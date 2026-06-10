@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Node
+node_modules/
+dist/
+build/
+.next/
+*.tsbuildinfo
+
+# Env files (NEVER commit)
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+agentops.log
+
+# Build artifacts
+*.db
+*.sqlite
+
+# Frontend
+dashboard/.next/
+dashboard/out/
+
+# Backend
+backend/.pytest_cache/
+
+# MCP
+mcp/dist/
+mcp/coverage/
+
+# Local-only files
+.carto/
+.kiro/
+
+# Internal docs — NEVER commit (planning/strategy/spec, internal-only)
+BUILD-SPEC.md
+STRATEGY.md
+working.md
+NOTES.md
+TODO.md
+*.private.md
