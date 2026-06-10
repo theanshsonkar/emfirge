@@ -1,0 +1,59 @@
+{
+  "name": "@emfirge/mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Emfirge — graph-based AWS security scanning. Privacy-first: tokenizes resource IDs before sending to LLMs.",
+  "main": "dist/index.js",
+  "type": "module",
+  "bin": {
+    "emfirge-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "install-cli": "node dist/index.js install",
+    "uninstall-cli": "node dist/index.js uninstall",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "aws",
+    "security",
+    "cloud",
+    "model-context-protocol",
+    "claude",
+    "cursor",
+    "kiro",
+    "attack-path",
+    "privacy"
+  ],
+  "author": "Ansh Sonkar <theanshsonkar@gmail.com>",
+  "license": "BUSL-1.1",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/theanshsonkar/emfirge.git",
+    "directory": "mcp"
+  },
+  "homepage": "https://github.com/theanshsonkar/emfirge/tree/main/mcp",
+  "bugs": "https://github.com/theanshsonkar/emfirge/issues"
+}
