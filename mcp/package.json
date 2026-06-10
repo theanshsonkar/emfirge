@@ -1,11 +1,12 @@
 {
   "name": "@emfirge/mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server for Emfirge — graph-based AWS security scanning. Privacy-first: tokenizes resource IDs before sending to LLMs.",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
-    "emfirge-mcp": "./dist/index.js"
+    "emfirge-mcp": "./dist/index.js",
+    "mcp": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",
