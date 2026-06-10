@@ -56,4 +56,4 @@ jobs:
       - name: run pytest
         run: pytest -q --no-header
         env:
-          DATABASE_URL: sqlite:///:memory:
+          DATABASE_URL: 'sqlite:///:memory:'
