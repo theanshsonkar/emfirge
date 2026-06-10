@@ -21,6 +21,10 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
+              # 282027772803 is the AWS account ID for the hosted Emfirge backend (emfirge.cloud).
+              # If you self-host this OSS backend, replace it with your own AWS account ID
+              # before deploying this stack. Otherwise this role will let emfirge.cloud
+              # scan your account, not your self-hosted backend.
               AWS: arn:aws:iam::282027772803:root
             Action: sts:AssumeRole
             Condition:
@@ -55,6 +59,11 @@ Resources:
                   - config:DescribeConfigurationRecorderStatus
                   - config:DescribeComplianceByConfigRule
                   - cloudfront:ListDistributions
+                  - apigatewayv2:GetApis
+                  - apigatewayv2:GetStages
+                  - apigatewayv2:GetAuthorizers
+                  - sqs:ListQueues
+                  - sqs:GetQueueAttributes
                 Resource: '*'
 
 Outputs:
