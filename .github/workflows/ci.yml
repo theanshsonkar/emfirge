@@ -54,6 +54,6 @@ jobs:
       - name: AST parse all modules
         run: python -c "import ast, glob; [ast.parse(open(f).read()) for f in glob.glob('app/*.py')]; print('all modules parse clean')"
       - name: run pytest
-        run: pytest -q --no-header
+        run: python -m pytest -q --no-header
         env:
           DATABASE_URL: 'sqlite:///:memory:'
