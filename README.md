@@ -1,9 +1,8 @@
 # Emfirge
 
-> Pre-deployment AWS security. Simulate any change against your live
-> infrastructure graph — see the blast radius before it ships.
->
-> Plugs into Claude / Cursor / Kiro / Cline / Continue via MCP — privacy-first.
+> **Pre-deployment AWS security. Simulate any change against your live infrastructure graph — see the blast radius before it ships.**
+
+MCP-native. Works in Claude, Cursor, Kiro, Cline, Continue, and Codex CLI. Privacy-first.
 
 [![License: BUSL 1.1](https://img.shields.io/badge/license-BUSL--1.1-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/@emfirge/mcp.svg)](https://www.npmjs.com/package/@emfirge/mcp)
@@ -12,7 +11,7 @@
 
 ![Emfirge MCP — kill-chain output in Kiro CLI, with tokenized IDs in strict privacy mode](assets/mcp-demo.png)
 
-<sub><i>“Show me the worst attack path from the internet” — `emfirge_simulate_breach` in Kiro CLI. AWS IDs are tokenized locally (strict mode) before they reach the LLM.</i></sub>
+<sub><i>“Show me the worst attack path from the internet” — `emfirge_simulate_breach` in Claude Code. AWS IDs are tokenized locally (strict mode) before they reach the LLM.</i></sub>
 
 ### What it feels like
 
@@ -126,25 +125,6 @@ to wipe everything, instantly. Full story in [PRIVACY.md](PRIVACY.md).
 
 ---
 
-## Repo layout
-
-```
-backend/        FastAPI scanner (Python 3.11). Graph engine, 58 rules,
-                AI advisor. Runs at emfirge.cloud — open for transparency
-                + audit. Self-hostable but unsupported.
-
-mcp/            TypeScript MCP server. The `npx @emfirge/mcp` package on
-                npm. Thin client; tokenizes responses before they reach
-                the LLM.
-
-iam-role.yaml   CloudFormation read-only IAM role. ExternalId-protected,
-                instantly revocable by deleting the stack.
-```
-
-> The dashboard isn't OSS in v1. The MCP + scanner is the substance.
-
----
-
 ## How the data flows
 
 ```
@@ -223,5 +203,5 @@ Contributors agree to the same terms — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Author
 
-Built by Ansh Sonkar — [GitHub](https://github.com/theanshsonkar) ·
+Built by Ansh Sonkar — [LinkedIn](https://linkedin.com/in/theanshsonkar) ·
 [emfirge.cloud](https://emfirge.cloud)
