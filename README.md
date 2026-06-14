@@ -1,8 +1,9 @@
 # Emfirge
 
-> **Pre-deployment AWS security. Simulate any change against your live infrastructure graph — see the blast radius before it ships.**
+> AWS security that lives inside your AI. Attack paths, blast radius,
+> fix simulations — all from a conversation.
 
-MCP-native. Works in Claude, Cursor, Kiro, Cline, Continue, and Codex CLI. Privacy-first.
+MCP-native · Claude · Cursor · Kiro · Cline · Continue · Codex CLI · Privacy-first
 
 [![License: BUSL 1.1](https://img.shields.io/badge/license-BUSL--1.1-blue.svg)](LICENSE)
 [![npm](https://img.shields.io/npm/v/@emfirge/mcp.svg)](https://www.npmjs.com/package/@emfirge/mcp)
@@ -11,21 +12,25 @@ MCP-native. Works in Claude, Cursor, Kiro, Cline, Continue, and Codex CLI. Priva
 
 ![Emfirge MCP — kill-chain output in Kiro CLI, with tokenized IDs in strict privacy mode](assets/mcp-demo.png)
 
-<sub><i>“Show me the worst attack path from the internet” — `emfirge_simulate_breach` in Claude Code. AWS IDs are tokenized locally (strict mode) before they reach the LLM.</i></sub>
+<sub><i>"Show me the worst attack path from the internet" — `emfirge_simulate_breach` in Claude Code. AWS IDs are tokenized locally (strict mode) before they reach the LLM.</i></sub>
 
-### What it feels like
+---
 
 ```
-You:    scan my AWS account, role arn:aws:iam::123456789012:role/EmfirgeReadOnly
+You:    scan my AWS, role arn:aws:iam::123456789012:role/EmfirgeReadOnly
 Claude: Scanned 47 resources. Risk score: 38/100 (HIGH).
         3 critical findings, 2 toxic combos.
-        Worst attack path: INTERNET → SG_001 → EC2_001 → S3_001.
+        Worst path: INTERNET → SG_001 → EC2_001 → S3_001 (crown jewel).
         Want me to walk the full kill chain?
 
-You:    verify a fix for the SSH-open finding
-Claude: Simulated closing port 22 on SG_001. Score would jump 38 → 62.
-        Resolves 2 findings, breaks 0 attack paths. Safe to apply.
+You:    verify a fix — close port 22 on that security group
+Claude: Simulated. Score jumps 38 → 62. Resolves 2 findings, breaks 0 paths.
+        Safe to apply.
 ```
+
+> **The AI isn't guessing.** Emfirge clones your infrastructure graph, applies
+> the change, and re-runs 58 deterministic rules. Claude reads back what the
+> engine proved — not what it imagined.
 
 ---
 
@@ -41,9 +46,7 @@ mode. Restart your client, then ask:
 > *"Scan my AWS account, role `arn:aws:iam::123456789012:role/EmfirgeReadOnly`,
 > region us-east-1"*
 
-**Just want to see it in action — no AWS account?** Use the demo ARN.
-Runs against a hardcoded fake infrastructure (~50 resources, real
-findings). Zero setup:
+**No AWS account? Use the demo ARN — zero setup:**
 
 ```
 arn:aws:iam::194722410583:role/EmfirgeReadOnly
@@ -52,13 +55,13 @@ region: us-east-1
 
 > *"Scan with `arn:aws:iam::194722410583:role/EmfirgeReadOnly` in `us-east-1`"*
 
-No role yet but want to scan your real AWS? Just say **"help me set up Emfirge"** — your assistant will hand
-you a one-click CloudFormation deploy link.
+No role yet but want to scan your real AWS? Say **"help me set up Emfirge"** —
+your assistant hands you a one-click CloudFormation deploy link.
 
 **Free.** 15 scans/day per AWS account. No signup. No API keys.
 
-> Need a visual graph? Go to **[emfirge.cloud](https://emfirge.cloud)** —
-> same engine, browser UI, free during beta.
+> Need a visual graph? **[emfirge.cloud](https://emfirge.cloud)** — same engine,
+> browser UI, free during beta.
 
 ### CLI reference
 
@@ -79,14 +82,13 @@ Env vars, per-client config paths, manual install fallback → [`mcp/README.md`]
 
 - **Attack paths** from the internet to your S3 / RDS / IAM crown jewels,
   ranked by exploit difficulty (weighted Dijkstra, not hop count)
-- **58 graph-aware rules** with context-aware severity (SSH-open behind an
-  ALB drops Critical → Low; public S3 with CloudFront drops Critical → Low)
-- **Toxic-combo detection** — pattern combinations like *public RDS + no
+- **58 graph-aware rules** with context-aware severity — SSH-open behind an
+  ALB drops Critical → Low; public S3 with CloudFront drops Critical → Low
+- **Toxic-combo detection** — dangerous pattern pairs like *public RDS + no
   CloudTrail*, *SSH-open + GuardDuty disabled*
 - **Deterministic fix simulation** — clone infra → apply mutation → rebuild
-  graph → rerun every rule → diff. No LLM, no guessing — a real proof.
-- **Compliance mapping** — CIS AWS Foundations 1.5 + SOC 2, per-control
-  pass/fail
+  graph → rerun every rule → diff. No LLM in the verification path. A real proof.
+- **Compliance mapping** — CIS AWS Foundations 1.5 + SOC 2, per-control pass/fail
 - **MITRE ATT&CK** technique mapped to every finding
 
 Coverage: EC2, Lambda, ECS, S3, EBS, RDS, IAM, Secrets Manager, KMS, VPC,
@@ -141,10 +143,10 @@ to wipe everything, instantly. Full story in [PRIVACY.md](PRIVACY.md).
 └──────────────┘               └──────────────┘
 ```
 
-The MCP runs on **your laptop**. Your LLM only ever sees tokenized IDs
-(`SG_001`, `EC2_001`) — the mapping never leaves your machine. The
-backend assumes your read-only IAM role with a 1-hour STS token, scans,
-saves findings for 90 days, then auto-deletes.
+The MCP runs on **your laptop**. Your LLM only ever sees tokenized IDs —
+the mapping never leaves your machine. The backend assumes your read-only
+IAM role with a 1-hour STS token, scans, saves findings for 90 days, then
+auto-deletes.
 
 ---
 
@@ -174,10 +176,9 @@ saves findings for 90 days, then auto-deletes.
 | `emfirge_check_compliance` | CIS / SOC 2 per-control status |
 | `emfirge_simulate_breach` | Full kill-chain walkthrough — attack stages, blast radius, follow-up moves |
 
-> All 7 tools are deterministic on the backend side — no LLM calls inside
-> the MCP path. Your host LLM (Claude / Cursor / Kiro / Cline / Continue)
-> is the only AI in the loop, and in `strict` mode it only ever sees
-> tokenized data.
+> All 7 tools are deterministic on the backend — no LLM calls inside the MCP
+> path. Your host LLM is the only AI in the loop, and in `strict` mode it only
+> ever sees tokenized data.
 
 ---
 
