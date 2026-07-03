@@ -1,0 +1,34 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.theanshsonkar/emfirge",
+  "title": "Emfirge",
+  "description": "Privacy-first AWS security in your AI: attack paths & fix simulation, IDs never sent to the LLM.",
+  "websiteUrl": "https://emfirge.cloud",
+  "repository": {
+    "url": "https://github.com/theanshsonkar/emfirge",
+    "source": "github"
+  },
+  "version": "0.1.2",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@emfirge/mcp",
+      "version": "0.1.2",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "EMFIRGE_PRIVACY",
+          "description": "Tokenization mode: strict (default), balanced, or off",
+          "isRequired": false,
+          "format": "string"
+        },
+        {
+          "name": "EMFIRGE_BASE_URL",
+          "description": "Backend URL — override to point at a self-hosted backend",
+          "isRequired": false,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
