@@ -24,10 +24,23 @@ export const verifyFixSchema = {
 export const verifyFixZodObject = z.object(verifyFixSchema);
 export type VerifyFixArgs = z.infer<typeof verifyFixZodObject>;
 
+// The backend's verify-fix mutation map keys on the FULL rule id
+// (e.g. "EMFIRGE-EC2-002"). The tool also accepts the short form
+// ("EC2-002") for convenience, so normalize before the backend call —
+// otherwise the short form silently returns can_simulate: false.
+export function normalizeRuleId(ruleId: string): string {
+  const trimmed = ruleId.trim().toUpperCase();
+  return trimmed.startsWith("EMFIRGE-") ? trimmed : `EMFIRGE-${trimmed}`;
+}
+
 export async function verifyFixHandler(args: VerifyFixArgs) {
   const realArgs = expandTokens(args) as VerifyFixArgs;
+  const normalizedArgs = {
+    ...realArgs,
+    rule_id: normalizeRuleId(realArgs.rule_id),
+  };
 
-  const result = await backendCall("POST", "/remediation/verify-fix", realArgs, {
+  const result = await backendCall("POST", "/remediation/verify-fix", normalizedArgs, {
     timeout: 30_000,
   });
 
