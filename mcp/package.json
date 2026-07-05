@@ -1,6 +1,6 @@
 {
   "name": "@emfirge/mcp",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "mcpName": "io.github.theanshsonkar/emfirge",
   "description": "Privacy-first AWS security in your AI. Trace attack paths from the internet to your sensitive data, check CIS/SOC2, and prove fixes before applying - Emfirge clones your infra graph, mutates it, and re-runs every rule. Resource IDs are tokenized locally, never sent to the LLM.",
   "main": "dist/index.js",
