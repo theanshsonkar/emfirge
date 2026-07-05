@@ -113,6 +113,10 @@ const EMBEDDED_PATTERNS: Array<[RegExp, string, boolean]> = [
   [/arn:aws:lambda:[\w-]+:\d+:function:[\w+=,.@\-/]+/g, "LAMBDA", true],
   [/arn:aws:rds:[\w-]+:\d+:db:[\w+=,.@\-/]+/g, "RDS", true],
   [/arn:aws:kms:[\w-]+:\d+:key\/[\w+=,.@\-/]+/g, "KMS", true],
+  // S3 ARNs (arn:aws:s3:::bucket[/key]). Missing here previously, which let
+  // bucket ARNs leak when they appeared inside narrative captions rather than
+  // as a standalone field value.
+  [/arn:aws:s3:::[\w.\-/]+/g, "S3", true],
 
   // Resource IDs: word boundary on both sides + the AWS prefix is enough
   [/\bsg-[a-f0-9]{8,}\b/gi, "SG", true],
@@ -284,7 +288,10 @@ function redactDeepInner(obj: unknown, parentKey = ""): unknown {
   return obj;
 }
 
-const TOKEN_PATTERN = /^[A-Z_]+_\d{3}$/;
+// Token prefixes can contain digits (EC2, S3), so the char class must allow
+// 0-9 — otherwise EC2_001 / S3_001 never match and expandTokens silently
+// leaves them unresolved, sending the literal token to the backend.
+const TOKEN_PATTERN = /^[A-Z0-9_]+_\d{3}$/;
 
 // inverse of redactDeep: swap tokens back to real IDs before sending to backend
 export function expandTokens(obj: unknown): unknown {
@@ -292,7 +299,7 @@ export function expandTokens(obj: unknown): unknown {
 
   if (typeof obj === "string") {
     if (TOKEN_PATTERN.test(obj)) return detokenize(obj);
-    return obj.replace(/\b[A-Z_]+_\d{3}\b/g, (match) => detokenize(match));
+    return obj.replace(/\b[A-Z0-9_]+_\d{3}\b/g, (match) => detokenize(match));
   }
 
   if (Array.isArray(obj)) {

@@ -37,7 +37,8 @@ export async function backendCall<T = unknown>(
 
       if (res.status === 429) {
         throw new Error(
-          "Daily scan limit reached (15/day per AWS account). Try again tomorrow.",
+          extractDetail(text) ??
+            "Daily limit reached for this AWS account. Resets at midnight UTC.",
         );
       }
       if (res.status === 403) {
@@ -68,6 +69,19 @@ export async function backendCall<T = unknown>(
 
 export function getBaseUrl(): string {
   return BASE_URL;
+}
+
+// FastAPI returns errors as {"detail": "..."}. Surfacing that verbatim keeps
+// user-facing limits (e.g. "5/day, resets midnight UTC") accurate without the
+// client hardcoding numbers that drift when the backend changes them.
+function extractDetail(text: string): string | null {
+  try {
+    const j = JSON.parse(text) as { detail?: unknown };
+    if (typeof j.detail === "string" && j.detail.trim()) return j.detail;
+  } catch {
+    /* not JSON */
+  }
+  return null;
 }
 
 // Streaming variant for endpoints that return SSE (currently just /simulate
@@ -110,7 +124,8 @@ export async function backendCallSSE<T = unknown>(
       const text = await res.text();
       if (res.status === 429) {
         throw new Error(
-          "Daily simulation limit reached (10/day per AWS account). Try again tomorrow.",
+          extractDetail(text) ??
+            "Daily limit reached for this AWS account. Resets at midnight UTC.",
         );
       }
       if (res.status === 404) {

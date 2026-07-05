@@ -472,7 +472,7 @@ async function runInstallOrUninstall(
       console.log("If you don't have a role yet, ask:");
       console.log('  "Help me set up Emfirge"\n');
       console.log(`Privacy mode: ${privacy}  (change with: npx @emfirge/mcp privacy <mode>)`);
-      console.log("Limit: 15 scans/day per AWS account.");
+      console.log("Limit: 5 scans/day per AWS account.");
     }
   } else {
     console.log(

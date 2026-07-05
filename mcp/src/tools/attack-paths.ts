@@ -1,5 +1,5 @@
-// emfirge_attack_paths: calls the graph endpoint at /cartography/{id}
-// (legacy URL — see backend/app/egraph.py). Slices the response to attack
+// emfirge_attack_paths: calls the graph endpoint at /egraph/{id}
+// (see backend/app/egraph.py). Slices the response to attack
 // paths + crown jewels + orphans. Full graph is too noisy for chat.
 
 import { z } from "zod";
@@ -27,7 +27,7 @@ interface GraphResponse {
 export async function attackPathsHandler(args: AttackPathsArgs) {
   const result = await backendCall<GraphResponse>(
     "GET",
-    `/cartography/${encodeURIComponent(args.analysis_id)}`,
+    `/egraph/${encodeURIComponent(args.analysis_id)}`,
   );
 
   const summary = {

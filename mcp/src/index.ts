@@ -11,8 +11,9 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { homedir } from "node:os";
-import { join } from "node:path";
-import { existsSync, writeFileSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 
 import { getBaseUrl } from "./client.js";
 import { privacyMode } from "./tokenize.js";
@@ -37,8 +38,59 @@ import {
 } from "./tools/compliance.js";
 import { simulateSchema, simulateZodObject, simulateHandler } from "./tools/simulate.js";
 
+// Read the published version from package.json so the value advertised over
+// the MCP protocol can never drift from what npm shipped. dist/index.js and
+// src/index.ts (dev via tsx) both sit one dir below package.json.
+function readPackageVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf-8")) as {
+      version?: string;
+    };
+    return pkg.version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
+const VERSION = readPackageVersion();
+
 const SUBCOMMANDS = new Set(["install", "uninstall", "status", "tokens", "purge", "privacy"]);
 const subcommand = process.argv[2];
+
+// --version / --help are handled here (not in installer) so `npx @emfirge/mcp
+// --help` in a terminal prints usage instead of silently hanging on the stdio
+// server waiting for an MCP client that will never connect.
+if (subcommand === "--version" || subcommand === "-v" || subcommand === "version") {
+  process.stdout.write(`${VERSION}\n`);
+  process.exit(0);
+}
+
+if (subcommand === "--help" || subcommand === "-h" || subcommand === "help") {
+  process.stdout.write(
+    [
+      `Emfirge MCP v${VERSION} — privacy-first AWS security inside your AI.`,
+      "",
+      "Usage:",
+      "  npx @emfirge/mcp <command>",
+      "",
+      "Commands:",
+      "  install [--privacy=<mode>]   Wire Emfirge into all detected MCP clients",
+      "  uninstall                    Remove Emfirge from all clients",
+      "  status                       Show wired clients, backend URL, privacy mode",
+      "  privacy [<mode>]             Show or set privacy mode (strict|balanced|off)",
+      "  tokens                       List local token mappings (never sent anywhere)",
+      "  purge --role-arn <ARN>       Delete all your scan data (local + server)",
+      "  --version, -v                Print version and exit",
+      "  --help, -h                   Print this help and exit",
+      "",
+      "With no command, runs as an MCP stdio server for your AI client.",
+      "Docs: https://github.com/theanshsonkar/emfirge/tree/main/mcp",
+      "",
+    ].join("\n"),
+  );
+  process.exit(0);
+}
 
 if (subcommand && SUBCOMMANDS.has(subcommand)) {
   const { runInstaller } = await import("./installer.js");
@@ -77,7 +129,7 @@ function maybeShowFirstRunNotice(): void {
 maybeShowFirstRunNotice();
 
 const server = new Server(
-  { name: "emfirge", version: "0.1.0" },
+  { name: "emfirge", version: VERSION },
   { capabilities: { tools: {} } },
 );
 

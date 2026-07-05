@@ -50,7 +50,7 @@ then asks you to pick a privacy mode. Restart your client and just ask:
 **No role yet?** Say **"help me set up Emfirge"** — your assistant hands you a one-click
 CloudFormation deploy link for a read-only IAM role.
 
-**Free.** 15 scans/day per AWS account. No signup. No API keys.
+**Free.** 5 scans/day per AWS account. No signup. No API keys.
 
 ### Try it with zero setup
 
