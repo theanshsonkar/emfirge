@@ -1,12 +1,12 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional, Literal, Union
 
-# -- INPUT MODEL ---------------------------------------------------
+# ── INPUT MODEL ───────────────────────────────────────────────────
 class AWSCredentials(BaseModel):
     role_arn: str
     region: str
 
-# -- INFRASTRUCTURE MODELS -----------------------------------------
+# ── INFRASTRUCTURE MODELS ─────────────────────────────────────────
 
 # Relationship tracking models
 class EC2Instance(BaseModel):
@@ -149,12 +149,12 @@ class CloudWatchData(BaseModel):
     has_alarms: bool = False
     has_billing_alarm: bool = False
 
-# -- NEW: GUARDDUTY MODEL ------------------------------------------
+# ── NEW: GUARDDUTY MODEL ──────────────────────────────────────────
 class GuardDutyData(BaseModel):
     is_enabled: bool = False              # True if at least one active detector exists in the region
     detector_id: Optional[str] = None    # ID of the active detector, if found
 
-# -- NEW: LAMBDA MODEL ---------------------------------------------
+# ── NEW: LAMBDA MODEL ─────────────────────────────────────────────
 class LambdaData(BaseModel):
     function_count: int = 0
     functions_with_admin_role: List[str] = []    # function names with AdministratorAccess or Action:* Resource:*
@@ -163,12 +163,12 @@ class LambdaData(BaseModel):
     # Relationship tracking
     functions: List[LambdaFunction] = []
 
-# -- NEW: SECRETS MANAGER MODEL ------------------------------------
+# ── NEW: SECRETS MANAGER MODEL ────────────────────────────────────
 class SecretsManagerData(BaseModel):
     total_secrets: int = 0
     secrets_without_rotation: List[str] = []     # secret names with rotation disabled or never rotated in 90+ days
 
-# -- NEW: VPC MODEL ------------------------------------------------
+# ── NEW: VPC MODEL ────────────────────────────────────────────────
 class VPCData(BaseModel):
     total_vpcs: int = 0
     vpcs_without_flow_logs: List[str] = []       # VPC IDs without flow logs enabled
@@ -183,37 +183,37 @@ class VPCData(BaseModel):
     # Relationship tracking
     subnets: List[VPCSubnet] = []
 
-# -- NEW: KMS MODEL ------------------------------------------------
+# ── NEW: KMS MODEL ────────────────────────────────────────────────
 class KMSData(BaseModel):
     total_cmks: int = 0
     cmks_without_rotation: List[str] = []        # Key IDs with rotation disabled
     cmks_pending_deletion: List[str] = []        # Key IDs scheduled for deletion
 
-# -- NEW: AWS CONFIG MODEL -----------------------------------------
+# ── NEW: AWS CONFIG MODEL ─────────────────────────────────────────
 class ConfigData(BaseModel):
     is_enabled: bool = False
     is_recording: bool = False
     non_compliant_rules: List[str] = []          # Config rule names with NON_COMPLIANT status
 
-# -- NEW: SNS MODEL ------------------------------------------------
+# ── NEW: SNS MODEL ────────────────────────────────────────────────
 class SNSData(BaseModel):
     total_topics: int = 0
     topics_without_encryption: List[str] = []    # Topic ARNs without KMS encryption
     topics_with_public_access: List[str] = []    # Topic ARNs with Principal: "*" in policy
 
-# -- NEW: ECS MODEL ------------------------------------------------
+# ── NEW: ECS MODEL ────────────────────────────────────────────────
 class ECSData(BaseModel):
     total_task_definitions: int = 0
     tasks_with_privileged_containers: List[str] = []  # Task definition ARNs with privileged=True
     tasks_without_resource_limits: List[str] = []     # Task definition ARNs with missing CPU or memory limits
     task_role_arns: List[str] = []                    # non-empty task role ARNs across all task defs
 
-# -- NEW: WAF MODEL ------------------------------------------------
+# ── NEW: WAF MODEL ────────────────────────────────────────────────
 class WAFData(BaseModel):
     total_albs: int = 0
     albs_without_waf: List[str] = []             # ALB ARNs without an associated WAF Web ACL
 
-# -- NEW: API GATEWAY MODEL ----------------------------------------
+# ── NEW: API GATEWAY MODEL ────────────────────────────────────────
 class APIGatewayInstance(BaseModel):
     id: str                          # API ID
     name: str
@@ -230,7 +230,7 @@ class APIGatewayData(BaseModel):
     apis_without_waf: List[str] = []         # API IDs without WAF
     apis: List[APIGatewayInstance] = []
 
-# -- NEW: ELASTICACHE MODEL ----------------------------------------
+# ── NEW: ELASTICACHE MODEL ────────────────────────────────────────
 class ElastiCacheCluster(BaseModel):
     id: str                          # Cluster ID
     engine: str                      # "redis" | "memcached"
@@ -249,7 +249,7 @@ class ElastiCacheData(BaseModel):
     clusters_without_transit_encryption: List[str] = []
     clusters: List[ElastiCacheCluster] = []
 
-# -- NEW: SQS MODEL -----------------------------------------------
+# ── NEW: SQS MODEL ───────────────────────────────────────────────
 class SQSQueue(BaseModel):
     url: str
     arn: str
@@ -265,7 +265,7 @@ class SQSData(BaseModel):
     queues_with_public_access: List[str] = []   # Queue names
     queues: List[SQSQueue] = []
 
-# -- NEW: DYNAMODB MODEL ------------------------------------------
+# ── NEW: DYNAMODB MODEL ──────────────────────────────────────────
 class DynamoDBTable(BaseModel):
     name: str
     arn: str
@@ -282,7 +282,7 @@ class DynamoDBData(BaseModel):
     tables_without_backup: List[str] = []       # No backup plan
     tables: List[DynamoDBTable] = []
 
-# Master infrastructure object - holds all collected data + warnings from skipped services
+# Master infrastructure object — holds all collected data + warnings from skipped services
 class AWSInfrastructure(BaseModel):
     ec2: EC2Data = EC2Data()
     s3: S3Data = S3Data()
@@ -307,7 +307,7 @@ class AWSInfrastructure(BaseModel):
     region: str = ''
     warnings: List[str] = []          # services skipped due to insufficient permissions
 
-# -- SIMULATION BASELINE MODEL ------------------------------------
+# ── SIMULATION BASELINE MODEL ────────────────────────────────────
 class SimulationBaseline(BaseModel):
     public_resource_count: int = 0
     rds_multi_az: bool = False
@@ -318,7 +318,7 @@ class SimulationBaseline(BaseModel):
     moderate_count: int = 0
     maturity_score: int = 0
 
-# -- SIMULATION REQUEST / RESPONSE MODELS -------------------------
+# ── SIMULATION REQUEST / RESPONSE MODELS ─────────────────────────
 class SimulateRequest(BaseModel):
     query: str
     analysis_id: str
@@ -353,7 +353,7 @@ class SimulateResponse(BaseModel):
     category: str
     query: str
 
-# -- TOXIC COMBO MODEL --------------------------------------------
+# ── TOXIC COMBO MODEL ────────────────────────────────────────────
 class ToxicCombo(BaseModel):
     combo_id: str
     title: str
@@ -364,13 +364,13 @@ class ToxicCombo(BaseModel):
     blast_radius: Optional[int] = 0
     attack_path: Optional[List[str]] = []
 
-# -- FINDING MODEL -------------------------------------------------
+# ── FINDING MODEL ─────────────────────────────────────────────────
 class RiskFinding(BaseModel):
     rule_id: Optional[str] = None
     category: str
     severity: str
     raw_severity: Optional[str] = None  # Static severity before graph-aware adjustment (for compliance)
-    confidence: str = 'MEDIUM'        # 'HIGH' | 'MEDIUM' | 'LOW' - affects scoring weight
+    confidence: str = 'MEDIUM'        # 'HIGH' | 'MEDIUM' | 'LOW' — affects scoring weight
     issue: str
     recommendation: str
     aws_service: str
@@ -382,17 +382,17 @@ class RiskFinding(BaseModel):
     mitre_technique_id: Optional[str] = None
     mitre_technique_name: Optional[str] = None
 
-# -- PRIORITY ACTION MODEL -----------------------------------------
+# ── PRIORITY ACTION MODEL ─────────────────────────────────────────
 # One item in the AI-generated prioritized action plan (01-05)
 # Gemini fills this with specific, resource-aware advice per finding
 class PriorityAction(BaseModel):
     rank: str                          # '01', '02', '03', '04', '05'
     title: str                         # short label e.g. 'Close SSH to the internet'
     what_is_wrong: str                 # plain English explanation of the problem
-    why_dangerous: str                 # real attacker scenario - what happens if not fixed
+    why_dangerous: str                 # real attacker scenario — what happens if not fixed
     fix_steps: List[str]               # exact AWS console steps to remediate
 
-# -- REMEDIATION INSIGHT MODELS -----------------------------------
+# ── REMEDIATION INSIGHT MODELS ───────────────────────────────────
 class RemediationInsightRequest(BaseModel):
     rule_id: Optional[str] = None
     severity: str
@@ -408,7 +408,7 @@ class RemediationInsightResponse(BaseModel):
     what_this_fixes: str
     why_it_matters: str
 
-# -- RESPONSE MODEL ------------------------------------------------
+# ── RESPONSE MODEL ────────────────────────────────────────────────
 class AnalysisResponse(BaseModel):
     analysis_id: str
     timestamp: str
@@ -445,7 +445,7 @@ class AnalysisResponse(BaseModel):
     scan_duration_seconds: float
     report_url: str
 
-# -- TERRAFORM MODELS ----------------------------------------------
+# ── TERRAFORM MODELS ──────────────────────────────────────────────
 class TerraformGenerateRequest(BaseModel):
     rule_id: Optional[str] = None
     severity: str
@@ -466,7 +466,7 @@ class TerraformGenerateResponse(BaseModel):
     valid: Optional[bool] = None
     errors: Optional[str] = None
 
-# -- GITHUB PR MODELS ----------------------------------------------
+# ── GITHUB PR MODELS ──────────────────────────────────────────────
 class GitHubPRRequest(BaseModel):
     installation_id: int
     repo: str
@@ -490,7 +490,7 @@ class FeedbackRequest(BaseModel):
     aws_account_id: Optional[str] = ''
 
 
-# -- COMPONENT SIMULATION MODELS -----------------------------------
+# ── COMPONENT SIMULATION MODELS ───────────────────────────────────
 # Discriminated union configs for POST /simulate/component
 
 class EC2Config(BaseModel):
@@ -588,7 +588,7 @@ class ComponentResponse(BaseModel):
     risk_delta: dict = {}
 
 
-# -- VERIFY FIX MODELS ---------------------------------------------
+# ── VERIFY FIX MODELS ─────────────────────────────────────────────
 class VerifyFixRequest(BaseModel):
     analysis_id: str
     rule_id: str
@@ -606,7 +606,7 @@ class VerifyFixResponse(BaseModel):
     safe_to_apply: bool = True
 
 
-# -- TF INDEX MODELS -----------------------------------------------
+# ── TF INDEX MODELS ───────────────────────────────────────────────
 class TFIndexRequest(BaseModel):
     installation_id: int
     repo: str
@@ -624,7 +624,7 @@ class TFIndexStatusResponse(BaseModel):
     repo: str = ""
 
 
-# -- CI/CD GATE MODELS --------------------------------------------
+# ── CI/CD GATE MODELS ────────────────────────────────────────────
 class CIAnalyzeRequest(BaseModel):
     """Request body for CI/CD security analysis of a PR."""
     repo: str                           # e.g. "org/repo"

@@ -15,6 +15,9 @@ from datetime import datetime, date
 from collections import defaultdict
 from dotenv import load_dotenv
 
+# AGENTOPS IMPORT
+# (AgentOps telemetry omitted from public source)
+
 from app.models import (
     AWSCredentials, AnalysisResponse,
     RemediationInsightRequest, RemediationInsightResponse,
@@ -44,9 +47,9 @@ logger = logging.getLogger(__name__)
 # Create database tables when app starts
 create_tables()
 
-# -- IN-MEMORY RATE LIMITER FOR INSIGHT ENDPOINT -------------------
+# ── IN-MEMORY RATE LIMITER FOR INSIGHT ENDPOINT ───────────────────
 # Tracks (ip → list of request timestamps) for a sliding 60-second window.
-# No external dependency - resets on server restart, which is acceptable
+# No external dependency — resets on server restart, which is acceptable
 # for a lightweight Gemini cost guard.
 _insight_request_log: dict = defaultdict(list)
 _INSIGHT_LIMIT = 5       # max requests
@@ -65,7 +68,7 @@ def _check_insight_rate_limit(ip: str) -> None:
         )
     _insight_request_log[ip].append(now)
 
-# -- IN-MEMORY RATE LIMITER FOR TERRAFORM + PR ENDPOINTS ----------
+# ── IN-MEMORY RATE LIMITER FOR TERRAFORM + PR ENDPOINTS ──────────
 _terraform_request_log: dict = defaultdict(list)
 _TERRAFORM_LIMIT = 5
 _TERRAFORM_WINDOW = 60
@@ -74,7 +77,7 @@ _pr_request_log: dict = defaultdict(list)
 _PR_LIMIT = 10
 _PR_WINDOW = 60
 
-# -- IN-MEMORY RATE LIMITER FOR SIMULATE ENDPOINT -----------------
+# ── IN-MEMORY RATE LIMITER FOR SIMULATE ENDPOINT ─────────────────
 _simulate_request_log: dict = {}
 
 def _check_terraform_rate_limit(ip: str) -> None:
@@ -146,8 +149,15 @@ def _lookup_resource_name(resource_id: str, resource_type: str) -> Optional[str]
         print(f"[_lookup_resource_name] Error: {e}")
         return None
 
-# Raw mode: caller is an LLM host (MCP), so skip Gemini/Claude calls.
-# The host renders responses itself, no need to spend tokens here.
+# AGENTOPS INIT — runs once when server starts
+try:
+    pass  # AgentOps init omitted from public source
+except Exception as _agentops_err:
+    logger.warning(f'AgentOps init failed (non-fatal): {_agentops_err}')
+
+
+# Raw mode = caller is an LLM host (MCP, etc.) so we skip Gemini/Claude calls.
+# The host renders the response itself, no need to spend tokens here.
 def _is_raw_mode(request: Request, raw: bool = False) -> bool:
     if raw:
         return True
@@ -158,13 +168,13 @@ def _is_raw_mode(request: Request, raw: bool = False) -> bool:
     return False
 
 
-# Daily scan cap per AWS account. Bumped from 5 to 15 for OSS launch.
-DAILY_SCAN_LIMIT = int(os.getenv('DAILY_SCAN_LIMIT', '15'))
+# Daily scan cap per AWS account. Overridable via DAILY_SCAN_LIMIT env var.
+DAILY_SCAN_LIMIT = int(os.getenv('DAILY_SCAN_LIMIT', '5'))
 
 
 app = FastAPI(title='AWS Risk Analysis Agent', version='2.0')
 
-# -- CORS ----------------------------------------------------------
+# ── CORS ──────────────────────────────────────────────────────────
 # Allows the browser to call this API from Vercel and localhost
 # Without this, every fetch() from the frontend gets blocked silently
 app.add_middleware(
@@ -236,7 +246,7 @@ def get_log_by_uuid(analysis_id: str, account_id: str = None):
     Fetch a scan record by analysis_id (UUID). Used by MCP clients that
     only know the UUID, not the integer DB id.
 
-    Mirrors the lookup pattern used by /cartography/{analysis_id}: validate
+    Mirrors the lookup pattern used by /egraph/{analysis_id}: validate
     the UUID format, then run a LIKE query on findings_json.
     """
     import re
@@ -258,12 +268,10 @@ def get_log_by_uuid(analysis_id: str, account_id: str = None):
     finally:
         session.close()
 
-# URL path '/cartography/' is grandfathered for backwards compat with the
-# hosted dashboard. Internal module is app/egraph.py — the URL is legacy.
-@app.get('/cartography/{analysis_id}')
+@app.get('/egraph/{analysis_id}')
 def get_graph(analysis_id: str):
     """
-    Get graph data for a completed scan.
+    Get infrastructure graph data for a completed scan.
     
     Returns infrastructure graph with nodes, edges, orphaned resources, and statistics.
     """
@@ -317,7 +325,7 @@ def get_graph(analysis_id: str):
         
         # Aggregate attack paths from findings
         # Include findings with non-empty attack_path OR blast_radius > 0
-        # (mirrors Findings page behavior - blast_radius > 0 means lateral movement is possible)
+        # (mirrors Findings page behavior — blast_radius > 0 means lateral movement is possible)
         all_findings = (
             findings_data.get('critical_risks', []) +
             findings_data.get('moderate_risks', [])
@@ -466,7 +474,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
     Fast (~2-4s), reliable, cheap. No Sonnet needed.
     Rate limited to 10 requests/minute per IP.
     """
-    # -- RATE LIMIT: 10/min per IP ---------------------------------
+    # ── RATE LIMIT: 10/min per IP ─────────────────────────────────
     client_ip = http_request.client.host if http_request.client else 'unknown'
     now = time.time()
     _simulate_request_log.setdefault(client_ip, [])
@@ -475,7 +483,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
         raise HTTPException(status_code=429, detail='Rate limit exceeded. You can run 10 simulations per minute.')
     _simulate_request_log[client_ip].append(now)
 
-    # -- LOAD INFRASTRUCTURE FROM DB -------------------------------
+    # ── LOAD INFRASTRUCTURE FROM DB ───────────────────────────────
     from app.database import SessionLocal, AnalysisLog
     from app.models import AWSInfrastructure
 
@@ -519,7 +527,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
         return StreamingResponse(error_stream(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    # -- DAILY SIMULATION LIMIT: 10/day per AWS account -------------
+    # ── DAILY SIMULATION LIMIT: 10/day per AWS account ─────────────
     SIMULATION_DAILY_LIMIT = 10
     WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
     if aws_account_id and aws_account_id not in WHITELISTED_ACCOUNTS:
@@ -530,7 +538,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
                 detail=f'Simulation limit reached. Your account has used {sim_count}/{SIMULATION_DAILY_LIMIT} simulations today. Resets at midnight UTC.'
             )
 
-    # -- META-QUERY CHECK (skip LLM entirely) ---------------------
+    # ── META-QUERY CHECK (skip LLM entirely) ─────────────────────
     _META_PHRASES = ['real infra', 'real data', 'actually scanning', 'live scan',
                      'real account', 'really scanning', 'real aws']
     if any(p in request.query.lower() for p in _META_PHRASES):
@@ -554,14 +562,14 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
         return StreamingResponse(meta_stream(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    # -- BUILD GRAPH + CLASSIFY + SLICE ----------------------------
+    # ── BUILD GRAPH + CLASSIFY + SLICE ────────────────────────────
     graph = build_graph(infrastructure)
     category = classify_query(request.query)
     slice_dict = get_simulation_slice(graph, category)
     graph_text = format_graph_for_claude(slice_dict)
     layers = slice_dict.get('layers', {})
 
-    # -- DETERMINISTIC: Build attack chain from BFS ----------------
+    # ── DETERMINISTIC: Build attack chain from BFS ────────────────
     def _build_attack_stages(slice_data: dict, graph_obj: Graph) -> list:
         """Build attack chain stages from BFS layers with narrative captions."""
         bfs_layers = slice_data.get('layers', {})
@@ -670,7 +678,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
 
     attack_stages = _build_attack_stages(slice_dict, graph)
 
-    # -- DETERMINISTIC: Compute blast radius from BFS --------------
+    # ── DETERMINISTIC: Compute blast radius from BFS ──────────────
     def _compute_blast_radius(slice_data: dict, graph_obj: Graph) -> dict:
         """Count reachable resources by type — no LLM needed."""
         bfs_layers = slice_data.get('layers', {})
@@ -708,7 +716,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
 
     blast_radius = _compute_blast_radius(slice_dict, graph)
 
-    # -- SMART DETERMINISTIC NARRATIVE (fallback that's actually good) -
+    # ── SMART DETERMINISTIC NARRATIVE (fallback that's actually good) ─
     def _build_deterministic_narrative(stages: list, blast: dict, query: str, graph_obj: Graph) -> dict:
         """Build a meaningful narrative from graph data alone — no LLM needed."""
         total = blast.get('total', 0)
@@ -775,12 +783,13 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
 
         return {"verdict": verdict, "severity": severity, "summary": summary, "follow_up": follow_up}
 
-    # -- HAIKU WITH RETRY + SMART FALLBACK -------------------------
+    # ── HAIKU WITH RETRY + SMART FALLBACK ─────────────────────────
     async def event_stream():
         import anthropic as anthropic_lib
 
         haiku_data = None
         # Raw mode: skip Haiku, use deterministic narrative.
+        # MCP host is already an LLM, no need for second one.
         api_key = None if _is_raw_mode(http_request, raw) else os.getenv('ANTHROPIC_API_KEY')
 
         if api_key:
@@ -824,7 +833,7 @@ Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical
         if not haiku_data:
             haiku_data = _build_deterministic_narrative(attack_stages, blast_radius, request.query, graph)
 
-        # -- Send preview immediately ------------------------------
+        # ── Send preview immediately ──────────────────────────────
         preview_data = {
             "verdict": haiku_data.get("verdict", ""),
             "severity": haiku_data.get("severity", "low"),
@@ -832,7 +841,7 @@ Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical
         }
         yield f"event: preview\ndata: {json.dumps(preview_data)}\n\n"
 
-        # -- Send complete with deterministic attack chain + blast radius --
+        # ── Send complete with deterministic attack chain + blast radius ──
         complete_data = {
             "verdict": haiku_data.get("verdict", ""),
             "severity": haiku_data.get("severity", "low"),
@@ -845,7 +854,7 @@ Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical
         }
         yield f"event: complete\ndata: {json.dumps(complete_data)}\n\n"
 
-        # -- LOG SIMULATION FOR DAILY LIMIT TRACKING ---------------
+        # ── LOG SIMULATION FOR DAILY LIMIT TRACKING ───────────────
         if aws_account_id:
             try:
                 save_simulation_log(aws_account_id, request.analysis_id, request.query)
@@ -927,7 +936,7 @@ def generate_remediation_insight(request: RemediationInsightRequest, http_reques
     client_ip = http_request.client.host if http_request.client else 'unknown'
     _check_insight_rate_limit(client_ip)
 
-    # -- ACCOUNT-BASED DAILY LIMIT: 5/day per account -------------
+    # ── ACCOUNT-BASED DAILY LIMIT: 5/day per account ─────────────
     INSIGHT_DAILY_LIMIT = 5
     WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
     account_id = request.account_id
@@ -939,6 +948,7 @@ def generate_remediation_insight(request: RemediationInsightRequest, http_reques
                 detail=f'Daily insight limit reached. Your account has used {insight_used}/{INSIGHT_DAILY_LIMIT} insights today. Resets at midnight UTC.'
             )
 
+    import os
     from google import genai
     import json
 
@@ -983,7 +993,7 @@ Respond with valid JSON only — no markdown, no code fences:
             why_it_matters=result.get('why_it_matters', f'This {request.severity.lower()} {request.aws_service} issue should be resolved promptly to reduce your attack surface.')
         )
     except Exception as e:
-        # Graceful fallback - never surface an error to the frontend
+        # Graceful fallback — never surface an error to the frontend
         logger.warning(f"Gemini insight generation failed for {request.resource_id}: {type(e).__name__}: {e}")
         return RemediationInsightResponse(
             what_this_fixes=request.recommendation,
@@ -1056,7 +1066,7 @@ def generate_terraform(request: TerraformGenerateRequest, http_request: Request,
     client_ip = http_request.client.host if http_request.client else 'unknown'
     _check_terraform_rate_limit(client_ip)
 
-    # -- ACCOUNT-BASED DAILY LIMIT: 5/day per account -------------
+    # ── ACCOUNT-BASED DAILY LIMIT: 5/day per account ─────────────
     TERRAFORM_DAILY_LIMIT = 5
     WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
     account_id = request.account_id
@@ -1188,11 +1198,11 @@ def verify_fix(request: VerifyFixRequest, http_request: Request):
     import copy
     from app.fix_mutations import FIX_MUTATIONS
 
-    # -- CHECK IF WE CAN SIMULATE THIS RULE ------------------------
+    # ── CHECK IF WE CAN SIMULATE THIS RULE ────────────────────────
     if request.rule_id not in FIX_MUTATIONS:
         return VerifyFixResponse(can_simulate=False)
 
-    # -- LOAD INFRASTRUCTURE FROM DB -------------------------------
+    # ── LOAD INFRASTRUCTURE FROM DB ───────────────────────────────
     from app.database import SessionLocal, AnalysisLog
 
     infrastructure = None
@@ -1219,7 +1229,7 @@ def verify_fix(request: VerifyFixRequest, http_request: Request):
     if not infrastructure:
         raise HTTPException(status_code=404, detail='Scan data not found for this analysis ID.')
 
-    # -- DEEP-COPY AND APPLY MUTATION ------------------------------
+    # ── DEEP-COPY AND APPLY MUTATION ──────────────────────────────
     mutated_infra_dict = copy.deepcopy(infrastructure.model_dump())
     mutation_fn = FIX_MUTATIONS[request.rule_id]
     applied = mutation_fn(mutated_infra_dict, request.resource_id)
@@ -1227,13 +1237,13 @@ def verify_fix(request: VerifyFixRequest, http_request: Request):
     if not applied:
         return VerifyFixResponse(can_simulate=False)
 
-    # -- REBUILD GRAPH + RUN CHECKS --------------------------------
+    # ── REBUILD GRAPH + RUN CHECKS ────────────────────────────────
     mutated_infra = AWSInfrastructure(**mutated_infra_dict)
     mutated_graph = build_graph(mutated_infra)
     mutated_findings = run_all_checks(mutated_infra, mutated_graph)
     mutated_combos = find_toxic_combos(mutated_findings, mutated_graph, mutated_infra)
 
-    # -- DIFF FINDINGS ---------------------------------------------
+    # ── DIFF FINDINGS ─────────────────────────────────────────────
     def finding_key(f):
         rid = f.get('rule_id', '') or (f.rule_id if hasattr(f, 'rule_id') else '')
         res = f.get('resource_id', '') or (f.resource_id if hasattr(f, 'resource_id') else '')
@@ -1260,18 +1270,18 @@ def verify_fix(request: VerifyFixRequest, http_request: Request):
     removed_keys = original_keys - mutated_keys
     findings_removed = [f for f in original_findings_list if finding_key(f) in removed_keys]
 
-    # Findings added (in mutated, not in original) - shouldn't happen for a fix, but track it
+    # Findings added (in mutated, not in original) — shouldn't happen for a fix, but track it
     added_keys = mutated_keys - original_keys
     findings_added = [f for f in mutated_findings_list if finding_key(f) in added_keys]
 
-    # -- DIFF TOXIC COMBOS -----------------------------------------
+    # ── DIFF TOXIC COMBOS ─────────────────────────────────────────
     original_combo_ids = {c.get('combo_id', '') for c in original_findings_data.get('toxic_combinations', [])}
     mutated_combo_ids = {(c.get('combo_id') if isinstance(c, dict) else c.combo_id) for c in mutated_combos}
 
     combos_resolved = list(original_combo_ids - mutated_combo_ids)
     combos_created = list(mutated_combo_ids - original_combo_ids)
 
-    # -- CALCULATE SCORE DELTA -------------------------------------
+    # ── CALCULATE SCORE DELTA ─────────────────────────────────────
     original_score = original_findings_data.get('overall_risk_score', 0)
     total_resources = original_findings_data.get('total_resources_scanned', 1)
     mutated_scores = calculate_score(mutated_findings, total_resources, mutated_infra)
@@ -1295,7 +1305,7 @@ def verify_fix(request: VerifyFixRequest, http_request: Request):
     )
 
 
-# -- UNIFIED FIX ENDPOINT ---------------------------------------------
+# ── UNIFIED FIX ENDPOINT ─────────────────────────────────────────────
 
 
 def _apply_rule_based_mutation(infra_dict: dict, rule_id: str, resource_id: str) -> bool:
@@ -1305,7 +1315,7 @@ def _apply_rule_based_mutation(infra_dict: dict, rule_id: str, resource_id: str)
     """
     rid = rule_id.upper() if rule_id else ""
 
-    # -- EC2 / Security Group rules --------------------------------
+    # ── EC2 / Security Group rules ────────────────────────────────
     if rid in ('EMFIRGE-EC2-002', 'EMFIRGE-EC2-003', 'EMFIRGE-EC2-004', 'EMFIRGE-EC2-005',
                'EMFIRGE-EC2-006', 'EMFIRGE-EC2-007', 'EMFIRGE-EC2-008', 'EMFIRGE-EC2-010',
                'EMFIRGE-EC2-011', 'EMFIRGE-EC2-012', 'EMFIRGE-EC2-013', 'EMFIRGE-EC2-014',
@@ -1339,7 +1349,7 @@ def _apply_rule_based_mutation(infra_dict: dict, rule_id: str, resource_id: str)
         infra_dict['ec2']['has_auto_scaling'] = True
         return True
 
-    # -- S3 rules --------------------------------------------------
+    # ── S3 rules ──────────────────────────────────────────────────
     if rid == 'EMFIRGE-S3-001':
         for bucket in infra_dict.get('s3', {}).get('buckets', []):
             if bucket['name'] == resource_id:
@@ -1369,7 +1379,7 @@ def _apply_rule_based_mutation(infra_dict: dict, rule_id: str, resource_id: str)
         infra_dict['s3']['logging_enabled'] = True
         return True
 
-    # -- RDS rules -------------------------------------------------
+    # ── RDS rules ─────────────────────────────────────────────────
     if rid == 'EMFIRGE-RDS-001':
         infra_dict['rds']['backup_retention_days'] = 7
         return True
@@ -1413,7 +1423,7 @@ def _apply_rule_based_mutation(infra_dict: dict, rule_id: str, resource_id: str)
         infra_dict['rds']['backup_retention_days'] = 14
         return True
 
-    # -- IAM rules -------------------------------------------------
+    # ── IAM rules ─────────────────────────────────────────────────
     if rid in ('EMFIRGE-IAM-001', 'EMFIRGE-IAM-002', 'EMFIRGE-IAM-003',
                'EMFIRGE-IAM-004', 'EMFIRGE-IAM-005', 'EMFIRGE-IAM-006'):
         admin_users = infra_dict.get('iam', {}).get('users_with_admin_policy', [])
@@ -1426,7 +1436,7 @@ def _apply_rule_based_mutation(infra_dict: dict, rule_id: str, resource_id: str)
             old_keys.remove(resource_id)
         return True
 
-    # -- Lambda rules ----------------------------------------------
+    # ── Lambda rules ──────────────────────────────────────────────
     if rid == 'EMFIRGE-LAMBDA-001':
         for func in infra_dict.get('lambda_data', {}).get('functions', []):
             if func['name'] == resource_id:
@@ -1449,61 +1459,61 @@ def _apply_rule_based_mutation(infra_dict: dict, rule_id: str, resource_id: str)
                 return True
         return False
 
-    # -- CloudTrail rules ------------------------------------------
+    # ── CloudTrail rules ──────────────────────────────────────────
     if rid in ('EMFIRGE-CT-001', 'EMFIRGE-CT-002', 'EMFIRGE-CT-003'):
         infra_dict['cloudtrail']['is_enabled'] = True
         infra_dict['cloudtrail']['is_multi_region'] = True
         infra_dict['cloudtrail']['has_log_validation'] = True
         return True
 
-    # -- CloudWatch ------------------------------------------------
+    # ── CloudWatch ────────────────────────────────────────────────
     if rid == 'EMFIRGE-CW-001':
         infra_dict['cloudwatch']['has_alarms'] = True
         infra_dict['cloudwatch']['has_billing_alarm'] = True
         return True
 
-    # -- GuardDuty -------------------------------------------------
+    # ── GuardDuty ─────────────────────────────────────────────────
     if rid in ('EMFIRGE-GD-001', 'EMFIRGE-GUARD-001'):
         infra_dict['guardduty']['is_enabled'] = True
         infra_dict['guardduty']['detector_id'] = 'simulated-detector'
         return True
 
-    # -- WAF -------------------------------------------------------
+    # ── WAF ───────────────────────────────────────────────────────
     if rid == 'EMFIRGE-WAF-001':
         albs_without = infra_dict.get('waf', {}).get('albs_without_waf', [])
         if resource_id in albs_without:
             albs_without.remove(resource_id)
         return True
 
-    # -- VPC rules -------------------------------------------------
+    # ── VPC rules ─────────────────────────────────────────────────
     if rid in ('EMFIRGE-VPC-001', 'EMFIRGE-VPC-002', 'EMFIRGE-VPC-003'):
         infra_dict['vpc']['has_flow_logs'] = True
         return True
 
-    # -- Secrets Manager -------------------------------------------
+    # ── Secrets Manager ───────────────────────────────────────────
     if rid == 'EMFIRGE-SM-001':
         infra_dict['secrets_manager']['all_rotated'] = True
         return True
 
-    # -- KMS -------------------------------------------------------
+    # ── KMS ───────────────────────────────────────────────────────
     if rid in ('EMFIRGE-KMS-001', 'EMFIRGE-KMS-002'):
         infra_dict['kms']['all_keys_rotating'] = True
         infra_dict['kms']['keys_pending_deletion'] = []
         return True
 
-    # -- AWS Config ------------------------------------------------
+    # ── AWS Config ────────────────────────────────────────────────
     if rid in ('EMFIRGE-CFG-001', 'EMFIRGE-CFG-002'):
         infra_dict['config']['is_enabled'] = True
         infra_dict['config']['non_compliant_rules'] = []
         return True
 
-    # -- SNS -------------------------------------------------------
+    # ── SNS ───────────────────────────────────────────────────────
     if rid in ('EMFIRGE-SNS-001', 'EMFIRGE-SNS-002'):
         infra_dict['sns']['all_encrypted'] = True
         infra_dict['sns']['public_topics'] = []
         return True
 
-    # -- ECS -------------------------------------------------------
+    # ── ECS ───────────────────────────────────────────────────────
     if rid in ('EMFIRGE-ECS-001', 'EMFIRGE-ECS-002'):
         infra_dict['ecs']['privileged_tasks'] = []
         infra_dict['ecs']['no_resource_limits'] = False
@@ -1525,11 +1535,11 @@ def unified_fix(request: TerraformGenerateRequest, http_request: Request, raw: b
     Returns both the terraform fix AND the verification result.
     Rate limited: 5/min per IP + 10/day per account.
     """
-    # -- RATE LIMIT: 5/min per IP ----------------------------------
+    # ── RATE LIMIT: 5/min per IP ──────────────────────────────────
     client_ip = http_request.client.host if http_request.client else 'unknown'
     _check_terraform_rate_limit(client_ip)
 
-    # -- DAILY LIMIT: 10/day per account ---------------------------
+    # ── DAILY LIMIT: 10/day per account ───────────────────────────
     FIX_DAILY_LIMIT = 10
     WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
     account_id = request.account_id
@@ -1553,7 +1563,7 @@ def unified_fix(request: TerraformGenerateRequest, http_request: Request, raw: b
         if recent:
             analysis_id = str(recent[0]['id'])
 
-    # -- LOAD INFRASTRUCTURE ---------------------------------------
+    # ── LOAD INFRASTRUCTURE ───────────────────────────────────────
     infrastructure = None
     original_findings_data = None
 
@@ -1579,7 +1589,8 @@ def unified_fix(request: TerraformGenerateRequest, http_request: Request, raw: b
         except Exception as e:
             logger.error(f"unified_fix: DB load failed: {e}")
 
-    # -- GENERATE HCL (Claude) -------------------------------------
+    # ── GENERATE HCL (Claude) ─────────────────────────────────────
+    # ── GENERATE HCL (Claude) ─────────────────────────────────────
     hcl = ""
     filename = f"{(request.rule_id or 'fix').lower()}.tf"
     # Raw mode: skip Claude, host LLM generates HCL itself.
@@ -1640,7 +1651,7 @@ CRITICAL RULES:
         logger.error(f"unified_fix: HCL generation failed: {e}")
         hcl = f"# Generation failed: {str(e)[:50]}"
 
-    # -- VERIFY THE FIX --------------------------------------------
+    # ── VERIFY THE FIX ────────────────────────────────────────────
     verification = {
         "can_simulate": False,
         "method": "unverified",
@@ -1910,7 +1921,7 @@ async def github_webhook(http_request: Request):
         pr_url = payload['pull_request']['html_url']
         logger.info(f"Emfirge PR merged: {pr_url}")
 
-    # -- PULL REQUEST EVENTS - Auto-analyze .tf changes ------------
+    # ── PULL REQUEST EVENTS — Auto-analyze .tf changes ────────────
     if payload.get('action') in ('opened', 'synchronize') and 'pull_request' in payload:
         installation_id = payload.get('installation', {}).get('id')
         repo_full_name = payload.get('repository', {}).get('full_name', '')
@@ -2176,7 +2187,7 @@ async def github_webhook(http_request: Request):
             # Run in background thread so webhook returns quickly
             threading.Thread(target=_run_ci_on_pr, daemon=True).start()
 
-    # Handle push events - re-index TF files if .tf files changed
+    # Handle push events — re-index TF files if .tf files changed
     if 'commits' in payload and 'repository' in payload:
         repo_full_name = payload['repository'].get('full_name', '')
         installation_id = payload.get('installation', {}).get('id')
@@ -2202,7 +2213,7 @@ async def github_webhook(http_request: Request):
     return {"status": "ok"}
 
 
-# -- TF INDEXING --------------------------------------------------
+# ── TF INDEXING ──────────────────────────────────────────────────
 
 @app.post('/github/index-tf', response_model=TFIndexResponse)
 def index_tf_repo(request: TFIndexRequest):
@@ -2239,7 +2250,7 @@ def tf_index_status(installation_id: int, repo: str):
     )
 
 
-# -- CI/CD GATE ---------------------------------------------------
+# ── CI/CD GATE ───────────────────────────────────────────────────
 
 @app.post('/ci/api-key', response_model=CIAPIKeyResponse)
 def create_ci_key(request: CIAPIKeyRequest):
@@ -2336,7 +2347,7 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
                 summary=f"PR modifies {len(tf_changes)} TF resources but none map to security-relevant components.",
             )
 
-        # -- LOAD INFRASTRUCTURE FROM DB ---------------------------
+        # ── LOAD INFRASTRUCTURE FROM DB ───────────────────────────
         from app.database import SessionLocal, AnalysisLog
 
         log = get_log_by_id(int(analysis_id)) if analysis_id.isdigit() else {}
@@ -2366,7 +2377,7 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
 
         infrastructure = AWSInfrastructure(**infra_dict)
 
-        # -- ORIGINAL FINDINGS BASELINE ----------------------------
+        # ── ORIGINAL FINDINGS BASELINE ────────────────────────────
         original_finding_keys = set()
         for category in ['critical_risks', 'moderate_risks', 'low_risks', 'best_practices', 'cost_findings']:
             for f in findings_data.get(category, []):
@@ -2377,7 +2388,7 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
         original_score = findings_data.get('overall_risk_score', 0)
         total_resources = findings_data.get('total_resources_scanned', 1)
 
-        # -- SIMULATE ALL CHANGES (FULL GRAPH + RULES) -------------
+        # ── SIMULATE ALL CHANGES (FULL GRAPH + RULES) ─────────────
         # Deep-copy infrastructure once, apply ALL changes, then run rules once
         mutated_infra_dict = copy.deepcopy(infrastructure.model_dump())
 
@@ -2390,7 +2401,7 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
             file_path = comp['tf_source']['file_path']
 
             if action == 'delete':
-                # For deletes, we'd remove from infra - skip for now (complex)
+                # For deletes, we'd remove from infra — skip for now (complex)
                 continue
 
             # Apply mutation based on component type (same logic as /simulate/component)
@@ -2490,7 +2501,7 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
                 mutated_infra_dict['ec2']['has_load_balancer'] = True
                 new_nodes.append({'id': new_arn, 'type': 'load_balancer', 'name': resource_name, 'file': file_path})
 
-        # -- REBUILD GRAPH + RUN ALL 58 RULES ----------------------
+        # ── REBUILD GRAPH + RUN ALL 58 RULES ──────────────────────
         mutated_infra = AWSInfrastructure(**mutated_infra_dict)
         mutated_graph = build_graph(mutated_infra)
         mutated_bfs = bfs_from_internet(mutated_graph)
@@ -2499,7 +2510,7 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
         mutated_findings = run_all_checks(mutated_infra, mutated_graph)
         mutated_combos = find_toxic_combos(mutated_findings, mutated_graph, mutated_infra)
 
-        # -- DIFF FINDINGS (new vs original) -----------------------
+        # ── DIFF FINDINGS (new vs original) ───────────────────────
         new_findings = []
         for category in ['critical_risks', 'moderate_risks', 'low_risks', 'best_practices', 'cost_findings']:
             for f in mutated_findings.get(category, []):
@@ -2524,7 +2535,7 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
                         'blast_radius': f_dict.get('blast_radius', 0),
                     })
 
-        # -- RESOLVED FINDINGS (existed before, gone after mutation) -
+        # ── RESOLVED FINDINGS (existed before, gone after mutation) ─
         # Build set of all finding keys AFTER mutation
         mutated_finding_keys = set()
         for category in ['critical_risks', 'moderate_risks', 'low_risks', 'best_practices', 'cost_findings']:
@@ -2548,7 +2559,7 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
                     'resource_id': res,
                 })
 
-        # -- DETECT NEW ATTACK PATHS -------------------------------
+        # ── DETECT NEW ATTACK PATHS ───────────────────────────────
         attack_paths = []
         bfs_layers = mutated_bfs.get('layers', {})
         for node in new_nodes:
@@ -2563,7 +2574,7 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
                     'reachable_from_internet': True,
                 })
 
-        # -- DETECT NEW TOXIC COMBOS -------------------------------
+        # ── DETECT NEW TOXIC COMBOS ───────────────────────────────
         original_combo_ids = {c.get('combo_id', '') for c in findings_data.get('toxic_combinations', [])}
         new_toxic_combos = []
         for c in mutated_combos:
@@ -2571,13 +2582,13 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
             if combo_id not in original_combo_ids:
                 new_toxic_combos.append(combo_id)
 
-        # -- CALCULATE REAL SCORE DELTA ----------------------------
+        # ── CALCULATE REAL SCORE DELTA ────────────────────────────
         new_total_resources = total_resources + len([n for n in new_nodes if n['type'] != 'security_group'])
         mutated_scores = calculate_score(mutated_findings, new_total_resources, mutated_infra)
         mutated_score = mutated_scores.get('overall_risk_score', 0)
         score_delta = mutated_score - original_score
 
-        # -- DETERMINE STATUS --------------------------------------
+        # ── DETERMINE STATUS ──────────────────────────────────────
         critical_new = [f for f in new_findings if f.get('severity') == 'Critical']
         has_attack_paths = len(attack_paths) > 0
 
@@ -2628,7 +2639,7 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
         )
 
 
-# -- FEEDBACK ---------------------------------------------
+# ── FEEDBACK ─────────────────────────────────────────────
 _feedback_request_log = {}
 
 @app.post('/feedback')
@@ -2669,9 +2680,17 @@ def list_feedback(limit: int = 50, key: str = None):
 def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
     start_time = time.time()
 
+    # AGENTOPS SESSION START
+    session = None
     try:
-        # Rate limiting: DAILY_SCAN_LIMIT scans per day per AWS account.
-        # Account ID extracted from role ARN, no extra API call needed.
+        session = None  # AgentOps omitted
+    except Exception:
+        pass
+
+    try:
+        # ── RATE LIMITING — DAILY_SCAN_LIMIT scans per day per AWS account ──────
+        # Extract account ID from role ARN — no extra API call needed
+        # Role ARN format: arn:aws:iam::ACCOUNT_ID:role/RoleName
         try:
             account_id = credentials.role_arn.split(':')[4]
         except Exception:
@@ -2683,25 +2702,26 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
             if account_id not in WHITELISTED_ACCOUNTS:
                 scan_count = get_scan_count_today(account_id)
                 if scan_count >= DAILY_SCAN_LIMIT:
+                    if session: session.end_session(end_state='Fail')
                     raise HTTPException(
                         status_code=429,
                         detail=f'Rate limit reached. Your AWS account has used {scan_count}/{DAILY_SCAN_LIMIT} free scans today. Limit resets at midnight UTC.'
                     )
 
-        # STEP 1 - Collect infrastructure data (demo or real)
+        # STEP 1 — Collect infrastructure data (demo or real)
         from app.demo_seed import is_demo_arn, get_demo_infrastructure
         if is_demo_arn(credentials.role_arn):
             infrastructure = get_demo_infrastructure()
         else:
             infrastructure = collect_infrastructure(credentials)
 
-        # STEP 1.5 - Build infrastructure graph for relationship-aware rules
+        # STEP 1.5 — Build infrastructure graph for relationship-aware rules
         graph = build_graph(infrastructure)
 
-        # STEP 2 - Run all risk checks (with graph for smarter severity detection)
+        # STEP 2 — Run all risk checks (with graph for smarter severity detection)
         findings = run_all_checks(infrastructure, graph)
 
-        # STEP 2.5 - Enhance findings with attack path and blast radius analysis
+        # STEP 2.5 — Enhance findings with attack path and blast radius analysis
         from app.egraph import find_attack_path, calculate_blast_radius
         
         # Process critical and moderate risks
@@ -2737,10 +2757,10 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
                     blast_radius_result = calculate_blast_radius(graph, finding.resource_id)
                     finding.blast_radius = blast_radius_result['count']
 
-        # STEP 2.75 - Detect toxic combinations of co-existing findings
+        # STEP 2.75 — Detect toxic combinations of co-existing findings
         toxic_combinations = find_toxic_combos(findings, graph, infrastructure)
 
-        # STEP 2.8 - MITRE ATT&CK enrichment
+        # STEP 2.8 — MITRE ATT&CK enrichment
         from app.mitre import MITRE_MAPPING
         critical_risks = findings.get('critical_risks', [])
         moderate_risks = findings.get('moderate_risks', [])
@@ -2753,7 +2773,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
                 finding.mitre_technique_id = technique_id
                 finding.mitre_technique_name = technique_name
 
-        # STEP 3 - Calculate weighted scores
+        # STEP 3 — Calculate weighted scores
         # total_resources must be computed here so it can be passed to calculate_score
         total_resources = (
             infrastructure.ec2.instance_count +
@@ -2775,11 +2795,11 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
         )
         scores = calculate_score(findings, total_resources, infrastructure)
 
-        # Build local warnings list - starts with collector warnings (skipped services),
+        # Build local warnings list — starts with collector warnings (skipped services),
         # backend failures (Gemini, S3, DB) are appended below
         warnings = list(infrastructure.warnings)
 
-        # STEP 4 - Get AI explanation from Gemini (skipped in raw mode for MCP callers)
+        # STEP 4 — Get AI explanation from Gemini (skipped in raw mode for MCP callers)
         if _is_raw_mode(request, raw):
             ai_result = {
                 'ai_summary': '',
@@ -2815,7 +2835,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
         # Calculate scan duration
         scan_duration = round(time.time() - start_time, 2)
 
-        # STEP 5 - Save report to S3
+        # STEP 5 — Save report to S3
         report_data = {
             'analysis_id': analysis_id,
             'timestamp': datetime.utcnow().isoformat(),
@@ -2845,7 +2865,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
             'infrastructure': infrastructure.dict()  # Store infrastructure data for graph endpoint
         }
 
-        # STEP 5 + 6 - Save to S3 and DB concurrently (Gemini already done, report_data is ready)
+        # STEP 5 + 6 — Save to S3 and DB concurrently (Gemini already done, report_data is ready)
         from concurrent.futures import ThreadPoolExecutor
 
         def _save_s3():
@@ -2896,7 +2916,10 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
         elif db_result == -1:
             warnings.append('Scan result could not be saved to database. Graph will not be available for this scan.')
 
-        # STEP 6.5 - Drift detection (never fails the scan)
+        # AGENTOPS SESSION END
+        if session: session.end_session(end_state='Success')
+
+        # STEP 6.5 — Drift detection (never fails the scan)
         try:
             if db_result and db_result != -1:
                 prev = get_previous_scan_for_account(account_id, exclude_id=db_result)
@@ -2932,7 +2955,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
             logger.warning(f"Drift detection skipped: {drift_err}")
             print(f"DRIFT ERROR: {drift_err}")
 
-        # STEP 6.7 - Simulation baseline
+        # STEP 6.7 — Simulation baseline
         from app.models import SimulationBaseline
         public_count = 0
         try:
@@ -2951,7 +2974,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
             maturity_score=scores.get('maturity_score', 0),
         )
 
-        # STEP 7 - Return complete response
+        # STEP 7 — Return complete response
         return AnalysisResponse(
             analysis_id=analysis_id,
             timestamp=datetime.utcnow().isoformat(),
@@ -2982,18 +3005,22 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
         )
 
     except ValueError as e:
+        if session: session.end_session(end_state='Fail')
         raise HTTPException(status_code=400, detail=str(e))
 
     except HTTPException:
+        if session: session.end_session(end_state='Fail')
         raise
 
     except NoCredentialsError:
+        if session: session.end_session(end_state='Fail')
         raise HTTPException(
             status_code=400,
             detail='AWS credentials not found. Please check your server configuration.'
         )
 
     except ClientError as e:
+        if session: session.end_session(end_state='Fail')
         error_code = e.response['Error']['Code']
         if error_code == 'AccessDenied':
             raise HTTPException(status_code=400, detail='Could not assume the IAM role. Make sure you deployed the Emfirge CloudFormation stack correctly.')
@@ -3001,10 +3028,11 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
             raise HTTPException(status_code=400, detail=f'AWS error: {e.response["Error"]["Message"]}')
 
     except Exception as e:
+        if session: session.end_session(end_state='Fail')
         raise HTTPException(status_code=500, detail=f'Server error: {str(e)}')
 
 
-# -- SSE STREAMING ANALYZE ENDPOINT --------------------------------
+# ── SSE STREAMING ANALYZE ENDPOINT ────────────────────────────────
 # Bypasses Vercel's 30s proxy timeout by streaming progress events.
 # Same logic as /analyze but wrapped in an SSE generator.
 
@@ -3032,7 +3060,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
 
     start_time = time.time()
 
-    # -- RATE LIMITING - same as /analyze --------------------------
+    # ── RATE LIMITING — same as /analyze ──────────────────────────
     try:
         account_id = credentials.role_arn.split(':')[4]
     except Exception:
@@ -3055,7 +3083,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
             return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
         try:
-            # -- STEP 1: Collect infrastructure --------------------
+            # ── STEP 1: Collect infrastructure ────────────────────
             yield _emit("progress", {"step": "collecting", "service": "starting", "status": "in_progress", "detail": "Assuming IAM role..."})
 
             if is_demo_arn(credentials.role_arn):
@@ -3199,7 +3227,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
                     region=credentials.region, warnings=warnings
                 )
 
-            # -- STEP 2: Build graph + run rules -------------------
+            # ── STEP 2: Build graph + run rules ───────────────────
             yield _emit("progress", {"step": "analyzing", "detail": "Building infrastructure graph..."})
             graph = build_graph(infrastructure)
 
@@ -3242,7 +3270,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
                     finding.mitre_technique_id = technique_id
                     finding.mitre_technique_name = technique_name
 
-            # -- STEP 3: Calculate scores --------------------------
+            # ── STEP 3: Calculate scores ──────────────────────────
             yield _emit("progress", {"step": "analyzing", "detail": "Calculating risk scores..."})
             total_resources = (
                 infrastructure.ec2.instance_count +
@@ -3266,7 +3294,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
 
             local_warnings = list(infrastructure.warnings)
 
-            # STEP 4: AI explanation (skipped in raw mode for MCP callers)
+            # ── STEP 4: AI explanation (skipped in raw mode for MCP callers) ──
             if _is_raw_mode(request, raw):
                 yield _emit("progress", {"step": "ai", "detail": "Skipping AI summary (raw mode)"})
                 ai_result = {
@@ -3289,7 +3317,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
                         'latency_ms': 0
                     }
 
-            # -- STEP 5: Save to S3 + DB ---------------------------
+            # ── STEP 5: Save to S3 + DB ───────────────────────────
             yield _emit("progress", {"step": "saving", "detail": "Saving report..."})
             analysis_id = str(uuid.uuid4())
             scan_duration = round(time.time() - start_time, 2)
@@ -3372,7 +3400,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
             elif db_result == -1:
                 local_warnings.append('Scan result could not be saved to database.')
 
-            # -- Drift detection -----------------------------------
+            # ── Drift detection ───────────────────────────────────
             try:
                 if db_result and db_result != -1:
                     prev = get_previous_scan_for_account(account_id, exclude_id=db_result)
@@ -3404,7 +3432,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
             except Exception as drift_err:
                 logger.warning(f"Drift detection skipped in stream: {drift_err}")
 
-            # -- Simulation baseline -------------------------------
+            # ── Simulation baseline ───────────────────────────────
             public_count = 0
             try:
                 if graph.get_node("INTERNET"):
@@ -3422,7 +3450,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
                 maturity_score=scores.get('maturity_score', 0),
             )
 
-            # -- FINAL: Emit complete response ---------------------
+            # ── FINAL: Emit complete response ─────────────────────
             final_response = {
                 'analysis_id': analysis_id,
                 'timestamp': datetime.utcnow().isoformat(),
@@ -3468,7 +3496,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
     )
 
 
-# -- COMPONENT SIMULATION ENDPOINT ---------------------------------
+# ── COMPONENT SIMULATION ENDPOINT ─────────────────────────────────
 # Deterministic mutation: Python mutates graph, Claude only writes prose.
 
 @app.post('/simulate/component')
@@ -3490,7 +3518,7 @@ def simulate_component(request: ComponentRequest, http_request: Request):
     import copy
     import anthropic as anthropic_lib
 
-    # -- RATE LIMIT: 10/min per IP (shared with /simulate) ---------
+    # ── RATE LIMIT: 10/min per IP (shared with /simulate) ─────────
     client_ip = http_request.client.host if http_request.client else 'unknown'
     now = time.time()
     _simulate_request_log.setdefault(client_ip, [])
@@ -3499,7 +3527,7 @@ def simulate_component(request: ComponentRequest, http_request: Request):
         raise HTTPException(status_code=429, detail='Rate limit exceeded. You can run 10 simulations per minute.')
     _simulate_request_log[client_ip].append(now)
 
-    # -- LOAD INFRASTRUCTURE FROM DB -------------------------------
+    # ── LOAD INFRASTRUCTURE FROM DB ───────────────────────────────
     from app.database import SessionLocal, AnalysisLog
 
     infrastructure = None
@@ -3528,7 +3556,7 @@ def simulate_component(request: ComponentRequest, http_request: Request):
     if not infrastructure:
         raise HTTPException(status_code=404, detail='Scan data not found for this analysis ID. Please run a new scan first.')
 
-    # -- DAILY SIMULATION LIMIT: 10/day per AWS account -------------
+    # ── DAILY SIMULATION LIMIT: 10/day per AWS account ─────────────
     SIMULATION_DAILY_LIMIT = 10
     WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
     if aws_account_id and aws_account_id not in WHITELISTED_ACCOUNTS:
@@ -3539,7 +3567,7 @@ def simulate_component(request: ComponentRequest, http_request: Request):
                 detail=f'Simulation limit reached. Your account has used {sim_count}/{SIMULATION_DAILY_LIMIT} simulations today. Resets at midnight UTC.'
             )
 
-    # -- DEEP-COPY AND MUTATE --------------------------------------
+    # ── DEEP-COPY AND MUTATE ──────────────────────────────────────
     mutated_infra_dict = copy.deepcopy(infrastructure.model_dump())
     config = request.config
     component_type = config.component_type
@@ -3661,12 +3689,12 @@ def simulate_component(request: ComponentRequest, http_request: Request):
     elif component_type == 'api_gateway':
         new_id = f"new-apigw-{uuid.uuid4().hex[:6]}"
         new_node_info = {'id': new_id, 'type': 'api_gateway', 'label': new_id}
-        # API Gateway doesn't map to existing infra models directly - graph-only node
+        # API Gateway doesn't map to existing infra models directly — graph-only node
 
     elif component_type == 'elasticache':
         new_id = f"new-cache-{uuid.uuid4().hex[:6]}"
         new_node_info = {'id': new_id, 'type': 'elasticache', 'label': new_id}
-        # ElastiCache doesn't map to existing infra models directly - graph-only node
+        # ElastiCache doesn't map to existing infra models directly — graph-only node
 
     elif component_type == 'ecs_service':
         new_id = f"new-ecs-{uuid.uuid4().hex[:6]}"
@@ -3678,7 +3706,7 @@ def simulate_component(request: ComponentRequest, http_request: Request):
         new_node_info = {'id': new_id, 'type': 'ecs_tasks', 'label': new_id}
 
     elif component_type == 'sg_rule':
-        # Modify existing security group - no new node
+        # Modify existing security group — no new node
         for sg in mutated_infra_dict['ec2']['security_groups']:
             if sg['id'] == config.sg_id:
                 if config.action == 'add':
@@ -3696,18 +3724,18 @@ def simulate_component(request: ComponentRequest, http_request: Request):
                 break
 
     elif component_type == 'iam_policy':
-        # Modify existing IAM role - no new node
+        # Modify existing IAM role — no new node
         if config.action == 'attach' and 'Admin' in config.policy_name:
             mutated_infra_dict['iam']['users_with_admin_policy'].append(config.role_name)
         elif config.action == 'detach' and config.role_name in mutated_infra_dict['iam'].get('users_with_admin_policy', []):
             mutated_infra_dict['iam']['users_with_admin_policy'].remove(config.role_name)
 
-    # -- REBUILD GRAPH + RUN CHECKS --------------------------------
+    # ── REBUILD GRAPH + RUN CHECKS ────────────────────────────────
     mutated_infra = AWSInfrastructure(**mutated_infra_dict)
     mutated_graph = build_graph(mutated_infra)
     mutated_bfs = bfs_from_internet(mutated_graph)
 
-    # Run all checks on mutated infrastructure (pure - no DB writes)
+    # Run all checks on mutated infrastructure (pure — no DB writes)
     mutated_findings = run_all_checks(mutated_infra, mutated_graph)
     mutated_combos = find_toxic_combos(
         mutated_findings,
@@ -3715,7 +3743,7 @@ def simulate_component(request: ComponentRequest, http_request: Request):
         mutated_infra
     )
 
-    # -- DIFF FINDINGS ---------------------------------------------
+    # ── DIFF FINDINGS ─────────────────────────────────────────────
     def finding_key(f):
         rid = f.get('rule_id', '') or (f.rule_id if hasattr(f, 'rule_id') else '')
         res = f.get('resource_id', '') or (f.resource_id if hasattr(f, 'resource_id') else '')
@@ -3737,7 +3765,7 @@ def simulate_component(request: ComponentRequest, http_request: Request):
     original_combo_ids = {c.get('combo_id', '') for c in original_findings_data.get('toxic_combinations', [])}
     new_combos = [c.model_dump() if hasattr(c, 'model_dump') else c for c in mutated_combos if (c.get('combo_id') if isinstance(c, dict) else c.combo_id) not in original_combo_ids]
 
-    # -- CALCULATE RISK DELTA --------------------------------------
+    # ── CALCULATE RISK DELTA ──────────────────────────────────────
     original_score = original_findings_data.get('overall_risk_score', 0)
     total_resources = original_findings_data.get('total_resources_scanned', 1) + (1 if new_node_info else 0)
     mutated_scores = calculate_score(mutated_findings, total_resources, mutated_infra)
@@ -3748,7 +3776,7 @@ def simulate_component(request: ComponentRequest, http_request: Request):
         'delta': mutated_score - original_score,
     }
 
-    # -- ATTACK PATHS FOR NEW NODE ---------------------------------
+    # ── ATTACK PATHS FOR NEW NODE ─────────────────────────────────
     attack_paths = []
     if new_node_info:
         # Check if new node is in BFS reachable set
@@ -3762,7 +3790,7 @@ def simulate_component(request: ComponentRequest, http_request: Request):
                 path.append(new_node_info['id'])
                 attack_paths.append({'path': path, 'depth': target_depth})
 
-    # -- CLAUDE NARRATIVE (Haiku - fast) ---------------------------
+    # ── CLAUDE NARRATIVE (Haiku — fast) ───────────────────────────
     narrative = {'verdict': '', 'severity': 'low', 'summary': '', 'recommendations': []}
     try:
         anthropic_client = anthropic_lib.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'), timeout=30)
@@ -3827,14 +3855,14 @@ Respond with ONLY this JSON (no markdown):
                 'recommendations': [],
             }
 
-    # -- LOG SIMULATION FOR DAILY LIMIT TRACKING -------------------
+    # ── LOG SIMULATION FOR DAILY LIMIT TRACKING ───────────────────
     if aws_account_id:
         try:
             save_simulation_log(aws_account_id, request.analysis_id, f"[add_component] {component_type}")
         except Exception as sim_log_err:
             logger.warning(f"simulate_component: failed to save simulation log: {sim_log_err}")
 
-    # -- RETURN RESPONSE -------------------------------------------
+    # ── RETURN RESPONSE ───────────────────────────────────────────
     return {
         'new_node': new_node_info,
         'new_edges': new_edges_info,
@@ -3846,7 +3874,7 @@ Respond with ONLY this JSON (no markdown):
     }
 
 
-# Privacy: purge user data
+# ── PRIVACY: PURGE USER DATA ──────────────────────────────────────
 # Lets a user delete every row + S3 object tied to their AWS account.
 # Re-assumes the role to prove the caller controls the account before deleting.
 

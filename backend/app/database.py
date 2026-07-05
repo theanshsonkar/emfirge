@@ -43,7 +43,7 @@ class AnalysisLog(Base):
     latency_ms = Column(Integer)
     tokens_used = Column(Integer, default=0)
     prompt_version = Column(String(20), default='v1.0')
-    aws_account_id = Column(String(20), default='')    # NEW - for rate limiting
+    aws_account_id = Column(String(20), default='')    # NEW — for rate limiting
 
 class DriftEvent(Base):
     __tablename__ = 'drift_events'
@@ -215,7 +215,7 @@ def get_log_by_id(log_id: int, account_id: str = None) -> dict:
 
 def get_scan_count_today(account_id: str) -> int:
     # Returns how many successful scans this AWS account has done today
-    # Used for rate limiting - max 5 scans per account per day
+    # Used for rate limiting — max 5 scans per account per day
     # If the DB check itself fails, we return 0 and allow the scan
     # Better to let a scan through than to block a legitimate user due to a DB error
     session = SessionLocal()
@@ -376,7 +376,7 @@ def get_llm_usage_count_today(aws_account_id: str, endpoint_type: str) -> int:
         session.close()
 
 
-# -- TF INDEX FUNCTIONS --------------------------------------------
+# ── TF INDEX FUNCTIONS ────────────────────────────────────────────
 
 def save_tf_index(installation_id: int, repo_full_name: str, resources: list[dict]) -> int:
     """
@@ -456,7 +456,7 @@ def get_tf_index_status(installation_id: int, repo_full_name: str) -> dict:
         session.close()
 
 
-# -- CI API KEY FUNCTIONS ------------------------------------------
+# ── CI API KEY FUNCTIONS ──────────────────────────────────────────
 
 def create_ci_api_key(installation_id: int, repo_full_name: str) -> str:
     """Create a new CI/CD API key for an installation. Returns the key string."""

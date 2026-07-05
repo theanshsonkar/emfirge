@@ -68,7 +68,7 @@ class GraphContext:
             return None
         return get_attack_path_to(self.graph, resource_id)
 
-# -- PORT CLASSIFICATION TABLE -------------------------------------
+# ── PORT CLASSIFICATION TABLE ─────────────────────────────────────
 PORT_CLASSES = {
     22: "ADMIN", 3389: "ADMIN", 5985: "ADMIN", 5986: "ADMIN",
     5900: "ADMIN", 5901: "ADMIN", 2375: "ADMIN", 2376: "ADMIN",
@@ -79,7 +79,7 @@ PORT_CLASSES = {
     80: "WEB", 443: "WEB",
 }
 
-# -- HELPER FUNCTIONS ----------------------------------------------
+# ── HELPER FUNCTIONS ──────────────────────────────────────────────
 
 def is_intentional_resource(resource_tags: dict) -> bool:
     if not resource_tags:
@@ -105,7 +105,7 @@ def is_behind_load_balancer(graph, resource_id: str) -> bool:
     except:
         return False
 
-# -- EC2 RULES -----------------------------------------------------
+# ── EC2 RULES ─────────────────────────────────────────────────────
 
 def check_single_ec2_no_alb(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> Optional[RiskFinding]:
     # If only 1 server and no load balancer, app goes down if server crashes
@@ -158,7 +158,7 @@ def check_ssh_open(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx:
                         behind_lb = True
                         break
                 
-                # If behind load balancer, downgrade to Low - likely intentional
+                # If behind load balancer, downgrade to Low — likely intentional
                 if behind_lb:
                     severity = 'Low'
                     confidence = 'LOW'
@@ -244,7 +244,7 @@ def check_rdp_open(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx:
 
 def check_no_auto_scaling(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # No auto scaling means app crashes during traffic spikes
-    # Low severity - solo devs and small teams often don't need ASG intentionally
+    # Low severity — solo devs and small teams often don't need ASG intentionally
     if not infra.ec2.auto_scaling_enabled and infra.ec2.instance_count > 0:
         return RiskFinding(
             rule_id='EMFIRGE-EC2-004',
@@ -260,7 +260,7 @@ def check_no_auto_scaling(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     return None
 
 def check_expensive_instance(infra: AWSInfrastructure) -> Optional[RiskFinding]:
-    # Paid instance types detected - may incur unexpected costs for new users
+    # Paid instance types detected — may incur unexpected costs for new users
     if not infra.ec2.free_tier_eligible and infra.ec2.instance_count > 0:
         return RiskFinding(
             rule_id='EMFIRGE-EC2-005',
@@ -347,7 +347,7 @@ def check_dangerous_open_ports(infra: AWSInfrastructure, graph: Optional[Graph] 
             if from_port is None or to_port is None:
                 continue
 
-            # Fast-path: wide range (>1000 ports) - treat as effectively wide-open
+            # Fast-path: wide range (>1000 ports) — treat as effectively wide-open
             if to_port - from_port > 1000:
                 key = (sg_id, f'WIDE:{from_port}-{to_port}')
                 if key not in seen:
@@ -382,7 +382,7 @@ def check_dangerous_open_ports(infra: AWSInfrastructure, graph: Optional[Graph] 
                 port_class = PORT_CLASSES.get(port)
 
                 if port_class == 'WEB':
-                    # Web ports (80/443) open to internet are expected - no finding
+                    # Web ports (80/443) open to internet are expected — no finding
                     continue
                 elif port_class == 'ADMIN':
                     severity = 'Moderate' if sg_not_reachable else 'Critical'
@@ -433,7 +433,7 @@ def check_dangerous_open_ports(infra: AWSInfrastructure, graph: Optional[Graph] 
                         region=infra.region
                     ))
                 else:
-                    # Port not in classification table - only downgrade if not reachable
+                    # Port not in classification table — only downgrade if not reachable
                     severity = 'Low' if sg_not_reachable else 'Moderate'
                     suffix = ' (not internet-reachable)' if sg_not_reachable else ''
                     findings.append(RiskFinding(
@@ -476,7 +476,7 @@ def check_default_sg_open(infra: AWSInfrastructure, graph: Optional[Graph] = Non
                 if graph and has_subnet_data:
                     attached = sg.attached_to
                     if not attached:
-                        # No instances using this SG - lower risk
+                        # No instances using this SG — lower risk
                         severity = 'Low'
                         confidence = 'LOW'
                         issue_suffix = ' — no instances currently attached'
@@ -504,7 +504,7 @@ def check_default_sg_open(infra: AWSInfrastructure, graph: Optional[Graph] = Non
 
 def check_imdsv1_enabled(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> List[RiskFinding]:
     # IMDSv1 allows unauthenticated HTTP requests to the metadata service
-    # Exploitable via SSRF - used in the Capital One breach to steal IAM credentials
+    # Exploitable via SSRF — used in the Capital One breach to steal IAM credentials
     # UPGRADED: Upgrade to Critical if instance is internet-reachable (SSRF exploitable)
     findings = []
     # Build reachable set once for all instances
@@ -542,7 +542,7 @@ def check_imdsv1_enabled(infra: AWSInfrastructure, graph: Optional[Graph] = None
             ))
     return findings
 
-# -- S3 RULES ------------------------------------------------------
+# ── S3 RULES ──────────────────────────────────────────────────────
 
 def check_public_s3_context_aware(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> List[RiskFinding]:
     findings = []
@@ -650,7 +650,7 @@ def check_s3_encryption(infra: AWSInfrastructure, graph: Optional[Graph] = None,
 
 def check_s3_versioning(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # No versioning = accidentally deleted files cannot be recovered
-    # Low severity - log buckets, temp buckets, artifact buckets don't need versioning
+    # Low severity — log buckets, temp buckets, artifact buckets don't need versioning
     if len(infra.s3.buckets_without_versioning) > 0:
         return RiskFinding(
             rule_id='EMFIRGE-S3-003',
@@ -667,7 +667,7 @@ def check_s3_versioning(infra: AWSInfrastructure) -> Optional[RiskFinding]:
 
 def check_s3_no_logging(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # No access logging = no visibility into who accessed your buckets and when
-    # Moderate severity - important for security auditing and incident response
+    # Moderate severity — important for security auditing and incident response
     if len(infra.s3.buckets_without_logging) > 0:
         return RiskFinding(
             rule_id='EMFIRGE-S3-004',
@@ -683,7 +683,7 @@ def check_s3_no_logging(infra: AWSInfrastructure) -> Optional[RiskFinding]:
         )
     return None
 
-# -- RDS RULES -----------------------------------------------------
+# ── RDS RULES ─────────────────────────────────────────────────────
 
 def check_rds_no_backup(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> Optional[RiskFinding]:
     if infra.rds.instances and not infra.rds.backup_enabled:
@@ -848,7 +848,7 @@ def check_rds_log_exports(infra: AWSInfrastructure) -> Optional[RiskFinding]:
         )
     return None
 
-# -- IAM RULES -----------------------------------------------------
+# ── IAM RULES ─────────────────────────────────────────────────────
 
 def check_root_access_keys(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # Root access keys = if leaked, attacker has full control of entire AWS account
@@ -957,7 +957,7 @@ def check_users_without_mfa(infra: AWSInfrastructure, ctx: Optional['GraphContex
 
 def check_old_access_keys(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # Old access keys sitting around increase the window of exposure if leaked
-    # Low severity - service account keys are often intentionally long-lived
+    # Low severity — service account keys are often intentionally long-lived
     if len(infra.iam.old_access_keys) > 0:
         return RiskFinding(
             rule_id='EMFIRGE-IAM-004',
@@ -973,7 +973,7 @@ def check_old_access_keys(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     return None
 
 def check_root_used_recently(infra: AWSInfrastructure) -> Optional[RiskFinding]:
-    # Root account should never be used for daily work - only for emergencies
+    # Root account should never be used for daily work — only for emergencies
     if infra.iam.root_used_recently:
         return RiskFinding(
             rule_id='EMFIRGE-IAM-005',
@@ -993,7 +993,7 @@ def check_iam_wildcard_policy(infra: AWSInfrastructure, graph: Optional[Graph] =
     for username in infra.iam.users_with_admin_policy:
         blast = 0
         if graph:
-            # Admin can access ALL data stores - count them
+            # Admin can access ALL data stores — count them
             for node_type in ['s3_bucket', 'rds_instance', 'secretsmanager_secret']:
                 blast += len(graph.find_nodes_by_type(node_type))
 
@@ -1013,7 +1013,7 @@ def check_iam_wildcard_policy(infra: AWSInfrastructure, graph: Optional[Graph] =
         ))
     return findings
 
-# -- CLOUDTRAIL RULES ----------------------------------------------
+# ── CLOUDTRAIL RULES ──────────────────────────────────────────────
 
 def check_cloudtrail_disabled(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> Optional[RiskFinding]:
     if not infra.cloudtrail.is_enabled:
@@ -1055,7 +1055,7 @@ def check_cloudtrail_not_multiregion(infra: AWSInfrastructure) -> Optional[RiskF
         )
     return None
 
-# -- COST RULES ----------------------------------------------------
+# ── COST RULES ────────────────────────────────────────────────────
 
 def check_no_budget_alerts(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # No budget alerts = surprise bill at end of month
@@ -1075,7 +1075,7 @@ def check_no_budget_alerts(infra: AWSInfrastructure) -> Optional[RiskFinding]:
 
 def check_no_billing_alarm(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # Only fires if BOTH budget alerts and billing alarm are missing
-    # If user has Budgets configured, they are already protected - skip this rule
+    # If user has Budgets configured, they are already protected — skip this rule
     if not infra.cost.has_billing_alarm and not infra.cost.has_budget_alerts:
         return RiskFinding(
             rule_id='EMFIRGE-COST-002',
@@ -1106,7 +1106,7 @@ def check_service_dominance(infra: AWSInfrastructure) -> Optional[RiskFinding]:
         )
     return None
 
-# -- CLOUDWATCH RULES ----------------------------------------------
+# ── CLOUDWATCH RULES ──────────────────────────────────────────────
 
 def check_no_cloudwatch(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # No monitoring = flying blind, no alerts when things go wrong
@@ -1124,11 +1124,11 @@ def check_no_cloudwatch(infra: AWSInfrastructure) -> Optional[RiskFinding]:
         )
     return None
 
-# -- GUARDDUTY RULES -----------------------------------------------
+# ── GUARDDUTY RULES ───────────────────────────────────────────────
 
 def check_guardduty_disabled(infra: AWSInfrastructure) -> Optional[RiskFinding]:
-    # GuardDuty off = zero threat detection - you won't know if your account is actively being attacked
-    # Moderate not Critical - your account isn't necessarily under attack right now,
+    # GuardDuty off = zero threat detection — you won't know if your account is actively being attacked
+    # Moderate not Critical — your account isn't necessarily under attack right now,
     # but you have zero visibility if it is. Think of it like disabling your burglar alarm.
     if not infra.guardduty.is_enabled:
         return RiskFinding(
@@ -1144,7 +1144,7 @@ def check_guardduty_disabled(infra: AWSInfrastructure) -> Optional[RiskFinding]:
         )
     return None
 
-# -- LAMBDA RULES --------------------------------------------------
+# ── LAMBDA RULES ──────────────────────────────────────────────────
 
 def check_lambda_admin_role(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> Optional[RiskFinding]:
     # UPGRADED: Add blast_radius by counting can_access edges from the Lambda's role
@@ -1231,11 +1231,11 @@ def check_lambda_timeout(infra: AWSInfrastructure) -> Optional[RiskFinding]:
         )
     return None
 
-# -- SECRETS MANAGER RULES -----------------------------------------
+# ── SECRETS MANAGER RULES ─────────────────────────────────────────
 
 def check_secrets_not_rotated(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # Secrets that never rotate = if a secret leaks (via logs, git, breach),
-    # it remains valid forever - giving an attacker permanent access
+    # it remains valid forever — giving an attacker permanent access
     if len(infra.secrets_manager.secrets_without_rotation) > 0:
         return RiskFinding(
             rule_id='EMFIRGE-SM-001',
@@ -1250,7 +1250,7 @@ def check_secrets_not_rotated(infra: AWSInfrastructure) -> Optional[RiskFinding]
         )
     return None
 
-# -- VPC RULES -----------------------------------------------------
+# ── VPC RULES ─────────────────────────────────────────────────────
 
 def check_vpc_no_flow_logs(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # VPCs without flow logs = no visibility into network traffic patterns or security incidents
@@ -1328,7 +1328,7 @@ def check_missing_vpc_endpoints(infra: AWSInfrastructure) -> Optional[RiskFindin
         )
     return None
 
-# -- KMS RULES -----------------------------------------------------
+# ── KMS RULES ─────────────────────────────────────────────────────
 
 def check_kms_no_rotation(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # KMS keys without rotation = if a key is compromised, it remains valid indefinitely
@@ -1363,7 +1363,7 @@ def check_kms_pending_deletion(infra: AWSInfrastructure) -> Optional[RiskFinding
         )
     return None
 
-# -- AWS CONFIG RULES ----------------------------------------------
+# ── AWS CONFIG RULES ──────────────────────────────────────────────
 
 def check_config_disabled(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # AWS Config not enabled = no compliance monitoring or resource configuration tracking
@@ -1397,7 +1397,7 @@ def check_config_non_compliant(infra: AWSInfrastructure) -> Optional[RiskFinding
         )
     return None
 
-# -- SNS RULES -----------------------------------------------------
+# ── SNS RULES ─────────────────────────────────────────────────────
 
 def check_sns_no_encryption(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # SNS topics without encryption = message data stored in plain text
@@ -1432,7 +1432,7 @@ def check_sns_public_access(infra: AWSInfrastructure) -> Optional[RiskFinding]:
         )
     return None
 
-# -- ECS RULES -----------------------------------------------------
+# ── ECS RULES ─────────────────────────────────────────────────────
 
 def check_ecs_privileged_mode(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> Optional[RiskFinding]:
     if len(infra.ecs.tasks_with_privileged_containers) > 0:
@@ -1478,7 +1478,7 @@ def check_ecs_no_resource_limits(infra: AWSInfrastructure) -> Optional[RiskFindi
         )
     return None
 
-# -- WAF RULES -----------------------------------------------------
+# ── WAF RULES ─────────────────────────────────────────────────────
 
 def check_waf_not_enabled(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> Optional[RiskFinding]:
     if len(infra.waf.albs_without_waf) > 0:
@@ -1515,7 +1515,7 @@ def check_waf_not_enabled(infra: AWSInfrastructure, graph: Optional[Graph] = Non
         )
     return None
 
-# -- ORPHANED RESOURCES -------------------------------------------
+# ── ORPHANED RESOURCES ───────────────────────────────────────────
 
 def check_orphaned_resources(infra: AWSInfrastructure, graph: Optional[Graph] = None) -> List[RiskFinding]:
     """
@@ -1578,7 +1578,7 @@ def _get_service_name(resource_type: str) -> str:
     return type_to_service.get(resource_type, 'AWS')
 
 
-# -- BEST PRACTICES ------------------------------------------------
+# ── BEST PRACTICES ────────────────────────────────────────────────
 
 def detect_best_practices(infra: AWSInfrastructure) -> List[RiskFinding]:
     best = []
@@ -1714,7 +1714,7 @@ def detect_best_practices(infra: AWSInfrastructure) -> List[RiskFinding]:
 
     return best
 
-# -- TOXIC COMBINATIONS -------------------------------------------
+# ── TOXIC COMBINATIONS ───────────────────────────────────────────
 
 def find_toxic_combos(findings: dict, graph, infrastructure: AWSInfrastructure) -> List[ToxicCombo]:
     """
@@ -1730,8 +1730,8 @@ def find_toxic_combos(findings: dict, graph, infrastructure: AWSInfrastructure) 
         if f.rule_id:
             critical_by_rule.setdefault(f.rule_id, []).append(f)
 
-    # -- COMBO 1: SSH_OPEN_NO_GUARDDUTY ----------------------------
-    # SSH open to internet AND GuardDuty disabled - brute force with zero detection
+    # ── COMBO 1: SSH_OPEN_NO_GUARDDUTY ────────────────────────────
+    # SSH open to internet AND GuardDuty disabled — brute force with zero detection
     if 'EMFIRGE-EC2-002' in critical_by_rule and not infrastructure.guardduty.is_enabled:
         contributing = critical_by_rule['EMFIRGE-EC2-002']
         resource_ids = [f.resource_id for f in contributing if f.resource_id]
@@ -1747,8 +1747,8 @@ def find_toxic_combos(findings: dict, graph, infrastructure: AWSInfrastructure) 
             attack_path=[]
         ))
 
-    # -- COMBO 2: PUBLIC_RDS_NO_CLOUDTRAIL -------------------------
-    # Public RDS AND CloudTrail disabled - database reachable with no audit log
+    # ── COMBO 2: PUBLIC_RDS_NO_CLOUDTRAIL ─────────────────────────
+    # Public RDS AND CloudTrail disabled — database reachable with no audit log
     if 'EMFIRGE-RDS-002' in critical_by_rule and not infrastructure.cloudtrail.is_enabled:
         contributing = critical_by_rule['EMFIRGE-RDS-002']
         resource_ids = [f.resource_id for f in contributing if f.resource_id]
@@ -1765,8 +1765,8 @@ def find_toxic_combos(findings: dict, graph, infrastructure: AWSInfrastructure) 
             attack_path=attack_path
         ))
 
-    # -- COMBO 3: PUBLIC_S3_NO_CLOUDTRAIL --------------------------
-    # Any Critical S3-001 finding AND CloudTrail disabled - exposed data, no access record
+    # ── COMBO 3: PUBLIC_S3_NO_CLOUDTRAIL ──────────────────────────
+    # Any Critical S3-001 finding AND CloudTrail disabled — exposed data, no access record
     s3_critical = [f for f in critical_by_rule.get('EMFIRGE-S3-001', [])]
     if s3_critical and not infrastructure.cloudtrail.is_enabled:
         resource_ids = [f.resource_id for f in s3_critical if f.resource_id]
@@ -1782,8 +1782,8 @@ def find_toxic_combos(findings: dict, graph, infrastructure: AWSInfrastructure) 
             attack_path=[]
         ))
 
-    # -- COMBO 4: ROOT_KEYS_ACTIVE_AND_USED -----------------------
-    # Root access keys exist AND root was used recently - active misuse of highest-privilege creds
+    # ── COMBO 4: ROOT_KEYS_ACTIVE_AND_USED ───────────────────────
+    # Root access keys exist AND root was used recently — active misuse of highest-privilege creds
     if 'EMFIRGE-IAM-001' in critical_by_rule and infrastructure.iam.root_used_recently:
         contributing = critical_by_rule['EMFIRGE-IAM-001']
         resource_ids = [f.resource_id for f in contributing if f.resource_id]
@@ -1799,8 +1799,8 @@ def find_toxic_combos(findings: dict, graph, infrastructure: AWSInfrastructure) 
             attack_path=[]
         ))
 
-    # -- COMBO 5: IAM_NO_MFA_OLD_KEYS -----------------------------
-    # Any Critical IAM-003 (no MFA) AND any IAM-004 (old keys) - stale creds + no second factor
+    # ── COMBO 5: IAM_NO_MFA_OLD_KEYS ─────────────────────────────
+    # Any Critical IAM-003 (no MFA) AND any IAM-004 (old keys) — stale creds + no second factor
     iam003_critical = critical_by_rule.get('EMFIRGE-IAM-003', [])
     all_findings_flat = findings.get('critical_risks', []) + findings.get('moderate_risks', []) + findings.get('low_risks', [])
     iam004_findings = [f for f in all_findings_flat if f.rule_id == 'EMFIRGE-IAM-004']
@@ -1819,8 +1819,8 @@ def find_toxic_combos(findings: dict, graph, infrastructure: AWSInfrastructure) 
             attack_path=[]
         ))
 
-    # -- COMBO 6: LAMBDA_ADMIN_NO_CLOUDTRAIL ----------------------
-    # Lambda with admin role AND CloudTrail disabled - unrestricted serverless access, no audit trail
+    # ── COMBO 6: LAMBDA_ADMIN_NO_CLOUDTRAIL ──────────────────────
+    # Lambda with admin role AND CloudTrail disabled — unrestricted serverless access, no audit trail
     if 'EMFIRGE-LAMBDA-001' in critical_by_rule and not infrastructure.cloudtrail.is_enabled:
         contributing = critical_by_rule['EMFIRGE-LAMBDA-001']
         resource_ids = [f.resource_id for f in contributing if f.resource_id]
@@ -1836,8 +1836,8 @@ def find_toxic_combos(findings: dict, graph, infrastructure: AWSInfrastructure) 
             attack_path=[]
         ))
 
-    # -- COMBO 7: RDS_NO_BACKUP_NO_DELETION_PROTECTION ------------
-    # RDS no backups AND deletion protection disabled - total data loss with no recovery path
+    # ── COMBO 7: RDS_NO_BACKUP_NO_DELETION_PROTECTION ────────────
+    # RDS no backups AND deletion protection disabled — total data loss with no recovery path
     if 'EMFIRGE-RDS-001' in critical_by_rule and infrastructure.rds.instances_without_deletion_protection:
         rds001 = critical_by_rule['EMFIRGE-RDS-001']
         rds004_findings = [f for f in all_findings_flat if f.rule_id == 'EMFIRGE-RDS-004']
@@ -1855,8 +1855,8 @@ def find_toxic_combos(findings: dict, graph, infrastructure: AWSInfrastructure) 
             attack_path=[]
         ))
 
-    # -- COMBO 8: PUBLIC_S3_UNENCRYPTED ---------------------------
-    # Critical public S3 bucket AND unencrypted buckets exist - public plaintext data
+    # ── COMBO 8: PUBLIC_S3_UNENCRYPTED ───────────────────────────
+    # Critical public S3 bucket AND unencrypted buckets exist — public plaintext data
     if s3_critical and infrastructure.s3.unencrypted_buckets:
         s3002_findings = [f for f in all_findings_flat if f.rule_id == 'EMFIRGE-S3-002']
         contributing = s3_critical + s3002_findings
@@ -1873,8 +1873,8 @@ def find_toxic_combos(findings: dict, graph, infrastructure: AWSInfrastructure) 
             attack_path=[]
         ))
 
-    # -- COMBO 9: SSH_OPEN_SINGLE_EC2 -----------------------------
-    # SSH open to internet AND single EC2 with no load balancer - exposed + no redundancy
+    # ── COMBO 9: SSH_OPEN_SINGLE_EC2 ─────────────────────────────
+    # SSH open to internet AND single EC2 with no load balancer — exposed + no redundancy
     if ('EMFIRGE-EC2-002' in critical_by_rule
             and infrastructure.ec2.instance_count == 1
             and not infrastructure.ec2.has_load_balancer):
@@ -1895,7 +1895,7 @@ def find_toxic_combos(findings: dict, graph, infrastructure: AWSInfrastructure) 
     return combos
 
 
-# -- NEW AVAILABILITY RULES ----------------------------------------
+# ── NEW AVAILABILITY RULES ────────────────────────────────────────
 
 def check_rds_no_multi_az(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     """RDS without Multi-AZ = database goes down if the AZ has an outage."""
@@ -2004,7 +2004,7 @@ def check_single_az_instances(infra: AWSInfrastructure) -> Optional[RiskFinding]
     return None
 
 
-# -- NEW DISASTER RECOVERY RULES ----------------------------------
+# ── NEW DISASTER RECOVERY RULES ──────────────────────────────────
 
 def check_rds_low_backup_retention(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     """RDS backup retention under 7 days = limited recovery window."""
@@ -2042,7 +2042,7 @@ def check_cloudtrail_no_log_validation(infra: AWSInfrastructure) -> Optional[Ris
     return None
 
 
-# -- MAIN FUNCTION -------------------------------------------------
+# ── MAIN FUNCTION ─────────────────────────────────────────────────
 
 def run_all_checks(infrastructure: AWSInfrastructure, graph: Optional[Graph] = None) -> dict:
     critical_risks = []
@@ -2050,7 +2050,7 @@ def run_all_checks(infrastructure: AWSInfrastructure, graph: Optional[Graph] = N
     low_risks = []
     cost_findings = []
 
-    # Build graph context once - thread-safe, no globals
+    # Build graph context once — thread-safe, no globals
     ctx = GraphContext.build(graph, infrastructure)
 
     # Single-return rules (Optional[RiskFinding])
@@ -2182,7 +2182,7 @@ def run_all_checks(infrastructure: AWSInfrastructure, graph: Optional[Graph] = N
         check_no_budget_alerts,
         check_no_billing_alarm,
         check_service_dominance,
-        # Lambda timeout is a Cost finding - lives here
+        # Lambda timeout is a Cost finding — lives here
         check_lambda_timeout,
     ]
 

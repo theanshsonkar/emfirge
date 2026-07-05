@@ -1,6 +1,6 @@
 import math
 
-# -- MATURITY CHECK CONSTANTS --------------------------------------
+# ── MATURITY CHECK CONSTANTS ──────────────────────────────────────
 MATURITY_CHECKS = [
     ("cloudtrail_multiregion",    10),
     ("guardduty_enabled",         10),
@@ -23,7 +23,7 @@ MATURITY_FIELD_MAP = {
     "cloudwatch_alarms_exist":  lambda i: i.cloudwatch.has_alarms,
 }
 
-# -- SEVERITY × CONFIDENCE WEIGHT TABLE ---------------------------
+# ── SEVERITY × CONFIDENCE WEIGHT TABLE ───────────────────────────
 # Each finding contributes a base weight determined by its severity and
 # how confident the rule is that this is a real risk (not a false positive).
 # Context-aware rules that downgrade findings set confidence='LOW'.
@@ -35,7 +35,7 @@ SEVERITY_WEIGHTS = {
     'Low':      {'HIGH': 2,  'MEDIUM': 1,  'LOW': 0.5},
 }
 
-# -- CRITICAL FLOOR PENALTY ----------------------------------------
+# ── CRITICAL FLOOR PENALTY ────────────────────────────────────────
 # Each Critical/HIGH finding imposes a flat penalty on the overall score
 # regardless of account size. This prevents large accounts from hiding
 # critical vulnerabilities behind a high resource count.
@@ -88,7 +88,7 @@ def _score_from_risk(weighted_risk: float, total_resources: int) -> int:
     Score is inverted: higher = safer.
     """
     normaliser = max(total_resources, 10) * 20
-    raw = weighted_risk / normaliser          # 0.0 → ∞, typically 0.0-1.0+
+    raw = weighted_risk / normaliser          # 0.0 → ∞, typically 0.0–1.0+
     score = 100 * max(0.0, 1.0 - raw)        # invert: 0 risk → 100, high risk → 0
     return max(0, min(100, int(score)))
 
@@ -106,7 +106,7 @@ def _category_resource_count(category: str, infrastructure) -> int:
         return 10
 
     if category == 'Availability':
-        # Compute + DB resources - the things that need redundancy
+        # Compute + DB resources — the things that need redundancy
         count = (
             infrastructure.ec2.instance_count +
             len(infrastructure.rds.instances) +
@@ -116,7 +116,7 @@ def _category_resource_count(category: str, infrastructure) -> int:
         return max(count, 3)   # floor of 3 so a single-instance account isn't over-penalised
 
     if category == 'Disaster Recovery':
-        # Stateful resources - the things that need backups
+        # Stateful resources — the things that need backups
         count = (
             len(infrastructure.rds.instances) +
             infrastructure.s3.total_buckets +
@@ -128,7 +128,7 @@ def _category_resource_count(category: str, infrastructure) -> int:
         # All resources contribute to cost
         return max(_total_resource_count(infrastructure), 10)
 
-    # Security - uses total resources (covers everything)
+    # Security — uses total resources (covers everything)
     return max(_total_resource_count(infrastructure), 10)
 
 
@@ -176,15 +176,15 @@ def calculate_score(findings_dict: dict, total_resources: int = 10, infrastructu
 
     all_risk_findings = critical + moderate + low
 
-    # -- OVERALL SCORE ---------------------------------------------
+    # ── OVERALL SCORE ─────────────────────────────────────────────
     overall_risk  = _weighted_risk(all_risk_findings)
     overall_score = _score_from_risk(overall_risk, total_resources)
 
-    # Apply critical floor penalty - flat deduction per Critical/HIGH finding
+    # Apply critical floor penalty — flat deduction per Critical/HIGH finding
     floor_penalty = _critical_floor_penalty(all_risk_findings)
     overall_score = max(0, overall_score - floor_penalty)
 
-    # -- MATURITY BONUS --------------------------------------------
+    # ── MATURITY BONUS ────────────────────────────────────────────
     maturity_score = 0
     maturity_bonus = 0.0
     maturity_checks_passed = []
@@ -212,7 +212,7 @@ def calculate_score(findings_dict: dict, total_resources: int = 10, infrastructu
     else:
         risk_level = 'CRITICAL'
 
-    # -- CATEGORY SCORES -------------------------------------------
+    # ── CATEGORY SCORES ───────────────────────────────────────────
     # Each category normalises against its own relevant resource count
     # so that thin categories (Availability, DR) produce meaningful scores.
 
@@ -228,7 +228,7 @@ def calculate_score(findings_dict: dict, total_resources: int = 10, infrastructu
     dr_resources          = _category_resource_count('Disaster Recovery', infrastructure) if infrastructure else total_resources
     dr_score              = _score_from_risk(_weighted_risk(dr_findings), dr_resources)
 
-    # -- COST SCORE ------------------------------------------------
+    # ── COST SCORE ────────────────────────────────────────────────
     cost_risk  = _weighted_risk(cost)
     cost_score = _score_from_risk(cost_risk, total_resources)
 

@@ -12,10 +12,9 @@ To customize the demo:
 
 No AWS API calls are made when demo mode is active.
 """
-# Demo ARN format: arn:aws:iam::DEMO_ACCOUNT_ID:role/EmfirgeReadOnly
+# Demo ARN = arn:aws:iam::DEMO_ACCOUNT_ID:role/EmfirgeReadOnly
 
 import os
-
 from app.models import (
     AWSInfrastructure,
     EC2Data, EC2Instance, SecurityGroup, LoadBalancer, EBSVolume, ElasticIP,
@@ -40,7 +39,7 @@ from app.models import (
     DynamoDBData, DynamoDBTable,
 )
 
-# -- DEMO CONSTANTS ------------------------------------------------
+# ── DEMO CONSTANTS ────────────────────────────────────────────────
 DEMO_ACCOUNT_ID = os.getenv('DEMO_ACCOUNT_ID', '000000000000')
 DEMO_ROLE_ARN = f"arn:aws:iam::{DEMO_ACCOUNT_ID}:role/EmfirgeReadOnly"
 DEMO_REGION = "us-east-1"
@@ -57,7 +56,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
     security gaps that trigger 25-35 findings across all severity levels.
     """
 
-    # -- SECURITY GROUPS -------------------------------------------
+    # ── SECURITY GROUPS ───────────────────────────────────────────
     security_groups = [
         SecurityGroup(
             id="sg-0a1b2c3d4e5f00001",
@@ -104,7 +103,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         ),
     ]
 
-    # -- EC2 INSTANCES ---------------------------------------------
+    # ── EC2 INSTANCES ─────────────────────────────────────────────
     instances = [
         EC2Instance(id="i-0abc000000000001", type="t3.medium", sg_ids=["sg-0a1b2c3d4e5f00001"], subnet_id="subnet-0001a", state="running", imdsv2_required=True),
         EC2Instance(id="i-0abc000000000002", type="t3.medium", sg_ids=["sg-0a1b2c3d4e5f00001"], subnet_id="subnet-0001b", state="running", imdsv2_required=True),
@@ -114,7 +113,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         EC2Instance(id="i-0abc000000000006", type="t3.micro", sg_ids=["sg-0a1b2c3d4e5f00004"], subnet_id="subnet-0002b", state="stopped", imdsv2_required=False),
     ]
 
-    # -- LOAD BALANCERS --------------------------------------------
+    # ── LOAD BALANCERS ────────────────────────────────────────────
     load_balancers = [
         LoadBalancer(
             arn=f"arn:aws:elasticloadbalancing:{DEMO_REGION}:{DEMO_ACCOUNT_ID}:loadbalancer/app/web-alb/50dc6c495c0c9188",
@@ -128,7 +127,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         ),
     ]
 
-    # -- EBS VOLUMES -----------------------------------------------
+    # ── EBS VOLUMES ───────────────────────────────────────────────
     ebs_volumes = [
         EBSVolume(id="vol-0001", size_gb=50, volume_type="gp3", create_time="2024-08-15T10:00:00Z", availability_zone="us-east-1a"),
         EBSVolume(id="vol-0002", size_gb=50, volume_type="gp3", create_time="2024-08-15T10:00:00Z", availability_zone="us-east-1b"),
@@ -136,13 +135,13 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         EBSVolume(id="vol-0004", size_gb=200, volume_type="io1", create_time="2024-03-20T10:00:00Z", availability_zone="us-east-1a"),
     ]
 
-    # -- ELASTIC IPs -----------------------------------------------
+    # ── ELASTIC IPs ───────────────────────────────────────────────
     elastic_ips = [
         ElasticIP(allocation_id="eipalloc-0001", public_ip="54.210.33.101", is_attached=True),
         ElasticIP(allocation_id="eipalloc-0002", public_ip="54.210.33.102", is_attached=False),  # orphaned
     ]
 
-    # -- EC2 DATA --------------------------------------------------
+    # ── EC2 DATA ──────────────────────────────────────────────────
     ec2 = EC2Data(
         instance_count=6,
         instance_types=["t3.medium", "t3.medium", "t3.large", "m5.xlarge", "t3.small", "t3.micro"],
@@ -163,7 +162,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         elastic_ips=elastic_ips,
     )
 
-    # -- S3 BUCKETS ------------------------------------------------
+    # ── S3 BUCKETS ────────────────────────────────────────────────
     s3 = S3Data(
         total_buckets=4,
         public_buckets=["acme-public-assets"],
@@ -178,7 +177,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         ],
     )
 
-    # -- RDS INSTANCES ---------------------------------------------
+    # ── RDS INSTANCES ─────────────────────────────────────────────
     rds = RDSData(
         instances=["acme-prod-db", "acme-analytics-db"],
         multi_az_enabled=False,
@@ -194,7 +193,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         ],
     )
 
-    # -- IAM -------------------------------------------------------
+    # ── IAM ───────────────────────────────────────────────────────
     iam = IAMData(
         root_has_access_keys=False,
         users_without_mfa=["deploy-bot", "intern-dev"],
@@ -239,7 +238,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         ],
     )
 
-    # -- CLOUDTRAIL ------------------------------------------------
+    # ── CLOUDTRAIL ────────────────────────────────────────────────
     cloudtrail = CloudTrailData(
         is_enabled=True,
         is_multi_region=True,
@@ -247,7 +246,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         trail_arn=f"arn:aws:cloudtrail:{DEMO_REGION}:{DEMO_ACCOUNT_ID}:trail/acme-trail",
     )
 
-    # -- COST ------------------------------------------------------
+    # ── COST ──────────────────────────────────────────────────────
     cost = CostData(
         monthly_cost=342.50,
         has_budget_alerts=False,
@@ -256,19 +255,19 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         top_service_percentage=62.0,
     )
 
-    # -- CLOUDWATCH ------------------------------------------------
+    # ── CLOUDWATCH ────────────────────────────────────────────────
     cloudwatch = CloudWatchData(
         has_alarms=False,
         has_billing_alarm=False,
     )
 
-    # -- GUARDDUTY -------------------------------------------------
+    # ── GUARDDUTY ─────────────────────────────────────────────────
     guardduty = GuardDutyData(
         is_enabled=False,
         detector_id=None,
     )
 
-    # -- LAMBDA ----------------------------------------------------
+    # ── LAMBDA ────────────────────────────────────────────────────
     lambda_data = LambdaData(
         function_count=3,
         functions_with_admin_role=["acme-data-processor"],
@@ -299,13 +298,13 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         ],
     )
 
-    # -- SECRETS MANAGER -------------------------------------------
+    # ── SECRETS MANAGER ───────────────────────────────────────────
     secrets_manager = SecretsManagerData(
         total_secrets=3,
         secrets_without_rotation=["prod/db-creds", "webhook-secret"],
     )
 
-    # -- VPC -------------------------------------------------------
+    # ── VPC ───────────────────────────────────────────────────────
     vpc = VPCData(
         total_vpcs=2,
         vpcs_without_flow_logs=["vpc-0001", "vpc-default"],
@@ -324,28 +323,28 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         ],
     )
 
-    # -- KMS -------------------------------------------------------
+    # ── KMS ───────────────────────────────────────────────────────
     kms = KMSData(
         total_cmks=2,
         cmks_without_rotation=["key-0001-abcd-1234"],
         cmks_pending_deletion=[],
     )
 
-    # -- AWS CONFIG ------------------------------------------------
+    # ── AWS CONFIG ────────────────────────────────────────────────
     config = ConfigData(
         is_enabled=False,
         is_recording=False,
         non_compliant_rules=[],
     )
 
-    # -- SNS -------------------------------------------------------
+    # ── SNS ───────────────────────────────────────────────────────
     sns = SNSData(
         total_topics=2,
         topics_without_encryption=[f"arn:aws:sns:{DEMO_REGION}:{DEMO_ACCOUNT_ID}:acme-alerts"],
         topics_with_public_access=[],
     )
 
-    # -- ECS -------------------------------------------------------
+    # ── ECS ───────────────────────────────────────────────────────
     ecs = ECSData(
         total_task_definitions=2,
         tasks_with_privileged_containers=[f"arn:aws:ecs:{DEMO_REGION}:{DEMO_ACCOUNT_ID}:task-definition/acme-worker:3"],
@@ -353,13 +352,13 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         task_role_arns=[f"arn:aws:iam::{DEMO_ACCOUNT_ID}:role/ECSTaskRole"],
     )
 
-    # -- WAF -------------------------------------------------------
+    # ── WAF ───────────────────────────────────────────────────────
     waf = WAFData(
         total_albs=1,
         albs_without_waf=[f"arn:aws:elasticloadbalancing:{DEMO_REGION}:{DEMO_ACCOUNT_ID}:loadbalancer/app/web-alb/50dc6c495c0c9188"],
     )
 
-    # -- API GATEWAY -----------------------------------------------
+    # ── API GATEWAY ───────────────────────────────────────────────
     api_gateway = APIGatewayData(
         total_apis=2,
         apis_without_auth=["api-public-webhook"],
@@ -387,7 +386,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         ],
     )
 
-    # -- ELASTICACHE -----------------------------------------------
+    # ── ELASTICACHE ───────────────────────────────────────────────
     elasticache = ElastiCacheData(
         total_clusters=1,
         clusters_without_encryption=["acme-redis-001"],
@@ -408,7 +407,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         ],
     )
 
-    # -- SQS -------------------------------------------------------
+    # ── SQS ───────────────────────────────────────────────────────
     sqs = SQSData(
         total_queues=2,
         queues_without_encryption=["acme-events"],
@@ -434,7 +433,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         ],
     )
 
-    # -- DYNAMODB --------------------------------------------------
+    # ── DYNAMODB ──────────────────────────────────────────────────
     dynamodb = DynamoDBData(
         total_tables=2,
         tables_without_pitr=["acme-sessions", "acme-events-log"],
@@ -462,7 +461,7 @@ def get_demo_infrastructure() -> AWSInfrastructure:
         ],
     )
 
-    # -- ASSEMBLE --------------------------------------------------
+    # ── ASSEMBLE ──────────────────────────────────────────────────
     return AWSInfrastructure(
         ec2=ec2,
         s3=s3,

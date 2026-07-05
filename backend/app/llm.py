@@ -45,7 +45,7 @@ def _call_gemini(client, prompt: str, timeout: int = 15) -> dict:
     text = text.replace('```json', '').replace('```', '').strip()
     result = json.loads(text)
 
-    # Validate priority_actions structure - if Gemini returns malformed data,
+    # Validate priority_actions structure — if Gemini returns malformed data,
     # we catch it here and fall back gracefully instead of crashing the scan
     raw_actions = result.get('priority_actions', [])
     priority_actions = []
@@ -63,7 +63,7 @@ def generate_explanation(findings_dict: dict, risk_score: int, region: str) -> d
     # Get Gemini API key from .env file
     api_key = os.getenv('GEMINI_API_KEY')
 
-    # Early check - if no API key, skip client creation entirely
+    # Early check — if no API key, skip client creation entirely
     client = None
     if api_key:
         try:
@@ -72,11 +72,11 @@ def generate_explanation(findings_dict: dict, risk_score: int, region: str) -> d
             client = None
 
     # Only send critical and moderate risks to Gemini
-    # Best practices are removed - Gemini should focus on what's broken, not what's good
+    # Best practices are removed — Gemini should focus on what's broken, not what's good
     critical = findings_dict.get('critical_risks', [])
     moderate = findings_dict.get('moderate_risks', [])
 
-    # Cap total findings sent to Gemini at 5 - criticals always take priority
+    # Cap total findings sent to Gemini at 5 — criticals always take priority
     critical = critical[:5]
     moderate = moderate[:max(0, 5 - len(critical))]
 
@@ -102,13 +102,13 @@ def generate_explanation(findings_dict: dict, risk_score: int, region: str) -> d
     critical_text = format_findings(critical)
     moderate_text = format_findings(moderate)
 
-    # Total findings count - used to cap priority_actions at 3
+    # Total findings count — used to cap priority_actions at 3
     total_findings = len(critical) + len(moderate)
 
-    # How many priority actions to generate - max 3, min 1
+    # How many priority actions to generate — max 3, min 1
     action_count = min(total_findings, 3)
 
-    # -- ADVISOR PROMPT v3.1 ---------------------------------------
+    # ── ADVISOR PROMPT v3.1 ───────────────────────────────────────
     # Key changes from v3.0:
     # - Dropped recommended_improvements from Gemini (auto-generated from findings now)
     # - Capped priority_actions at 3 (matches what dashboard shows)
@@ -165,8 +165,8 @@ Context-aware fix rules you MUST follow:
 - Never give steps that could take down a running application.
 """
 
-    # -- AUTO-GENERATE recommended_improvements FROM FINDINGS -----
-    # These are generated from the findings themselves - no AI needed.
+    # ── AUTO-GENERATE recommended_improvements FROM FINDINGS ─────
+    # These are generated from the findings themselves — no AI needed.
     # Maps each finding's aws_service to a concrete one-liner action.
     _service_to_quick_win = {
         'IAM': 'Enable MFA on all IAM users and remove unused access keys',
@@ -216,7 +216,7 @@ Context-aware fix rules you MUST follow:
         if result['priority_actions']:
             result['recommended_improvements'] = auto_recommendations
             return result
-        # Empty priority_actions - use fallback immediately
+        # Empty priority_actions — use fallback immediately
     except Exception as e:
         print(f'Gemini failed: {e}')
         # Fall through to fallback

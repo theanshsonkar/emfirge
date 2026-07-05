@@ -148,7 +148,7 @@ def _fix_cloudwatch_disabled(infra_dict: dict, resource_id: str) -> bool:
     return True
 
 
-# -- MASTER MAP ----------------------------------------------------
+# ── MASTER MAP ────────────────────────────────────────────────────
 # rule_id → mutation function
 FIX_MUTATIONS: dict = {
     "EMFIRGE-EC2-002": _fix_ssh_open,

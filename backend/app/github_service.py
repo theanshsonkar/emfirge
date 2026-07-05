@@ -51,15 +51,15 @@ def create_fix_pr(
 
     base = repo.get_branch(repo.default_branch)
 
-    # Check if branch already exists - return existing PR if so
+    # Check if branch already exists — return existing PR if so
     try:
         repo.get_branch(branch_name)
-        # Branch exists - find open PR
+        # Branch exists — find open PR
         open_prs = list(repo.get_pulls(state='open', head=f'{repo.owner.login}:{branch_name}'))
         if open_prs:
             pr = open_prs[0]
             return {"pr_url": pr.html_url, "pr_number": pr.number, "branch": branch_name}
-        # Branch exists but PR was closed/merged - append timestamp to branch name
+        # Branch exists but PR was closed/merged — append timestamp to branch name
         import time
         branch_name = f"{branch_name}-{int(time.time())}"
     except Exception:

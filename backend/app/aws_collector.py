@@ -19,7 +19,7 @@ from app.models import (
 )
 from datetime import datetime, timezone
 
-# 10 second timeout for every boto3 call - prevents hangs on bad credentials
+# 10 second timeout for every boto3 call — prevents hangs on bad credentials
 # max_attempts=2: one initial call + one retry. Faster failure (11s max vs 25s with 5 retries).
 BOTO_CONFIG = Config(connect_timeout=5, read_timeout=10, retries={'max_attempts': 2, 'mode': 'standard'})
 
@@ -27,7 +27,7 @@ def collect_infrastructure(credentials: AWSCredentials) -> AWSInfrastructure:
     region = credentials.region
     warnings = []
 
-    # -- ASSUME ROLE -----------------------------------------------
+    # ── ASSUME ROLE ───────────────────────────────────────────────
     # Exchange the user's Role ARN for temporary credentials
     # These credentials expire after 1 hour automatically
     try:
@@ -52,7 +52,7 @@ def collect_infrastructure(credentials: AWSCredentials) -> AWSInfrastructure:
     except Exception as e:
         raise ValueError(f'Could not connect to AWS: {str(e)}')
 
-    # -- VALIDATE REGION -------------------------------------------
+    # ── VALIDATE REGION ───────────────────────────────────────────
     # Fail fast if region is invalid before firing all 10 threads
     try:
         sts2 = boto3.client(
@@ -71,7 +71,7 @@ def collect_infrastructure(credentials: AWSCredentials) -> AWSInfrastructure:
     except Exception as e:
         raise ValueError(f'Could not connect to AWS: {str(e)}')
 
-    # -- PARALLEL SCANNING -----------------------------------------
+    # ── PARALLEL SCANNING ─────────────────────────────────────────
     # All 10 collectors run simultaneously via ThreadPoolExecutor
     # threading.Lock() protects the shared warnings list from race conditions
 
@@ -194,7 +194,7 @@ def collect_infrastructure(credentials: AWSCredentials) -> AWSInfrastructure:
                 }
                 results[name] = defaults[name]
 
-    # -- POST-PROCESSING: Derive functions_with_admin_role from IAM data --
+    # ── POST-PROCESSING: Derive functions_with_admin_role from IAM data ──
     # Instead of Lambda collector making duplicate IAM API calls, we cross-reference
     # the IAM collector's role_policies (which already parsed all role policies)
     # against each Lambda function's role_arn. Saves ~40% IAM API calls.
@@ -240,11 +240,11 @@ def collect_infrastructure(credentials: AWSCredentials) -> AWSInfrastructure:
         warnings=warnings
     )
 
-# -- HELPER --------------------------------------------------------
+# ── HELPER ────────────────────────────────────────────────────────
 def get_error_code(e: ClientError) -> str:
     return e.response['Error']['Code']
 
-# -- EC2 COLLECTOR -------------------------------------------------
+# ── EC2 COLLECTOR ─────────────────────────────────────────────────
 def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
     instance_count = 0
     instance_types = []
@@ -473,7 +473,7 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
         elastic_ips=elastic_ips,
     )
 
-# -- S3 COLLECTOR --------------------------------------------------
+# ── S3 COLLECTOR ──────────────────────────────────────────────────
 def collect_s3(key, secret, token, region, warnings) -> S3Data:
     total_buckets = 0
     public_buckets = []
@@ -636,7 +636,7 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
         buckets=buckets
     )
 
-# -- RDS COLLECTOR -------------------------------------------------
+# ── RDS COLLECTOR ─────────────────────────────────────────────────
 def collect_rds(key, secret, token, region, warnings) -> RDSData:
     instances = []
     multi_az = False
@@ -713,7 +713,7 @@ def collect_rds(key, secret, token, region, warnings) -> RDSData:
         rds_instances=rds_instances
     )
 
-# -- IAM COLLECTOR -------------------------------------------------
+# ── IAM COLLECTOR ─────────────────────────────────────────────────
 def collect_iam(key, secret, token, region, warnings) -> IAMData:
     root_has_keys = False
     users_without_mfa = []
@@ -840,7 +840,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
         except Exception:
             pass
 
-        # -- ROLE POLICY COLLECTION (for graph can_access edges) -------
+        # ── ROLE POLICY COLLECTION (for graph can_access edges) ───────
         # Collect policy documents for each role to determine what resources
         # each role can access. Skip AWS service-linked roles.
         import time as _time
@@ -1009,7 +1009,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
         role_policies=role_policies,
     )
 
-# -- CLOUDTRAIL COLLECTOR ------------------------------------------
+# ── CLOUDTRAIL COLLECTOR ──────────────────────────────────────────
 def collect_cloudtrail(key, secret, token, region, warnings) -> CloudTrailData:
     is_enabled = False
     is_multi_region = False
@@ -1061,8 +1061,8 @@ def collect_cloudtrail(key, secret, token, region, warnings) -> CloudTrailData:
         trail_arn=trail_arn
     )
 
-# -- COST COLLECTOR ------------------------------------------------
-# Cost Explorer removed - it charged $0.01 per scan to the user's AWS account
+# ── COST COLLECTOR ────────────────────────────────────────────────
+# Cost Explorer removed — it charged $0.01 per scan to the user's AWS account
 # Budget alerts and billing alarm checks are free and cover the important cases
 def collect_cost(key, secret, token, region, warnings) -> CostData:
     has_budget_alerts = False
@@ -1111,7 +1111,7 @@ def collect_cost(key, secret, token, region, warnings) -> CostData:
         has_billing_alarm=has_billing_alarm
     )
 
-# -- CLOUDWATCH COLLECTOR ------------------------------------------
+# ── CLOUDWATCH COLLECTOR ──────────────────────────────────────────
 def collect_cloudwatch(key, secret, token, region, warnings) -> CloudWatchData:
     has_alarms = False
     has_billing_alarm = False
@@ -1149,7 +1149,7 @@ def collect_cloudwatch(key, secret, token, region, warnings) -> CloudWatchData:
         has_billing_alarm=has_billing_alarm
     )
 
-# -- GUARDDUTY COLLECTOR -------------------------------------------
+# ── GUARDDUTY COLLECTOR ───────────────────────────────────────────
 def collect_guardduty(key, secret, token, region, warnings) -> GuardDutyData:
     is_enabled = False
     detector_id = None
@@ -1189,7 +1189,7 @@ def collect_guardduty(key, secret, token, region, warnings) -> GuardDutyData:
         detector_id=detector_id
     )
 
-# -- LAMBDA COLLECTOR ----------------------------------------------
+# ── LAMBDA COLLECTOR ──────────────────────────────────────────────
 def collect_lambda(key, secret, token, region, warnings) -> LambdaData:
     function_count = 0
     functions_with_outdated_runtime = []
@@ -1277,7 +1277,7 @@ def collect_lambda(key, secret, token, region, warnings) -> LambdaData:
         functions=functions
     )
 
-# -- SECRETS MANAGER COLLECTOR -------------------------------------
+# ── SECRETS MANAGER COLLECTOR ─────────────────────────────────────
 def collect_secrets_manager(key, secret, token, region, warnings) -> SecretsManagerData:
     total_secrets = 0
     secrets_without_rotation = []
@@ -1323,7 +1323,7 @@ def collect_secrets_manager(key, secret, token, region, warnings) -> SecretsMana
         secrets_without_rotation=secrets_without_rotation
     )
 
-# -- VPC COLLECTOR -------------------------------------------------
+# ── VPC COLLECTOR ─────────────────────────────────────────────────
 def collect_vpc(key, secret, token, region, warnings) -> VPCData:
     total_vpcs = 0
     vpcs_without_flow_logs = []
@@ -1371,7 +1371,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
             except Exception:
                 pass
 
-        # -- INTERNET GATEWAYS -------------------------------------
+        # ── INTERNET GATEWAYS ─────────────────────────────────────
         try:
             igws_response = ec2.describe_internet_gateways()
             for igw in igws_response.get('InternetGateways', []):
@@ -1381,7 +1381,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         except Exception:
             pass
 
-        # -- NAT GATEWAYS ------------------------------------------
+        # ── NAT GATEWAYS ──────────────────────────────────────────
         try:
             nats_response = ec2.describe_nat_gateways(
                 Filters=[{'Name': 'state', 'Values': ['available']}]
@@ -1393,7 +1393,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         except Exception:
             pass
 
-        # -- ROUTE TABLES → determine public subnets ---------------
+        # ── ROUTE TABLES → determine public subnets ───────────────
         # A subnet is public if its route table has a 0.0.0.0/0 route via an IGW.
         # Subnets without an explicit route table association inherit the VPC's main RT.
         try:
@@ -1516,7 +1516,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         subnets=subnets
     )
 
-# -- KMS COLLECTOR -------------------------------------------------
+# ── KMS COLLECTOR ─────────────────────────────────────────────────
 def collect_kms(key, secret, token, region, warnings) -> KMSData:
     total_cmks = 0
     cmks_without_rotation = []
@@ -1585,7 +1585,7 @@ def collect_kms(key, secret, token, region, warnings) -> KMSData:
         cmks_pending_deletion=cmks_pending_deletion
     )
 
-# -- AWS CONFIG COLLECTOR ------------------------------------------
+# ── AWS CONFIG COLLECTOR ──────────────────────────────────────────
 def collect_config(key, secret, token, region, warnings) -> ConfigData:
     is_enabled = False
     is_recording = False
@@ -1650,7 +1650,7 @@ def collect_config(key, secret, token, region, warnings) -> ConfigData:
         non_compliant_rules=non_compliant_rules
     )
 
-# -- SNS COLLECTOR -------------------------------------------------
+# ── SNS COLLECTOR ─────────────────────────────────────────────────
 def collect_sns(key, secret, token, region, warnings) -> SNSData:
     total_topics = 0
     topics_without_encryption = []
@@ -1728,7 +1728,7 @@ def collect_sns(key, secret, token, region, warnings) -> SNSData:
         topics_with_public_access=topics_with_public_access
     )
 
-# -- ECS COLLECTOR -------------------------------------------------
+# ── ECS COLLECTOR ─────────────────────────────────────────────────
 def collect_ecs(key, secret, token, region, warnings) -> ECSData:
     total_task_definitions = 0
     tasks_with_privileged_containers = []
@@ -1800,7 +1800,7 @@ def collect_ecs(key, secret, token, region, warnings) -> ECSData:
         task_role_arns=task_role_arns
     )
 
-# -- WAF COLLECTOR -------------------------------------------------
+# ── WAF COLLECTOR ─────────────────────────────────────────────────
 def collect_waf(key, secret, token, region, warnings) -> WAFData:
     total_albs = 0
     albs_without_waf = []
@@ -1867,7 +1867,7 @@ def collect_waf(key, secret, token, region, warnings) -> WAFData:
     )
 
 
-# -- API GATEWAY COLLECTOR -----------------------------------------
+# ── API GATEWAY COLLECTOR ─────────────────────────────────────────
 def collect_api_gateway(key, secret, token, region, warnings) -> APIGatewayData:
     total_apis = 0
     apis_without_auth = []
@@ -1876,7 +1876,7 @@ def collect_api_gateway(key, secret, token, region, warnings) -> APIGatewayData:
     apis = []
 
     try:
-        # -- HTTP & WebSocket APIs (API Gateway V2) ----------------
+        # ── HTTP & WebSocket APIs (API Gateway V2) ────────────────
         apigwv2 = boto3.client('apigatewayv2', aws_access_key_id=key,
                                aws_secret_access_key=secret,
                                aws_session_token=token,
@@ -1942,7 +1942,7 @@ def collect_api_gateway(key, secret, token, region, warnings) -> APIGatewayData:
             if code not in ['AccessDenied', 'UnauthorizedOperation']:
                 print(f'API Gateway V2 scan partial failure: {code}')
 
-        # -- REST APIs (API Gateway V1) ----------------------------
+        # ── REST APIs (API Gateway V1) ────────────────────────────
         apigw = boto3.client('apigateway', aws_access_key_id=key,
                              aws_secret_access_key=secret,
                              aws_session_token=token,
@@ -1974,7 +1974,7 @@ def collect_api_gateway(key, secret, token, region, warnings) -> APIGatewayData:
                 except Exception:
                     pass
 
-                # Determine auth - check if any authorizers exist
+                # Determine auth — check if any authorizers exist
                 auth_type = 'NONE'
                 try:
                     authorizers = apigw.get_authorizers(restApiId=api_id).get('items', [])
@@ -2056,7 +2056,7 @@ def collect_api_gateway(key, secret, token, region, warnings) -> APIGatewayData:
     )
 
 
-# -- ELASTICACHE COLLECTOR -----------------------------------------
+# ── ELASTICACHE COLLECTOR ─────────────────────────────────────────
 def collect_elasticache(key, secret, token, region, warnings) -> ElastiCacheData:
     total_clusters = 0
     clusters_without_encryption = []
@@ -2096,7 +2096,7 @@ def collect_elasticache(key, secret, token, region, warnings) -> ElastiCacheData
             node_type = cluster.get('CacheNodeType', '')
             total_clusters += 1
 
-            # Encryption info - check replication group if available
+            # Encryption info — check replication group if available
             rg_id = cluster.get('ReplicationGroupId')
             if rg_id and rg_id in repl_groups:
                 encryption_at_rest = repl_groups[rg_id]['at_rest']
@@ -2165,7 +2165,7 @@ def collect_elasticache(key, secret, token, region, warnings) -> ElastiCacheData
     )
 
 
-# -- SQS COLLECTOR ------------------------------------------------
+# ── SQS COLLECTOR ────────────────────────────────────────────────
 def collect_sqs(key, secret, token, region, warnings) -> SQSData:
     total_queues = 0
     queues_without_encryption = []
@@ -2207,13 +2207,13 @@ def collect_sqs(key, secret, token, region, warnings) -> SQSData:
                 queue_arn = attrs.get('QueueArn', '')
                 queue_name = url.split('/')[-1]
 
-                # Encryption check - KmsMasterKeyId present means SSE-KMS
+                # Encryption check — KmsMasterKeyId present means SSE-KMS
                 encrypted = bool(attrs.get('KmsMasterKeyId') or attrs.get('SqsManagedSseEnabled') == 'true')
 
-                # DLQ check - RedrivePolicy present means DLQ is configured
+                # DLQ check — RedrivePolicy present means DLQ is configured
                 has_dlq = bool(attrs.get('RedrivePolicy'))
 
-                # Public access check - parse policy for Principal: "*"
+                # Public access check — parse policy for Principal: "*"
                 is_public = False
                 policy_str = attrs.get('Policy', '')
                 if policy_str:
@@ -2275,7 +2275,7 @@ def collect_sqs(key, secret, token, region, warnings) -> SQSData:
     )
 
 
-# -- DYNAMODB COLLECTOR --------------------------------------------
+# ── DYNAMODB COLLECTOR ────────────────────────────────────────────
 def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
     total_tables = 0
     tables_without_pitr = []
@@ -2316,7 +2316,7 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                 item_count = table.get('ItemCount', 0)
                 billing_mode = table.get('BillingModeSummary', {}).get('BillingMode', 'PROVISIONED')
 
-                # Encryption - check SSEDescription
+                # Encryption — check SSEDescription
                 sse = table.get('SSEDescription', {})
                 sse_status = sse.get('Status', '')
                 if sse_status == 'ENABLED':
@@ -2338,7 +2338,7 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                 except Exception:
                     pass
 
-                # Backup check - see if any on-demand backups exist
+                # Backup check — see if any on-demand backups exist
                 has_backup = False
                 try:
                     backups = ddb.list_backups(TableName=table_name, Limit=1)

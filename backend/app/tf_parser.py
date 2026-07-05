@@ -80,7 +80,7 @@ def parse_pr_diff(diff_text: str, file_path: str) -> list[TFChange]:
             if resource_match:
                 resource_type = resource_match.group(1)
                 resource_name = resource_match.group(2)
-                # This is a new resource being added - collect its attributes
+                # This is a new resource being added — collect its attributes
                 attrs, end_idx = _collect_added_block(lines, i + 1)
                 changes.append(TFChange(
                     action="add",
@@ -344,7 +344,7 @@ def _map_lambda_attrs(attrs: dict) -> dict:
     return config
 
 
-# -- RAW HCL PARSER (for Claude-generated fixes) ----------------------
+# ── RAW HCL PARSER (for Claude-generated fixes) ──────────────────────
 
 # Regex for resource block in raw HCL (no diff prefix)
 _RAW_RESOURCE_RE = re.compile(r'resource\s+"([^"]+)"\s+"([^"]+)"\s*\{')

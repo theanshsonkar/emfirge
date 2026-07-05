@@ -292,7 +292,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
     nodes = []
     edges = []
     
-    # -- EC2 NODES -------------------------------------------------
+    # ── EC2 NODES ─────────────────────────────────────────────────
     # EC2 Instances
     for instance in infrastructure.ec2.instances:
         # Handle both dict and Pydantic model formats
@@ -388,7 +388,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'relationship': 'attached_to_instance'
             })
     
-    # -- INTERNET REACHABILITY -------------------------------------
+    # ── INTERNET REACHABILITY ─────────────────────────────────────
     # Add a virtual INTERNET node and edges for any SG with 0.0.0.0/0 or ::/0 rules
     # Only connect INTERNET to resources that are in PUBLIC subnets
     internet_node_added = False
@@ -496,7 +496,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'relationship': 'targets_instance'
             })
     
-    # -- S3 NODES --------------------------------------------------
+    # ── S3 NODES ──────────────────────────────────────────────────
     for bucket in infrastructure.s3.buckets:
         # Handle both dict and Pydantic model formats
         if isinstance(bucket, dict):
@@ -542,7 +542,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'relationship': 'serves_from_bucket'
             })
     
-    # -- RDS NODES -------------------------------------------------
+    # ── RDS NODES ─────────────────────────────────────────────────
     for rds in infrastructure.rds.rds_instances:
         # Handle both dict and Pydantic model formats
         if isinstance(rds, dict):
@@ -575,7 +575,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'relationship': 'uses_security_group'
             })
     
-    # -- LAMBDA NODES ----------------------------------------------
+    # ── LAMBDA NODES ──────────────────────────────────────────────
     for func in infrastructure.lambda_data.functions:
         # Handle both dict and Pydantic model formats
         if isinstance(func, dict):
@@ -654,7 +654,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'relationship': 'REFERENCES_SECRET'
             })
     
-    # -- ECS NODES -------------------------------------------------
+    # ── ECS NODES ─────────────────────────────────────────────────
     if infrastructure.ecs.task_role_arns:
         nodes.append({
             'id': 'ecs_tasks',
@@ -678,7 +678,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'relationship': 'USES_ROLE'
             })
 
-    # -- VPC NODES -------------------------------------------------
+    # ── VPC NODES ─────────────────────────────────────────────────
     for subnet in infrastructure.vpc.subnets:
         # Handle both dict and Pydantic model formats
         if isinstance(subnet, dict):
@@ -737,8 +737,8 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 }
             })
     
-    # -- EBS VOLUME NODES ------------------------------------------
-    # Unattached volumes (state=available) - no edges, isolated for orphan detection
+    # ── EBS VOLUME NODES ──────────────────────────────────────────
+    # Unattached volumes (state=available) — no edges, isolated for orphan detection
     for vol in infrastructure.ec2.ebs_volumes:
         vol_id = vol['id'] if isinstance(vol, dict) else vol.id
         size_gb = vol['size_gb'] if isinstance(vol, dict) else vol.size_gb
@@ -755,8 +755,8 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             }
         })
 
-    # -- ELASTIC IP NODES ------------------------------------------
-    # All EIPs - no edges, orphan detection filters by is_attached
+    # ── ELASTIC IP NODES ──────────────────────────────────────────
+    # All EIPs — no edges, orphan detection filters by is_attached
     for eip in infrastructure.ec2.elastic_ips:
         alloc_id = eip['allocation_id'] if isinstance(eip, dict) else eip.allocation_id
         public_ip = eip['public_ip'] if isinstance(eip, dict) else eip.public_ip
@@ -771,7 +771,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             }
         })
 
-    # -- API GATEWAY NODES -----------------------------------------
+    # ── API GATEWAY NODES ─────────────────────────────────────────
     for api in infrastructure.api_gateway.apis:
         if isinstance(api, dict):
             api_id = api['id']
@@ -816,7 +816,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'relationship': 'REACHES'
             })
 
-    # -- ELASTICACHE NODES -----------------------------------------
+    # ── ELASTICACHE NODES ─────────────────────────────────────────
     for cluster in infrastructure.elasticache.clusters:
         if isinstance(cluster, dict):
             cluster_id = cluster['id']
@@ -850,7 +850,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'relationship': 'uses_security_group'
             })
 
-    # -- SQS NODES ------------------------------------------------
+    # ── SQS NODES ────────────────────────────────────────────────
     for queue in infrastructure.sqs.queues:
         if isinstance(queue, dict):
             queue_name = queue['name']
@@ -874,7 +874,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             }
         })
 
-    # -- DYNAMODB NODES --------------------------------------------
+    # ── DYNAMODB NODES ────────────────────────────────────────────
     for table in infrastructure.dynamodb.tables:
         if isinstance(table, dict):
             table_name = table['name']
@@ -901,7 +901,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             }
         })
 
-    # -- IAM POLICY EDGES (can_access) --------------------------------
+    # ── IAM POLICY EDGES (can_access) ────────────────────────────────
     # Create edges from IAM roles to data stores based on parsed policy documents.
     # This enables BFS to trace full attack paths: EC2 → Role → S3/RDS.
     node_id_set = {n['id'] for n in nodes}
@@ -929,7 +929,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         edge_count = 0
 
         if has_admin:
-            # Admin role can access ALL data stores - create edges to each
+            # Admin role can access ALL data stores — create edges to each
             for n in nodes:
                 if n['type'] in ('s3_bucket', 'rds_instance', 'secretsmanager_secret', 'dynamodb_table', 'sqs_queue') and edge_count < MAX_EDGES_PER_ROLE:
                     edges.append({'from': role_id, 'to': n['id'], 'relationship': 'can_access'})
@@ -939,7 +939,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 if edge_count >= MAX_EDGES_PER_ROLE:
                     break
                 if arn == '*':
-                    # Wildcard resource - treat as admin for data stores
+                    # Wildcard resource — treat as admin for data stores
                     for n in nodes:
                         if n['type'] in ('s3_bucket', 'rds_instance', 'secretsmanager_secret', 'dynamodb_table', 'sqs_queue') and edge_count < MAX_EDGES_PER_ROLE:
                             edges.append({'from': role_id, 'to': n['id'], 'relationship': 'can_access'})
@@ -977,7 +977,7 @@ SLICE_CATEGORIES = {
 }
 
 
-# Edge weights for Dijkstra - lower = easier to exploit.
+# Edge weights for Dijkstra — lower = easier to exploit.
 # Scale: 0 = metadata (no exploit step), 1 = trivial, 2 = easy, 3 = medium,
 #         4 = hard, 5 = very hard (cross-boundary).
 EDGE_WEIGHTS: Dict[str, int] = {
@@ -1101,7 +1101,7 @@ def betweenness_centrality(graph: Graph, source_nodes: Optional[List[str]] = Non
     else:
         sources = source_nodes
 
-    # Brandes' algorithm - BFS from each source, accumulate dependency
+    # Brandes' algorithm — BFS from each source, accumulate dependency
     for s in sources:
         stack: List[str] = []
         predecessors: Dict[str, List[str]] = {nid: [] for nid in all_node_ids}
@@ -1273,10 +1273,10 @@ def get_simulation_slice(graph: Graph, category: str) -> dict:
         result = bfs_from_internet(graph)
         if result['nodes']:
             return result
-        # fallback: no INTERNET node - return first 50 nodes
+        # fallback: no INTERNET node — return first 50 nodes
         node_ids = set(list(graph._node_index.keys())[:50])
     elif category == 'data_exposure':
-        # BFS first - return data-type nodes reachable from internet
+        # BFS first — return data-type nodes reachable from internet
         DATA_TYPES = {'s3_bucket', 'rds_instance', 'secretsmanager_secret', 'iam_role'}
         bfs_result = bfs_from_internet(graph)
         bfs_ids = {n['id'] for n in bfs_result['nodes']}
@@ -1289,7 +1289,7 @@ def get_simulation_slice(graph: Graph, category: str) -> dict:
 
         # If no data nodes are BFS-reachable, fall back to ALL data nodes.
         # S3 buckets and RDS have no direct internet edge in the graph so the
-        # BFS intersection is always empty - returning empty gives Claude nothing
+        # BFS intersection is always empty — returning empty gives Claude nothing
         # to reason about and produces "empty infrastructure graph" errors.
         if reachable_data_ids:
             node_ids = reachable_data_ids
@@ -1567,7 +1567,7 @@ def find_attack_path(graph: Graph, resource_id: str, max_hops: int = 5) -> List[
     if not start_node:
         return []
     
-    # BFS setup - queue stores (current_id, path_to_current, depth)
+    # BFS setup — queue stores (current_id, path_to_current, depth)
     queue = deque([(resource_id, [start_node], 0)])
     visited = {resource_id}
     
@@ -1583,7 +1583,7 @@ def find_attack_path(graph: Graph, resource_id: str, max_hops: int = 5) -> List[
         if depth >= max_hops:
             continue
         
-        # Explore both outbound AND inbound neighbors - lateral movement goes both ways
+        # Explore both outbound AND inbound neighbors — lateral movement goes both ways
         # e.g. EC2 → SG (outbound), RDS → SG (outbound from RDS = inbound to SG)
         # Following only outbound misses EC2→SG←RDS paths
         neighbors = graph.get_neighbors(current_id)
@@ -1625,7 +1625,7 @@ def calculate_blast_radius(graph: Graph, resource_id: str, max_hops: int = 5) ->
     if not start_node:
         return {"count": 0, "resource_ids": []}
     
-    # BFS setup - queue stores (current_id, depth)
+    # BFS setup — queue stores (current_id, depth)
     queue = deque([(resource_id, 0)])
     visited = {resource_id}
     

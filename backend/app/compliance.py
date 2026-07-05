@@ -14,7 +14,7 @@ Logic:
 from typing import Optional
 
 
-# --- FRAMEWORK DEFINITIONS ----------------------------------------------------
+# ─── FRAMEWORK DEFINITIONS ────────────────────────────────────────────────────
 
 CIS_SECTIONS = [
     {"id": "1", "title": "Identity and Access Management"},
@@ -246,7 +246,7 @@ def evaluate_framework(
             description = f"No {na_service.upper()} resources deployed"
             na += 1
         elif mapped_rule_id is None:
-            # No automated check - assumed pass
+            # No automated check — assumed pass
             status = "pass"
             description = desc_pass
             passed += 1
