@@ -948,7 +948,6 @@ def generate_remediation_insight(request: RemediationInsightRequest, http_reques
                 detail=f'Daily insight limit reached. Your account has used {insight_used}/{INSIGHT_DAILY_LIMIT} insights today. Resets at midnight UTC.'
             )
 
-    import os
     from google import genai
     import json
 

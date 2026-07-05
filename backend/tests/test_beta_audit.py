@@ -233,15 +233,15 @@ class TestInputValidation:
 
 
 class TestGraphInputValidation:
-    """Input sanitization for the graph endpoint at /cartography/{id} (legacy URL — see app.egraph)."""
+    """Input sanitization for the graph endpoint at /egraph/{id}."""
 
     def test_sql_injection_in_analysis_id_blocked(self):
-        resp = client.get("/cartography/'; DROP TABLE analysis_logs; --")
+        resp = client.get("/egraph/'; DROP TABLE analysis_logs; --")
         assert resp.status_code == 400
         assert "Invalid" in resp.json()["detail"]
 
     def test_like_pattern_injection_blocked(self):
-        resp = client.get("/cartography/%25%25")
+        resp = client.get("/egraph/%25%25")
         assert resp.status_code == 400
 
     def test_valid_uuid_format_accepted(self):
@@ -250,11 +250,11 @@ class TestGraphInputValidation:
             mock_s = MagicMock()
             mock_s.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
             mock_session.return_value = mock_s
-            resp = client.get("/cartography/550e8400-e29b-41d4-a716-446655440000")
+            resp = client.get("/egraph/550e8400-e29b-41d4-a716-446655440000")
             assert resp.status_code == 404
 
     def test_empty_analysis_id_rejected(self):
-        resp = client.get("/cartography/")
+        resp = client.get("/egraph/")
         # FastAPI returns 404 for empty path segment (no route match)
         assert resp.status_code in (404, 405)
 
