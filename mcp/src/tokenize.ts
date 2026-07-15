@@ -99,6 +99,122 @@ const PATTERNS: Array<[RegExp, string, boolean]> = [
   [/^(?:\d{1,3}\.){3}\d{1,3}$/, "IP", true],
 ];
 
+// Friendly / label-style identifiers that carry a known AWS prefix but NOT the
+// hex body EMBEDDED_PATTERNS require. In real accounts these are hex ids; in
+// graph node ids (and demo data) they're human strings — "sg-backend",
+// "subnet-priv-a", "iam-role-AppServerRole". Same [prefix, redact-in-balanced]
+// contract as PATTERNS, so balanced mode keeps generic topology (subnet/vpc/…)
+// raw. Only used for values we already KNOW are identifiers (under an
+// IDENTIFIER_KEY or the name-half of a "<Type>: <name>" label) — never for
+// arbitrary prose, so a loose prefix here can't false-match normal words.
+const PREFIX_TYPES: Array<[RegExp, string, boolean]> = [
+  [/^iam-role-.+$/i, "IAM_ROLE", true],
+  [/^sg-.+$/i, "SG", true],
+  [/^i-.+$/i, "EC2", true],
+  [/^eipalloc-.+$/i, "EIP", true],
+  [/^vol-.+$/i, "VOL", false],
+  [/^subnet-.+$/i, "SUBNET", false],
+  [/^vpc-.+$/i, "VPC", false],
+  [/^eni-.+$/i, "ENI", false],
+  [/^rtb-.+$/i, "RTB", false],
+  [/^igw-.+$/i, "IGW", false],
+  [/^nat-.+$/i, "NAT", false],
+  [/^acl-.+$/i, "ACL", false],
+];
+
+// Graph nodes that are concepts, not resources — never tokenize (would turn
+// readable attack narratives into gibberish and pollute the token map).
+const GENERIC_NODE_IDS = new Set(["INTERNET", "Internet", "internet"]);
+
+// Backend graph labels follow the convention "<TypeLabel>: <name>" — e.g.
+// "IAM Role: AppServerRole", "SG: backend-private-sg", "RDS: acme-prod-customers".
+// The <name> half can be a friendly name that never appears as a bare node id
+// (an IAM role's profile name, an SG's Name tag), so it can ONLY be caught by
+// parsing this convention out of captions/labels. The type word itself is
+// generic (kept verbatim). Longest first so "IAM Role" wins over "IAM", etc.
+const TYPE_LABELS = [
+  "Security Group",
+  "API Gateway",
+  "IAM Role",
+  "CloudFront",
+  "API GW",
+  "Subnet",
+  "Secret",
+  "Cache",
+  "RDS",
+  "EC2",
+  "SG",
+  "S3",
+  "LB",
+  "VPC",
+  "IAM",
+  "EBS",
+  "EIP",
+];
+
+// Decide how to tokenize a value we KNOW is an identifier (it sits under an
+// IDENTIFIER_KEY, or is the <name> half of a "<Type>: <name>" label).
+// Order: exact AWS-format PATTERNS (typed) -> loose AWS prefixes -> NAME.
+//
+// classifyStrict returns null when the value isn't id-SHAPED (so callers can
+// tell "this is an id" from "this is an arbitrary name"). classifyIdentifier
+// adds the NAME fallback for values we already know are identifiers.
+function classifyStrict(real: string): [string, boolean] | null {
+  for (const [re, prefix, balancedRedact] of PATTERNS) {
+    if (re.test(real)) return [prefix, balancedRedact];
+  }
+  for (const [re, prefix, balancedRedact] of PREFIX_TYPES) {
+    if (re.test(real)) return [prefix, balancedRedact];
+  }
+  return null;
+}
+
+function classifyIdentifier(real: string): [string, boolean] {
+  return classifyStrict(real) ?? ["NAME", true]; // else a plain name (bucket/role/secret)
+}
+
+// Tokenize a value that IS a whole AWS identifier (hex OR friendly-prefix),
+// wherever it appears — including under arbitrary keys like vpc_id,
+// allocation_id, flow_logs[]. Returns:
+//   • a token string        — it's an id and we redacted it
+//   • the value unchanged    — it's an id we intentionally keep raw
+//                              (off mode, generic node, or generic topology in
+//                              balanced) — still "handled", don't fall through
+//   • null                   — not id-shaped; let the caller decide
+function tokenizeWholeId(real: string): string | null {
+  const cls = classifyStrict(real);
+  if (!cls) return null;
+  if (MODE === "off") return real;
+  if (GENERIC_NODE_IDS.has(real)) return real;
+  const [prefix, balancedRedact] = cls;
+  if (MODE === "balanced" && !balancedRedact) return real;
+  return tokenize(real, prefix);
+}
+
+// Tokenize a value known to be an identifier. Honors mode + the balanced-mode
+// redaction flag. Returns the value unchanged when it must stay raw: off mode,
+// a generic node ("INTERNET"), an already-issued token, or generic topology
+// (subnet/vpc/vol/…) in balanced mode.
+function tokenizeIdentifier(real: string): string {
+  if (MODE === "off") return real;
+  if (real.length < 2) return real;
+  if (GENERIC_NODE_IDS.has(real)) return real;
+  if (TOKEN_PATTERN.test(real)) return real; // already a token — don't re-wrap
+  const [prefix, balancedRedact] = classifyIdentifier(real);
+  if (MODE === "balanced" && !balancedRedact) return real;
+  return tokenize(real, prefix);
+}
+
+// The <name> half of a "<Type>: <name>" label. Skips already-issued tokens and
+// leaves purely descriptive labels (sizes like "50GB") readable, but still
+// tokenizes real identifiers (names, ids, IPs).
+function tokenizeLabelName(name: string): string {
+  if (TOKEN_PATTERN.test(name)) return name;
+  const [prefix] = classifyIdentifier(name);
+  if (prefix === "NAME" && /^[\d.]+\s?[A-Za-z]{0,3}$/.test(name)) return name;
+  return tokenizeIdentifier(name);
+}
+
 // Unanchored versions for scanning IDs embedded inside narrative strings
 // (e.g. "Attacker lands on EC2: i-0c0c... via SG"). Only patterns with
 // distinctive prefixes are safe to unanchor — pure 12-digit numbers and IPs
@@ -131,17 +247,6 @@ const EMBEDDED_PATTERNS: Array<[RegExp, string, boolean]> = [
   [/\bnat-[a-f0-9]{8,}\b/gi, "NAT", false],
   [/\bacl-[a-f0-9]{8,}\b/gi, "ACL", false],
 ];
-
-function redactString(s: string): string {
-  if (MODE === "off") return s;
-  for (const [re, prefix, balancedRedact] of PATTERNS) {
-    if (re.test(s)) {
-      if (MODE === "balanced" && !balancedRedact) return s;
-      return tokenize(s, prefix);
-    }
-  }
-  return s;
-}
 
 // Scan a free-text string for AWS IDs anywhere inside it and replace
 // each match with a token. Used for narrative captions / summaries / etc.
@@ -182,6 +287,19 @@ function redactEmbedded(s: string): string {
     out = out.replace(new RegExp(escaped, "g"), token);
   }
 
+  // Backend label convention "<Type>: <name>" inside narrative captions
+  // (e.g. "… assumes IAM Role: AppServerRole …", "… via SG: backend-private-sg").
+  // The <name> half is frequently a friendly name that is NOT a bare node id,
+  // so the dictionary pass above can't catch it. \b anchors the type word so
+  // "SG:" won't match inside "MSG:". The name run stops at whitespace, which is
+  // correct for the single-token names captions use; multi-word label *fields*
+  // are handled wholesale by redactLabel().
+  for (const label of TYPE_LABELS) {
+    const esc = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`(\\b${esc}:\\s*)([A-Za-z0-9][\\w./-]*)`, "g");
+    out = out.replace(re, (_m, pre: string, name: string) => pre + tokenizeLabelName(name));
+  }
+
   return out;
 }
 
@@ -211,6 +329,45 @@ const SENSITIVE_KEYS = new Set([
   "ip_address",
 ]);
 
+// keys whose values are graph identifiers — often friendly / label-style node
+// ids that are NOT AWS-hex format and never sit under a SENSITIVE_KEY, so they
+// used to pass straight through to the LLM (this was the leak):
+//   attack_path[], node_ids[], path[], node_id, resource_ids[], from/to, …
+// We tokenize the whole value, typed by prefix where known (SG_/EC2_/IAM_ROLE_
+// /SUBNET_…) and NAME_ otherwise. Arrays inherit their parent key, so every
+// element of attack_path / node_ids is covered.
+const IDENTIFIER_KEYS = new Set([
+  "node_id",
+  "node_ids",
+  "affected_node_ids",
+  "attack_path",
+  "path",
+  "resource_ids",
+  "from",
+  "to",
+  "source",
+  "target",
+]);
+
+// A "label" field is exactly "<Type>: <name>" (e.g. "API GW: Internal Admin API",
+// "EIP: 52.20.14.202"). Tokenize the whole <name> half — handles multi-word
+// names and embedded IPs that the caption regex (single-token) would miss —
+// while keeping the generic type word and descriptive sizes ("EBS: 50GB") readable.
+function redactLabel(s: string): string {
+  if (MODE === "off") return s;
+  const idx = s.indexOf(": ");
+  if (idx > 0 && idx <= 20) {
+    const type = s.slice(0, idx);
+    const name = s.slice(idx + 2);
+    if (TYPE_LABELS.includes(type)) {
+      const scrubbed = tokenizeLabelName(name);
+      if (scrubbed !== name) return `${type}: ${scrubbed}`;
+    }
+  }
+  // Not the expected convention — fall back to free-text scrubbing.
+  return redactEmbedded(s);
+}
+
 export function redactDeep(obj: unknown, parentKey = ""): unknown {
   if (MODE === "off") return obj;
   // First pass at the top level: pre-tokenize every value found under a
@@ -228,13 +385,22 @@ function collectNames(obj: unknown, parentKey = ""): void {
   if (obj == null) return;
 
   if (typeof obj === "string") {
+    // Any whole-string AWS id (hex OR friendly-prefix) under ANY key: seed it
+    // into the dictionary (typed, honoring balanced/generic) so narrative
+    // strings referencing the same id later get scrubbed too.
+    if (classifyStrict(obj)) {
+      tokenizeWholeId(obj);
+      return;
+    }
+    // Graph identifiers (node ids, attack_path elements, …): tokenize the whole
+    // value even without an AWS-hex prefix, so captions/labels referencing the
+    // same id later get scrubbed via the dictionary.
+    if (IDENTIFIER_KEYS.has(parentKey)) {
+      tokenizeIdentifier(obj);
+      return;
+    }
     if (!SENSITIVE_KEYS.has(parentKey)) return;
     if (obj.length < 4) return;
-    // If it already matches a pattern (e.g. arn:..., sg-...), leave it for
-    // PATTERNS to handle so it gets the right prefix instead of "NAME".
-    for (const [re] of PATTERNS) {
-      if (re.test(obj)) return;
-    }
     tokenize(obj, "NAME");
     return;
   }
@@ -257,15 +423,25 @@ function redactDeepInner(obj: unknown, parentKey = ""): unknown {
   if (obj == null) return obj;
 
   if (typeof obj === "string") {
-    // 1. Whole-string match — return a single token
-    for (const [re] of PATTERNS) {
-      if (re.test(obj)) return redactString(obj);
+    // 1. Whole-string AWS id (hex OR friendly-prefix) under ANY key — single
+    //    typed token (honors balanced/off/generic). Catches vpc_id, allocation_id,
+    //    flow_logs[] entries, etc., not just fields we enumerate.
+    const whole = tokenizeWholeId(obj);
+    if (whole !== null) return whole;
+    // 2. Graph identifier key — tokenize the id even without AWS-hex format
+    //    (friendly node ids: "acme-prod-customers", "iam-role-AppServerRole").
+    if (IDENTIFIER_KEYS.has(parentKey)) {
+      return tokenizeIdentifier(obj);
     }
-    // 2. Sensitive key — tokenize the whole value as a name
+    // 3. Graph label "<Type>: <name>" — scrub the name half.
+    if (parentKey === "label") {
+      return redactLabel(obj);
+    }
+    // 4. Sensitive key — tokenize the whole value as a name.
     if (SENSITIVE_KEYS.has(parentKey)) {
       return tokenize(obj, "NAME");
     }
-    // 3. Free-text — scan for embedded AWS IDs (e.g. narrative captions)
+    // 5. Free-text — scan for embedded AWS IDs + known names (narrative captions)
     return redactEmbedded(obj);
   }
 

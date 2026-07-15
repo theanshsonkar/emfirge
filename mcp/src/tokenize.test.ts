@@ -178,3 +178,134 @@ test("expandTokens: bare token, embedded token, and unknown token", async () => 
   // unknown token -> passes through as-is
   assert.equal(t.expandTokens("SG_999"), "SG_999");
 });
+
+// ---------------------------------------------------------------------------
+// REGRESSION: the privacy-launch-blocker leak. Graph-derived / narrative fields
+// (attack_path[], node_ids[], captions, labels, critical_resources) emitted RAW
+// friendly resource names that no AWS-format pattern matched and that never sat
+// under a SENSITIVE_KEY, so they reached the LLM. These are the exact values
+// verified leaking against the live demo account.
+// ---------------------------------------------------------------------------
+
+const RAW_LEAKS = [
+  "acme-prod-customers", // RDS identifier (friendly, non-hex)
+  "iam-role-AppServerRole", // IAM role node id (label-style)
+  "AppServerRole", // the name half of the "IAM Role: AppServerRole" label
+  "prod/db-credentials-aB3xY9", // secret name
+  "sg-backend",
+  "sg-monitoring",
+  "backend-private-sg", // an SG's Name tag (differs from its id)
+  "subnet-priv-a",
+  "subnet-pub-a",
+  "i-backend00000001",
+];
+
+test("strict: friendly node ids inside attack_path[] are tokenized", async () => {
+  const t = await load("strict");
+  const finding = {
+    rule_id: "EMFIRGE-EC2-002",
+    resource_id: "sg-backend",
+    attack_path: ["sg-backend", "iam-role-AppServerRole", "acme-prod-customers"],
+  };
+  const out = t.redactDeep(finding) as { attack_path: string[] };
+  assertNoLeak(out, RAW_LEAKS);
+  // every element is a token now
+  for (const el of out.attack_path) {
+    assert.match(el, /^[A-Z0-9_]+_\d{3}$/, `attack_path element not tokenized: ${el}`);
+  }
+  // typed where the prefix is known
+  assert.match(out.attack_path[1], /^IAM_ROLE_\d{3}$/);
+  // round-trips exactly
+  assert.deepEqual(t.expandTokens(out), finding);
+});
+
+test("strict: node_ids[] with secret/subnet/friendly-ec2 are tokenized", async () => {
+  const t = await load("strict");
+  const stage = {
+    node_ids: ["prod/db-credentials-aB3xY9", "subnet-priv-a", "i-backend00000001", "sg-monitoring"],
+  };
+  const out = t.redactDeep(stage) as { node_ids: string[] };
+  assertNoLeak(out, RAW_LEAKS);
+  for (const el of out.node_ids) {
+    assert.match(el, /^[A-Z0-9_]+_\d{3}$/, `node_id not tokenized: ${el}`);
+  }
+  assert.match(out.node_ids[1], /^SUBNET_\d{3}$/);
+  assert.match(out.node_ids[2], /^EC2_\d{3}$/);
+  assert.deepEqual(t.expandTokens(out), stage);
+});
+
+test("strict: narrative captions using the '<Type>: <name>' label convention scrub", async () => {
+  const t = await load("strict");
+  // mirrors emfirge_simulate_breach stages: node_ids give the ids, captions
+  // embed the LABEL form (name half differs from the node id).
+  const sim = {
+    stages: [
+      {
+        order: 2,
+        caption: "EC2: i-backend00000001 assumes IAM Role: AppServerRole — credential theft possible",
+        node_ids: ["iam-role-AppServerRole"],
+      },
+      {
+        order: 4,
+        caption: "RDS: acme-prod-customers shares network access via SG: backend-private-sg",
+        node_ids: ["sg-backend"],
+      },
+    ],
+  };
+  const out = t.redactDeep(sim);
+  assertNoLeak(out, RAW_LEAKS);
+  // captions round-trip back to the originals
+  assert.deepEqual(t.expandTokens(out), sim);
+});
+
+test("strict: critical_resources node_id + label are both tokenized (incl. label IP)", async () => {
+  const t = await load("strict");
+  const graph = {
+    critical_resources: [
+      { node_id: "iam-role-AppServerRole", label: "IAM Role: AppServerRole", type: "iam_role" },
+      { node_id: "acme-prod-customers", label: "RDS: acme-prod-customers", type: "rds_instance" },
+    ],
+    orphaned_resources: [
+      { id: "eipalloc-x", label: "EIP: 52.20.14.202", type: "elastic_ip" },
+      { id: "vol-x", label: "EBS: 50GB", type: "ebs_volume" },
+    ],
+  };
+  const out = t.redactDeep(graph) as any;
+  assertNoLeak(out, RAW_LEAKS);
+  assertNoLeak(out, ["52.20.14.202"]); // IP embedded in a label must not leak
+  // node_id tokenized
+  assert.match(out.critical_resources[0].node_id, /^IAM_ROLE_\d{3}$/);
+  // descriptive size labels stay readable (not an identifier)
+  assert.equal(out.orphaned_resources[1].label, "EBS: 50GB");
+});
+
+test("strict: generic 'INTERNET' node id is never tokenized", async () => {
+  const t = await load("strict");
+  const out = t.redactDeep({ path: ["INTERNET", "sg-backend"] }) as { path: string[] };
+  assert.equal(out.path[0], "INTERNET");
+  assert.match(out.path[1], /^SG_\d{3}$/);
+});
+
+test("balanced: generic topology in node_ids stays raw, sensitive names tokenized", async () => {
+  const t = await load("balanced");
+  const stage = {
+    node_ids: ["subnet-priv-a", "sg-backend", "acme-prod-customers", "iam-role-AppServerRole"],
+  };
+  const out = t.redactDeep(stage) as { node_ids: string[] };
+  // generic topology left raw (documented balanced behavior)
+  assert.equal(out.node_ids[0], "subnet-priv-a");
+  // sensitive identifiers still tokenized
+  assert.match(out.node_ids[1], /^SG_\d{3}$/);
+  assert.match(out.node_ids[2], /^NAME_\d{3}$/);
+  assert.match(out.node_ids[3], /^IAM_ROLE_\d{3}$/);
+  assertNoLeak(out, ["sg-backend", "acme-prod-customers", "iam-role-AppServerRole"]);
+});
+
+test("off: attack_path / node_ids pass through unchanged", async () => {
+  const t = await load("off");
+  const obj = {
+    attack_path: ["sg-backend", "acme-prod-customers"],
+    caption: "IAM Role: AppServerRole — credential theft possible",
+  };
+  assert.deepEqual(t.redactDeep(obj), obj);
+});

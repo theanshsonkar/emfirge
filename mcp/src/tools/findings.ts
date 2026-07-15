@@ -57,6 +57,16 @@ export async function findingsHandler(args: FindingsArgs) {
     findings = { [key]: findings[key] ?? [] };
   }
 
+  // The stored log embeds the full raw `infrastructure` inventory — it exists
+  // only so /egraph can rebuild the graph, and it's NOT part of the findings
+  // contract (rule_id, issue, recommendation, attack_path, blast_radius, MITRE).
+  // Returning it to the host LLM both (a) dumps ~50KB of noise and (b) is a
+  // privacy leak: it carries resource details under arbitrary keys
+  // (subnet_group, secret_refs, allocation_id, …) that no tokenizer can be
+  // expected to know are sensitive. Drop it at the source; the tokenizer still
+  // scrubs every identifier in the findings themselves as defense-in-depth.
+  delete findings.infrastructure;
+
   const redacted = redactDeep(findings);
 
   return {
