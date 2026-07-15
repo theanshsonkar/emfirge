@@ -1,0 +1,483 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-mono), ui-monospace, monospace;
+  --font-display: var(--font-display), var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-prose: var(--prose);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-safe: var(--safe);
+  --color-danger: var(--danger);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ------------------------------------------------------------------ */
+/* MONOCHROME + LAYERED ELEVATION                                     */
+/* stage (backdrop) < surface (app panel) < surface-2 (code/inner)    */
+/* Only non-gray values: safe (green) / danger (red) functional signal */
+/* ------------------------------------------------------------------ */
+:root {
+  --stage: oklch(0.955 0 0);
+  --stage-2: oklch(0.9 0 0);
+  --background: oklch(1 0 0);
+  --surface: oklch(1 0 0);
+  --surface-2: oklch(0.975 0 0);
+  --foreground: oklch(0.17 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.17 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.17 0 0);
+  --primary: oklch(0.17 0 0);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.965 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.965 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  /* primary body/reading color — darker than muted so long-form prose reads
+     clearly; muted stays for leads, captions, and secondary hints */
+  --prose: oklch(0.32 0 0);
+  --accent: oklch(0.96 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.912 0 0);
+  --border-soft: oklch(0.94 0 0);
+  --input: oklch(0.9 0 0);
+  --ring: oklch(0.708 0 0);
+  --radius: 0.75rem;
+
+  --safe: oklch(0.6 0.13 155);
+  --danger: oklch(0.577 0.22 27.325);
+
+  --grid-line: oklch(0.92 0 0);
+  --tick: oklch(0.78 0 0);
+
+  /* code rail is always dark (Stripe-style) even in light mode */
+  --code-bg: oklch(0.165 0 0);
+  --code-bg-2: oklch(0.205 0 0);
+  --code-fg: oklch(0.9 0 0);
+  --code-border: oklch(1 0 0 / 9%);
+  --code-muted: oklch(0.62 0 0);
+
+  --elev: 0 1px 2px oklch(0 0 0 / 0.04), 0 8px 24px -6px oklch(0 0 0 / 0.08),
+    0 24px 60px -20px oklch(0 0 0 / 0.12);
+}
+
+.dark {
+  --stage: oklch(0.135 0 0);
+  --stage-2: oklch(0.11 0 0);
+  --background: oklch(0.178 0 0);
+  --surface: oklch(0.192 0 0);
+  --surface-2: oklch(0.145 0 0);
+  --foreground: oklch(0.965 0 0);
+  --card: oklch(0.192 0 0);
+  --card-foreground: oklch(0.965 0 0);
+  --popover: oklch(0.192 0 0);
+  --popover-foreground: oklch(0.965 0 0);
+  --primary: oklch(0.965 0 0);
+  --primary-foreground: oklch(0.178 0 0);
+  --secondary: oklch(0.245 0 0);
+  --secondary-foreground: oklch(0.965 0 0);
+  --muted: oklch(0.245 0 0);
+  --muted-foreground: oklch(0.66 0 0);
+  --prose: oklch(0.86 0 0);
+  --accent: oklch(0.26 0 0);
+  --accent-foreground: oklch(0.965 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 9%);
+  --border-soft: oklch(1 0 0 / 6%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+
+  --safe: oklch(0.74 0.16 155);
+  --danger: oklch(0.704 0.191 22.216);
+
+  --grid-line: oklch(1 0 0 / 6%);
+  --tick: oklch(1 0 0 / 20%);
+
+  --code-bg: oklch(0.135 0 0);
+  --code-bg-2: oklch(0.185 0 0);
+  --code-fg: oklch(0.9 0 0);
+  --code-border: oklch(1 0 0 / 8%);
+  --code-muted: oklch(0.6 0 0);
+
+  --elev: 0 1px 2px oklch(0 0 0 / 0.3), 0 12px 32px -8px oklch(0 0 0 / 0.5),
+    0 40px 80px -24px oklch(0 0 0 / 0.6);
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    min-height: 100vh;
+  }
+  html {
+    @apply font-sans;
+    -webkit-font-smoothing: antialiased;
+    scroll-behavior: smooth;
+  }
+  /* Visible keyboard focus for all interactive elements (low specificity so
+     component styles still win on everything except the focus ring). */
+  :where(a, button, summary, [role="button"], [tabindex="0"], input):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  :focus:not(:focus-visible) {
+    outline: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* UTILITIES                                                          */
+/* ------------------------------------------------------------------ */
+.elev {
+  box-shadow: var(--elev);
+}
+
+.surface {
+  background: var(--surface);
+}
+.surface-2 {
+  background: var(--surface-2);
+}
+
+/* dashed engineering grid */
+.grid-motif {
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+}
+
+/* faint fading grid used behind the topbar / hero for engineered texture */
+.grid-fade {
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 28px 28px;
+  -webkit-mask-image: radial-gradient(120% 100% at 50% -10%, black 0%, transparent 72%);
+  mask-image: radial-gradient(120% 100% at 50% -10%, black 0%, transparent 72%);
+}
+
+/* ------------------------------------------------------------------ */
+/* SIGNATURE MOTIF — corner registration ticks + engineered framing   */
+/* (references: unsiloed.ai / raindrop.ai — hairline + [ ] + ticks)   */
+/* ------------------------------------------------------------------ */
+
+/* display face for headings + wordmark */
+.font-display {
+  font-family: var(--font-display);
+  font-feature-settings: "ss01" 1, "ss02" 1;
+}
+
+/* corner registration ticks drawn on the four corners of a bordered box.
+   Two thin crosshair lines per corner — reads "engineered / technical". */
+.ticks {
+  position: relative;
+}
+.ticks::before,
+.ticks::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+/* top-left + bottom-right pair */
+.ticks::before {
+  background-image:
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick));
+  background-repeat: no-repeat;
+  background-size:
+    9px 1px, 1px 9px,
+    9px 1px, 1px 9px;
+  background-position:
+    top left, top left,
+    bottom right, bottom right;
+}
+/* top-right + bottom-left pair */
+.ticks::after {
+  background-image:
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick)),
+    linear-gradient(var(--tick), var(--tick));
+  background-repeat: no-repeat;
+  background-size:
+    9px 1px, 1px 9px,
+    9px 1px, 1px 9px;
+  background-position:
+    top right, top right,
+    bottom left, bottom left;
+}
+
+/* engineered grid backdrop behind a page header. Uses a soft radial fade
+   (same treatment as the topbar's .grid-fade) so it reads as an intentional
+   centered halo behind the title, with no hard rectangular edges. */
+.header-grid {
+  position: absolute;
+  inset: -3.5rem -2rem auto -2rem;
+  height: 19rem;
+  z-index: -1;
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 32px 32px;
+  -webkit-mask-image: radial-gradient(125% 100% at 50% -15%, black 0%, transparent 68%);
+  mask-image: radial-gradient(125% 100% at 50% -15%, black 0%, transparent 68%);
+  opacity: 1;
+}
+
+/* bracketed mono label: renders as [ LABEL ] */
+.tag {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.tag::before {
+  content: "[ ";
+  color: var(--tick);
+}
+.tag::after {
+  content: " ]";
+  color: var(--tick);
+}
+
+/* subtle hover elevation for interactive cards */
+.lift {
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease,
+    background-color 0.16s ease;
+}
+.lift:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.04), 0 10px 28px -14px oklch(0 0 0 / 0.18);
+}
+.dark .lift:hover {
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.3), 0 12px 30px -16px oklch(0 0 0 / 0.5);
+}
+
+/* thin, monochrome scrollbars for the nav rails */
+.rail-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.rail-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.rail-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.rail-scroll:hover::-webkit-scrollbar-thumb {
+  background: var(--input);
+  background-clip: content-box;
+}
+
+/* ------------------------------------------------------------------ */
+/* SCROLL / ENTRANCE REVEAL (GSAP)                                    */
+/* Only pre-hide when JS added `.gsap-anim` (set before first paint,  */
+/* and never under prefers-reduced-motion). No-JS users see content.  */
+/* ------------------------------------------------------------------ */
+.gsap-anim article > * {
+  opacity: 0;
+  animation: docs-reveal 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes docs-reveal {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.gsap-anim article > *:nth-child(1) { animation-delay: 0.02s; }
+.gsap-anim article > *:nth-child(2) { animation-delay: 0.06s; }
+.gsap-anim article > *:nth-child(3) { animation-delay: 0.10s; }
+.gsap-anim article > *:nth-child(4) { animation-delay: 0.14s; }
+.gsap-anim article > *:nth-child(5) { animation-delay: 0.18s; }
+.gsap-anim article > *:nth-child(6) { animation-delay: 0.22s; }
+.gsap-anim article > *:nth-child(7) { animation-delay: 0.26s; }
+.gsap-anim article > *:nth-child(n + 8) { animation-delay: 0.30s; }
+
+/* ------------------------------------------------------------------ */
+/* SHIKI CODE HIGHLIGHTING (always-dark rail)                         */
+/* ------------------------------------------------------------------ */
+/* The rail is dark in BOTH themes, so pin its default text color to the
+   light code-fg — otherwise plain-text blocks inherit the (dark) page
+   foreground and vanish on the dark rail in light mode. Shiki-highlighted
+   spans set their own inline colors and override this. */
+.code-rail {
+  color: var(--code-fg);
+}
+.code-rail .shiki,
+.code-rail .shiki span {
+  background: transparent !important;
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+.code-rail .shiki {
+  margin: 0;
+  white-space: pre;
+}
+.code-rail .shiki .line {
+  display: inline-block;
+  width: 100%;
+}
+/* optional line numbers */
+.shiki-numbered .shiki code {
+  counter-reset: step;
+}
+.shiki-numbered .shiki .line::before {
+  counter-increment: step;
+  content: counter(step);
+  display: inline-block;
+  width: 1.4rem;
+  margin-right: 1.1rem;
+  text-align: right;
+  color: var(--code-muted);
+  user-select: none;
+}
+
+/* selection uses the safe-green signal at low intensity */
+::selection {
+  background: color-mix(in oklch, var(--safe) 26%, transparent);
+  color: var(--foreground);
+}
+
+/* ------------------------------------------------------------------ */
+/* COMMAND MENU (cmdk / ⌘K)                                           */
+/* ------------------------------------------------------------------ */
+[cmdk-overlay] {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: oklch(0 0 0 / 0.5);
+  backdrop-filter: blur(4px);
+  animation: cmdk-fade 0.15s ease;
+}
+[cmdk-dialog] {
+  position: fixed;
+  z-index: 71;
+  top: 14vh;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(92vw, 34rem);
+}
+[cmdk-root] {
+  overflow: hidden;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--elev);
+  animation: cmdk-pop 0.15s ease;
+}
+[cmdk-input] {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  padding: 0.95rem 1.05rem;
+  font-size: 14px;
+  color: var(--foreground);
+  outline: none;
+}
+[cmdk-input]::placeholder {
+  color: var(--muted-foreground);
+}
+[cmdk-list] {
+  max-height: 22rem;
+  overflow-y: auto;
+  padding: 0.5rem;
+  scroll-padding: 0.5rem;
+}
+[cmdk-group-heading] {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  padding: 0.6rem 0.6rem 0.35rem;
+}
+[cmdk-item] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.6rem;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  user-select: none;
+}
+[cmdk-item][data-selected="true"] {
+  background: var(--accent);
+  color: var(--foreground);
+}
+[cmdk-item] .cmdk-enter {
+  opacity: 0;
+}
+[cmdk-item][data-selected="true"] .cmdk-enter {
+  opacity: 1;
+}
+[cmdk-empty] {
+  padding: 1.25rem 0.6rem;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+@keyframes cmdk-fade {
+  from { opacity: 0; }
+}
+@keyframes cmdk-pop {
+  from { opacity: 0; transform: translateY(-6px); }
+}
+
+/* mono section label: [ LABEL ] */
+.mono-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* code syntax tokens — colored for the always-dark code rail (theme-independent) */
+.tok-punc { color: var(--code-muted); }
+.tok-key { color: var(--code-fg); font-weight: 500; }
+.tok-str { color: var(--safe); }
+.tok-num { color: color-mix(in oklch, var(--code-fg) 88%, transparent); }
+.tok-bool { color: var(--safe); font-weight: 500; }
+.tok-comment { color: var(--code-muted); }
