@@ -10,7 +10,7 @@ export function PageFooter() {
   const pathname = usePathname();
   const [voted, setVoted] = useState<null | "up" | "down">(null);
 
-  const editHref = `${REPO}/edit/main/emfirge-site/src/app${pathname === "/docs" ? "/docs" : pathname}/page.tsx`;
+  const editHref = `${REPO}/edit/main/site/src/app${pathname === "/docs" ? "/docs" : pathname}/page.tsx`;
 
   return (
     <div className="mt-10 flex flex-col gap-3 border-t border-border pt-5 text-[12.5px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
