@@ -6,7 +6,7 @@ export const NAV: NavSection[] = [
   {
     label: "Get Started",
     items: [
-      { title: "Overview", href: "/docs" },
+      { title: "Overview", href: "/" },
       { title: "Quickstart", href: "/docs/quickstart" },
       { title: "CLI reference", href: "/docs/cli" },
     ],

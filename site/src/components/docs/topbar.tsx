@@ -11,7 +11,7 @@ export function Topbar() {
       <div className="pointer-events-none absolute inset-0 grid-fade opacity-60" aria-hidden />
       <div className="relative flex h-14 items-center gap-4 px-4 sm:px-6">
         <MobileNav />
-        <Link href="/docs" className="flex items-center gap-2">
+        <Link href="/" className="flex items-center gap-2">
           <div className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <EmfirgeMark className="size-4" />
           </div>

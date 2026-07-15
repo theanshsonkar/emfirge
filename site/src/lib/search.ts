@@ -3,7 +3,7 @@
 import { NAV } from "./nav";
 
 const SUMMARY: Record<string, string> = {
-  "/docs": "overview read-only mcp fork aws graph prove a fix seven tools git branch for your cloud",
+  "/": "overview read-only mcp fork aws graph prove a fix seven tools git branch for your cloud",
   "/docs/quickstart": "install npx @emfirge/mcp read-only role first scan privacy mode getting started",
   "/docs/cli": "cli reference commands install privacy purge terminal npx",
   "/docs/how-it-works": "clone mutate re-score diff graph 58 rules toxic combinations chokepoints attack paths deterministic",

@@ -19,7 +19,7 @@ export default function NotFound() {
         </p>
         <div className="mt-7 flex items-center justify-center gap-3">
           <Link
-            href="/docs"
+            href="/"
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-[13.5px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
           >
             Back to docs <ArrowRight className="size-3.5" />

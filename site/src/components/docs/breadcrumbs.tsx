@@ -9,6 +9,8 @@ import { NAV } from "@/lib/nav";
 export function Breadcrumbs() {
   const pathname = usePathname();
 
+  if (pathname === "/") return null;
+
   let section: string | undefined;
   let title: string | undefined;
   let mono = false;
@@ -25,7 +27,7 @@ export function Breadcrumbs() {
 
   return (
     <nav aria-label="Breadcrumb" className="mb-5 flex flex-wrap items-center gap-1.5 text-[12.5px] text-muted-foreground">
-      <Link href="/docs" className="transition-colors hover:text-foreground">Docs</Link>
+      <Link href="/" className="transition-colors hover:text-foreground">Docs</Link>
       {section && (
         <>
           <ChevronRight className="size-3 opacity-60" />
