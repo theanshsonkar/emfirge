@@ -4,8 +4,9 @@ import { prevNext } from "@/lib/nav";
 import DocsLayout from "./docs/layout";
 
 export const metadata = {
-  title: "Overview · Emfirge Docs",
-  description: "Emfirge makes a copy of your AWS infrastructure, tries a change on the copy, and shows you what gets safer or riskier, before anything touches your real cloud.",
+  title: "Emfirge — Git branch for your cloud",
+  description:
+    "Let your AI test AWS security changes before anything touches production.",
 };
 
 export default function Page() {
