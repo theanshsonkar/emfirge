@@ -9,6 +9,7 @@ export const NAV: NavSection[] = [
       { title: "Overview", href: "/" },
       { title: "Quickstart", href: "/docs/quickstart" },
       { title: "CLI reference", href: "/docs/cli" },
+      { title: "FAQ", href: "/docs/faq" },
     ],
   },
   {

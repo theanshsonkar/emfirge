@@ -6,6 +6,7 @@ const SUMMARY: Record<string, string> = {
   "/": "overview read-only mcp fork aws graph prove a fix seven tools git branch for your cloud",
   "/docs/quickstart": "install npx @emfirge/mcp read-only role first scan privacy mode getting started",
   "/docs/cli": "cli reference commands install privacy purge terminal npx",
+  "/docs/faq": "faq simple common questions non technical what is emfirge safe read only free demo privacy scan time limits self hosting",
   "/docs/how-it-works": "clone mutate re-score diff graph 58 rules toxic combinations chokepoints attack paths deterministic",
   "/docs/graph": "one graph many answers graph model nodes edges resources typed edges exploit difficulty weights attack paths blast radius chokepoints betweenness centrality toxic combinations 58 rules scoring orphaned coverage how big scale honest limits",
   "/docs/privacy": "strict balanced off tokenization NAME tokens tokens.json redaction regulated",
