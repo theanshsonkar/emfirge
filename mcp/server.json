@@ -2,18 +2,18 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.theanshsonkar/emfirge",
   "title": "Emfirge",
-  "description": "Privacy-first AWS security in your AI: attack paths & fix simulation, IDs never sent to the LLM.",
+  "description": "Git branch for your cloud. Understand AWS risk, prove fixes, and ship safer changes.",
   "websiteUrl": "https://emfirge.cloud",
   "repository": {
     "url": "https://github.com/theanshsonkar/emfirge",
     "source": "github"
   },
-  "version": "0.2.0",
+  "version": "0.2.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "@emfirge/mcp",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "transport": { "type": "stdio" },
       "environmentVariables": [
         {
