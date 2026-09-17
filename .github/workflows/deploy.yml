@@ -56,7 +56,6 @@ jobs:
             sudo docker stop emfirge-engine || true
             sudo docker rm emfirge-engine || true
             sudo grep -q "GITHUB_PRIVATE_KEY_B64" /home/ubuntu/.env || echo "GITHUB_PRIVATE_KEY_B64=${{ secrets.APP_PRIVATE_KEY_B64 }}" | sudo tee -a /home/ubuntu/.env > /dev/null
-            sudo grep -q "ANTHROPIC_API_KEY" /home/ubuntu/.env || echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" | sudo tee -a /home/ubuntu/.env > /dev/null
             sudo docker run -d --name emfirge-engine --restart=always \
               --env-file /home/ubuntu/.env \
               -p 8000:8000 \
