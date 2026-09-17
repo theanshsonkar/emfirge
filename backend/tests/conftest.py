@@ -1,3 +1,7 @@
+import os
+
+os.environ.setdefault("WHITELISTED_ACCOUNTS", "000000000000")
+
 """
 Shared fixtures for Emfirge test suite.
 All fixtures build synthetic AWSInfrastructure objects — zero real AWS calls.
@@ -16,7 +20,7 @@ from app.models import (
 )
 
 
-# -- HELPERS -------------------------------------------------------
+# ── HELPERS ───────────────────────────────────────────────────────
 
 def make_sg(sg_id="sg-001", name="default", rules=None, attached_to=None):
     return SecurityGroup(
@@ -41,7 +45,7 @@ def make_instance(instance_id="i-001", sg_ids=None, imdsv2=True):
     )
 
 
-# -- SCENARIO FIXTURES ---------------------------------------------
+# ── SCENARIO FIXTURES ─────────────────────────────────────────────
 
 @pytest.fixture
 def clean_infra():

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime, date
@@ -101,6 +101,20 @@ class TFResource(Base):
     indexed_at       = Column(DateTime, default=datetime.utcnow)
 
 
+
+class BranchLog(Base):
+    """Persisted base snapshot and ordered mutations for a simulation branch."""
+    __tablename__ = 'branch_logs'
+
+    branch_id = Column(String(36), primary_key=True, unique=True)
+    name = Column(String(200), nullable=False)
+    base_analysis_id = Column(String(100), nullable=True)
+    base_infra_json = Column(Text, nullable=False)
+    changes_json = Column(Text, nullable=False, default='[]')
+    status = Column(String(20), nullable=False, default='open')
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 class CIAPIKey(Base):
     """API keys for CI/CD gate endpoint authentication."""
     __tablename__ = 'ci_api_keys'
@@ -111,6 +125,18 @@ class CIAPIKey(Base):
     created_at       = Column(DateTime, default=datetime.utcnow)
     last_used_at     = Column(DateTime, nullable=True)
     is_active        = Column(Integer, default=1)  # 1=active, 0=revoked
+
+
+class APIKey(Base):
+    """Hashed API keys used to authenticate API clients."""
+    __tablename__ = 'api_keys'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key_hash = Column(String(64), unique=True, index=True, nullable=False)
+    project_name = Column(String(200), nullable=False)
+    active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    last_used_at = Column(DateTime, nullable=True)
 
 def create_tables():
     Base.metadata.create_all(engine)

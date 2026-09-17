@@ -58,7 +58,7 @@ export default function Page() {
           <A href="/docs/privacy">Privacy modes</A>.
         </Param>
         <Param name="EMFIRGE_TRUSTED_ACCOUNT_ID" type="string">
-          AWS account ID the generated IAM role trusts. Default <Code>282027772803</Code>. Set this to
+          AWS account ID the generated IAM role trusts. Default <Code>000000000000</Code>. Set this to
           your own account when self-hosting so <Code>setup_help</Code> builds a role that trusts your scanner.
         </Param>
         <Param name="EMFIRGE_EXTERNAL_ID" type="string">

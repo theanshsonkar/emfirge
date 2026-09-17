@@ -55,7 +55,7 @@ export default function Page() {
       </Callout>
 
       <Callout type="note">
-        The role trusts account <Code>282027772803</Code> with ExternalId <Code>aws-risk-agent</Code>.
+        The role trusts account <Code>000000000000</Code> with ExternalId <Code>aws-risk-agent</Code>.
         Self-hosting? Override those via <Code>EMFIRGE_TRUSTED_ACCOUNT_ID</Code> and{" "}
         <Code>EMFIRGE_EXTERNAL_ID</Code>, see{" "}
         <A href="/docs/self-host">Self-hosting</A>.

@@ -15,7 +15,8 @@ from app.models import (
     ElastiCacheData, ElastiCacheCluster,
     SQSData, SQSQueue,
     DynamoDBData, DynamoDBTable,
-    EBSVolume, ElasticIP
+    EBSVolume, ElasticIP, Route, RouteTable, NACLEntry, NetworkACL,
+    VPCPeeringConnection, TransitGatewayAttachment, VPNGateway, InterfaceEndpoint
 )
 from datetime import datetime, timezone
 
@@ -245,6 +246,41 @@ def get_error_code(e: ClientError) -> str:
     return e.response['Error']['Code']
 
 # ── EC2 COLLECTOR ─────────────────────────────────────────────────
+def _derive_has_public_ip(instance: dict) -> bool | None:
+    """Derive public-IP presence while preserving malformed AWS responses."""
+    public_ip = instance.get('PublicIpAddress')
+    has_public_ip = False
+    if public_ip is not None and public_ip != '':
+        if not isinstance(public_ip, (str, int, float, bool)):
+            return None
+        has_public_ip = True
+
+    network_interfaces = instance.get('NetworkInterfaces')
+    if network_interfaces is None:
+        return has_public_ip
+    if not isinstance(network_interfaces, list):
+        return None
+
+    for network_interface in network_interfaces:
+        if not isinstance(network_interface, dict):
+            return None
+        if 'Association' not in network_interface:
+            continue
+        association = network_interface['Association']
+        if not isinstance(association, dict):
+            return None
+        if 'PublicIp' not in association:
+            continue
+        associated_public_ip = association['PublicIp']
+        if associated_public_ip is None or associated_public_ip == '':
+            continue
+        if not isinstance(associated_public_ip, (str, int, float, bool)):
+            return None
+        has_public_ip = True
+
+    return has_public_ip
+
+
 def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
     instance_count = 0
     instance_types = []
@@ -285,6 +321,7 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
                 subnet_id = instance.get('SubnetId')
                 metadata = instance.get('MetadataOptions', {})
                 imdsv2_required = metadata.get('HttpTokens') == 'required'
+                has_public_ip = _derive_has_public_ip(instance)
                 
                 # Add to relationship tracking
                 instances.append({
@@ -294,6 +331,7 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
                     'subnet_id': subnet_id,
                     'state': instance_state,
                     'imdsv2_required': imdsv2_required,
+                    'has_public_ip': has_public_ip,
                     'instance_profile_arn': instance.get('IamInstanceProfile', {}).get('Arn'),
                 })
                 
@@ -317,13 +355,15 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
             sg_id = sg['GroupId']
             sg_name = sg['GroupName']
             rules = []
+            egress_rules = []
             
             for rule in sg['IpPermissions']:
                 rules.append({
                     'from_port': rule.get('FromPort'),
                     'to_port': rule.get('ToPort'),
                     'protocol': rule.get('IpProtocol'),
-                    'ip_ranges': [ip.get('CidrIp') for ip in rule.get('IpRanges', [])]
+                    'ip_ranges': [ip.get('CidrIp') for ip in rule.get('IpRanges', [])],
+                    'source_sg_ids': [pair.get('GroupId') for pair in rule.get('UserIdGroupPairs', [])]
                 })
                 
                 for ip in rule.get('IpRanges', []):
@@ -336,12 +376,22 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
                         if port == 3389:
                             rdp_open = True
                             rdp_security_group_id = sg_id
+
+            for rule in sg.get('IpPermissionsEgress', []):
+                egress_rules.append({
+                    'from_port': rule.get('FromPort'),
+                    'to_port': rule.get('ToPort'),
+                    'protocol': rule.get('IpProtocol'),
+                    'ip_ranges': [ip.get('CidrIp') for ip in rule.get('IpRanges', [])],
+                    'dest_sg_ids': [pair.get('GroupId') for pair in rule.get('UserIdGroupPairs', [])]
+                })
             
             # Add to relationship tracking
             security_groups.append({
                 'id': sg_id,
                 'name': sg_name,
                 'rules': rules,
+                'egress_rules': egress_rules,
                 'attached_to': sg_to_instances.get(sg_id, [])
             })
 
@@ -714,6 +764,100 @@ def collect_rds(key, secret, token, region, warnings) -> RDSData:
     )
 
 # ── IAM COLLECTOR ─────────────────────────────────────────────────
+
+def _parse_role_trust_policy(document, role_arn):
+    """Extract conservative trust metadata from an IAM AssumeRole policy."""
+    import urllib.parse
+
+    trusted_role_arns = []
+    trusted_services = []
+    trust_allows_external = False
+    trust_has_conditions = False
+
+    try:
+        if isinstance(document, str):
+            document = json.loads(urllib.parse.unquote(document))
+        if not isinstance(document, dict):
+            return trusted_role_arns, trusted_services, trust_allows_external, trust_has_conditions
+        statements = document.get('Statement', [])
+        if isinstance(statements, dict):
+            statements = [statements]
+        if not isinstance(statements, list):
+            return trusted_role_arns, trusted_services, trust_allows_external, trust_has_conditions
+
+        role_account = None
+        role_parts = str(role_arn or '').split(':')
+        if len(role_parts) > 4 and role_parts[0] == 'arn':
+            role_account = role_parts[4]
+
+        def principal_values(value):
+            if isinstance(value, str):
+                return [value]
+            if isinstance(value, list):
+                values = []
+                for item in value:
+                    values.extend(principal_values(item))
+                return values
+            if isinstance(value, dict):
+                values = []
+                for item in value.values():
+                    values.extend(principal_values(item))
+                return values
+            return []
+
+        def add_unique(items, value):
+            if isinstance(value, str) and value and value not in items:
+                items.append(value)
+
+        qualifying_actions = {
+            'sts:assumerole', 'sts:assumerolewithsaml',
+            'sts:assumerolewithwebidentity', '*',
+        }
+        for statement in statements:
+            if not isinstance(statement, dict):
+                continue
+            if str(statement.get('Effect', '')).lower() != 'allow':
+                continue
+            actions = principal_values(statement.get('Action', []))
+            if not any(str(action).lower() in qualifying_actions for action in actions):
+                continue
+            if 'Condition' in statement:
+                trust_has_conditions = True
+
+            principal = statement.get('Principal')
+            if principal == '*':
+                trust_allows_external = True
+                continue
+            if not isinstance(principal, dict):
+                continue
+            for value in principal_values(principal.get('AWS')):
+                lowered = value.lower()
+                if value == '*' or lowered.endswith(':root') or value.isdigit():
+                    trust_allows_external = True
+                    continue
+                if lowered.startswith('arn:'):
+                    parts = value.split(':')
+                    account = parts[4] if len(parts) > 4 else None
+                    resource = parts[5] if len(parts) > 5 else ''
+                    if account != role_account:
+                        trust_allows_external = True
+                    elif resource.startswith(('role/', 'user/')):
+                        add_unique(trusted_role_arns, value)
+                    else:
+                        # Unknown ARN principal forms are not converted into role data.
+                        trust_allows_external = True
+                else:
+                    trust_allows_external = True
+            for value in principal_values(principal.get('Service')):
+                add_unique(trusted_services, value)
+            if 'Federated' in principal:
+                trust_allows_external = True
+    except Exception:
+        # Trust documents are AWS input and should never make collection fail.
+        pass
+
+    return trusted_role_arns, trusted_services, trust_allows_external, trust_has_conditions
+
 def collect_iam(key, secret, token, region, warnings) -> IAMData:
     root_has_keys = False
     users_without_mfa = []
@@ -722,6 +866,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
     iam_users = []
     users_with_admin_policy = []
     role_policies = []
+    instance_profile_roles = {}
 
     try:
         iam = boto3.client('iam', aws_access_key_id=key,
@@ -734,6 +879,68 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
             root_has_keys = summary['SummaryMap'].get('AccountAccessKeysPresent', 0) > 0
         except ClientError as e:
             print(f'IAM root check skipped: {get_error_code(e)}')
+        except Exception:
+            pass
+
+        # Resolve instance profiles to their contained roles for graph identity
+        # canonicalization. AWS responses are treated as untrusted input. Keep
+        # state for every observed ARN/name key so a later good observation
+        # cannot resurrect a key invalidated by an earlier bad one.
+        try:
+            profile_states = {}
+            profiles_paginator = iam.get_paginator('list_instance_profiles')
+            for profiles_page in profiles_paginator.paginate():
+                if not isinstance(profiles_page, dict):
+                    continue
+                profiles = profiles_page.get('InstanceProfiles', [])
+                if not isinstance(profiles, list):
+                    continue
+                for profile in profiles:
+                    if not isinstance(profile, dict):
+                        continue
+                    profile_name = profile.get('InstanceProfileName')
+                    profile_arn = profile.get('Arn')
+                    profile_keys = [key for key in (profile_arn, profile_name)
+                                    if isinstance(key, str) and key]
+                    roles = profile.get('Roles')
+                    observation_role = None
+                    observation_valid = isinstance(roles, list)
+                    if observation_valid and len(roles) == 1:
+                        role = roles[0]
+                        if isinstance(role, dict):
+                            role_name = role.get('RoleName')
+                            role_arn = role.get('Arn')
+                            if (isinstance(role_name, str) and role_name and
+                                    isinstance(role_arn, str) and role_arn):
+                                observation_role = (role_name, role_arn)
+                            else:
+                                observation_valid = False
+                        else:
+                            observation_valid = False
+                    else:
+                        # Zero, multiple, or malformed role records are not a
+                        # trusted single-role observation.
+                        observation_valid = False
+
+                    for key in profile_keys:
+                        state = profile_states.setdefault(
+                            key, {'role': None, 'invalid': False})
+                        if state['invalid'] or not observation_valid:
+                            state['invalid'] = True
+                        elif state['role'] is None:
+                            state['role'] = observation_role
+                        elif state['role'] != observation_role:
+                            state['invalid'] = True
+
+            for key, state in profile_states.items():
+                if state['invalid'] or state['role'] is None:
+                    continue
+                role_name, role_arn = state['role']
+                instance_profile_roles[key] = {
+                    'role_name': role_name, 'role_arn': role_arn,
+                }
+        except ClientError as e:
+            print(f'IAM instance profile scan skipped: {get_error_code(e)}')
         except Exception:
             pass
 
@@ -859,8 +1066,68 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                         continue
 
                     accessible_resources = []
+                    access_statements = []
                     has_admin = False
                     policy_names_list = []
+                    (trusted_role_arns, trusted_services, trust_allows_external,
+                     trust_has_conditions) = _parse_role_trust_policy(
+                        role.get('AssumeRolePolicyDocument'), role_arn
+                    )
+
+                    def parse_access_document(doc):
+                        """Normalize untrusted IAM policy input without failing collection."""
+                        nonlocal has_admin
+                        if isinstance(doc, str):
+                            try:
+                                doc = json.loads(_urlparse.unquote(doc))
+                            except Exception:
+                                return
+                        if not isinstance(doc, dict):
+                            return
+                        statements = doc.get('Statement', [])
+                        if isinstance(statements, dict):
+                            statements = [statements]
+                        if not isinstance(statements, list):
+                            return
+                        for stmt in statements:
+                            if not isinstance(stmt, dict):
+                                continue
+                            effect = stmt.get('Effect')
+                            if not isinstance(effect, str) or not effect:
+                                continue
+                            effect = effect.lower()
+                            action_key = 'NotAction' if 'NotAction' in stmt else 'Action'
+                            resource_key = 'NotResource' if 'NotResource' in stmt else 'Resource'
+                            actions = stmt.get(action_key, [])
+                            resources = stmt.get(resource_key, [])
+                            if isinstance(actions, str):
+                                actions = [actions]
+                            if isinstance(resources, str):
+                                resources = [resources]
+                            if not isinstance(actions, list) or not isinstance(resources, list):
+                                continue
+                            actions = [value for value in actions if isinstance(value, str)]
+                            resources = [value for value in resources if isinstance(value, str)]
+                            if not actions and not resources:
+                                continue
+                            from app.models import AccessStatement
+                            access_statements.append(AccessStatement(
+                                effect=effect,
+                                actions=list(dict.fromkeys(actions)),
+                                resources=list(dict.fromkeys(resources)),
+                                is_not_action=action_key == 'NotAction',
+                                is_not_resource=resource_key == 'NotResource',
+                                has_condition=bool(stmt.get('Condition')),
+                            ))
+                            if effect != 'allow':
+                                continue
+                            if '*' in actions and '*' in resources:
+                                has_admin = True
+                            for res in resources:
+                                if any(svc in res for svc in [':s3:', ':rds:', ':lambda:', ':secretsmanager:', ':dynamodb:']):
+                                    accessible_resources.append(res)
+                                elif res == '*':
+                                    accessible_resources.append('*')
 
                     # Check attached managed policies
                     try:
@@ -868,13 +1135,11 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                         for policy in attached_resp.get('AttachedPolicies', []):
                             policy_arn = policy['PolicyArn']
                             policy_names_list.append(policy['PolicyName'])
-
-                            # Check for AdministratorAccess shortcut
                             if policy_arn == 'arn:aws:iam::aws:policy/AdministratorAccess':
                                 has_admin = True
-                                break
 
-                            # Get the policy document for resource ARNs
+                            # Keep parsing all attached policies: statements after an
+                            # admin statement still matter for deny/condition analysis.
                             try:
                                 pol = iam.get_policy(PolicyArn=policy_arn)
                                 version_id = pol['Policy']['DefaultVersionId']
@@ -882,30 +1147,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                                     PolicyArn=policy_arn,
                                     VersionId=version_id
                                 )
-                                doc = version['PolicyVersion']['Document']
-                                if isinstance(doc, str):
-                                    doc = json.loads(_urlparse.unquote(doc))
-                                for stmt in doc.get('Statement', []):
-                                    if stmt.get('Effect') != 'Allow':
-                                        continue
-                                    actions = stmt.get('Action', [])
-                                    resources = stmt.get('Resource', [])
-                                    if isinstance(actions, str):
-                                        actions = [actions]
-                                    if isinstance(resources, str):
-                                        resources = [resources]
-                                    # Check for full admin
-                                    if '*' in actions and '*' in resources:
-                                        has_admin = True
-                                        break
-                                    # Collect resource ARNs for data services
-                                    for res in resources:
-                                        if any(svc in res for svc in [':s3:', ':rds:', ':lambda:', ':secretsmanager:', ':dynamodb:']):
-                                            accessible_resources.append(res)
-                                        elif res == '*':
-                                            accessible_resources.append('*')
-                                if has_admin:
-                                    break
+                                parse_access_document(version['PolicyVersion']['Document'])
                             except ClientError:
                                 pass
                             except Exception:
@@ -923,54 +1165,39 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                     if has_admin:
                         accessible_resources = []  # has_admin flag is sufficient
 
-                    # Check inline policies (only if not already admin)
-                    if not has_admin:
-                        try:
-                            inline_resp = iam.list_role_policies(RoleName=role_name)
-                            for pol_name in inline_resp.get('PolicyNames', []):
-                                policy_names_list.append(pol_name)
-                                try:
-                                    pol_doc_resp = iam.get_role_policy(RoleName=role_name, PolicyName=pol_name)
-                                    doc = pol_doc_resp.get('PolicyDocument', {})
-                                    if isinstance(doc, str):
-                                        doc = json.loads(_urlparse.unquote(doc))
-                                    for stmt in doc.get('Statement', []):
-                                        if stmt.get('Effect') != 'Allow':
-                                            continue
-                                        actions = stmt.get('Action', [])
-                                        resources = stmt.get('Resource', [])
-                                        if isinstance(actions, str):
-                                            actions = [actions]
-                                        if isinstance(resources, str):
-                                            resources = [resources]
-                                        if '*' in actions and '*' in resources:
-                                            has_admin = True
-                                            accessible_resources = []
-                                            break
-                                        for res in resources:
-                                            if any(svc in res for svc in [':s3:', ':rds:', ':lambda:', ':secretsmanager:', ':dynamodb:']):
-                                                accessible_resources.append(res)
-                                            elif res == '*':
-                                                accessible_resources.append('*')
-                                    if has_admin:
-                                        break
-                                except Exception:
-                                    pass
-                        except ClientError as e:
-                            if get_error_code(e) == 'Throttling':
-                                _time.sleep(0.2)
-                        except Exception:
-                            pass
+                    # Parse inline policies even when an attached policy already
+                    # established admin access; denies and uncertainty remain relevant.
+                    try:
+                        inline_resp = iam.list_role_policies(RoleName=role_name)
+                        for pol_name in inline_resp.get('PolicyNames', []):
+                            policy_names_list.append(pol_name)
+                            try:
+                                pol_doc_resp = iam.get_role_policy(RoleName=role_name, PolicyName=pol_name)
+                                parse_access_document(pol_doc_resp.get('PolicyDocument', {}))
+                            except Exception:
+                                pass
+                    except ClientError as e:
+                        if get_error_code(e) == 'Throttling':
+                            _time.sleep(0.2)
+                    except Exception:
+                        pass
 
-                    # Only record roles that have meaningful access data
-                    if has_admin or accessible_resources:
+                    # Record useful access data or trust metadata. Trust-only roles
+                    # are required for graph identity relationships.
+                    if (has_admin or accessible_resources or access_statements or trusted_role_arns or
+                            trusted_services or trust_allows_external or trust_has_conditions):
                         from app.models import RolePolicy
                         role_policies.append(RolePolicy(
                             role_name=role_name,
                             role_arn=role_arn,
-                            accessible_resources=list(set(accessible_resources)),
+                            accessible_resources=list(dict.fromkeys(accessible_resources)),
                             has_admin=has_admin,
+                            access_statements=list(access_statements),
                             policy_names=policy_names_list,
+                            trusted_role_arns=trusted_role_arns,
+                            trusted_services=trusted_services,
+                            trust_allows_external=trust_allows_external,
+                            trust_has_conditions=trust_has_conditions,
                         ))
 
                     # Throttle between roles to stay under 15 TPS
@@ -1007,6 +1234,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
         users_with_admin_policy=users_with_admin_policy,
         iam_users=iam_users,
         role_policies=role_policies,
+        instance_profile_roles=instance_profile_roles,
     )
 
 # ── CLOUDTRAIL COLLECTOR ──────────────────────────────────────────
@@ -1323,6 +1551,43 @@ def collect_secrets_manager(key, secret, token, region, warnings) -> SecretsMana
         secrets_without_rotation=secrets_without_rotation
     )
 
+def _parse_vpc_peering_connection(connection) -> VPCPeeringConnection | None:
+    """Parse one EC2 VPC peering connection without trusting nested shapes."""
+    if not isinstance(connection, dict):
+        return None
+
+    connection_id = connection.get('VpcPeeringConnectionId')
+    requester_info = connection.get('RequesterVpcInfo')
+    accepter_info = connection.get('AccepterVpcInfo')
+    if not isinstance(connection_id, str) or not connection_id:
+        return None
+    if not isinstance(requester_info, dict) or not isinstance(accepter_info, dict):
+        return None
+
+    requester_vpc_id = requester_info.get('VpcId')
+    accepter_vpc_id = accepter_info.get('VpcId')
+    if (not isinstance(requester_vpc_id, str) or not requester_vpc_id or
+            not isinstance(accepter_vpc_id, str) or not accepter_vpc_id):
+        return None
+
+    status_info = connection.get('Status')
+    if status_info is None:
+        status = None
+    elif isinstance(status_info, dict):
+        status = status_info.get('Code')
+        if status is not None and not isinstance(status, str):
+            return None
+    else:
+        return None
+
+    return VPCPeeringConnection(
+        id=connection_id,
+        requester_vpc_id=requester_vpc_id,
+        accepter_vpc_id=accepter_vpc_id,
+        status=status,
+    )
+
+
 # ── VPC COLLECTOR ─────────────────────────────────────────────────
 def collect_vpc(key, secret, token, region, warnings) -> VPCData:
     total_vpcs = 0
@@ -1339,12 +1604,30 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
     
     # Relationship tracking
     subnets = []
+    route_tables = []
+    vpc_peering_connections = []
+    nacls = []
+    transit_gateway_attachments = []
+    vpn_gateways = []
+    interface_endpoints = []
 
     try:
         ec2 = boto3.client('ec2', aws_access_key_id=key,
                           aws_secret_access_key=secret,
                           aws_session_token=token,
                           region_name=region, config=BOTO_CONFIG)
+
+        # ── VPC PEERING CONNECTIONS ──────────────────────────────
+        try:
+            peering_response = ec2.describe_vpc_peering_connections()
+            for connection in peering_response.get('VpcPeeringConnections', []) or []:
+                parsed_connection = _parse_vpc_peering_connection(connection)
+                if parsed_connection is not None:
+                    vpc_peering_connections.append(parsed_connection)
+        except ClientError as e:
+            print(f'VPC peering connections check skipped: {get_error_code(e)}')
+        except Exception as e:
+            print(f'VPC peering connections check skipped: {e}')
 
         # Get all VPCs
         vpcs_response = ec2.describe_vpcs()
@@ -1404,6 +1687,47 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
             vpcs_with_public_main_rt = set()
 
             for rt in rts_response.get('RouteTables', []):
+                associations = rt.get('Associations', [])
+                associated_subnet_ids = [
+                    assoc['SubnetId'] for assoc in associations if assoc.get('SubnetId')
+                ]
+                routes = []
+                for route in rt.get('Routes', []):
+                    destination_cidr = route.get('DestinationCidrBlock')
+                    if not destination_cidr:
+                        continue
+                    gateway_id = route.get('GatewayId')
+                    nat_gateway_id = route.get('NatGatewayId')
+                    peering_id = route.get('VpcPeeringConnectionId')
+                    if gateway_id and gateway_id.startswith('igw-'):
+                        target_type = 'internet_gateway'
+                        target_id = gateway_id
+                    elif nat_gateway_id:
+                        target_type = 'nat_gateway'
+                        target_id = nat_gateway_id
+                    elif gateway_id == 'local':
+                        target_type = 'local'
+                        target_id = gateway_id
+                    elif peering_id and peering_id.startswith('pcx-'):
+                        target_type = 'vpc_peering'
+                        target_id = peering_id
+                    else:
+                        target_type = 'other'
+                        target_id = gateway_id or nat_gateway_id or peering_id or ''
+                    routes.append(Route(
+                        destination_cidr=destination_cidr,
+                        target_type=target_type,
+                        target_id=target_id,
+                    ))
+
+                route_tables.append(RouteTable(
+                    id=rt['RouteTableId'],
+                    vpc_id=rt['VpcId'],
+                    is_main=any(assoc.get('Main', False) for assoc in associations),
+                    associated_subnet_ids=associated_subnet_ids,
+                    routes=routes,
+                ))
+
                 has_igw_route = any(
                     r.get('GatewayId', '').startswith('igw-')
                     for r in rt.get('Routes', [])
@@ -1459,6 +1783,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
                 subnets.append({
                     'id': subnet_id,
                     'vpc_id': vpc_id,
+                    'cidr': subnet.get('CidrBlock'),
                     'resources': resources,
                     'availability_zone': az,
                     'is_public': is_public,
@@ -1468,19 +1793,135 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         except Exception:
             pass
 
+        # ── NETWORK ACLS ──────────────────────────────────────────
+        try:
+            nacls_response = ec2.describe_network_acls()
+            for acl in nacls_response.get('NetworkAcls', []):
+                entries = []
+                for entry in acl.get('Entries', []):
+                    port_range = entry.get('PortRange') or {}
+                    entries.append(NACLEntry(
+                        rule_number=entry['RuleNumber'],
+                        protocol=entry.get('Protocol', ''),
+                        rule_action=entry.get('RuleAction', ''),
+                        egress=entry.get('Egress', False),
+                        cidr_block=entry.get('CidrBlock'),
+                        port_from=port_range.get('From'),
+                        port_to=port_range.get('To'),
+                    ))
+                nacls.append(NetworkACL(
+                    id=acl['NetworkAclId'],
+                    vpc_id=acl['VpcId'],
+                    is_default=acl.get('IsDefault', False),
+                    associated_subnet_ids=[
+                        association['SubnetId']
+                        for association in acl.get('Associations', [])
+                        if association.get('SubnetId')
+                    ],
+                    entries=entries,
+                ))
+        except ClientError as e:
+            print(f'Network ACLs check skipped: {get_error_code(e)}')
+        except Exception as e:
+            print(f'Network ACLs check skipped: {e}')
+
+        # ── TRANSIT GATEWAY ATTACHMENTS ──────────────────────────
+        try:
+            response = ec2.describe_transit_gateway_vpc_attachments()
+            attachments = response.get('TransitGatewayVpcAttachments', []) if isinstance(response, dict) else []
+            if not isinstance(attachments, list):
+                attachments = []
+            for attachment in attachments:
+                if not isinstance(attachment, dict):
+                    continue
+                attachment_id = attachment.get('TransitGatewayAttachmentId')
+                transit_gateway_id = attachment.get('TransitGatewayId')
+                vpc_id = attachment.get('VpcId')
+                if not all(isinstance(value, str) and value for value in
+                           (attachment_id, transit_gateway_id, vpc_id)):
+                    continue
+                state = attachment.get('State')
+                if state is not None and not isinstance(state, str):
+                    state = None
+                transit_gateway_attachments.append(TransitGatewayAttachment(
+                    id=attachment_id,
+                    transit_gateway_id=transit_gateway_id,
+                    vpc_id=vpc_id,
+                    state=state,
+                ))
+        except ClientError as e:
+            print(f'Transit Gateway attachments check skipped: {get_error_code(e)}')
+        except Exception as e:
+            print(f'Transit Gateway attachments check skipped: {e}')
+
+        # ── VPN GATEWAYS ──────────────────────────────────────────
+        try:
+            response = ec2.describe_vpn_gateways()
+            gateways = response.get('VpnGateways', []) if isinstance(response, dict) else []
+            if not isinstance(gateways, list):
+                gateways = []
+            for gateway in gateways:
+                if not isinstance(gateway, dict):
+                    continue
+                gateway_id = gateway.get('VpnGatewayId')
+                if not isinstance(gateway_id, str) or not gateway_id:
+                    continue
+                state = gateway.get('State')
+                if state is not None and not isinstance(state, str):
+                    state = None
+                attachments = gateway.get('VpcAttachments', [])
+                valid_vpc_ids = []
+                if isinstance(attachments, list):
+                    for attachment in attachments:
+                        if not isinstance(attachment, dict):
+                            continue
+                        vpc_id = attachment.get('VpcId')
+                        if isinstance(vpc_id, str) and vpc_id:
+                            valid_vpc_ids.append(vpc_id)
+                if valid_vpc_ids:
+                    for vpc_id in valid_vpc_ids:
+                        vpn_gateways.append(VPNGateway(
+                            id=gateway_id, vpc_id=vpc_id, state=state,
+                        ))
+                else:
+                    vpn_gateways.append(VPNGateway(id=gateway_id, state=state))
+        except ClientError as e:
+            print(f'VPN Gateways check skipped: {get_error_code(e)}')
+        except Exception as e:
+            print(f'VPN Gateways check skipped: {e}')
+
         # Check for VPC endpoints
         try:
             endpoints = ec2.describe_vpc_endpoints()
             s3_endpoint_exists = False
             dynamodb_endpoint_exists = False
-            
-            for endpoint in endpoints['VpcEndpoints']:
-                service_name = endpoint.get('ServiceName', '').lower()
-                if 's3' in service_name:
+            endpoint_records = endpoints.get('VpcEndpoints', []) if isinstance(endpoints, dict) else []
+            if not isinstance(endpoint_records, list):
+                endpoint_records = []
+
+            for endpoint in endpoint_records:
+                if not isinstance(endpoint, dict):
+                    continue
+                service_name = endpoint.get('ServiceName', '')
+                if not isinstance(service_name, str):
+                    service_name = ''
+                service_name_lower = service_name.lower()
+                if 's3' in service_name_lower:
                     s3_endpoint_exists = True
-                if 'dynamodb' in service_name:
+                if 'dynamodb' in service_name_lower:
                     dynamodb_endpoint_exists = True
-            
+
+                endpoint_id = endpoint.get('VpcEndpointId')
+                vpc_id = endpoint.get('VpcId')
+                if (endpoint.get('VpcEndpointType') == 'Interface' and
+                        isinstance(endpoint_id, str) and endpoint_id and
+                        isinstance(vpc_id, str) and vpc_id):
+                    interface_endpoints.append(InterfaceEndpoint(
+                        id=endpoint_id,
+                        vpc_id=vpc_id,
+                        service_name=service_name or None,
+                    ))
+
             missing_s3_endpoint = not s3_endpoint_exists
             missing_dynamodb_endpoint = not dynamodb_endpoint_exists
         except ClientError as e:
@@ -1513,7 +1954,13 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         internet_gateways=internet_gateways,
         nat_gateways=nat_gateways,
         public_subnet_ids=list(public_subnet_ids),
-        subnets=subnets
+        subnets=subnets,
+        route_tables=route_tables,
+        vpc_peering_connections=vpc_peering_connections,
+        nacls=nacls,
+        transit_gateway_attachments=transit_gateway_attachments,
+        vpn_gateways=vpn_gateways,
+        interface_endpoints=interface_endpoints
     )
 
 # ── KMS COLLECTOR ─────────────────────────────────────────────────

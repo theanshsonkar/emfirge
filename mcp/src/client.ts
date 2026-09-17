@@ -19,6 +19,8 @@ export async function backendCall<T = unknown>(
     "X-MCP": "1",
     "X-Source": "mcp",
   };
+  const apiKey = process.env.EMFIRGE_API_KEY;
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
   const controller = new AbortController();
   const timeoutMs = opts.timeout ?? 90_000;
@@ -107,6 +109,8 @@ export async function backendCallSSE<T = unknown>(
     "X-MCP": "1",
     "X-Source": "mcp",
   };
+  const apiKey = process.env.EMFIRGE_API_KEY;
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
   const controller = new AbortController();
   const timeoutMs = opts.timeout ?? 90_000;

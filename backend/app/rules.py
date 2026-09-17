@@ -1,5 +1,5 @@
 from app.models import AWSInfrastructure, RiskFinding, ToxicCombo
-from app.egraph import Graph, find_orphaned_resources, get_internet_reachable_set, get_attack_path_to
+from app.egraph import Graph, find_orphaned_resources, get_internet_reachable_set, get_attack_path_to, is_traversable_relationship
 from typing import List, Optional, Set
 from dataclasses import dataclass
 
@@ -50,6 +50,8 @@ class GraphContext:
                 continue
             visited.add(current)
             for edge in self.graph._edges_by_source.get(current, []):
+                if not is_traversable_relationship(edge):
+                    continue
                 if edge['to'] not in visited:
                     queue.append((edge['to'], depth + 1))
         visited.discard(resource_id)
@@ -165,10 +167,13 @@ def check_ssh_open(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx:
                     issue_suffix = ' — instances are behind load balancer'
                     recommendation_suffix = ' or use AWS Systems Manager Session Manager for secure access'
                 
-                # Check for dev environment naming
+                # Check for dev environment naming only when no attached instance
+                # is confirmed internet-reachable.
+                reachable = ctx.reachable if ctx else get_internet_reachable_set(graph)
+                has_reachable_instance = any(instance_id in reachable for instance_id in attached_instances)
                 for instance_id in attached_instances:
                     if is_likely_dev(instance_id):
-                        if severity == 'Critical':
+                        if severity == 'Critical' and not has_reachable_instance:
                             severity = 'Moderate'
                             confidence = 'LOW'
                         issue_suffix += ' — may be intentional in dev environment'
@@ -218,12 +223,24 @@ def check_rdp_open(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx:
                     issue_suffix = ' — instances are behind load balancer'
                     recommendation_suffix = ' or use AWS Systems Manager Session Manager for secure access'
 
-                # Check for dev environment naming
+                # If attached instances are not internet-reachable, use the existing lower severity.
+                if severity == 'Critical' and len(infra.vpc.subnets) > 0 and attached_instances:
+                    reachable = get_internet_reachable_set(graph)
+                    if not any(instance_id in reachable for instance_id in attached_instances):
+                        severity = 'Moderate'
+                        confidence = 'LOW'
+                        issue_suffix = ' — attached instances are not internet-reachable'
+
+                # Check for dev environment naming only when no attached instance
+                # is confirmed internet-reachable.
+                reachable = ctx.reachable if ctx else get_internet_reachable_set(graph)
+                has_reachable_instance = any(instance_id in reachable for instance_id in attached_instances)
                 if severity == 'Critical':
                     for instance_id in attached_instances:
                         if is_likely_dev(instance_id):
-                            severity = 'Moderate'
-                            confidence = 'LOW'
+                            if not has_reachable_instance:
+                                severity = 'Moderate'
+                                confidence = 'LOW'
                             issue_suffix += ' — may be intentional in dev environment'
                             break
 
@@ -561,6 +578,10 @@ def check_public_s3_context_aware(infra: AWSInfrastructure, graph: Optional[Grap
         # Check if this is likely a dev environment
         is_dev_bucket = is_likely_dev(bucket)
         
+        # Confirm internet reachability before applying the dev-name downgrade.
+        reachable = ctx.reachable if ctx else (get_internet_reachable_set(graph) if graph else set())
+        bucket_is_reachable = graph is not None and bucket in reachable
+
         # Determine severity and confidence based on CloudFront, naming patterns, and dev environment
         if has_cloudfront:
             # Bucket with CloudFront is likely intentional (website/CDN)
@@ -583,13 +604,20 @@ def check_public_s3_context_aware(infra: AWSInfrastructure, graph: Optional[Grap
             confidence = 'MEDIUM'
             issue_suffix = ' — log bucket should be private'
         else:
-            # Default severity based on dev environment
-            severity = 'Moderate' if is_dev_bucket else 'Critical'
-            confidence = 'LOW' if is_dev_bucket else 'HIGH'
-            issue_suffix = ' — may be intentional in dev environment' if is_dev_bucket else ''
+            # Default severity based on dev environment. Confirmed reachable
+            # buckets remain Critical even when their names look like dev.
+            if is_dev_bucket and bucket_is_reachable:
+                severity = 'Critical'
+                confidence = 'HIGH'
+                issue_suffix = ''
+            else:
+                severity = 'Moderate' if is_dev_bucket else 'Critical'
+                confidence = 'LOW' if is_dev_bucket else 'HIGH'
+                issue_suffix = ' — may be intentional in dev environment' if is_dev_bucket else ''
         
-        # Apply dev environment downgrade
-        if is_dev_bucket and severity == 'Critical':
+        # Apply dev environment downgrade only when the bucket is not confirmed
+        # internet-reachable in the graph. A bucket ID is the finding resource ID.
+        if is_dev_bucket and severity == 'Critical' and not bucket_is_reachable:
             severity = 'Moderate'
             confidence = 'LOW'
             if not issue_suffix:

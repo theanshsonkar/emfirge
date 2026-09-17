@@ -55,7 +55,7 @@ class TestInsightRateLimit:
     def test_window_expires_allows_new_requests(self):
         now = time.time()
         _insight_request_log["10.0.0.50"] = [now - 120] * 5  # all expired
-        _check_insight_rate_limit("10.0.0.50")  # should work - old timestamps pruned
+        _check_insight_rate_limit("10.0.0.50")  # should work — old timestamps pruned
 
 
 class TestTerraformRateLimit:
@@ -128,8 +128,8 @@ class TestScanDailyLimit:
 
     def test_rate_limit_returns_429_not_500(self):
         """The bug we fixed: HTTPException(429) was caught by except Exception → 500."""
-        with patch("app.main.get_scan_count_today", return_value=15):
-            with patch("app.main.agentops", create=True) as mock_ao:
+        with patch("app.main.get_scan_count_today", return_value=5):
+            with patch("app.main.agentops") as mock_ao:
                 mock_ao.start_session.return_value = MagicMock()
                 resp = client.post("/analyze", json={
                     "role_arn": "arn:aws:iam::123456789012:role/EmfirgeRole",
@@ -139,20 +139,19 @@ class TestScanDailyLimit:
                 assert "5" in resp.json()["detail"]
 
     def test_whitelisted_account_bypasses_limit(self):
-        """Account 111111111111 is whitelisted via WHITELISTED_ACCOUNTS env var — should bypass rate limiting."""
+        """Account 000000000000 should bypass rate limiting."""
         mock_infra = AWSInfrastructure(region="us-east-1")
         mock_ai = {"ai_summary": "ok", "recommended_improvements": [], "priority_actions": [], "latency_ms": 0}
-        with patch.dict("os.environ", {"WHITELISTED_ACCOUNTS": "111111111111"}):
-          with patch("app.main.get_scan_count_today", return_value=99):
+        with patch("app.main.get_scan_count_today", return_value=99):
             with patch("app.main.collect_infrastructure", return_value=mock_infra):
                 with patch("app.main.generate_explanation", return_value=mock_ai):
                     with patch("app.main.save_report", return_value="r.json"):
                         with patch("app.main.get_report_url", return_value="https://s3/r"):
                             with patch("app.main.save_analysis", return_value=1):
                                 with patch("app.main.get_previous_scan_for_account", return_value={}):
-                                    with patch("app.main.agentops", create=True):
+                                    with patch("app.main.agentops"):
                                         resp = client.post("/analyze", json={
-                                            "role_arn": "arn:aws:iam::111111111111:role/EmfirgeRole",
+                                            "role_arn": "arn:aws:iam::000000000000:role/EmfirgeRole",
                                             "region": "us-east-1",
                                         })
                                         assert resp.status_code == 200
@@ -160,7 +159,7 @@ class TestScanDailyLimit:
     def test_unknown_account_id_not_rate_limited(self):
         """Malformed ARN → account_id='unknown' → no rate limit check."""
         with patch("app.main.collect_infrastructure", side_effect=ValueError("bad")):
-            with patch("app.main.agentops", create=True):
+            with patch("app.main.agentops"):
                 resp = client.post("/analyze", json={
                     "role_arn": "not-a-valid-arn",
                     "region": "us-east-1",
@@ -233,7 +232,7 @@ class TestInputValidation:
 
 
 class TestGraphInputValidation:
-    """Input sanitization for the graph endpoint at /egraph/{id}."""
+    """GET /egraph/{analysis_id} — input sanitization."""
 
     def test_sql_injection_in_analysis_id_blocked(self):
         resp = client.get("/egraph/'; DROP TABLE analysis_logs; --")
@@ -335,7 +334,7 @@ class TestGracefulDegradation:
                         with patch("app.main.get_report_url", return_value="https://s3/r"):
                             with patch("app.main.save_analysis", return_value=1):
                                 with patch("app.main.get_previous_scan_for_account", return_value={}):
-                                    with patch("app.main.agentops", create=True):
+                                    with patch("app.main.agentops"):
                                         resp = client.post("/analyze", json={
                                             "role_arn": "arn:aws:iam::123456789012:role/R",
                                             "region": "us-east-1",
@@ -354,7 +353,7 @@ class TestGracefulDegradation:
                         with patch("app.main.get_report_url", return_value="https://s3/r"):
                             with patch("app.main.save_analysis", return_value=-1):
                                 with patch("app.main.get_previous_scan_for_account", return_value={}):
-                                    with patch("app.main.agentops", create=True):
+                                    with patch("app.main.agentops"):
                                         resp = client.post("/analyze", json={
                                             "role_arn": "arn:aws:iam::123456789012:role/R",
                                             "region": "us-east-1",
@@ -552,8 +551,8 @@ class TestAPICompleteness:
             resp = client.get("/simulate/remaining?analysis_id=nonexistent")
             assert resp.status_code == 200
             data = resp.json()
-            assert data["remaining"] == 10
-            assert data["limit"] == 10
+            assert data["remaining"] == 3
+            assert data["limit"] == 3
 
     def test_feedback_get_endpoint(self):
         with patch("app.main.get_feedback", return_value=[]):
@@ -626,7 +625,7 @@ class TestResponseShapes:
                         with patch("app.main.get_report_url", return_value="https://s3/r"):
                             with patch("app.main.save_analysis", return_value=1):
                                 with patch("app.main.get_previous_scan_for_account", return_value={}):
-                                    with patch("app.main.agentops", create=True):
+                                    with patch("app.main.agentops"):
                                         resp = client.post("/analyze", json={
                                             "role_arn": "arn:aws:iam::123456789012:role/R",
                                             "region": "us-east-1",

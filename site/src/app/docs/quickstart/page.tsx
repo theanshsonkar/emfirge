@@ -38,7 +38,7 @@ export default function Page() {
       <Callout type="tip" title="Try it with zero setup">
         Use the demo role, fake infrastructure, the real engine:
         <div className="mt-2 font-mono text-[12.5px] text-foreground">
-          arn:aws:iam::194722410583:role/EmfirgeReadOnly · region us-east-1
+          arn:aws:iam::000000000000:role/EmfirgeReadOnly · region us-east-1
         </div>
       </Callout>
 

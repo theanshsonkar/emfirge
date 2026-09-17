@@ -11,7 +11,9 @@
 [![npm](https://img.shields.io/npm/v/@emfirge/mcp?style=flat-square&color=cb3837)](https://www.npmjs.com/package/@emfirge/mcp)
 [![CI](https://img.shields.io/github/actions/workflow/status/theanshsonkar/emfirge/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/theanshsonkar/emfirge/actions/workflows/ci.yml)
 [![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-5b5bd6?style=flat-square)][registry]
-[![License](https://img.shields.io/badge/License-BUSL_1.1-2563eb?style=flat-square)][license]
+[![License](https://img.shields.io/badge/License-AGPL--3.0%20(engine)%20%2F%20Apache--2.0%20(mcp%2F)-2563eb?style=flat-square)][license]
+
+**License:** AGPL-3.0 (engine) / Apache-2.0 (mcp/)
 
 </div>
 
@@ -44,7 +46,7 @@ arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 
 No role yet? Say **“help me set up Emfirge.”** You will get a one-click CloudFormation link for a read-only IAM role.
 
-> **Try it now with no setup:** use demo role `arn:aws:iam::194722410583:role/EmfirgeReadOnly` in `us-east-1`.
+> **Try it now with no setup:** use demo role `arn:aws:iam::000000000000:role/EmfirgeReadOnly` in `us-east-1`.
 
 **Free:** 5 scans per AWS account per day. No signup. No API key.
 

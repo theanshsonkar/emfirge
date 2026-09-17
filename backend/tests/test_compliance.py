@@ -11,7 +11,7 @@ from app.compliance import evaluate_framework, evaluate_all_frameworks
 client = TestClient(app)
 
 
-# -- UNIT TESTS: compliance.py -------------------------------------
+# ── UNIT TESTS: compliance.py ─────────────────────────────────────
 
 class TestEvaluateFramework:
     """Test the pure evaluation logic (no DB, no API)."""
@@ -138,7 +138,7 @@ class TestEvaluateFramework:
         assert result["passedControls"] + result["failedControls"] + result["naControls"] == result["totalControls"]
 
 
-# -- API ENDPOINT TESTS --------------------------------------------
+# ── API ENDPOINT TESTS ────────────────────────────────────────────
 
 class TestComplianceEndpoint:
     """Test the GET /compliance/{analysis_id} route."""

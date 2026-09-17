@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, HTTPException, Request, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware  # NEW
 from fastapi.responses import StreamingResponse
 from botocore.exceptions import ClientError, NoCredentialsError
@@ -16,7 +16,7 @@ from collections import defaultdict
 from dotenv import load_dotenv
 
 # AGENTOPS IMPORT
-# (AgentOps telemetry omitted from public source)
+import agentops
 
 from app.models import (
     AWSCredentials, AnalysisResponse,
@@ -30,10 +30,15 @@ from app.models import (
     TFIndexRequest, TFIndexResponse, TFIndexStatusResponse,
     CIAnalyzeRequest, CIAnalyzeResponse, CIAPIKeyRequest, CIAPIKeyResponse,
 )
+from app.diffing import DiffResult
+from app.mutations import Change, apply_change
+from app.verdict import CombinedVerdict, combined_verdict
+from app import branches
 from app.aws_collector import collect_infrastructure
 from app.rules import run_all_checks, find_toxic_combos
 from app.scoring import calculate_score
 from app.llm import generate_explanation
+from app.auth import require_api_key
 from app.database import create_tables, save_analysis, get_recent_logs, get_log_by_id, get_scan_count_today, get_previous_scan_for_account, save_drift_events, get_drift_events, save_simulation_log, get_simulation_count_today, save_feedback, get_feedback, save_llm_usage, get_llm_usage_count_today, save_tf_index, get_tf_index, get_tf_index_status, create_ci_api_key, validate_ci_api_key, get_ci_api_keys
 from app.storage import save_report, get_report_url
 from app.egraph import build_graph, get_simulation_slice, validate_simulation_response, classify_query, format_graph_for_claude, bfs_from_internet, find_attack_path, Graph
@@ -41,6 +46,12 @@ from app.drift_service import compare_findings
 from app.compliance import evaluate_all_frameworks
 
 load_dotenv()
+
+
+def _whitelisted_accounts() -> set[str]:
+    """Return account IDs allowed to bypass daily feature limits."""
+    return set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
+
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +116,80 @@ def _check_pr_rate_limit(ip: str) -> None:
     _pr_request_log[ip].append(now)
 
 
+# ── IN-MEMORY RATE LIMITER FOR BRANCH ROUTES ─────────────────────
+# Branches are persisted state and therefore use the same per-route IP
+# limiter pattern as the existing sensitive/cost-bearing endpoints. This is
+# not authentication; without global auth middleware these routes remain
+# publicly callable, subject to this process-local limiter.
+_branch_request_log: dict = defaultdict(list)
+_BRANCH_LIMIT = 30
+_BRANCH_WINDOW = 60
+
+
+def _check_branch_rate_limit(ip: str) -> None:
+    """Raise HTTP 429 after 30 branch requests per IP in one minute."""
+    now = time.time()
+    window_start = now - _BRANCH_WINDOW
+    _branch_request_log[ip] = [t for t in _branch_request_log[ip] if t > window_start]
+    if len(_branch_request_log[ip]) >= _BRANCH_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail='Rate limit reached. Please wait a moment before making more branch requests.',
+        )
+    _branch_request_log[ip].append(now)
+
+
+def _load_analysis_record(analysis_id: str):
+    """Return the newest matching analysis infrastructure and stored data.
+
+    This intentionally mirrors verify-fix's newest-100 lookup and tolerates
+    malformed records, continuing to older records before reporting missing
+    data to the caller.
+    """
+    from app.database import AnalysisLog, SessionLocal
+
+    session = SessionLocal()
+    try:
+        logs = session.query(AnalysisLog).order_by(AnalysisLog.timestamp.desc()).limit(100).all()
+        for log in logs:
+            try:
+                data = json.loads(log.findings_json)
+                if data.get('analysis_id') != analysis_id:
+                    continue
+                infrastructure = AWSInfrastructure.model_validate(data.get('infrastructure', {}))
+                return infrastructure, data
+            except Exception:
+                continue
+    except Exception as exc:
+        logger.error(f'analysis load failed: {exc}')
+    finally:
+        session.close()
+    return None, None
+
+
+def get_infrastructure_for_analysis(analysis_id: str) -> AWSInfrastructure:
+    """Load an analysis snapshot using the verify-fix reconstruction rules."""
+    infrastructure, _ = _load_analysis_record(analysis_id)
+    if infrastructure is None:
+        raise HTTPException(status_code=404, detail='Scan data not found for this analysis ID.')
+    return infrastructure
+
+
+def _branch_summary(branch) -> dict:
+    """Serialize only the safe, compact branch metadata exposed by the API."""
+    return {
+        'branch_id': branch.branch_id,
+        'name': branch.name,
+        'status': branch.status,
+        'base_analysis_id': branch.base_analysis_id,
+        'num_changes': len(branch.changes),
+    }
+
+
+def _branch_request_ip(request: Request) -> str:
+    return request.client.host if request.client else 'unknown'
+
+
 def _lookup_resource_name(resource_id: str, resource_type: str) -> Optional[str]:
     """
     Look up a resource's human-readable name from the most recent scan data.
@@ -151,7 +236,7 @@ def _lookup_resource_name(resource_id: str, resource_type: str) -> Optional[str]
 
 # AGENTOPS INIT — runs once when server starts
 try:
-    pass  # AgentOps init omitted from public source
+    agentops.init(os.getenv('AGENTOPS_API_KEY'))
 except Exception as _agentops_err:
     logger.warning(f'AgentOps init failed (non-fatal): {_agentops_err}')
 
@@ -268,7 +353,7 @@ def get_log_by_uuid(analysis_id: str, account_id: str = None):
     finally:
         session.close()
 
-@app.get('/egraph/{analysis_id}')
+@app.get('/egraph/{analysis_id}', dependencies=[Depends(require_api_key)])
 def get_graph(analysis_id: str):
     """
     Get infrastructure graph data for a completed scan.
@@ -376,13 +461,15 @@ def get_graph(analysis_id: str):
         edge_types = Counter(edge['relationship'] for edge in graph.edges)
         total_waste = sum(r['estimated_monthly_cost'] for r in orphaned)
         
-        # Return graph data
+        # Return graph data using the legacy public serialization shape. Typed
+        # nodes and edges remain available internally for graph analysis above.
+        graph_data = graph.to_dict()
         return {
             'analysis_id': analysis_id,
             'timestamp': findings_data.get('timestamp'),
             'region': findings_data.get('region_analyzed'),
-            'nodes': graph.nodes,
-            'edges': graph.edges,
+            'nodes': graph_data['nodes'],
+            'edges': graph_data['edges'],
             'orphaned_resources': orphaned,
             'attack_paths': attack_paths,
             'node_label_map': node_label_map,
@@ -407,7 +494,7 @@ def get_graph(analysis_id: str):
         session.close()
 
 
-@app.get('/compliance/{analysis_id}')
+@app.get('/compliance/{analysis_id}', dependencies=[Depends(require_api_key)])
 def get_compliance(analysis_id: str):
     """
     Evaluate compliance frameworks (CIS AWS 1.5, SOC 2) against a completed scan.
@@ -467,7 +554,7 @@ def get_compliance(analysis_id: str):
         session.close()
 
 
-@app.post("/simulate")
+@app.post("/simulate", dependencies=[Depends(require_api_key)])
 async def simulate(request: SimulateRequest, http_request: Request, raw: bool = False):
     """
     Single-phase SSE simulation: Haiku for narrative + deterministic BFS for attack chain.
@@ -529,7 +616,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
 
     # ── DAILY SIMULATION LIMIT: 10/day per AWS account ─────────────
     SIMULATION_DAILY_LIMIT = 10
-    WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
+    WHITELISTED_ACCOUNTS = _whitelisted_accounts()
     if aws_account_id and aws_account_id not in WHITELISTED_ACCOUNTS:
         sim_count = get_simulation_count_today(aws_account_id)
         if sim_count >= SIMULATION_DAILY_LIMIT:
@@ -865,7 +952,7 @@ Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@app.get('/simulate/remaining')
+@app.get('/simulate/remaining', dependencies=[Depends(require_api_key)])
 def simulate_remaining(analysis_id: str):
     """Returns how many simulations remain today for the account that owns this analysis."""
     SIMULATION_DAILY_LIMIT = 10
@@ -893,7 +980,7 @@ def simulate_remaining(analysis_id: str):
         return {'remaining': SIMULATION_DAILY_LIMIT, 'limit': SIMULATION_DAILY_LIMIT, 'used': 0}
 
     # Whitelisted accounts get unlimited simulations
-    WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
+    WHITELISTED_ACCOUNTS = _whitelisted_accounts()
     if aws_account_id in WHITELISTED_ACCOUNTS:
         return {'remaining': SIMULATION_DAILY_LIMIT, 'limit': SIMULATION_DAILY_LIMIT, 'used': 0}
 
@@ -921,7 +1008,7 @@ def usage_remaining(account_id: str = Query(...)):
     }
 
 
-@app.post('/remediation/generate-insight', response_model=RemediationInsightResponse)
+@app.post('/remediation/generate-insight', response_model=RemediationInsightResponse, dependencies=[Depends(require_api_key)])
 def generate_remediation_insight(request: RemediationInsightRequest, http_request: Request, raw: bool = False):
     """
     Generate AI-powered 'What this fixes' and 'Why it matters' text for a single finding.
@@ -938,7 +1025,7 @@ def generate_remediation_insight(request: RemediationInsightRequest, http_reques
 
     # ── ACCOUNT-BASED DAILY LIMIT: 5/day per account ─────────────
     INSIGHT_DAILY_LIMIT = 5
-    WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
+    WHITELISTED_ACCOUNTS = _whitelisted_accounts()
     account_id = request.account_id
     if account_id and account_id not in WHITELISTED_ACCOUNTS:
         insight_used = get_llm_usage_count_today(account_id, "insight")
@@ -1056,7 +1143,7 @@ def _validate_hcl_output(hcl: str, request: TerraformGenerateRequest) -> bool:
     return True
 
 
-@app.post('/remediation/generate-terraform', response_model=TerraformGenerateResponse)
+@app.post('/remediation/generate-terraform', response_model=TerraformGenerateResponse, dependencies=[Depends(require_api_key)])
 def generate_terraform(request: TerraformGenerateRequest, http_request: Request, raw: bool = False):
     # Raw mode: MCP host generates HCL itself, skip Claude
     if _is_raw_mode(http_request, raw):
@@ -1067,7 +1154,7 @@ def generate_terraform(request: TerraformGenerateRequest, http_request: Request,
 
     # ── ACCOUNT-BASED DAILY LIMIT: 5/day per account ─────────────
     TERRAFORM_DAILY_LIMIT = 5
-    WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
+    WHITELISTED_ACCOUNTS = _whitelisted_accounts()
     account_id = request.account_id
     if account_id and account_id not in WHITELISTED_ACCOUNTS:
         terraform_used = get_llm_usage_count_today(account_id, "terraform")
@@ -1180,7 +1267,97 @@ resource "aws_vpc_security_group_ingress_rule" "fix_ssh" {{
         return TerraformGenerateResponse(hcl='', filename='fix.tf', valid=False, errors=str(e))
 
 
-@app.post('/remediation/verify-fix', response_model=VerifyFixResponse)
+# ── SIMULATION BRANCH API ─────────────────────────────────────────
+
+
+@app.post('/branches/compare', dependencies=[Depends(require_api_key)])
+def compare_branches_endpoint(payload: dict, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    branch_ids = payload.get('branch_ids') if isinstance(payload, dict) else None
+    if not isinstance(branch_ids, list) or not all(isinstance(item, str) for item in branch_ids):
+        raise HTTPException(status_code=422, detail='branch_ids must be a list of strings')
+    try:
+        return branches.compare_branches(branch_ids)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post('/branches', dependencies=[Depends(require_api_key)])
+def create_branch_endpoint(payload: dict, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    if not isinstance(payload, dict) or not isinstance(payload.get('base_analysis_id'), str) or not isinstance(payload.get('name'), str):
+        raise HTTPException(status_code=422, detail='base_analysis_id and name are required strings')
+    base_infra = get_infrastructure_for_analysis(payload['base_analysis_id'])
+    try:
+        branch_id = branches.create_branch(base_infra, payload['name'], payload['base_analysis_id'])
+    except branches.BranchLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    return {'branch_id': branch_id}
+
+
+@app.get('/branches', dependencies=[Depends(require_api_key)])
+def list_branches_endpoint(request: Request, base_analysis_id: Optional[str] = None):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    return [_branch_summary(branch) for branch in branches.list_branches(base_analysis_id)]
+
+
+@app.post('/branches/{branch_id}/changes', dependencies=[Depends(require_api_key)])
+def add_branch_change_endpoint(branch_id: str, change: Change, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    try:
+        current_branch = branches.get_branch(branch_id)
+        if current_branch.status != 'open':
+            raise ValueError(f"Branch is not open: {branch_id}")
+        rebuilt = branches.rebuild_branch_infra(branch_id)
+        apply_change(rebuilt, change)
+        branch = branches.apply_change_to_branch(branch_id, change)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        status_code = 409 if str(exc).startswith('Branch is not open:') else 422
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    return {'branch_id': branch.branch_id, 'num_changes': len(branch.changes)}
+
+
+@app.get('/branches/{branch_id}/diff', response_model=DiffResult, dependencies=[Depends(require_api_key)])
+def branch_diff_endpoint(branch_id: str, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    try:
+        return branches.get_branch_diff(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get('/branches/{branch_id}/verdict', response_model=CombinedVerdict, dependencies=[Depends(require_api_key)])
+def branch_verdict_endpoint(branch_id: str, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    try:
+        branch = branches.get_branch(branch_id)
+        rebuilt = branches.rebuild_branch_infra(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return combined_verdict(branch.base, rebuilt)
+
+
+@app.post('/branches/{branch_id}/rollback', dependencies=[Depends(require_api_key)])
+def rollback_branch_endpoint(branch_id: str, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    try:
+        branch = branches.rollback_last(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return _branch_summary(branch)
+
+
+@app.post('/branches/{branch_id}/discard', dependencies=[Depends(require_api_key)])
+def discard_branch_endpoint(branch_id: str, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    try:
+        branch = branches.discard_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {'branch_id': branch.branch_id, 'status': branch.status}
+@app.post('/remediation/verify-fix', response_model=VerifyFixResponse, dependencies=[Depends(require_api_key)])
 def verify_fix(request: VerifyFixRequest, http_request: Request):
     """
     Simulate applying a fix for a specific finding and return the impact.
@@ -1202,30 +1379,8 @@ def verify_fix(request: VerifyFixRequest, http_request: Request):
         return VerifyFixResponse(can_simulate=False)
 
     # ── LOAD INFRASTRUCTURE FROM DB ───────────────────────────────
-    from app.database import SessionLocal, AnalysisLog
-
-    infrastructure = None
-    original_findings_data = None
-    try:
-        session = SessionLocal()
-        try:
-            logs = session.query(AnalysisLog).order_by(AnalysisLog.timestamp.desc()).limit(100).all()
-            for log in logs:
-                try:
-                    data = json.loads(log.findings_json)
-                    if data.get('analysis_id') == request.analysis_id:
-                        infra_dict = data.get('infrastructure', {})
-                        infrastructure = AWSInfrastructure(**infra_dict)
-                        original_findings_data = data
-                        break
-                except Exception:
-                    continue
-        finally:
-            session.close()
-    except Exception as e:
-        logger.error(f"verify_fix: DB load failed: {e}")
-
-    if not infrastructure:
+    infrastructure, original_findings_data = _load_analysis_record(request.analysis_id)
+    if infrastructure is None:
         raise HTTPException(status_code=404, detail='Scan data not found for this analysis ID.')
 
     # ── DEEP-COPY AND APPLY MUTATION ──────────────────────────────
@@ -1521,7 +1676,7 @@ def _apply_rule_based_mutation(infra_dict: dict, rule_id: str, resource_id: str)
     return False
 
 
-@app.post('/remediation/fix')
+@app.post('/remediation/fix', dependencies=[Depends(require_api_key)])
 def unified_fix(request: TerraformGenerateRequest, http_request: Request, raw: bool = False):
     """
     Unified fix endpoint: generates HCL + verifies it in one call.
@@ -1540,7 +1695,7 @@ def unified_fix(request: TerraformGenerateRequest, http_request: Request, raw: b
 
     # ── DAILY LIMIT: 10/day per account ───────────────────────────
     FIX_DAILY_LIMIT = 10
-    WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
+    WHITELISTED_ACCOUNTS = _whitelisted_accounts()
     account_id = request.account_id
     if account_id and account_id not in WHITELISTED_ACCOUNTS:
         fix_used = get_llm_usage_count_today(account_id, "terraform")
@@ -1815,12 +1970,12 @@ CRITICAL RULES:
     }
 
 
-@app.get('/github/install-url')
+@app.get('/github/install-url', dependencies=[Depends(require_api_key)])
 def github_install_url():
     return {"url": os.getenv('GITHUB_APP_INSTALL_URL', 'https://github.com/apps/emfirge-security')}
 
 
-@app.get('/github/repos')
+@app.get('/github/repos', dependencies=[Depends(require_api_key)])
 def github_repos(installation_id: int):
     from app.github_service import _get_private_key
     import requests as req
@@ -1842,7 +1997,7 @@ def github_repos(installation_id: int):
         return GitHubReposResponse(repos=[])
 
 
-@app.post('/github/pr', response_model=GitHubPRResponse)
+@app.post('/github/pr', response_model=GitHubPRResponse, dependencies=[Depends(require_api_key)])
 def create_github_pr(request: GitHubPRRequest, http_request: Request):
     client_ip = http_request.client.host if http_request.client else 'unknown'
     _check_pr_rate_limit(client_ip)
@@ -1900,7 +2055,7 @@ def create_github_pr(request: GitHubPRRequest, http_request: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post('/github/webhook')
+@app.post('/github/webhook', dependencies=[Depends(require_api_key)])
 async def github_webhook(http_request: Request):
     import hmac
     import hashlib
@@ -2214,7 +2369,7 @@ async def github_webhook(http_request: Request):
 
 # ── TF INDEXING ──────────────────────────────────────────────────
 
-@app.post('/github/index-tf', response_model=TFIndexResponse)
+@app.post('/github/index-tf', response_model=TFIndexResponse, dependencies=[Depends(require_api_key)])
 def index_tf_repo(request: TFIndexRequest):
     """Manually trigger TF indexing for a repo. Called after GitHub App install."""
     from app.github_service import get_github_client
@@ -2237,7 +2392,7 @@ def index_tf_repo(request: TFIndexRequest):
         )
 
 
-@app.get('/github/index-status')
+@app.get('/github/index-status', dependencies=[Depends(require_api_key)])
 def tf_index_status(installation_id: int, repo: str):
     """Check TF indexing status for a repo."""
     status = get_tf_index_status(installation_id, repo)
@@ -2675,14 +2830,14 @@ def list_feedback(limit: int = 50, key: str = None):
     return get_feedback(limit=min(limit, 100))
 
 
-@app.post('/analyze')
+@app.post('/analyze', dependencies=[Depends(require_api_key)])
 def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
     start_time = time.time()
 
     # AGENTOPS SESSION START
     session = None
     try:
-        session = None  # AgentOps omitted
+        session = agentops.start_session()
     except Exception:
         pass
 
@@ -2697,7 +2852,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
 
         if account_id != 'unknown':
             # Whitelisted accounts bypass rate limiting (owner/dev accounts)
-            WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
+            WHITELISTED_ACCOUNTS = _whitelisted_accounts()
             if account_id not in WHITELISTED_ACCOUNTS:
                 scan_count = get_scan_count_today(account_id)
                 if scan_count >= DAILY_SCAN_LIMIT:
@@ -2710,7 +2865,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
         # STEP 1 — Collect infrastructure data (demo or real)
         from app.demo_seed import is_demo_arn, get_demo_infrastructure
         if is_demo_arn(credentials.role_arn):
-            infrastructure = get_demo_infrastructure()
+            infrastructure = get_demo_infrastructure(credentials.role_arn)
         else:
             infrastructure = collect_infrastructure(credentials)
 
@@ -3035,7 +3190,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
 # Bypasses Vercel's 30s proxy timeout by streaming progress events.
 # Same logic as /analyze but wrapped in an SSE generator.
 
-@app.post('/analyze/stream')
+@app.post('/analyze/stream', dependencies=[Depends(require_api_key)])
 async def analyze_stream(credentials: AWSCredentials, request: Request, raw: bool = False):
     """
     SSE streaming version of /analyze. Sends progress events as each collector
@@ -3066,7 +3221,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
         account_id = 'unknown'
 
     if account_id != 'unknown':
-        WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
+        WHITELISTED_ACCOUNTS = _whitelisted_accounts()
         if account_id not in WHITELISTED_ACCOUNTS:
             scan_count = get_scan_count_today(account_id)
             if scan_count >= DAILY_SCAN_LIMIT:
@@ -3086,7 +3241,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
             yield _emit("progress", {"step": "collecting", "service": "starting", "status": "in_progress", "detail": "Assuming IAM role..."})
 
             if is_demo_arn(credentials.role_arn):
-                infrastructure = get_demo_infrastructure()
+                infrastructure = get_demo_infrastructure(credentials.role_arn)
                 yield _emit("progress", {"step": "collecting", "service": "demo", "status": "done", "detail": "Demo data loaded"})
             else:
                 # Inline collector with per-service progress events
@@ -3498,7 +3653,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
 # ── COMPONENT SIMULATION ENDPOINT ─────────────────────────────────
 # Deterministic mutation: Python mutates graph, Claude only writes prose.
 
-@app.post('/simulate/component')
+@app.post('/simulate/component', dependencies=[Depends(require_api_key)])
 def simulate_component(request: ComponentRequest, http_request: Request):
     """
     Simulate adding/modifying a component in the infrastructure.
@@ -3557,7 +3712,7 @@ def simulate_component(request: ComponentRequest, http_request: Request):
 
     # ── DAILY SIMULATION LIMIT: 10/day per AWS account ─────────────
     SIMULATION_DAILY_LIMIT = 10
-    WHITELISTED_ACCOUNTS = set(filter(None, os.getenv('WHITELISTED_ACCOUNTS', '').split(',')))
+    WHITELISTED_ACCOUNTS = _whitelisted_accounts()
     if aws_account_id and aws_account_id not in WHITELISTED_ACCOUNTS:
         sim_count = get_simulation_count_today(aws_account_id)
         if sim_count >= SIMULATION_DAILY_LIMIT:

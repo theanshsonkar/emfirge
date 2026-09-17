@@ -34,7 +34,7 @@ from app.models import (
 )
 
 
-# -- EC2 RULES -----------------------------------------------------
+# ── EC2 RULES ─────────────────────────────────────────────────────
 
 class TestSSHOpen:
     def test_ssh_open_is_critical(self, nightmare_infra):
@@ -243,7 +243,7 @@ class TestIMDSv1:
         assert "i-003" not in ids
 
 
-# -- S3 RULES -----------------------------------------------------
+# ── S3 RULES ─────────────────────────────────────────────────────
 
 class TestPublicS3:
     def test_prod_bucket_public_is_critical(self):
@@ -342,7 +342,7 @@ class TestS3NoLogging:
         assert check_s3_no_logging(empty_infra) is None
 
 
-# -- RDS RULES -----------------------------------------------------
+# ── RDS RULES ─────────────────────────────────────────────────────
 
 class TestRDSRules:
     def test_no_backup_is_critical(self, nightmare_infra):
@@ -377,7 +377,7 @@ class TestRDSRules:
         assert result.rule_id == "EMFIRGE-RDS-005"
 
 
-# -- IAM RULES -----------------------------------------------------
+# ── IAM RULES ─────────────────────────────────────────────────────
 
 class TestIAMRules:
     def test_root_access_keys_critical(self, nightmare_infra):
@@ -426,7 +426,7 @@ class TestIAMRules:
         assert check_root_used_recently(clean_infra) is None
 
 
-# -- CLOUDTRAIL / GUARDDUTY ----------------------------------------
+# ── CLOUDTRAIL / GUARDDUTY ────────────────────────────────────────
 
 class TestCloudTrailGuardDuty:
     def test_cloudtrail_disabled_flagged(self, nightmare_infra):
@@ -454,7 +454,7 @@ class TestCloudTrailGuardDuty:
         assert check_guardduty_disabled(clean_infra) is None
 
 
-# -- VPC / KMS / ECS / SNS / WAF ----------------------------------
+# ── VPC / KMS / ECS / SNS / WAF ──────────────────────────────────
 
 class TestVPCKMSECSSNSWAF:
     def test_vpc_no_flow_logs_flagged(self, nightmare_infra):
@@ -502,7 +502,7 @@ class TestVPCKMSECSSNSWAF:
         assert check_waf_not_enabled(clean_infra) is None
 
 
-# -- RUN ALL CHECKS ------------------------------------------------
+# ── RUN ALL CHECKS ────────────────────────────────────────────────
 
 class TestRunAllChecks:
     def test_clean_account_has_no_critical_risks(self, clean_infra):
@@ -550,7 +550,7 @@ class TestRunAllChecks:
         assert len(results["critical_risks"]) >= 5
 
 
-# -- TOXIC COMBOS -------------------------------------------------
+# ── TOXIC COMBOS ─────────────────────────────────────────────────
 
 class TestToxicCombos:
     def test_ssh_open_no_guardduty_detected(self, nightmare_infra):
@@ -590,7 +590,7 @@ class TestToxicCombos:
             assert c.severity in ("CRITICAL", "HIGH")
             assert isinstance(c.resource_ids, list)
 
-# -- NEW AVAILABILITY RULES ----------------------------------------
+# ── NEW AVAILABILITY RULES ────────────────────────────────────────
 
 class TestRDSNoMultiAZ:
     def test_no_multi_az_flagged(self, nightmare_infra):
@@ -709,7 +709,7 @@ class TestSingleAZInstances:
         assert check_single_az_instances(infra) is None
 
 
-# -- NEW DISASTER RECOVERY RULES ----------------------------------
+# ── NEW DISASTER RECOVERY RULES ──────────────────────────────────
 
 class TestRDSLowBackupRetention:
     def test_low_retention_flagged(self):

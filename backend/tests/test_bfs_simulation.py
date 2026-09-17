@@ -10,7 +10,7 @@ from app.models import (
 )
 
 
-# -- HELPERS -------------------------------------------------------
+# ── HELPERS ───────────────────────────────────────────────────────
 
 def make_open_sg(sg_id, port=22, attached_to=None):
     return SecurityGroup(
@@ -34,7 +34,7 @@ def make_instance(instance_id, sg_ids=None):
     )
 
 
-# -- bfs_from_internet() -------------------------------------------
+# ── bfs_from_internet() ───────────────────────────────────────────
 
 class TestBfsFromInternet:
 
@@ -208,7 +208,7 @@ class TestBfsFromInternet:
         assert result['layers']['sg-http'] == 1
 
 
-# -- get_simulation_slice() ----------------------------------------
+# ── get_simulation_slice() ────────────────────────────────────────
 
 class TestGetSimulationSlice:
 
@@ -307,7 +307,7 @@ class TestGetSimulationSlice:
             assert 'layers' in result, f"Missing 'layers' key for category={category}"
 
 
-# -- format_graph_for_claude() -------------------------------------
+# ── format_graph_for_claude() ─────────────────────────────────────
 
 class TestFormatGraphForClaude:
 

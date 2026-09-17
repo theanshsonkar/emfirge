@@ -11,7 +11,7 @@ from app.main import app
 client = TestClient(app)
 
 
-# -- HEALTH / STATUS -----------------------------------------------
+# ── HEALTH / STATUS ───────────────────────────────────────────────
 
 class TestHealthRoutes:
     def test_root_returns_ok(self):
@@ -27,7 +27,7 @@ class TestHealthRoutes:
         assert resp.json()["status"] == "healthy"
 
 
-# -- LOGS / HISTORY ------------------------------------------------
+# ── LOGS / HISTORY ────────────────────────────────────────────────
 
 class TestLogsRoutes:
     def test_logs_returns_list(self):
@@ -90,7 +90,7 @@ class TestLogsRoutes:
             assert "count" in data
 
 
-# -- GITHUB ROUTES -------------------------------------------------
+# ── GITHUB ROUTES ─────────────────────────────────────────────────
 
 class TestGitHubRoutes:
     def test_install_url_returns_url(self):
@@ -106,15 +106,13 @@ class TestGitHubRoutes:
             assert resp.json()["repos"] == []
 
     def test_github_webhook_invalid_signature(self):
-        # Need a secret configured for signature validation to actually run
-        with patch.dict("os.environ", {"GITHUB_WEBHOOK_SECRET": "test-secret"}):
-            resp = client.post(
-                "/github/webhook",
-                content=b'{"action": "opened"}',
-                headers={"X-Hub-Signature-256": "sha256=invalidsig", "Content-Type": "application/json"},
-            )
-            assert resp.status_code == 200
-            assert resp.json()["status"] == "invalid signature"
+        resp = client.post(
+            "/github/webhook",
+            content=b'{"action": "opened"}',
+            headers={"X-Hub-Signature-256": "sha256=invalidsig", "Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "invalid signature"
 
     def test_github_webhook_no_secret_accepts_all(self):
         """When no webhook secret configured, all payloads accepted."""
@@ -128,7 +126,7 @@ class TestGitHubRoutes:
             assert resp.json()["status"] == "ok"
 
 
-# -- REMEDIATION INSIGHT -------------------------------------------
+# ── REMEDIATION INSIGHT ───────────────────────────────────────────
 
 class TestRemediationInsight:
     def test_insight_returns_200_with_gemini_mocked(self):
@@ -158,7 +156,7 @@ class TestRemediationInsight:
                     "recommendation": "Restrict SSH",
                     "aws_service": "EC2",
                 })
-                # Should never 500 - always falls back
+                # Should never 500 — always falls back
                 assert resp.status_code == 200
                 data = resp.json()
                 assert "what_this_fixes" in data
@@ -175,7 +173,7 @@ class TestRemediationInsight:
             assert resp.status_code == 429
 
 
-# -- TERRAFORM GENERATE --------------------------------------------
+# ── TERRAFORM GENERATE ────────────────────────────────────────────
 
 class TestTerraformGenerate:
     def test_terraform_returns_hcl(self):
@@ -214,7 +212,7 @@ class TestTerraformGenerate:
                 assert data["hcl"] == ""
 
 
-# -- ANALYZE ENDPOINT ----------------------------------------------
+# ── ANALYZE ENDPOINT ──────────────────────────────────────────────
 
 class TestAnalyzeEndpoint:
     def _make_mock_infra(self):
@@ -223,8 +221,8 @@ class TestAnalyzeEndpoint:
         return AWSInfrastructure(region="us-east-1")
 
     def test_analyze_rate_limited_at_5_scans(self):
-        with patch("app.main.get_scan_count_today", return_value=15):
-            with patch("app.main.agentops", create=True) as mock_ao:
+        with patch("app.main.get_scan_count_today", return_value=5):
+            with patch("app.main.agentops") as mock_ao:
                 mock_ao.start_session.return_value = MagicMock()
                 mock_ao.init = MagicMock()
                 resp = client.post("/analyze", json={
@@ -238,7 +236,7 @@ class TestAnalyzeEndpoint:
         from app.aws_collector import collect_infrastructure
         with patch("app.main.get_scan_count_today", return_value=0):
             with patch("app.main.collect_infrastructure", side_effect=ValueError("Could not assume the IAM role")):
-                with patch("app.main.agentops", create=True):
+                with patch("app.main.agentops"):
                     resp = client.post("/analyze", json={
                         "role_arn": "arn:aws:iam::123456789012:role/BadRole",
                         "region": "us-east-1",
@@ -264,7 +262,7 @@ class TestAnalyzeEndpoint:
                         with patch("app.main.get_report_url", return_value="https://s3.example.com/report"):
                             with patch("app.main.save_analysis", return_value=1):
                                 with patch("app.main.get_previous_scan_for_account", return_value={}):
-                                    with patch("app.main.agentops", create=True):
+                                    with patch("app.main.agentops"):
                                         resp = client.post("/analyze", json={
                                             "role_arn": "arn:aws:iam::123456789012:role/EmfirgeRole",
                                             "region": "us-east-1",
@@ -291,7 +289,7 @@ class TestAnalyzeEndpoint:
                     with patch("app.main.save_report", side_effect=Exception("S3 down")):
                         with patch("app.main.save_analysis", return_value=1):
                             with patch("app.main.get_previous_scan_for_account", return_value={}):
-                                with patch("app.main.agentops", create=True):
+                                with patch("app.main.agentops"):
                                     resp = client.post("/analyze", json={
                                         "role_arn": "arn:aws:iam::123456789012:role/EmfirgeRole",
                                         "region": "us-east-1",
@@ -302,13 +300,13 @@ class TestAnalyzeEndpoint:
                                     assert any("S3" in w for w in data["warnings"])
 
 
-# -- ANALYZE STREAM (SSE) ENDPOINT ---------------------------------
+# ── ANALYZE STREAM (SSE) ENDPOINT ─────────────────────────────────
 
 class TestAnalyzeStreamEndpoint:
     """Tests for the SSE streaming /analyze/stream endpoint."""
 
     def test_stream_rate_limited_at_5_scans(self):
-        with patch("app.main.get_scan_count_today", return_value=15):
+        with patch("app.main.get_scan_count_today", return_value=5):
             resp = client.post("/analyze/stream", json={
                 "role_arn": "arn:aws:iam::123456789012:role/EmfirgeRole",
                 "region": "us-east-1",
@@ -321,9 +319,8 @@ class TestAnalyzeStreamEndpoint:
         from app.models import AWSInfrastructure
         mock_ai = {"ai_summary": "ok", "recommended_improvements": [], "priority_actions": [], "latency_ms": 0}
 
-        # Account 000000000000 is whitelisted via WHITELISTED_ACCOUNTS env var — should bypass rate limit even at 99 scans
-        with patch.dict("os.environ", {"WHITELISTED_ACCOUNTS": "000000000000"}):
-          with patch("app.main.get_scan_count_today", return_value=99):
+        # Account 000000000000 is whitelisted — should bypass rate limit even at 99 scans
+        with patch("app.main.get_scan_count_today", return_value=99):
             with patch("app.main.generate_explanation", return_value=mock_ai):
                 with patch("app.main.save_report", return_value="reports/test.json"):
                     with patch("app.main.get_report_url", return_value="https://s3.example.com/report"):
@@ -333,7 +330,7 @@ class TestAnalyzeStreamEndpoint:
                                     "role_arn": "arn:aws:iam::000000000000:role/EmfirgeReadOnly",
                                     "region": "us-east-1",
                                 })
-                                # Whitelisted account - should stream, not 429
+                                # Whitelisted account — should stream, not 429
                                 assert resp.status_code == 200
                                 assert "text/event-stream" in resp.headers["content-type"]
 
