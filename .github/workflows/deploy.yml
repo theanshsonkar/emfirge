@@ -51,14 +51,13 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_KEY }}
-          envs: ANTHROPIC_API_KEY
           script: |
             sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/aws-risk-agent:latest
             sudo docker stop emfirge-engine || true
             sudo docker rm emfirge-engine || true
+            sudo grep -q "GITHUB_PRIVATE_KEY_B64" /home/ubuntu/.env || echo "GITHUB_PRIVATE_KEY_B64=${{ secrets.APP_PRIVATE_KEY_B64 }}" | sudo tee -a /home/ubuntu/.env > /dev/null
+            sudo grep -q "ANTHROPIC_API_KEY" /home/ubuntu/.env || echo "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}" | sudo tee -a /home/ubuntu/.env > /dev/null
             sudo docker run -d --name emfirge-engine --restart=always \
-              -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+              --env-file /home/ubuntu/.env \
               -p 8000:8000 \
               ${{ secrets.DOCKERHUB_USERNAME }}/aws-risk-agent:latest
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

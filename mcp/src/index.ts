@@ -37,6 +37,29 @@ import {
   complianceHandler,
 } from "./tools/compliance.js";
 import { simulateSchema, simulateZodObject, simulateHandler } from "./tools/simulate.js";
+import {
+  applyChangeSchema,
+  applyChangeZodObject,
+  applyChangeHandler,
+  branchDiffZodObject,
+  branchDiffHandler,
+  branchIdSchema,
+  branchVerdictZodObject,
+  branchVerdictHandler,
+  createBranchSchema,
+  createBranchZodObject,
+  createBranchHandler,
+  discardBranchZodObject,
+  discardBranchHandler,
+  listBranchesSchema,
+  listBranchesZodObject,
+  listBranchesHandler,
+  compareBranchesSchema,
+  compareBranchesZodObject,
+  compareBranchesHandler,
+  rollbackBranchZodObject,
+  rollbackBranchHandler,
+} from "./tools/branches.js";
 
 // Read the published version from package.json so the value advertised over
 // the MCP protocol can never drift from what npm shipped. dist/index.js and
@@ -209,6 +232,70 @@ const tools: ToolRegistration[] = [
     zodObject: simulateZodObject as z.ZodObject<z.ZodRawShape>,
     handler: simulateHandler,
   },
+  {
+    name: "emfirge_create_branch",
+    description:
+      "Create an isolated infrastructure branch from a completed analysis. Use it to model changes safely before applying anything to AWS.",
+    schema: createBranchSchema as Record<string, z.ZodTypeAny>,
+    zodObject: createBranchZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: createBranchHandler,
+  },
+  {
+    name: "emfirge_apply_change",
+    description:
+      "Apply an add, modify, or delete change to a resource in an isolated branch. This changes the branch model, not AWS.",
+    schema: applyChangeSchema as Record<string, z.ZodTypeAny>,
+    zodObject: applyChangeZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: applyChangeHandler,
+  },
+  {
+    name: "emfirge_branch_diff",
+    description:
+      "Show the infrastructure diff for an isolated branch compared with its base analysis.",
+    schema: branchIdSchema as Record<string, z.ZodTypeAny>,
+    zodObject: branchDiffZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: branchDiffHandler,
+  },
+  {
+    name: "emfirge_branch_verdict",
+    description:
+      "Evaluate the security verdict for an isolated branch, including the effect of its modeled changes.",
+    schema: branchIdSchema as Record<string, z.ZodTypeAny>,
+    zodObject: branchVerdictZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: branchVerdictHandler,
+  },
+  {
+    name: "emfirge_rollback_branch",
+    description:
+      "Rollback an isolated branch to its base state without changing AWS.",
+    schema: branchIdSchema as Record<string, z.ZodTypeAny>,
+    zodObject: rollbackBranchZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: rollbackBranchHandler,
+  },
+  {
+    name: "emfirge_discard_branch",
+    description:
+      "Discard an isolated branch when it is no longer needed. This does not change AWS.",
+    schema: branchIdSchema as Record<string, z.ZodTypeAny>,
+    zodObject: discardBranchZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: discardBranchHandler,
+  },
+  {
+    name: "emfirge_list_branches",
+    description:
+      "List isolated infrastructure branches, optionally filtered by their base analysis ID.",
+    schema: listBranchesSchema as Record<string, z.ZodTypeAny>,
+    zodObject: listBranchesZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: listBranchesHandler,
+  },
+  {
+    name: "emfirge_compare_branches",
+    description:
+      "Compare one or more isolated infrastructure branches to understand their modeled changes and security outcomes.",
+    schema: compareBranchesSchema as Record<string, z.ZodTypeAny>,
+    zodObject: compareBranchesZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: compareBranchesHandler,
+  },
 ];
 
 // zod -> JSON Schema (just the types we use)
@@ -234,6 +321,15 @@ function zodFieldToJsonSchema(field: z.ZodTypeAny): Record<string, unknown> {
   } else if (inner instanceof z.ZodEnum) {
     base.type = "string";
     base.enum = (inner as any)._def.values;
+  } else if (inner instanceof z.ZodArray) {
+    base.type = "array";
+    base.items = zodFieldToJsonSchema((inner as any)._def.type);
+  } else if (inner instanceof z.ZodRecord) {
+    base.type = "object";
+    base.additionalProperties = zodFieldToJsonSchema((inner as any)._def.valueType);
+  } else if (inner instanceof z.ZodUnknown) {
+    // JSON Schema's empty schema represents an arbitrary JSON value.
+    return field.description ? { description: field.description } : {};
   } else {
     base.type = "string";
   }
