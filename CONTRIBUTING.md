@@ -14,10 +14,10 @@ npm install
 npm run dev
 ```
 
-The backend (`backend/`) is runnable locally but requires Postgres + several
-environment variables. See the comments in `backend/app/main.py` if you want
-to spin it up. Most users won't need to — `emfirge.cloud` is the canonical
-deployment.
+The backend (`backend/`) is runnable locally with SQLite and the existing virtualenv. From the
+repository root, run `cd backend && PYTHONPATH=. .venv/bin/pytest -q`. MCP contributors can run
+`cd mcp && npm run typecheck`. The guarded deploy workflow builds the native backend engine from
+this public repository and deploys it to EC2 only from the canonical `main` repository.
 
 ## What we welcome
 
@@ -55,10 +55,9 @@ deployment.
 
 ## License
 
-By contributing, you agree your contributions will be licensed under
-**BUSL 1.1** (see `LICENSE`). After the Change Date (2030-06-10) or 4 years
-after each release, your contributions auto-convert to Apache 2.0.
-
+By contributing, you agree that contributions to the engine/backend are licensed under
+**AGPL-3.0**, while contributions under `mcp/` are licensed under **Apache-2.0**.
+See the applicable license files for details.
 ## Questions?
 
 Open a GitHub Discussion. For private/security topics, see `SECURITY.md`.
