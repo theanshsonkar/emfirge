@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   build-and-push:
+    if: github.repository == 'theanshsonkar/emfirge'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -42,7 +43,7 @@ jobs:
 
   deploy:
     needs: build-and-push
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'theanshsonkar/emfirge'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to EC2
@@ -56,7 +57,9 @@ jobs:
             sudo docker rm -f emfirge-engine 2>/dev/null || true
             sudo docker ps -q --filter "publish=8000" | xargs -r sudo docker rm -f || true
             sudo docker system prune -af || true
-            sudo grep -q "GITHUB_PRIVATE_KEY_B64" /home/ubuntu/.env || echo "GITHUB_PRIVATE_KEY_B64=${{ secrets.APP_PRIVATE_KEY_B64 }}" | sudo tee -a /home/ubuntu/.env > /dev/null
+            if [ -n "${{ secrets.APP_PRIVATE_KEY_B64 }}" ] && ! sudo grep -q "GITHUB_PRIVATE_KEY_B64" /home/ubuntu/.env; then
+              echo "GITHUB_PRIVATE_KEY_B64=${{ secrets.APP_PRIVATE_KEY_B64 }}" | sudo tee -a /home/ubuntu/.env > /dev/null
+            fi
             sudo docker run -d --name emfirge-engine --restart=always \
               --env-file /home/ubuntu/.env \
               -p 8000:8000 \
