@@ -36,7 +36,7 @@
     "privacy"
   ],
   "author": "Ansh Sonkar <theanshsonkar@gmail.com>",
-  "license": "BUSL-1.1",
+  "license": "Apache-2.0",
   "engines": {
     "node": ">=20.0.0"
   },
