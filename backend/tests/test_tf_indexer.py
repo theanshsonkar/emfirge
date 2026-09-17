@@ -9,7 +9,7 @@ from app.tf_indexer import (
 )
 
 
-# -- SAMPLE TF CONTENT ---------------------------------------------
+# ── SAMPLE TF CONTENT ─────────────────────────────────────────────
 
 SAMPLE_SG_TF = '''
 resource "aws_security_group" "ssh_open" {
@@ -100,7 +100,7 @@ resource "aws_lambda_function" "processor" {
 '''
 
 
-# -- PARSE TESTS ---------------------------------------------------
+# ── PARSE TESTS ───────────────────────────────────────────────────
 
 class TestParseTFContent:
     def test_parse_security_groups(self):
@@ -167,7 +167,7 @@ output "sg_id" {
         assert "db.t3.medium" in resources[0].block_content
 
 
-# -- MATCHING TESTS ------------------------------------------------
+# ── MATCHING TESTS ────────────────────────────────────────────────
 
 class TestFindResourceMatch:
     @pytest.fixture
@@ -235,7 +235,7 @@ class TestFindResourceMatch:
         assert match.resource_name == "ssh_open"
 
 
-# -- EDGE CASES ----------------------------------------------------
+# ── EDGE CASES ────────────────────────────────────────────────────
 
 class TestEdgeCases:
     def test_nested_braces(self):

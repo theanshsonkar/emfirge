@@ -1,0 +1,328 @@
+{
+  "api_gateway": {
+    "apis": [],
+    "apis_without_auth": [],
+    "apis_without_throttling": [],
+    "apis_without_waf": [],
+    "total_apis": 0
+  },
+  "cloudtrail": {
+    "has_log_file_validation": false,
+    "is_enabled": false,
+    "is_multi_region": false,
+    "trail_arn": null
+  },
+  "cloudwatch": {
+    "has_alarms": false,
+    "has_billing_alarm": false
+  },
+  "config": {
+    "is_enabled": false,
+    "is_recording": false,
+    "non_compliant_rules": []
+  },
+  "cost": {
+    "has_billing_alarm": false,
+    "has_budget_alerts": false,
+    "monthly_cost": 0.0,
+    "top_service": "",
+    "top_service_percentage": 0.0
+  },
+  "dynamodb": {
+    "tables": [],
+    "tables_without_backup": [],
+    "tables_without_encryption": [],
+    "tables_without_pitr": [],
+    "total_tables": 0
+  },
+  "ec2": {
+    "auto_scaling_enabled": false,
+    "ebs_volumes": [],
+    "elastic_ips": [],
+    "free_tier_eligible": true,
+    "has_load_balancer": false,
+    "instance_count": 1,
+    "instance_ids": [
+      "i-demo-web-001"
+    ],
+    "instance_types": [
+      "t3.micro"
+    ],
+    "instances": [
+      {
+        "has_public_ip": true,
+        "id": "i-demo-web-001",
+        "imdsv2_required": true,
+        "instance_profile_arn": "arn:aws:iam::000000000000:role/EmfirgeDemoAppRole",
+        "sg_ids": [
+          "sg-demo-public"
+        ],
+        "state": "running",
+        "subnet_id": "subnet-demo-public",
+        "type": "t3.micro"
+      }
+    ],
+    "load_balancers": [],
+    "open_security_groups": [],
+    "rdp_open_to_internet": false,
+    "rdp_security_group_id": null,
+    "security_groups": [
+      {
+        "attached_to": [
+          "i-demo-web-001"
+        ],
+        "egress_rules": [
+          {
+            "ip_ranges": [
+              "0.0.0.0/0"
+            ],
+            "protocol": "-1"
+          }
+        ],
+        "id": "sg-demo-public",
+        "name": "demo-web-restricted",
+        "rules": [
+          {
+            "from_port": 22,
+            "ip_ranges": [
+              "10.0.0.0/16"
+            ],
+            "protocol": "tcp",
+            "to_port": 22
+          }
+        ]
+      },
+      {
+        "attached_to": [
+          "demo-postgres"
+        ],
+        "egress_rules": [],
+        "id": "sg-demo-db",
+        "name": "demo-database",
+        "rules": [
+          {
+            "from_port": 5432,
+            "ip_ranges": [
+              "10.0.0.0/16"
+            ],
+            "protocol": "tcp",
+            "to_port": 5432
+          }
+        ]
+      }
+    ],
+    "ssh_open_to_internet": false,
+    "ssh_security_group_id": null,
+    "stopped_instances": []
+  },
+  "ecs": {
+    "task_role_arns": [],
+    "tasks_with_privileged_containers": [],
+    "tasks_without_resource_limits": [],
+    "total_task_definitions": 0
+  },
+  "elasticache": {
+    "clusters": [],
+    "clusters_without_auth": [],
+    "clusters_without_encryption": [],
+    "clusters_without_transit_encryption": [],
+    "total_clusters": 0
+  },
+  "guardduty": {
+    "detector_id": null,
+    "is_enabled": false
+  },
+  "iam": {
+    "iam_users": [],
+    "instance_profile_roles": {},
+    "old_access_keys": [],
+    "role_policies": [
+      {
+        "access_statements": [
+          {
+            "actions": [
+              "s3:GetObject"
+            ],
+            "effect": "Allow",
+            "has_condition": false,
+            "is_not_action": false,
+            "is_not_resource": false,
+            "resources": [
+              "arn:aws:s3:::emfirge-demo-artifacts-000000000000/*"
+            ]
+          }
+        ],
+        "accessible_resources": [
+          "arn:aws:s3:::emfirge-demo-artifacts-000000000000"
+        ],
+        "has_admin": false,
+        "policy_names": [
+          "DemoReadArtifacts"
+        ],
+        "role_arn": "arn:aws:iam::000000000000:role/EmfirgeDemoAppRole",
+        "role_name": "EmfirgeDemoAppRole",
+        "trust_allows_external": false,
+        "trust_has_conditions": false,
+        "trusted_role_arns": [],
+        "trusted_services": [
+          "ec2.amazonaws.com"
+        ]
+      }
+    ],
+    "root_has_access_keys": false,
+    "root_used_recently": false,
+    "users_with_admin_policy": [],
+    "users_without_mfa": []
+  },
+  "kms": {
+    "cmks_pending_deletion": [],
+    "cmks_without_rotation": [],
+    "total_cmks": 0
+  },
+  "lambda_data": {
+    "function_count": 0,
+    "functions": [],
+    "functions_with_admin_role": [],
+    "functions_with_no_timeout": [],
+    "functions_with_outdated_runtime": []
+  },
+  "rds": {
+    "backup_enabled": true,
+    "backup_retention_days": 7,
+    "instances": [
+      "demo-postgres"
+    ],
+    "instances_without_deletion_protection": [],
+    "instances_without_log_exports": [],
+    "multi_az_enabled": false,
+    "publicly_accessible": [],
+    "rds_instances": [
+      {
+        "encrypted": true,
+        "id": "demo-postgres",
+        "publicly_accessible": false,
+        "sg_ids": [
+          "sg-demo-db"
+        ],
+        "subnet_id": "subnet-demo-private"
+      }
+    ],
+    "unencrypted_instances": []
+  },
+  "region": "us-east-1",
+  "s3": {
+    "buckets": [
+      {
+        "encrypted": false,
+        "has_cloudfront": false,
+        "is_empty": false,
+        "is_public": false,
+        "name": "emfirge-demo-artifacts-000000000000",
+        "policy": null,
+        "versioning_enabled": true
+      }
+    ],
+    "buckets_without_logging": [],
+    "buckets_without_versioning": [],
+    "public_buckets": [],
+    "total_buckets": 1,
+    "unencrypted_buckets": []
+  },
+  "secrets_manager": {
+    "secrets_without_rotation": [],
+    "total_secrets": 0
+  },
+  "sns": {
+    "topics_with_public_access": [],
+    "topics_without_encryption": [],
+    "total_topics": 0
+  },
+  "sqs": {
+    "queues": [],
+    "queues_with_public_access": [],
+    "queues_without_dlq": [],
+    "queues_without_encryption": [],
+    "total_queues": 0
+  },
+  "vpc": {
+    "default_vpc_id": null,
+    "default_vpc_in_use": false,
+    "interface_endpoints": [],
+    "internet_gateways": [
+      "igw-demo-001"
+    ],
+    "missing_dynamodb_endpoint": false,
+    "missing_s3_endpoint": false,
+    "nacls": [],
+    "nat_gateways": [
+      "nat-demo-001"
+    ],
+    "public_subnet_ids": [
+      "subnet-demo-public"
+    ],
+    "route_tables": [
+      {
+        "associated_subnet_ids": [
+          "subnet-demo-public"
+        ],
+        "id": "rtb-demo-public",
+        "is_main": false,
+        "routes": [
+          {
+            "destination_cidr": "0.0.0.0/0",
+            "target_id": "igw-demo-001",
+            "target_type": "internet_gateway"
+          }
+        ],
+        "vpc_id": "vpc-demo-001"
+      },
+      {
+        "associated_subnet_ids": [
+          "subnet-demo-private"
+        ],
+        "id": "rtb-demo-private",
+        "is_main": false,
+        "routes": [
+          {
+            "destination_cidr": "0.0.0.0/0",
+            "target_id": "nat-demo-001",
+            "target_type": "nat_gateway"
+          }
+        ],
+        "vpc_id": "vpc-demo-001"
+      }
+    ],
+    "subnets": [
+      {
+        "availability_zone": "us-east-1a",
+        "cidr": "10.0.1.0/24",
+        "id": "subnet-demo-public",
+        "is_public": true,
+        "resources": [
+          "i-demo-web-001"
+        ],
+        "vpc_id": "vpc-demo-001"
+      },
+      {
+        "availability_zone": "us-east-1a",
+        "cidr": "10.0.2.0/24",
+        "id": "subnet-demo-private",
+        "is_public": false,
+        "resources": [
+          "demo-postgres"
+        ],
+        "vpc_id": "vpc-demo-001"
+      }
+    ],
+    "total_vpcs": 1,
+    "transit_gateway_attachments": [],
+    "vpc_peering_connections": [],
+    "vpcs_without_flow_logs": [],
+    "vpn_gateways": []
+  },
+  "waf": {
+    "albs_without_waf": [],
+    "total_albs": 0
+  },
+  "warnings": []
+}

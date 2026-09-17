@@ -12,6 +12,12 @@ MATURITY_CHECKS = [
     ("cloudwatch_alarms_exist",    5),
 ]
 
+# Total points achievable across all maturity checks (currently 70).
+# Derived from the table so it stays correct if checks are added/removed —
+# previously the bonus math divided by a hardcoded 80, which meant a
+# perfect-maturity account could never reach the full +15 bonus.
+MATURITY_MAX_POINTS = sum(pts for _, pts in MATURITY_CHECKS)
+
 MATURITY_FIELD_MAP = {
     "cloudtrail_multiregion":   lambda i: i.cloudtrail.is_multi_region,
     "guardduty_enabled":        lambda i: i.guardduty.is_enabled,
@@ -180,9 +186,21 @@ def calculate_score(findings_dict: dict, total_resources: int = 10, infrastructu
     overall_risk  = _weighted_risk(all_risk_findings)
     overall_score = _score_from_risk(overall_risk, total_resources)
 
-    # Apply critical floor penalty — flat deduction per Critical/HIGH finding
+    # Apply critical floor penalty as a MONOTONIC ATTENUATION.
+    #
+    # Previously this was `max(0, overall_score - floor_penalty)`. On accounts
+    # with many Critical/HIGH findings the flat penalty exceeded the base score,
+    # so the result slammed into the 0-clamp and created a "dead zone": the
+    # score pinned at 0 and stopped responding to individual fixes. That broke
+    # the verify-fix loop (removing one critical produced score_delta == 0).
+    #
+    # Dividing by (1 + penalty/K) keeps the score strictly monotonic: every
+    # removed Critical/HIGH finding measurably raises the score, the score
+    # still trends toward 0 as criticals pile up, and clean accounts
+    # (floor_penalty == 0 → divisor 1.0) are completely unaffected.
     floor_penalty = _critical_floor_penalty(all_risk_findings)
-    overall_score = max(0, overall_score - floor_penalty)
+    if floor_penalty > 0:
+        overall_score = overall_score / (1.0 + floor_penalty / 25.0)
 
     # ── MATURITY BONUS ────────────────────────────────────────────
     maturity_score = 0
@@ -197,11 +215,16 @@ def calculate_score(findings_dict: dict, total_resources: int = 10, infrastructu
             pts for check, pts in MATURITY_CHECKS
             if check in maturity_checks_passed
         )
-        raw_bonus = round((maturity_score / 80) * 15, 1)
+        raw_bonus = round((maturity_score / MATURITY_MAX_POINTS) * 15, 1)
         # Cap maturity bonus at +5 when critical findings exist
         has_criticals = len(critical) > 0
         maturity_bonus = min(raw_bonus, 5.0) if has_criticals else raw_bonus
-        overall_score = min(100, overall_score + int(maturity_bonus))
+        overall_score = min(100, overall_score + maturity_bonus)
+
+    # Score may be a float after attenuation / fractional bonus — round once
+    # here for the public 0–100 integer. (Was previously int()-truncated in
+    # multiple places, which discarded sub-point remediation progress.)
+    overall_score = max(0, min(100, round(overall_score)))
 
     if overall_score >= 85:
         risk_level = 'LOW'

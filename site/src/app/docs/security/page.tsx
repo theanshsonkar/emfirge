@@ -27,7 +27,7 @@ export default function Page() {
       <ul className="mt-4 space-y-2 text-[14px] text-muted-foreground">
         <li>• <Strong>Read-only</Strong>, zero write permissions.</li>
         <li>• <Strong>ExternalId</Strong>, <Code>aws-risk-agent</Code>, prevents confused-deputy attacks.</li>
-        <li>• <Strong>Scoped trust</Strong>, only Emfirge&apos;s AWS account (<Code>282027772803</Code>) can assume it.</li>
+        <li>• <Strong>Scoped trust</Strong>, only Emfirge&apos;s AWS account (<Code>000000000000</Code>) can assume it.</li>
         <li>• <Strong>STS, 1-hour</Strong>, temporary credentials that expire in an hour and are never stored.</li>
         <li>• <Strong>Instant revoke</Strong>, delete the CloudFormation stack and all access is gone.</li>
       </ul>

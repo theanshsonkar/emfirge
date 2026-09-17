@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional, Literal, Union
+from typing import Dict, List, Optional, Literal, Union
 
 # ── INPUT MODEL ───────────────────────────────────────────────────
 class AWSCredentials(BaseModel):
@@ -16,13 +16,31 @@ class EC2Instance(BaseModel):
     subnet_id: Optional[str] = None
     state: str
     imdsv2_required: bool = False
+    has_public_ip: Optional[bool] = None
     instance_profile_arn: Optional[str] = None
 
 class SecurityGroup(BaseModel):
     id: str
     name: str
     rules: List[dict] = []
+    egress_rules: List[dict] = []
     attached_to: List[str] = []
+
+class NACLEntry(BaseModel):
+    rule_number: int
+    protocol: str
+    rule_action: str
+    egress: bool
+    cidr_block: Optional[str] = None
+    port_from: Optional[int] = None
+    port_to: Optional[int] = None
+
+class NetworkACL(BaseModel):
+    id: str
+    vpc_id: str
+    is_default: bool = False
+    associated_subnet_ids: List[str] = Field(default_factory=list)
+    entries: List[NACLEntry] = Field(default_factory=list)
 
 class S3Bucket(BaseModel):
     name: str
@@ -30,10 +48,13 @@ class S3Bucket(BaseModel):
     has_cloudfront: bool = False
     policy: Optional[str] = None
     is_empty: bool = False
+    encrypted: Optional[bool] = None
+    versioning_enabled: Optional[bool] = None
 
 class RDSInstance(BaseModel):
     id: str
     sg_ids: List[str] = []
+    subnet_id: Optional[str] = None
     publicly_accessible: bool = False
     encrypted: bool = False
 
@@ -64,9 +85,44 @@ class ElasticIP(BaseModel):
 class VPCSubnet(BaseModel):
     id: str
     vpc_id: str
+    cidr: Optional[str] = None
     resources: List[str] = []
     availability_zone: str = ""
     is_public: bool = False  # True if subnet has a route to an internet gateway
+
+class Route(BaseModel):
+    destination_cidr: str
+    target_type: str
+    target_id: str
+
+class RouteTable(BaseModel):
+    id: str
+    vpc_id: str
+    is_main: bool = False
+    associated_subnet_ids: List[str] = Field(default_factory=list)
+    routes: List[Route] = Field(default_factory=list)
+
+class VPCPeeringConnection(BaseModel):
+    id: str
+    requester_vpc_id: str
+    accepter_vpc_id: str
+    status: Optional[str] = None
+
+class TransitGatewayAttachment(BaseModel):
+    id: str
+    transit_gateway_id: str
+    vpc_id: str
+    state: Optional[str] = None
+
+class VPNGateway(BaseModel):
+    id: str
+    vpc_id: Optional[str] = None
+    state: Optional[str] = None
+
+class InterfaceEndpoint(BaseModel):
+    id: str
+    vpc_id: str
+    service_name: Optional[str] = None
 
 class EC2Data(BaseModel):
     instance_count: int = 0
@@ -113,13 +169,28 @@ class IAMUser(BaseModel):
     username: str
     has_console_access: Optional[bool] = None
 
+class AccessStatement(BaseModel):
+    """A normalized IAM identity-policy access statement."""
+    effect: str
+    actions: List[str] = Field(default_factory=list)
+    resources: List[str] = Field(default_factory=list)
+    is_not_action: bool = False
+    is_not_resource: bool = False
+    has_condition: bool = False
+
+
 class RolePolicy(BaseModel):
     """Parsed IAM role policy data for graph edge creation."""
     role_name: str
     role_arn: str
     accessible_resources: List[str] = []  # Resource ARNs from Allow statements
     has_admin: bool = False               # True if Action:* Resource:*
+    access_statements: List[AccessStatement] = Field(default_factory=list)
     policy_names: List[str] = []          # attached/inline policy names (for display)
+    trusted_role_arns: List[str] = []     # role/user ARNs trusted by the role
+    trusted_services: List[str] = []      # AWS services trusted by the role
+    trust_allows_external: bool = False  # trust includes external/account-wide principals
+    trust_has_conditions: bool = False   # qualifying trust statement has conditions
 
 class IAMData(BaseModel):
     root_has_access_keys: bool = False
@@ -131,6 +202,8 @@ class IAMData(BaseModel):
     iam_users: List[IAMUser] = []
     # Role policy data for graph can_access edges
     role_policies: List[RolePolicy] = []
+    # Instance profile ARN/name -> contained role identity for canonical graph IDs
+    instance_profile_roles: Dict[str, Dict[str, str]] = Field(default_factory=dict)
 
 class CloudTrailData(BaseModel):
     is_enabled: bool = False
@@ -182,6 +255,12 @@ class VPCData(BaseModel):
     public_subnet_ids: List[str] = []            # Subnet IDs with route to IGW
     # Relationship tracking
     subnets: List[VPCSubnet] = []
+    route_tables: List[RouteTable] = []
+    vpc_peering_connections: List[VPCPeeringConnection] = Field(default_factory=list)
+    nacls: List[NetworkACL] = Field(default_factory=list)
+    transit_gateway_attachments: List[TransitGatewayAttachment] = Field(default_factory=list)
+    vpn_gateways: List[VPNGateway] = Field(default_factory=list)
+    interface_endpoints: List[InterfaceEndpoint] = Field(default_factory=list)
 
 # ── NEW: KMS MODEL ────────────────────────────────────────────────
 class KMSData(BaseModel):

@@ -57,10 +57,10 @@ CloudFormation deploy link for a read-only IAM role.
 Use the demo ARN — fake infrastructure, the real engine:
 
 ```
-arn:aws:iam::194722410583:role/EmfirgeReadOnly    region: us-east-1
+arn:aws:iam::000000000000:role/EmfirgeReadOnly    region: us-east-1
 ```
 
-> *"Scan with `arn:aws:iam::194722410583:role/EmfirgeReadOnly` in `us-east-1`"*
+> *"Scan with `arn:aws:iam::000000000000:role/EmfirgeReadOnly` in `us-east-1`"*
 
 > Want a visual graph instead? **[emfirge.cloud][website]** — same engine, browser UI, free during beta.
 
@@ -133,7 +133,7 @@ npx @emfirge/mcp privacy                        # show current mode
 ```
 
 1. **You ask your AI to scan.** The MCP calls the backend with your read-only role ARN.
-2. **The backend assumes the role** (1-hour STS token, ExternalId-scoped), scans 16 AWS
+2. **The backend assumes the role** (1-hour STS token, ExternalId-scoped), maps ~20 AWS
    services, builds the graph, runs the rules, and returns findings.
 3. **The MCP tokenizes** every resource ID locally, then hands the safe version to your LLM.
 4. **Your assistant reasons over it** — attack paths, fixes, compliance — and you never
@@ -150,12 +150,16 @@ npx @emfirge/mcp privacy                        # show current mode
   kills the most attack paths at once.
 - **Deterministic fix simulator** — graph mutation + full rule re-run, no LLM in the
   verification path. Proof, not a guess.
-- **58 graph-aware rules** with context-aware severity — SSH-open behind an ALB drops
-  Critical → Low; public S3 with CloudFront drops Critical → Low.
-- **Toxic-combo detection** — dangerous pattern pairs like *public RDS + no CloudTrail*.
+- **58 graph-aware rules across 17 families** with context-aware severity — SSH-open behind
+  an ALB drops Critical → Low; public S3 with CloudFront drops Critical → Low.
+- **Deterministic 0–100 score** — higher is safer, normalized by account size, across four
+  dimensions (security, availability, cost, disaster recovery). No LLM in the scoring path.
+- **9 toxic-combo patterns** — multi-signal pairs like *public RDS + no CloudTrail* that are
+  safe on their own but dangerous together.
 
 Coverage: EC2, Lambda, ECS, S3, EBS, RDS, IAM, Secrets Manager, KMS, VPC, Security Groups,
-WAF, CloudFront, SNS, CloudTrail, GuardDuty, CloudWatch, AWS Config, Budgets.
+WAF, CloudFront, SNS, CloudTrail, GuardDuty, CloudWatch, AWS Config, Budgets — ~20 service
+types across 17 rule families.
 
 ---
 
@@ -206,7 +210,7 @@ npx @emfirge/mcp purge --role-arn <ARN>           # delete all your scan data
 |---|---|---|
 | `EMFIRGE_BASE_URL` | `https://emfirge.cloud/api` | Backend URL — override to point at a self-hosted backend |
 | `EMFIRGE_PRIVACY` | `strict` | `strict`, `balanced`, or `off` |
-| `EMFIRGE_TRUSTED_ACCOUNT_ID` | `282027772803` | AWS account ID to trust in the IAM role (for `setup_help`) |
+| `EMFIRGE_TRUSTED_ACCOUNT_ID` | `000000000000` | AWS account ID to trust in the IAM role (for `setup_help`) |
 | `EMFIRGE_EXTERNAL_ID` | `aws-risk-agent` | ExternalId for STS assume-role |
 
 ---

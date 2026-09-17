@@ -6,6 +6,11 @@ Description: >
   You can delete this stack at any time to revoke all access instantly.
 
 Parameters:
+  TrustedAccountId:
+    Type: String
+    Default: '000000000000'
+    Description: AWS account ID permitted to assume the read-only role
+
   ExternalId:
     Type: String
     Default: aws-risk-agent
@@ -21,11 +26,7 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              # 000000000000 is the AWS account ID for the hosted Emfirge backend (emfirge.cloud).
-              # If you self-host this OSS backend, replace it with your own AWS account ID
-              # before deploying this stack. Otherwise this role will let emfirge.cloud
-              # scan your account, not your self-hosted backend.
-              AWS: arn:aws:iam::000000000000:root
+              AWS: !Sub arn:aws:iam::${TrustedAccountId}:root
             Action: sts:AssumeRole
             Condition:
               StringEquals:

@@ -1,17 +1,235 @@
+
+
+# ── IAM-2 STRUCTURED ACCESS EDGES ────────────────────────────────
+def _access_infra(statements=None, accessible_resources=None):
+    return AWSInfrastructure(
+        region="us-east-1",
+        s3=S3Data(buckets=[S3Bucket(name="bucket-x"), S3Bucket(name="bucket-y")]),
+        rds=RDSData(rds_instances=[RDSInstance(id="db-x")]),
+        lambda_data=LambdaData(functions=[LambdaFunction(name="fn-x", secret_refs=["secret-y"])]),
+        iam=IAMData(role_policies=[RolePolicy(
+            role_name="AccessRole", role_arn="arn:aws:iam::123456789012:role/AccessRole",
+            access_statements=statements or [],
+            accessible_resources=accessible_resources or [],
+        )]),
+    )
+
+
+def _access_edges(graph):
+    return [edge for edge in graph.edges if edge.relationship.value == "can_access"]
+
+
+def test_iam2_s3_action_only_targets_s3_bucket():
+    graph = build_graph(_access_infra([AccessStatement(
+        effect="allow", actions=["s3:GetObject"], resources=["arn:aws:s3:::bucket-x"]
+    )]))
+    edges = _access_edges(graph)
+    assert [(edge.src, edge.dst) for edge in edges] == [("iam-role-AccessRole", "bucket-x")]
+    assert "s3:GetObject" in edges[0].attrs["actions"]
+
+
+def test_iam2_unconditional_matching_deny_suppresses_only_target():
+    graph = build_graph(_access_infra([
+        AccessStatement(effect="allow", actions=["s3:*"], resources=["arn:aws:s3:::bucket-x"]),
+        AccessStatement(effect="deny", actions=["s3:*"] , resources=["arn:aws:s3:::bucket-x"]),
+    ]))
+    assert _access_edges(graph) == []
+
+
+def test_iam2_conditional_deny_keeps_assumed_edge():
+    graph = build_graph(_access_infra([
+        AccessStatement(effect="allow", actions=["s3:GetObject"], resources=["arn:aws:s3:::bucket-x"]),
+        AccessStatement(effect="deny", actions=["s3:GetObject"], resources=["arn:aws:s3:::bucket-x"], has_condition=True),
+    ]))
+    edge = _access_edges(graph)[0]
+    assert edge.dst == "bucket-x"
+    assert edge.attrs["has_condition"] is True
+    assert edge.attrs["confidence"] == "assumed"
+
+
+def test_iam2_admin_fanout_excludes_unconditionally_denied_secret():
+    graph = build_graph(_access_infra([
+        AccessStatement(effect="allow", actions=["*"], resources=["*"]),
+        AccessStatement(effect="deny", actions=["secretsmanager:GetSecretValue"], resources=["arn:aws:secretsmanager:us-east-1:123456789012:secret:secret-y"]),
+    ]))
+    assert {edge.dst for edge in _access_edges(graph)} == {"bucket-x", "bucket-y", "db-x", "fn-x"}
+    assert "secret-y" not in {edge.dst for edge in _access_edges(graph)}
+
+
+def test_iam2_not_resource_allow_is_assumed_for_other_resources():
+    graph = build_graph(_access_infra([AccessStatement(
+        effect="allow", actions=["s3:GetObject"], resources=["arn:aws:s3:::bucket-y"], is_not_resource=True
+    )]))
+    edge = next(edge for edge in _access_edges(graph) if edge.dst == "bucket-x")
+    assert edge.attrs["confidence"] == "assumed"
+
+
+def test_iam2_legacy_accessible_resources_fallback():
+    graph = build_graph(_access_infra(accessible_resources=["arn:aws:s3:::bucket-x"]))
+    edge = next(edge for edge in _access_edges(graph) if edge.dst == "bucket-x")
+    assert edge.attrs == {
+        "actions": ["*"], "effect": "allow", "has_condition": False,
+        "confidence": "assumed", "access_level": "Permissions management",
+        "privilege_escalation": True,
+    }
+
+
+def test_iam2_repeated_build_has_identical_access_edges():
+    infra = _access_infra([AccessStatement(
+        effect="allow", actions=["*"], resources=["*"]
+    )])
+    first = [(edge.src, edge.dst, edge.attrs) for edge in _access_edges(build_graph(infra))]
+    second = [(edge.src, edge.dst, edge.attrs) for edge in _access_edges(build_graph(infra))]
+    assert first == second
+
+
+# ── IAM TRUST GRAPH ───────────────────────────────────────────────
+
+def _trust_infra(*policies):
+    return AWSInfrastructure(region="us-east-1", iam=IAMData(role_policies=list(policies)))
+
+
+def test_role_trust_creates_can_assume_edge_and_trust_only_nodes():
+    arn_a = "arn:aws:iam::123456789012:role/RoleA"
+    arn_b = "arn:aws:iam::123456789012:role/RoleB"
+    graph = build_graph(_trust_infra(
+        RolePolicy(role_name="RoleA", role_arn=arn_a),
+        RolePolicy(role_name="RoleB", role_arn=arn_b, trusted_role_arns=[arn_a]),
+    ))
+    edge = next(edge for edge in graph.edges if edge.relationship.value == "can_assume")
+    assert (edge.src, edge.dst) == ("iam-role-RoleA", "iam-role-RoleB")
+    assert edge.attrs == {"conditional": False, "confidence": "high", "reason": "trust policy allows sts:AssumeRole"}
+    assert graph.get_node("iam-role-RoleA") is not None
+    assert graph.get_node("iam-role-RoleB") is not None
+
+
+def test_conditional_trust_edge_is_assumed_and_service_trust_has_no_role_edge():
+    arn_b = "arn:aws:iam::123456789012:role/RoleB"
+    graph = build_graph(_trust_infra(RolePolicy(
+        role_name="RoleB", role_arn=arn_b,
+        trusted_role_arns=["arn:aws:iam::123456789012:role/RoleA"],
+        trusted_services=["lambda.amazonaws.com"], trust_has_conditions=True,
+    )))
+    # RoleA is absent, so the dangling principal must not become a node/edge.
+    assert not any(edge.relationship.value == "can_assume" for edge in graph.edges)
+    node = graph.get_node("iam-role-RoleB")
+    assert node.base["trusted_services"] == ["lambda.amazonaws.com"]
+    assert node.base["trust_has_conditions"] is True
+
+
+def test_instance_profile_resolves_to_canonical_role_and_preserves_paths():
+    profile_arn = "arn:aws:iam::123456789012:instance-profile/WebProfile"
+    web_role_arn = "arn:aws:iam::123456789012:role/WebRole"
+    infra = AWSInfrastructure(
+        region="us-east-1",
+        ec2=EC2Data(instances=[EC2Instance(
+            id="i-001", type="t3.micro", state="running",
+            instance_profile_arn=profile_arn,
+        )], security_groups=[SecurityGroup(
+            id="sg-open", name="open",
+            rules=[{"from_port": 443, "to_port": 443, "protocol": "tcp",
+                    "ip_ranges": ["0.0.0.0/0"]}], attached_to=["i-001"],
+        )]),
+        s3=S3Data(buckets=[S3Bucket(name="customer-data", is_empty=False)]),
+        iam=IAMData(
+            instance_profile_roles={
+                profile_arn: {"role_name": "WebRole", "role_arn": web_role_arn},
+                "WebProfile": {"role_name": "WebRole", "role_arn": web_role_arn},
+            },
+            role_policies=[
+                RolePolicy(role_name="RoleA", role_arn="arn:aws:iam::123456789012:role/RoleA"),
+                RolePolicy(
+                    role_name="WebRole", role_arn=web_role_arn,
+                    accessible_resources=["arn:aws:s3:::customer-data"],
+                    trusted_role_arns=["arn:aws:iam::123456789012:role/RoleA"],
+                ),
+            ],
+        ),
+    )
+    graph = build_graph(infra)
+
+    role_nodes = [node for node in graph.nodes if node["type"] == "iam_role"]
+    assert [node["id"] for node in role_nodes].count("iam-role-WebRole") == 1
+    assert graph.get_node("iam-role-WebProfile") is None
+    assert graph.has_connection("i-001", "iam-role-WebRole", "uses_iam_role")
+    assert graph.has_connection("iam-role-WebRole", "customer-data", "can_access")
+    assert sum(
+        edge.relationship.value == "uses_iam_role"
+        and edge.src == "i-001" and edge.dst == "iam-role-WebRole"
+        for edge in graph.edges
+    ) == 1
+    assert sum(
+        edge.relationship.value == "can_access"
+        and edge.src == "iam-role-WebRole" and edge.dst == "customer-data"
+        for edge in graph.edges
+    ) == 1
+    assert graph.has_connection("iam-role-RoleA", "iam-role-WebRole", "can_assume")
+    assert get_attack_path_to(graph, "customer-data") == [
+        "INTERNET", "i-001", "iam-role-WebRole", "customer-data"
+    ]
+    assert graph.get_node("iam-role-WebRole").metadata["arn"] == web_role_arn
+
+
+def test_conditional_trust_edge_with_present_principal_is_assumed():
+    arn_a = "arn:aws:iam::123456789012:role/RoleA"
+    arn_b = "arn:aws:iam::123456789012:role/RoleB"
+    graph = build_graph(_trust_infra(
+        RolePolicy(role_name="RoleA", role_arn=arn_a),
+        RolePolicy(
+            role_name="RoleB", role_arn=arn_b,
+            trusted_role_arns=[arn_a], trust_has_conditions=True,
+        ),
+    ))
+    edge = next(edge for edge in graph.edges if edge.relationship.value == "can_assume")
+    assert (edge.src, edge.dst) == ("iam-role-RoleA", "iam-role-RoleB")
+    assert edge.attrs == {
+        "conditional": True,
+        "confidence": "assumed",
+        "reason": "trust policy allows sts:AssumeRole",
+    }
+
+
+def test_external_trust_is_metadata_only_without_dangling_edges():
+    graph = build_graph(_trust_infra(RolePolicy(
+        role_name="RoleB", role_arn="arn:aws:iam::123456789012:role/RoleB",
+        trust_allows_external=True,
+    )))
+    node = graph.get_node("iam-role-RoleB")
+    assert node.base["trust_allows_external"] is True
+    assert all(edge.src in {n.id for n in graph.nodes} and edge.dst in {n.id for n in graph.nodes} for edge in graph.edges)
+
+
+def test_can_assume_is_followed_by_filtered_attack_path_and_build_is_deterministic():
+    arn_a = "arn:aws:iam::123456789012:role/RoleA"
+    arn_b = "arn:aws:iam::123456789012:role/RoleB"
+    infra = _trust_infra(
+        RolePolicy(role_name="RoleA", role_arn=arn_a),
+        RolePolicy(role_name="RoleB", role_arn=arn_b, trusted_role_arns=[arn_a]),
+    )
+    first = build_graph(infra)
+    first.edges.append({"from": "INTERNET", "to": "iam-role-RoleA", "relationship": "REACHES"})
+    first = Graph([*first.nodes, {"id": "INTERNET", "type": "internet", "label": "Internet"}], first.edges)
+    second = build_graph(infra)
+    second.edges.append({"from": "INTERNET", "to": "iam-role-RoleA", "relationship": "REACHES"})
+    second = Graph([*second.nodes, {"id": "INTERNET", "type": "internet", "label": "Internet"}], second.edges)
+    assert get_attack_path_to(first, "iam-role-RoleB") == ["INTERNET", "iam-role-RoleA", "iam-role-RoleB"]
+    assert [(e.src, e.dst, e.relationship.value, e.attrs) for e in first.edges] == [(e.src, e.dst, e.relationship.value, e.attrs) for e in second.edges]
 """
 Tests for egraph.py — graph building, BFS, blast radius, orphan detection.
 Zero AWS/LLM calls.
 """
 import pytest
-from app.egraph import build_graph, find_attack_path, calculate_blast_radius, find_orphaned_resources
+from app.egraph import Graph, build_graph, find_attack_path, calculate_blast_radius, find_orphaned_resources, get_attack_path_to
+from app.aws_collector import _parse_role_trust_policy
 from app.models import (
     AWSInfrastructure, EC2Data, S3Data, RDSData, LambdaData, VPCData,
     EC2Instance, SecurityGroup, S3Bucket, RDSInstance, LambdaFunction,
     LoadBalancer, VPCSubnet, EBSVolume, ElasticIP, IAMData, RolePolicy,
+    AccessStatement,
 )
 
 
-# -- GRAPH BUILDING ------------------------------------------------
+# ── GRAPH BUILDING ────────────────────────────────────────────────
 
 class TestBuildGraph:
     def test_empty_infra_builds_empty_graph(self, empty_infra):
@@ -176,7 +394,7 @@ class TestBuildGraph:
         assert len(graph.edges) > 0
 
 
-# -- GRAPH QUERY METHODS -------------------------------------------
+# ── GRAPH QUERY METHODS ───────────────────────────────────────────
 
 class TestGraphQueries:
     def test_get_node_returns_none_for_missing(self, clean_infra):
@@ -232,7 +450,7 @@ class TestGraphQueries:
         assert graph.has_connection("nonexistent", "also-nonexistent") is False
 
 
-# -- ATTACK PATH ---------------------------------------------------
+# ── ATTACK PATH ───────────────────────────────────────────────────
 
 class TestFindAttackPath:
     def test_path_from_instance_to_rds(self):
@@ -248,7 +466,11 @@ class TestFindAttackPath:
             ),
         )
         graph = build_graph(infra)
-        # BFS from instance outward: i-001 -> sg-001 -> my-db (via uses_security_group edges)
+        # Add the modeled same-SG reachability edge used by the attack-path fixture.
+        graph = Graph(nodes=graph.nodes, edges=[*graph.edges, {
+            'from': 'i-001', 'to': 'my-db', 'relationship': 'can_reach'
+        }])
+        # BFS from instance outward through the real movement edge
         # The path goes through the shared SG
         result = calculate_blast_radius(graph, "i-001")
         assert "my-db" in result["resource_ids"] or "sg-001" in result["resource_ids"]
@@ -289,7 +511,7 @@ class TestFindAttackPath:
         assert path == []
 
 
-# -- BLAST RADIUS --------------------------------------------------
+# ── BLAST RADIUS ──────────────────────────────────────────────────
 
 class TestBlastRadius:
     def test_isolated_resource_zero_blast(self, empty_infra):
@@ -309,6 +531,9 @@ class TestBlastRadius:
             ),
         )
         graph = build_graph(infra)
+        graph = Graph(nodes=graph.nodes, edges=[*graph.edges, {
+            'from': 'i-001', 'to': 'my-db', 'relationship': 'can_reach'
+        }])
         result = calculate_blast_radius(graph, "i-001")
         assert result["count"] > 0
         assert "my-db" in result["resource_ids"] or "sg-001" in result["resource_ids"]
@@ -326,7 +551,7 @@ class TestBlastRadius:
         assert "i-001" not in result["resource_ids"]
 
 
-# -- ORPHANED RESOURCES --------------------------------------------
+# ── ORPHANED RESOURCES ────────────────────────────────────────────
 
 class TestOrphanedResources:
     def test_connected_resources_not_orphaned(self, clean_infra):
@@ -445,7 +670,7 @@ class TestOrphanedResources:
         assert eip_orphan["estimated_monthly_cost"] == 3.65
 
 
-# -- IAM POLICY EDGES (can_access) --------------------------------
+# ── IAM POLICY EDGES (can_access) ────────────────────────────────
 
 class TestIAMPolicyEdges:
     def test_can_access_edge_created_for_s3(self):
@@ -546,7 +771,7 @@ class TestIAMPolicyEdges:
         infra = AWSInfrastructure(
             region="us-east-1",
             s3=S3Data(buckets=[S3Bucket(name="my-bucket", is_public=False, is_empty=False)]),
-            iam=IAMData(),  # no role_policies - defaults to []
+            iam=IAMData(),  # no role_policies — defaults to []
         )
         graph = build_graph(infra)
         # Should build fine with no can_access edges
@@ -653,7 +878,7 @@ class TestIAMPolicyEdges:
         assert graph.has_connection("i-001", "iam-role-MyRole", "uses_iam_role")
 
 
-# -- DIJKSTRA (WEIGHTED PATHS) ------------------------------------
+# ── DIJKSTRA (WEIGHTED PATHS) ────────────────────────────────────
 
 class TestDijkstra:
     def test_dijkstra_returns_distances_from_internet(self):
@@ -774,7 +999,7 @@ class TestDijkstra:
         assert len(path) >= 3  # at least INTERNET → something → data-bucket
 
 
-# -- BETWEENNESS CENTRALITY ----------------------------------------
+# ── BETWEENNESS CENTRALITY ────────────────────────────────────────
 
 class TestBetweennessCentrality:
     def test_centrality_returns_scores_for_all_nodes(self):
@@ -857,7 +1082,7 @@ class TestBetweennessCentrality:
         bucket_a_score = scores.get('bucket-a', 0.0)
         bucket_b_score = scores.get('bucket-b', 0.0)
 
-        # Admin role is a chokepoint - higher than leaf data stores
+        # Admin role is a chokepoint — higher than leaf data stores
         assert admin_score >= bucket_a_score
         assert admin_score >= bucket_b_score
 
@@ -896,3 +1121,77 @@ class TestBetweennessCentrality:
 
         # Should still return scores (uses all nodes as sources)
         assert len(scores) == len(graph.nodes)
+
+
+def test_role_trust_parser_handles_encoded_and_malformed_documents():
+    from urllib.parse import quote
+    from app.aws_collector import _parse_role_trust_policy
+
+    role_arn = "arn:aws:iam::123456789012:role/RoleB"
+    document = {
+        "Statement": {
+            "Effect": "Allow", "Action": "sts:AssumeRole",
+            "Principal": {"AWS": ["arn:aws:iam::123456789012:role/RoleA"], "Service": "ec2.amazonaws.com"},
+        }
+    }
+    parsed = _parse_role_trust_policy(quote(__import__("json").dumps(document)), role_arn)
+    assert parsed == (["arn:aws:iam::123456789012:role/RoleA"], ["ec2.amazonaws.com"], False, False)
+
+    wildcard_document = {
+        "Statement": {
+            "Effect": "Allow", "Action": "sts:AssumeRole", "Principal": "*",
+        }
+    }
+    encoded_wildcard = _parse_role_trust_policy(
+        quote(__import__("json").dumps(wildcard_document)), role_arn
+    )
+    assert encoded_wildcard[2] is True
+
+    assert _parse_role_trust_policy("not-json", role_arn) == ([], [], False, False)
+    assert _parse_role_trust_policy(None, role_arn) == ([], [], False, False)
+    assert _parse_role_trust_policy({"Statement": [{"Effect": "Deny"}]}, role_arn) == ([], [], False, False)
+
+
+def test_generic_principal_wildcard_allows_external_trust():
+    trust = {
+        "Statement": {
+            "Effect": "Allow",
+            "Action": "sts:AssumeRole",
+            "Principal": "*",
+        }
+    }
+    result = _parse_role_trust_policy(
+        trust, "arn:aws:iam::123456789012:role/RoleB"
+    )
+    assert result == ([], [], True, False)
+
+
+def test_profile_derived_role_node_is_enriched_for_trust_edge_matching():
+    role_a = "arn:aws:iam::123456789012:role/RoleA"
+    role_b = "arn:aws:iam::123456789012:role/RoleB"
+    profile_arn = "arn:aws:iam::123456789012:instance-profile/RoleA"
+    infra = AWSInfrastructure(
+        region="us-east-1",
+        ec2=EC2Data(instances=[EC2Instance(
+            id="i-001", type="t3.micro", state="running",
+            instance_profile_arn=profile_arn,
+        )]),
+        iam=IAMData(role_policies=[
+            RolePolicy(role_name="RoleA", role_arn=role_a),
+            RolePolicy(
+                role_name="RoleB", role_arn=role_b,
+                trusted_role_arns=[role_a],
+            ),
+        ]),
+    )
+
+    graph = build_graph(infra)
+    role_node = graph.get_node("iam-role-RoleA")
+    assert role_node.base["arn"] == role_a
+    assert role_node.base["source"] == "instance_profile"
+    assert any(
+        edge.relationship.value == "can_assume"
+        and edge.src == "iam-role-RoleA"
+        and edge.dst == "iam-role-RoleB"
+        for edge in graph.edges
+    )

@@ -9,16 +9,19 @@ Tests 3 scenarios for each upgraded rule:
 Also tests blast_radius and attack_path population.
 """
 import pytest
-from app.egraph import Graph, get_internet_reachable_set
+from app.egraph import Graph, build_graph, get_internet_reachable_set
 from app.models import (
     AWSInfrastructure, EC2Data, S3Data, RDSData, IAMData, IAMUser,
     CloudTrailData, CostData, CloudWatchData, GuardDutyData,
     LambdaData, LambdaFunction, SecretsManagerData, VPCData, VPCSubnet,
+    Route, RouteTable, NACLEntry, NetworkACL,
     KMSData, ConfigData, SNSData, ECSData, WAFData,
     EC2Instance, SecurityGroup, S3Bucket, RDSInstance, LoadBalancer,
 )
 from app.rules import (
     check_rdp_open,
+    check_ssh_open,
+    check_public_s3_context_aware,
     check_dangerous_open_ports,
     check_default_sg_open,
     check_imdsv1_enabled,
@@ -36,7 +39,9 @@ from app.rules import (
 )
 
 
-# -- GRAPH BUILDERS ------------------------------------------------
+# ── GRAPH BUILDERS ────────────────────────────────────────────────
+
+
 
 def build_reachable_graph(instance_ids, sg_ids, subnet_ids=None):
     """
@@ -134,7 +139,7 @@ def build_lb_graph(instance_ids, sg_ids, lb_arn="arn:aws:elasticloadbalancing:us
     return Graph(nodes=nodes, edges=edges)
 
 
-# -- INFRASTRUCTURE FIXTURES ---------------------------------------
+# ── INFRASTRUCTURE FIXTURES ───────────────────────────────────────
 
 def make_rdp_infra(has_subnets=True):
     """Infrastructure with RDP open to internet."""
@@ -289,6 +294,112 @@ def make_cloudtrail_infra(has_subnets=True):
 # TIER 1: INTERNET REACHABILITY TESTS
 # ══════════════════════════════════════════════════════════════════
 
+class TestDevNameReachabilityGuards:
+    def test_reachable_dev_ssh_stays_critical(self):
+        infra = make_reachable_dev_infra(22)
+        graph = build_graph(infra)
+        assert "i-dev-22" in get_internet_reachable_set(graph)
+        finding = check_ssh_open(infra, graph=graph)
+        assert finding is not None
+        assert finding.rule_id == "EMFIRGE-EC2-002"
+        assert finding.severity == "Critical"
+
+    def test_reachable_dev_public_s3_stays_critical(self):
+        bucket_id = "dev-bucket"
+        infra = AWSInfrastructure(
+            region="us-east-1",
+            s3=S3Data(
+                public_buckets=[bucket_id],
+                buckets=[S3Bucket(name=bucket_id, is_public=True, is_empty=False)],
+            ),
+        )
+        graph = Graph(
+            nodes=[
+                {'id': 'INTERNET', 'type': 'internet', 'label': 'Internet', 'metadata': {}},
+                {'id': bucket_id, 'type': 's3_bucket', 'label': f'S3: {bucket_id}', 'metadata': {}},
+            ],
+            edges=[{'from': 'INTERNET', 'to': bucket_id, 'relationship': 'REACHES'}],
+        )
+        assert bucket_id in get_internet_reachable_set(graph)
+        findings = check_public_s3_context_aware(infra, graph=graph)
+        assert len(findings) == 1
+        assert findings[0].rule_id == "EMFIRGE-S3-001"
+        assert findings[0].severity == "Critical"
+
+
+def make_reachable_dev_infra(port):
+    """Dev-named EC2 with IGW route, allowing NACL, and a public IP."""
+    instance_id = f"i-dev-{port}"
+    sg_id = f"sg-dev-{port}"
+    subnet_id = f"subnet-dev-{port}"
+    return AWSInfrastructure(
+        region="us-east-1",
+        ec2=EC2Data(
+            instance_count=1,
+            instance_types=["t3.micro"],
+            instance_ids=[instance_id],
+            ssh_open_to_internet=port == 22,
+            ssh_security_group_id=sg_id if port == 22 else None,
+            rdp_open_to_internet=port == 3389,
+            rdp_security_group_id=sg_id if port == 3389 else None,
+            instances=[EC2Instance(
+                id=instance_id,
+                type="t3.micro",
+                sg_ids=[sg_id],
+                subnet_id=subnet_id,
+                state="running",
+                imdsv2_required=True,
+                has_public_ip=True,
+            )],
+            security_groups=[SecurityGroup(
+                id=sg_id,
+                name="dev-open-sg",
+                rules=[{
+                    "from_port": port,
+                    "to_port": port,
+                    "protocol": "tcp",
+                    "ip_ranges": ["0.0.0.0/0"],
+                }],
+                attached_to=[instance_id],
+            )],
+        ),
+        vpc=VPCData(
+            total_vpcs=1,
+            subnets=[VPCSubnet(
+                id=subnet_id,
+                vpc_id="vpc-dev",
+                resources=[instance_id],
+                is_public=True,
+            )],
+            internet_gateways=["igw-dev"],
+            public_subnet_ids=[subnet_id],
+            route_tables=[RouteTable(
+                id=f"rtb-dev-{port}",
+                vpc_id="vpc-dev",
+                associated_subnet_ids=[subnet_id],
+                routes=[Route(
+                    destination_cidr="0.0.0.0/0",
+                    target_type="internet_gateway",
+                    target_id="igw-dev",
+                )],
+            )],
+            nacls=[NetworkACL(
+                id=f"acl-dev-{port}",
+                vpc_id="vpc-dev",
+                associated_subnet_ids=[subnet_id],
+                entries=[NACLEntry(
+                    rule_number=100,
+                    protocol="6",
+                    rule_action="allow",
+                    egress=False,
+                    cidr_block="0.0.0.0/0",
+                    port_from=port,
+                    port_to=port,
+                )],
+            )],
+        ),
+    )
+
 class TestRDPOpen:
     """EC2-003: check_rdp_open — downgrade if behind LB or not reachable."""
 
@@ -307,6 +418,16 @@ class TestRDPOpen:
         result = check_rdp_open(infra, graph=graph)
         assert result is not None
         assert result.severity == 'Critical'
+
+    def test_reachable_dev_stays_critical(self):
+        infra = make_reachable_dev_infra(3389)
+        graph = build_graph(infra)
+        assert "i-dev-3389" in get_internet_reachable_set(graph)
+        finding = check_rdp_open(infra, graph=graph)
+        assert finding is not None
+        assert finding.rule_id == "EMFIRGE-EC2-003"
+        assert finding.severity == "Critical"
+        assert finding.raw_severity == "Critical"
 
     def test_behind_lb_downgrades_to_low(self):
         """With graph showing instance behind LB, downgrades to Low."""
@@ -488,7 +609,7 @@ class TestLambdaOutdatedRuntime:
         ]
         edges = [
             {'from': 'INTERNET', 'to': 'api-gw', 'relationship': 'REACHES'},
-            {'from': 'api-gw', 'to': 'legacy-fn', 'relationship': 'invokes'},
+            {'from': 'api-gw', 'to': 'legacy-fn', 'relationship': 'can_reach'},
         ]
         graph = Graph(nodes=nodes, edges=edges)
         result = check_lambda_outdated_runtime(infra, graph=graph)
@@ -864,7 +985,7 @@ class TestRunAllChecksWithGraph:
     def test_run_all_checks_with_graph_produces_low_risks(self, nightmare_infra):
         """With a graph showing private resources, some findings move to low_risks."""
         from app.egraph import build_graph
-        # Build graph from nightmare_infra - it has public subnets so resources ARE reachable
+        # Build graph from nightmare_infra — it has public subnets so resources ARE reachable
         graph = build_graph(nightmare_infra)
         results = run_all_checks(nightmare_infra, graph=graph)
         assert 'critical_risks' in results
@@ -895,14 +1016,36 @@ class TestRunAllChecksWithGraph:
                 instance_ids=["i-private"],
                 rdp_open_to_internet=True,
                 rdp_security_group_id="sg-rdp",
-                instances=[EC2Instance(id="i-private", type="t3.micro", sg_ids=["sg-rdp"], state="running", imdsv2_required=False)],
+                instances=[EC2Instance(id="i-private", type="t3.micro", sg_ids=["sg-rdp"], subnet_id="subnet-priv", state="running", imdsv2_required=False)],
                 security_groups=[SecurityGroup(id="sg-rdp", name="rdp-sg",
                     rules=[{"from_port": 3389, "to_port": 3389, "protocol": "tcp", "ip_ranges": ["0.0.0.0/0"]}],
                     attached_to=["i-private"])],
             ),
             vpc=VPCData(
                 total_vpcs=1,
-                subnets=[VPCSubnet(id="subnet-priv", vpc_id="vpc-001", resources=["i-private"], is_public=False)],
+                subnets=[VPCSubnet(id="subnet-priv", vpc_id="vpc-001", resources=["i-private"], is_public=True)],
+                internet_gateways=["igw-public"],
+                public_subnet_ids=["subnet-priv"],
+                route_tables=[RouteTable(
+                    id="rtb-public",
+                    vpc_id="vpc-001",
+                    associated_subnet_ids=["subnet-priv"],
+                    routes=[Route(destination_cidr="0.0.0.0/0", target_type="internet_gateway", target_id="igw-public")],
+                )],
+                nacls=[NetworkACL(
+                    id="acl-public",
+                    vpc_id="vpc-001",
+                    associated_subnet_ids=["subnet-priv"],
+                    entries=[NACLEntry(
+                        rule_number=100,
+                        protocol="tcp",
+                        rule_action="allow",
+                        egress=False,
+                        cidr_block="0.0.0.0/0",
+                        port_from=3389,
+                        port_to=3389,
+                    )],
+                )],
             ),
             cloudtrail=CloudTrailData(is_enabled=True, is_multi_region=True, has_log_file_validation=True),
         )
@@ -914,16 +1057,84 @@ class TestRunAllChecksWithGraph:
         # The graph won't create INTERNET edges because the instance is in a private subnet
         rdp_findings = [f for f in results.get('critical_risks', []) + results.get('moderate_risks', []) + results.get('low_risks', [])
                        if f.rule_id == 'EMFIRGE-EC2-003']
-        if rdp_findings:
-            # raw_severity should be Critical (static), but severity may be downgraded
-            assert rdp_findings[0].raw_severity == 'Critical'
+        assert len(rdp_findings) == 1
+        assert rdp_findings[0].severity == 'Moderate'
+        assert rdp_findings[0].raw_severity == 'Critical'
 
-        # IMDSv1 (EC2-016) should stay Moderate (not upgraded) since instance is private
+        # IMDSv1 (EC2-016) remains Moderate under the graph-aware rule
         imds_findings = [f for f in results.get('critical_risks', []) + results.get('moderate_risks', []) + results.get('low_risks', [])
                         if f.rule_id == 'EMFIRGE-EC2-016']
-        if imds_findings:
-            assert imds_findings[0].severity == 'Moderate'
-            assert imds_findings[0].raw_severity == 'Moderate'
+        assert len(imds_findings) == 1
+        assert imds_findings[0].severity == 'Moderate'
+        assert imds_findings[0].raw_severity == 'Moderate'
+
+    def test_private_nat_only_rdp_is_not_internet_reachable(self):
+        """NAT-only private subnet must classify open RDP as non-internet-reachable."""
+        infra = AWSInfrastructure(
+            region="us-east-1",
+            ec2=EC2Data(
+                instance_count=1,
+                instance_types=["t3.micro"],
+                instance_ids=["i-private"],
+                rdp_open_to_internet=True,
+                rdp_security_group_id="sg-rdp",
+                instances=[EC2Instance(
+                    id="i-private",
+                    type="t3.micro",
+                    sg_ids=["sg-rdp"],
+                    subnet_id="subnet-priv",
+                    state="running",
+                    imdsv2_required=False,
+                )],
+                security_groups=[SecurityGroup(
+                    id="sg-rdp",
+                    name="rdp-sg",
+                    rules=[{
+                        "from_port": 3389,
+                        "to_port": 3389,
+                        "protocol": "tcp",
+                        "ip_ranges": ["0.0.0.0/0"],
+                    }],
+                    attached_to=["i-private"],
+                )],
+            ),
+            vpc=VPCData(
+                total_vpcs=1,
+                subnets=[VPCSubnet(
+                    id="subnet-priv",
+                    vpc_id="vpc-001",
+                    resources=["i-private"],
+                    is_public=False,
+                )],
+                nat_gateways=["nat-priv"],
+                route_tables=[RouteTable(
+                    id="rtb-priv",
+                    vpc_id="vpc-001",
+                    associated_subnet_ids=["subnet-priv"],
+                    routes=[Route(
+                        destination_cidr="0.0.0.0/0",
+                        target_type="nat_gateway",
+                        target_id="nat-priv",
+                    )],
+                )],
+            ),
+        )
+        from app.egraph import build_graph
+        graph = build_graph(infra)
+        assert "i-private" not in get_internet_reachable_set(graph)
+        results = run_all_checks(infra, graph=graph)
+
+        rdp_findings = [
+            finding
+            for category in ("critical_risks", "moderate_risks", "low_risks")
+            for finding in results[category]
+            if finding.rule_id == "EMFIRGE-EC2-003"
+        ]
+        assert len(rdp_findings) == 1
+        finding = rdp_findings[0]
+        assert finding.rule_id == "EMFIRGE-EC2-003"
+        assert finding.raw_severity == "Critical"
+        assert finding.severity == "Moderate"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -974,7 +1185,7 @@ class TestGetInternetReachableSet:
         ]
         edges = [
             {'from': 'INTERNET', 'to': 'sg-001', 'relationship': 'REACHES'},
-            {'from': 'sg-001', 'to': 'i-001', 'relationship': 'attached_to_instance'},
+            {'from': 'sg-001', 'to': 'i-001', 'relationship': 'can_reach'},
             {'from': 'i-001', 'to': 'role-001', 'relationship': 'uses_iam_role'},
             {'from': 'role-001', 'to': 'bucket-001', 'relationship': 'can_access'},
         ]
@@ -1021,7 +1232,7 @@ class TestGetAttackPathTo:
         ]
         edges = [
             {'from': 'INTERNET', 'to': 'sg-001', 'relationship': 'REACHES'},
-            {'from': 'sg-001', 'to': 'i-001', 'relationship': 'attached_to_instance'},
+            {'from': 'sg-001', 'to': 'i-001', 'relationship': 'can_reach'},
             {'from': 'i-001', 'to': 'role-001', 'relationship': 'uses_iam_role'},
             {'from': 'role-001', 'to': 'bucket-001', 'relationship': 'can_access'},
         ]
@@ -1173,7 +1384,7 @@ class TestGraphContext:
         ]
         edges = [
             {'from': 'INTERNET', 'to': 'sg-001', 'relationship': 'REACHES'},
-            {'from': 'sg-001', 'to': 'i-001', 'relationship': 'attached_to_instance'},
+            {'from': 'sg-001', 'to': 'i-001', 'relationship': 'can_reach'},
         ]
         graph = Graph(nodes=nodes, edges=edges)
         infra = AWSInfrastructure(
@@ -1318,7 +1529,7 @@ class TestLambdaNoVPCSeverityUpgrades:
         ]
         edges = [
             {'from': 'INTERNET', 'to': 'api-gw', 'relationship': 'REACHES'},
-            {'from': 'api-gw', 'to': 'api-handler', 'relationship': 'invokes'},
+            {'from': 'api-gw', 'to': 'api-handler', 'relationship': 'can_reach'},
         ]
         graph = Graph(nodes=nodes, edges=edges)
         results = check_lambda_no_vpc(infra, graph=graph)

@@ -8,7 +8,7 @@ from app.tf_parser import (
 )
 
 
-# -- SAMPLE DIFFS --------------------------------------------------
+# ── SAMPLE DIFFS ──────────────────────────────────────────────────
 
 DIFF_ADD_SG = '''\
 @@ -0,0 +1,15 @@
@@ -76,7 +76,7 @@ DIFF_ADD_EC2_NO_IMDSV2 = '''\
 '''
 
 
-# -- PARSE TESTS ---------------------------------------------------
+# ── PARSE TESTS ───────────────────────────────────────────────────
 
 class TestParsePRDiff:
     def test_parse_added_sg(self):
@@ -127,7 +127,7 @@ class TestParsePRDiff:
         assert changes == []
 
 
-# -- COMPONENT CONFIG CONVERSION -----------------------------------
+# ── COMPONENT CONFIG CONVERSION ───────────────────────────────────
 
 class TestTFChangeToComponentConfig:
     def test_sg_to_component(self):
@@ -210,7 +210,7 @@ class TestTFChangeToComponentConfig:
         assert config is None
 
 
-# -- UTILITY TESTS -------------------------------------------------
+# ── UTILITY TESTS ─────────────────────────────────────────────────
 
 class TestCleanTFValue:
     def test_removes_quotes(self):

@@ -9,7 +9,7 @@ const TEMPLATE_URL =
   process.env.EMFIRGE_TEMPLATE_URL ??
   "https://emfirge-reports.s3.ap-south-1.amazonaws.com/cloudformation/iam-role.yaml";
 
-const TRUSTED_ACCOUNT = process.env.EMFIRGE_TRUSTED_ACCOUNT_ID ?? "282027772803";
+const TRUSTED_ACCOUNT = process.env.EMFIRGE_TRUSTED_ACCOUNT_ID ?? "000000000000";
 const EXTERNAL_ID = process.env.EMFIRGE_EXTERNAL_ID ?? "aws-risk-agent";
 
 export async function setupHandler(_args: Record<string, never>) {
