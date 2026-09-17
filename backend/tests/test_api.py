@@ -106,13 +106,24 @@ class TestGitHubRoutes:
             assert resp.json()["repos"] == []
 
     def test_github_webhook_invalid_signature(self):
-        resp = client.post(
-            "/github/webhook",
-            content=b'{"action": "opened"}',
-            headers={"X-Hub-Signature-256": "sha256=invalidsig", "Content-Type": "application/json"},
-        )
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "invalid signature"
+        with patch.dict("os.environ", {"GITHUB_WEBHOOK_SECRET": "test-secret"}):
+            resp = client.post(
+                "/github/webhook",
+                content=b'{"action": "opened"}',
+                headers={"X-Hub-Signature-256": "sha256=invalidsig", "Content-Type": "application/json"},
+            )
+        assert resp.status_code == 401
+        assert "invalid signature" in resp.text
+
+    def test_github_webhook_missing_signature_rejected(self):
+        with patch.dict("os.environ", {"GITHUB_WEBHOOK_SECRET": "test-secret"}):
+            resp = client.post(
+                "/github/webhook",
+                content=b'{"action": "opened"}',
+                headers={"Content-Type": "application/json"},
+            )
+        assert resp.status_code == 401
+        assert "invalid signature" in resp.text
 
     def test_github_webhook_no_secret_accepts_all(self):
         """When no webhook secret configured, all payloads accepted."""
