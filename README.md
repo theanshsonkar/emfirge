@@ -94,6 +94,29 @@ The score, findings, attack paths, and fix verification come from deterministic 
 
 [Quickstart][quickstart] · [How the fork works][how-it-works] · [MCP tools][tools] · [Privacy][privacy] · [Security][security] · [Self-hosting][self-hosting] · [Contributing][contributing]
 
+## Repository layout and deployment
+
+The public `emfirge` repository is the single source of truth: `backend/` contains the AGPL-3.0
+engine/server, `mcp/` contains the Apache-2.0 MCP package, and `site/` contains the docs. The old
+`aws-risk-agent` repository is retired and pending archive; it is not a mirror to sync.
+
+Backend checks run locally with SQLite and the repository on `PYTHONPATH`:
+
+```bash
+cd backend
+PYTHONPATH=. .venv/bin/pytest -q
+```
+
+MCP checks are lightweight TypeScript checks from `mcp/`:
+
+```bash
+cd mcp
+npm run typecheck
+```
+
+The deploy workflow builds from `backend/` and deploys the same public-repo image to EC2 only for
+pushes to the canonical `main` repository, with the existing guarded secret/env-file mechanism.
+
 ---
 
 <div align="center">

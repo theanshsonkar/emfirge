@@ -614,8 +614,8 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
         return StreamingResponse(error_stream(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
-    # ── DAILY SIMULATION LIMIT: 10/day per AWS account ─────────────
-    SIMULATION_DAILY_LIMIT = 10
+    # ── DAILY SIMULATION LIMIT: 3/day per AWS account ─────────────
+    SIMULATION_DAILY_LIMIT = 3
     WHITELISTED_ACCOUNTS = _whitelisted_accounts()
     if aws_account_id and aws_account_id not in WHITELISTED_ACCOUNTS:
         sim_count = get_simulation_count_today(aws_account_id)
@@ -955,7 +955,7 @@ Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical
 @app.get('/simulate/remaining', dependencies=[Depends(require_api_key)])
 def simulate_remaining(analysis_id: str):
     """Returns how many simulations remain today for the account that owns this analysis."""
-    SIMULATION_DAILY_LIMIT = 10
+    SIMULATION_DAILY_LIMIT = 3
     from app.database import SessionLocal, AnalysisLog
 
     aws_account_id = None
@@ -2063,13 +2063,11 @@ async def github_webhook(http_request: Request):
     secret = os.getenv('GITHUB_WEBHOOK_SECRET', '')
     sig = http_request.headers.get('X-Hub-Signature-256', '')
 
-    # Reject unsigned requests when a webhook secret is configured
-    if secret and not sig:
-        return {"status": "missing signature"}
-    if secret and sig:
+    # Reject unsigned or invalid requests when a webhook secret is configured.
+    if secret:
         expected = 'sha256=' + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expected):
-            return {"status": "invalid signature"}
+        if not sig or not hmac.compare_digest(sig, expected):
+            raise HTTPException(status_code=401, detail="invalid signature")
     payload = json.loads(body)
     if payload.get('action') == 'closed' and payload.get('pull_request', {}).get('merged'):
         pr_url = payload['pull_request']['html_url']
@@ -3710,8 +3708,8 @@ def simulate_component(request: ComponentRequest, http_request: Request):
     if not infrastructure:
         raise HTTPException(status_code=404, detail='Scan data not found for this analysis ID. Please run a new scan first.')
 
-    # ── DAILY SIMULATION LIMIT: 10/day per AWS account ─────────────
-    SIMULATION_DAILY_LIMIT = 10
+    # ── DAILY SIMULATION LIMIT: 3/day per AWS account ─────────────
+    SIMULATION_DAILY_LIMIT = 3
     WHITELISTED_ACCOUNTS = _whitelisted_accounts()
     if aws_account_id and aws_account_id not in WHITELISTED_ACCOUNTS:
         sim_count = get_simulation_count_today(aws_account_id)

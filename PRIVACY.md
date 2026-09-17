@@ -133,7 +133,7 @@ count in `llm_usage` (just timestamps and counts — no content).
 
 ### Want zero data on emfirge.cloud at all?
 
-The full backend is open source under BUSL 1.1. You can read the code in
+The full backend is open source under AGPL-3.0. You can read the code in
 `backend/` and deploy your own copy. Then point the
 MCP at your URL:
 

@@ -281,7 +281,8 @@ class TestWebhookSecurity:
         with patch.dict("os.environ", {"GITHUB_WEBHOOK_SECRET": secret}):
             resp = client.post("/github/webhook", content=b'{"action": "TAMPERED"}',
                                headers={"X-Hub-Signature-256": sig, "Content-Type": "application/json"})
-            assert resp.json()["status"] == "invalid signature"
+            assert resp.status_code == 401
+            assert "invalid signature" in resp.text
 
 
 # ═══════════════════════════════════════════════════════════════════

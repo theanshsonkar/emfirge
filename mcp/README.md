@@ -11,7 +11,7 @@ and prove fixes *before* you apply them — without your resource IDs ever reach
 
 [![npm](https://img.shields.io/npm/v/@emfirge/mcp.svg)](https://www.npmjs.com/package/@emfirge/mcp)
 [![MCP Registry](https://img.shields.io/badge/MCP%20Registry-listed-blue.svg)][registry]
-[![License: BUSL 1.1](https://img.shields.io/badge/license-BUSL--1.1-blue.svg)][license]
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)][license]
 [![node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
 
 </div>
@@ -227,9 +227,9 @@ npx @emfirge/mcp purge --role-arn <ARN>           # delete all your scan data
 
 ## License
 
-[BUSL 1.1][license] — free for non-production and small production use (up to $1M ARR or
-100 employees). Auto-converts to Apache 2.0 in 2030.
-
+The MCP package is licensed under [Apache-2.0][license]. It lives in the same public `emfirge`
+repository as the AGPL-3.0 engine under `backend/`; there is no manual backend mirror or sync flow.
+The native engine is deployed to EC2 from the guarded workflow in the repository root.
 ---
 
 <div align="center">
