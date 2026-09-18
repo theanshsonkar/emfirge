@@ -26,7 +26,7 @@ export default function Page() {
       <H2>What it does</H2>
       <P>
         Your AI assistant can read your code, but it can&apos;t see your cloud, so it can&apos;t tell
-        you whether a change is safe. Emfirge closes that gap. It runs next to your assistant (Claude,
+        you whether a change might affect your security posture. Emfirge closes that gap. It runs next to your assistant (Claude,
         Cursor, Kiro, and others), maps your AWS account through a <Strong>read-only</Strong> role
         into one connected graph, and lets your assistant answer the question that actually matters:{" "}
         <Strong>&quot;what happens if I make this change?&quot;</Strong>
@@ -49,7 +49,7 @@ Emfirge → risk 3/100 (CRITICAL, higher is safer) · 15 critical · 17 moderate
 
 You: Is it safe to close SSH on NAME_132?
 
-Emfirge → removes 1 critical + resolves 1 toxic combo · 0 new findings · safe to apply`,
+Emfirge → modeled result: removes 1 critical + resolves 1 toxic combo · 0 new findings`,
           },
         ]}
       />
@@ -59,9 +59,9 @@ Emfirge → removes 1 critical + resolves 1 toxic combo · 0 new findings · saf
         Most cloud-security tools scan your account and hand you a list of problems with a fix to
         &quot;just trust.&quot; That&apos;s the crowded part of the market, and it&apos;s not us.
         Emfirge is the step that comes <Strong>before you apply a change</Strong>: it rehearses the
-        change on a copy of your cloud and <Strong>proves the result</Strong>, so you (or your AI)
-        aren&apos;t guessing. Scanners tell you what&apos;s wrong. Emfirge tells you whether your fix
-        actually helps, without any risk to prod.
+        change on a copy of your cloud and <Strong>shows the modeled result</Strong>, so you (or your AI)
+        aren&apos;t guessing. Scanners tell you what&apos;s wrong. Emfirge tells you what the modeled security delta looks like,
+        without writing to prod.
       </P>
 
       <Callout type="note" title="Deterministic by design">
@@ -102,12 +102,12 @@ Emfirge → removes 1 critical + resolves 1 toxic combo · 0 new findings · saf
       </P>
 
       <H2>What you can do</H2>
-      <P>Everything your assistant can do maps to one of seven tools:</P>
+      <P>Everything your assistant can do maps to a focused set of tools:</P>
       <CardGrid>
         <Card href="/docs/tools/scan" title="emfirge_scan">Scan an account → risk score + analysis_id.</Card>
         <Card href="/docs/tools/get-findings" title="emfirge_get_findings">Full findings, filterable by severity.</Card>
         <Card href="/docs/tools/attack-paths" title="emfirge_attack_paths">Internet-to-data paths + chokepoints.</Card>
-        <Card href="/docs/tools/verify-fix" title="emfirge_verify_fix">Fork the graph, prove a fix, read the delta.</Card>
+        <Card href="/docs/tools/verify-fix" title="emfirge_verify_fix">Fork the graph, model a fix, read the delta.</Card>
         <Card href="/docs/tools/simulate-breach" title="emfirge_simulate_breach">Walk a full kill chain from a what-if.</Card>
         <Card href="/docs/tools/check-compliance" title="emfirge_check_compliance">CIS 1.5 / SOC 2 per-control status.</Card>
         <Card href="/docs/tools/setup-help" title="emfirge_setup_help">One-click CloudFormation URL for the read-only role.</Card>
@@ -121,16 +121,15 @@ Emfirge → removes 1 critical + resolves 1 toxic combo · 0 new findings · saf
       <Callout type="warning" title="Honest limits (for now)">
         <ul className="mt-1 list-disc space-y-1.5 pl-4">
           <li>
-            We prove a change adds <Strong>no new security risk</Strong>. We don&apos;t yet check that
-            it won&apos;t break app connectivity. &quot;Safe&quot; means &quot;no security
-            regression,&quot; not &quot;won&apos;t break anything.&quot;
+            We show whether a modeled change adds <Strong>new security risk</Strong>. We don&apos;t yet check that
+            it won&apos;t break app connectivity. &quot;Security result&quot; means &quot;no modeled security regression,&quot; not &quot;won&apos;t break anything.&quot;
           </li>
           <li>
             The copy is built from your <Strong>most recent scan</Strong>, so keep scans fresh. A
-            stale copy proves against a cloud that may have changed.
+            stale copy reflects a cloud that may have changed.
           </li>
           <li>
-            The deepest &quot;prove it&quot; path is strongest on our <Strong>core fixes</Strong> today;
+            The deepest modeled verification path is strongest on our <Strong>core fixes</Strong> today;
             we&apos;re actively expanding coverage.
           </li>
         </ul>
@@ -139,8 +138,8 @@ Emfirge → removes 1 critical + resolves 1 toxic combo · 0 new findings · saf
       <H2>Next steps</H2>
       <P>
         Install in 30 seconds and run your first scan in the <A href="/docs/quickstart">Quickstart</A>,
-        or read <A href="/docs/how-it-works">How the fork works</A> to understand the engine. Every
-        scan is free: 5 per day per AWS account, no signup, no API keys.
+        or read <A href="/docs/how-it-works">How the fork works</A> to understand the engine. Scans
+        are subject to operational limits; no signup or API keys are required.
       </P>
 
       <PrevNext prev={prev} next={next} />

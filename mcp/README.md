@@ -1,171 +1,22 @@
 <div align="center">
 
-# 🛡️ Emfirge
+# 🛡️ Emfirge MCP
 
-**Privacy-first AWS security, inside your AI.**
+**Privacy-first AWS security inside your AI.**
 
-Trace attack paths from the internet to your sensitive data, calculate blast radius,
-and prove fixes *before* you apply them — without your resource IDs ever reaching the LLM.
-
-[Website][website] · [Source][repo] · [MCP Registry][registry] · [Privacy][privacy] · [Report an issue][issues]
-
-[![npm](https://img.shields.io/npm/v/@emfirge/mcp.svg)](https://www.npmjs.com/package/@emfirge/mcp)
-[![MCP Registry](https://img.shields.io/badge/MCP%20Registry-listed-blue.svg)][registry]
-[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)][license]
-[![node](https://img.shields.io/badge/node-%3E%3D20-brightgreen.svg)](https://nodejs.org)
+Version **0.2.3** · Apache-2.0
 
 </div>
 
----
+The Emfirge MCP server connects an AI client to read-only AWS security analysis. It exposes graph analysis and isolated branch modeling over stdio. Modeled branch changes do not mutate AWS; results compute a security delta and never guarantee safe deployment.
 
-Your AI can read your code, but it can't see your cloud. Emfirge fixes that. It scans your
-live AWS account, builds a graph of every resource and how they connect, then lets your
-assistant walk attack paths, simulate breaches, and verify fixes — all from a conversation.
-
-The AI never guesses. Emfirge clones your infrastructure graph, applies the change, and
-re-runs **58 deterministic rules**. Your assistant reads back what the engine *proved*.
-
-|  |  |
-|---|---|
-| 🕸️ **Graph-based** | Maps every AWS resource and relationship — not isolated resource linting like Checkov/tfsec. |
-| 🎯 **Attack paths** | Weighted-Dijkstra routes from the internet to your data, ranked by *exploit difficulty*, not hop count. |
-| 💥 **Blast radius** | See exactly what an attacker reaches once they land on a resource. |
-| 🔒 **Privacy-first** | Resource IDs are tokenized on your machine *before* anything reaches the LLM. The mapping never leaves. |
-| ✅ **Proven fixes** | Clone the graph → apply the change → re-run every rule → diff. A real simulation, not a hunch. |
-| 📋 **Compliance** | CIS AWS Foundations 1.5 + SOC 2, per-control pass/fail, mapped to MITRE ATT&CK. |
-
----
-
-## Install (30 seconds)
+## Install
 
 ```bash
 npx @emfirge/mcp install
 ```
 
-Auto-detects and wires up **Claude Desktop, Cursor, Kiro, Cline, Continue, and Codex CLI**,
-then asks you to pick a privacy mode. Restart your client and just ask:
-
-> *"Scan my AWS account, role `arn:aws:iam::123456789012:role/EmfirgeReadOnly`, region us-east-1"*
-
-**No role yet?** Say **"help me set up Emfirge"** — your assistant hands you a one-click
-CloudFormation deploy link for a read-only IAM role.
-
-**Free.** 5 scans/day per AWS account. No signup. No API keys.
-
-### Try it with zero setup
-
-Use the demo ARN — fake infrastructure, the real engine:
-
-```
-arn:aws:iam::000000000000:role/EmfirgeReadOnly    region: us-east-1
-```
-
-> *"Scan with `arn:aws:iam::000000000000:role/EmfirgeReadOnly` in `us-east-1`"*
-
-> Want a visual graph instead? **[emfirge.cloud][website]** — same engine, browser UI, free during beta.
-
----
-
-## What your AI gets
-
-| Tool | What it does |
-|---|---|
-| `emfirge_setup_help` | Returns a clickable CloudFormation deploy link (for first-time setup). |
-| `emfirge_scan` | Scan an AWS account — returns risk score, finding counts, and an `analysis_id`. |
-| `emfirge_get_findings` | Full findings list for a scan, filterable by severity. |
-| `emfirge_attack_paths` | Attack paths from the internet to internal resources, plus chokepoints. |
-| `emfirge_verify_fix` | Simulate a fix and see the real score delta — **no changes to your AWS**. |
-| `emfirge_check_compliance` | CIS AWS Foundations / SOC 2 per-control status. |
-| `emfirge_simulate_breach` | Full kill-chain walkthrough — attack stages, blast radius, follow-up moves. |
-
-All seven tools are **deterministic on the backend — no LLM calls inside the MCP path**.
-Your host LLM (Claude / Cursor / etc.) is the only AI in the loop, and in `strict` mode it
-only ever sees tokenized data.
-
----
-
-## Privacy by default
-
-In `strict` mode (the default), every AWS identifier is tokenized locally *before* it
-reaches your LLM:
-
-```
-What the LLM sees:    "SG_001 has SSH open → reaches S3_001"
-What's on your disk:  SG_001 = sg-0a1b2c3d
-                      S3_001 = acme-customer-pii
-```
-
-The mapping lives at `~/.emfirge/tokens.json` and is **never sent to Emfirge, Anthropic,
-or anyone**. When you say *"fix SG_001"*, the MCP resolves the real ID locally, calls the
-backend, and re-tokenizes the response.
-
-| Mode | What's tokenized | Best for |
-|---|---|---|
-| `strict` *(default)* | Every AWS ID — ARNs, EC2/SG/IAM/S3, IPs, account IDs, bucket names | Banks, healthcare, regulated industries |
-| `balanced` | ARNs, EC2/SG/EIP/IAM IDs, IPs, account IDs. Subnets/VPCs/volumes raw. | Most users |
-| `off` | Nothing — raw IDs go to the LLM | Personal accounts, demo, debugging |
-
-```bash
-npx @emfirge/mcp privacy strict|balanced|off   # change mode across every wired client
-npx @emfirge/mcp privacy                        # show current mode
-```
-
-> **Honest note:** tokenization sits between the MCP and the LLM. The Emfirge backend
-> *does* receive real IDs — it has to, to call AWS. It stores them for 90 days, then
-> auto-deletes. Full details in [PRIVACY.md][privacy]. Wipe everything anytime with
-> `npx @emfirge/mcp purge --role-arn <ARN>`.
-
----
-
-## How it works
-
-```
-┌──────────────┐   role ARN    ┌──────────────┐  read-only   ┌─────┐
-│ Your machine │──────────────▶│ emfirge.cloud│─────────────▶│ AWS │
-│  (MCP host)  │               │   (scanner)  │  STS, 1 hr   └─────┘
-└──────┬───────┘               └──────┬───────┘
-       │ tokenized IDs                │ findings + graph
-       ▼                              ▼
-┌──────────────┐               ┌──────────────┐
-│  Your LLM    │               │ Postgres + S3│
-│ (Claude/etc) │               │  (90-day TTL)│
-└──────────────┘               └──────────────┘
-```
-
-1. **You ask your AI to scan.** The MCP calls the backend with your read-only role ARN.
-2. **The backend assumes the role** (1-hour STS token, ExternalId-scoped), maps ~20 AWS
-   services, builds the graph, runs the rules, and returns findings.
-3. **The MCP tokenizes** every resource ID locally, then hands the safe version to your LLM.
-4. **Your assistant reasons over it** — attack paths, fixes, compliance — and you never
-   leave the chat.
-
----
-
-## Under the hood
-
-- **Weighted Dijkstra attack paths** — edges weighted by exploit difficulty (0 = metadata,
-  1 = trivial network reach, 3 = needs a shell). A 5-hop trivial path ranks more dangerous
-  than a 2-hop credential theft.
-- **Brandes' betweenness centrality** — finds chokepoint nodes where hardening one resource
-  kills the most attack paths at once.
-- **Deterministic fix simulator** — graph mutation + full rule re-run, no LLM in the
-  verification path. Proof, not a guess.
-- **58 graph-aware rules across 17 families** with context-aware severity — SSH-open behind
-  an ALB drops Critical → Low; public S3 with CloudFront drops Critical → Low.
-- **Deterministic 0–100 score** — higher is safer, normalized by account size, across four
-  dimensions (security, availability, cost, disaster recovery). No LLM in the scoring path.
-- **9 toxic-combo patterns** — multi-signal pairs like *public RDS + no CloudTrail* that are
-  safe on their own but dangerous together.
-
-Coverage: EC2, Lambda, ECS, S3, EBS, RDS, IAM, Secrets Manager, KMS, VPC, Security Groups,
-WAF, CloudFront, SNS, CloudTrail, GuardDuty, CloudWatch, AWS Config, Budgets — ~20 service
-types across 17 rule families.
-
----
-
-## Manual configuration
-
-If auto-install doesn't work, add this to your client's MCP config:
+The installer can wire supported desktop MCP clients. Manual configuration:
 
 ```json
 {
@@ -179,70 +30,68 @@ If auto-install doesn't work, add this to your client's MCP config:
 }
 ```
 
-Config file locations:
+Ask your assistant to scan with a read-only role. This is an example placeholder, not a real account:
 
-- **Claude Desktop** — `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac), `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
-- **Cursor** — `~/.cursor/mcp.json`
-- **Kiro** — `~/.kiro/settings/mcp.json`
-- **Cline** — `~/Library/Application Support/Cline/cline_mcp_settings.json`
-- **Continue** — `~/.continue/config.json`
+```text
+Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
+```
 
-> MCP requires a desktop AI client (stdio transport). Web Claude / ChatGPT / Gemini don't
-> support MCP yet — use **[emfirge.cloud][website]** for those.
+## Tools (15)
 
----
+### Analyze
+
+- `emfirge_scan` — scan an AWS account and return risk score, finding counts, and `analysis_id`.
+- `emfirge_get_findings` — return findings for a scan, optionally filtered by severity.
+- `emfirge_attack_paths` — return internet-to-resource paths, chokepoints, and orphaned resources.
+- `emfirge_simulate_breach` — walk a natural-language scenario through entry, pivot, impact, and blast radius.
+- `emfirge_verify_fix` — simulate a supported finding fix and return score and finding deltas.
+- `emfirge_check_compliance` — return CIS AWS Foundations 1.5 or SOC 2 per-control status.
+
+### Branch
+
+- `emfirge_create_branch` — create an isolated infrastructure branch from a completed analysis.
+- `emfirge_apply_change` — apply an add, modify, or delete change to the branch model, not AWS.
+- `emfirge_branch_diff` — show the infrastructure diff against the base analysis.
+- `emfirge_branch_verdict` — evaluate an advisory `block`, `warn`, or `pass` verdict with coverage details.
+- `emfirge_rollback_branch` — remove the most recent modeled change.
+- `emfirge_discard_branch` — discard an isolated branch.
+- `emfirge_list_branches` — list branches, optionally filtered by base analysis ID.
+- `emfirge_compare_branches` — compare branch models and rank outcomes safest-first.
+
+### Setup
+
+- `emfirge_setup_help` — return a CloudFormation deploy URL for a read-only IAM role.
+
+## Privacy
+
+Set `EMFIRGE_PRIVACY` to `strict`, `balanced`, or `off`; `strict` is the default. Strict tokenizes recognized AWS identifiers locally before MCP results reach the LLM. The token mapping remains on the local machine. The backend receives the data needed for the requested analysis. Credentials in presigned report URLs are scrubbed before URLs are returned.
+
+```bash
+npx @emfirge/mcp privacy
+npx @emfirge/mcp privacy strict|balanced|off
+```
 
 ## CLI
 
+```text
+npx @emfirge/mcp install                         # install for detected clients
+npx @emfirge/mcp uninstall                       # remove from clients
+npx @emfirge/mcp status                          # show installation and privacy mode
+npx @emfirge/mcp privacy <strict|balanced|off>   # set privacy mode
+npx @emfirge/mcp tokens                          # list local token mappings
+npx @emfirge/mcp purge --role-arn <ARN>          # request deletion of scan data
 ```
-npx @emfirge/mcp install                         # auto-wire to all detected clients
-npx @emfirge/mcp install --privacy=balanced      # non-interactive: skip the prompt
-npx @emfirge/mcp uninstall                        # remove from all clients
-npx @emfirge/mcp status                           # show what's wired up + privacy mode
-npx @emfirge/mcp privacy <strict|balanced|off>    # change privacy mode everywhere
-npx @emfirge/mcp tokens                           # list local token mappings
-npx @emfirge/mcp purge --role-arn <ARN>           # delete all your scan data
+
+## Advisory boundaries
+
+The typical workflow is:
+
+```text
+read-only scan → fork graph → apply modeled change → diff → re-run lenses → verdict
 ```
 
-## Environment variables
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `EMFIRGE_BASE_URL` | `https://emfirge.cloud/api` | Backend URL — override to point at a self-hosted backend |
-| `EMFIRGE_PRIVACY` | `strict` | `strict`, `balanced`, or `off` |
-| `EMFIRGE_TRUSTED_ACCOUNT_ID` | `000000000000` | AWS account ID to trust in the IAM role (for `setup_help`) |
-| `EMFIRGE_EXTERNAL_ID` | `aws-risk-agent` | ExternalId for STS assume-role |
-
----
-
-## Security model
-
-- **Read-only IAM role** — zero write permissions.
-- **ExternalId** — prevents confused-deputy attacks.
-- **Scoped trust** — only Emfirge's AWS account can assume the role.
-- **STS temporary credentials** — expire in 1 hour, never stored.
-- **Instant revoke** — delete the CloudFormation stack and all access is gone.
-
----
+A branch is an analysis model. `emfirge_branch_verdict` reports `scanner_status` and `coverage_warnings`; non-empty warnings mean degraded coverage and must not be presented as complete. `pass` is advisory evidence from the available lenses, not a guarantee of safety or application connectivity.
 
 ## License
 
-The MCP package is licensed under [Apache-2.0][license]. It lives in the same public `emfirge`
-repository as the AGPL-3.0 engine under `backend/`; there is no manual backend mirror or sync flow.
-The native engine is deployed to EC2 from the guarded workflow in the repository root.
----
-
-<div align="center">
-
-**See your cloud the way an attacker does — from inside your AI.**
-
-[Website][website] · [Source][repo] · [MCP Registry][registry]
-
-</div>
-
-[website]: https://emfirge.cloud
-[repo]: https://github.com/theanshsonkar/emfirge
-[registry]: https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.theanshsonkar/emfirge
-[privacy]: https://github.com/theanshsonkar/emfirge/blob/main/PRIVACY.md
-[license]: https://github.com/theanshsonkar/emfirge/blob/main/LICENSE
-[issues]: https://github.com/theanshsonkar/emfirge/issues
+The MCP package is licensed under [Apache-2.0](../LICENSE). The repository engine is separately licensed under AGPL-3.0.

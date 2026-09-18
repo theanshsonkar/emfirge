@@ -86,9 +86,9 @@ arn:aws:iam::123456789012:role/EmfirgeReadOnly, region us-east-1` },
         <Code>verify_fix</Code>, <Code>simulate_breach</Code>, and <Code>check_compliance</Code> all take it.
       </P>
 
-      <Callout type="note" title="Timing & limits">
+      <Callout type="note" title="Timing & operational limits">
         A scan takes 30-60 seconds on a real account (the tool streams to stay under proxy timeouts).
-        Free tier is 5 scans/day per AWS account, resetting at midnight UTC, a <Code>429</Code> means
+        The scan limit is 5 scans/day per AWS account, resetting at midnight UTC; a <Code>429</Code> means
         you&apos;ve hit it. The other tools run against a completed scan and don&apos;t consume the budget.
       </Callout>
 

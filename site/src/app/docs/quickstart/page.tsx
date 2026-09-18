@@ -38,7 +38,7 @@ export default function Page() {
       <Callout type="tip" title="Try it with zero setup">
         Use the demo role, fake infrastructure, the real engine:
         <div className="mt-2 font-mono text-[12.5px] text-foreground">
-          arn:aws:iam::000000000000:role/EmfirgeReadOnly · region us-east-1
+          arn:aws:iam::123456789012:role/EmfirgeReadOnly · region us-east-1
         </div>
       </Callout>
 
@@ -60,11 +60,11 @@ arn:aws:iam::123456789012:role/EmfirgeReadOnly, region us-east-1`,
       <Steps>
         <Step n={1} title="Explore findings">&quot;Show me the critical findings&quot; → <Code>emfirge_get_findings</Code>.</Step>
         <Step n={2} title="Walk attack paths">&quot;How would an attacker reach my database?&quot; → <Code>emfirge_attack_paths</Code>.</Step>
-        <Step n={3} title="Prove a fix">&quot;Is it safe to close SSH on NAME_132?&quot; → <Code>emfirge_verify_fix</Code>.</Step>
+        <Step n={3} title="Model a fix">&quot;Is it safe to close SSH on NAME_132?&quot; → <Code>emfirge_verify_fix</Code>.</Step>
       </Steps>
 
-      <Callout type="note" title="Free tier">
-        5 scans per day per AWS account, resets at midnight UTC. No signup, no API keys. Findings and
+      <Callout type="note" title="Operational limit">
+        The scan limit is 5 scans per day per AWS account, resetting at midnight UTC. Findings and
         the other tools (findings, attack paths, verify-fix, compliance) run against a completed scan
         and don&apos;t consume the daily scan budget.
       </Callout>

@@ -90,13 +90,13 @@ WAF-001  GUARD-001  CW-001` }]} />
         Over MCP, Emfirge <Strong>maps, simulates, and verifies</Strong> fixes, it does not open pull
         requests yet. Raising the Terraform PR (surgical diff on your <Code>.tf</Code>, feature branch,
         finding linked) currently happens in the <A href="https://app.emfirge.cloud">Emfirge web app</A>.
-        MCP-native PR creation is on the roadmap.
+        MCP-native PR creation is not available through MCP.
       </Callout>
 
       <Callout type="warning" title="What 'safe' means">
         <Code>safe_to_apply</Code> is true when the change opens <Strong>no new security finding</Strong>{" "}
-        and doesn&apos;t worsen the score. It does not verify application connectivity, and it mutates
-        your <Strong>last scan</Strong>, re-scan first if the account changed. See{" "}
+        and doesn&apos;t worsen the score. It does not verify application connectivity. The tool clones and
+        models the infrastructure; it does not mutate the real scan or AWS. See{" "}
         <A href="/docs/how-it-works">How the fork works</A>.
       </Callout>
 
