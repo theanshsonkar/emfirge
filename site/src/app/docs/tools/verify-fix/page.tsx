@@ -66,17 +66,17 @@ export default function Page() {
   "score_delta": 0,
   "safe_to_apply": true
 }` }]}
-        footer={<><span className="font-medium" style={{ color: "var(--safe)" }}>✓ safe to apply</span><span>· removes 1 critical + a toxic combo, adds 0.</span></>}
+        footer={<><span className="font-medium" style={{ color: "var(--safe)" }}>✓ no modeled security regression</span><span>· removes a finding and toxic combo, adds none in the clone.</span></>}
       />
       <P>
         <Code>findings_removed</Code> and <Code>findings_added</Code> are <Strong>arrays of full finding
         objects</Strong>, not counts. <Code>score_before</Code>/<Code>score_after</Code> are the 0-100
-        posture score (higher is safer); here it stays <Code>3</Code> because 14 other criticals still
-        dominate, yet the fix is still safe, it removed a finding and a toxic combo and added none.
+        posture score (higher is safer). A favorable modeled delta means no new exposure was detected
+        in the clone; it is advisory and does not establish live safety or application connectivity.
       </P>
 
       <H2>What it can simulate</H2>
-      <P>Deterministic fix-simulation covers these rules today:</P>
+      <P>Deterministic fix-simulation covers these rules:</P>
       <CodeBlock tabs={[{ label: "simulatable rules", code: `EC2-002  EC2-003  EC2-009
 S3-001   S3-002   S3-003
 RDS-002  RDS-003  RDS-004  RDS-006
@@ -86,18 +86,20 @@ WAF-001  GUARD-001  CW-001` }]} />
         the Terraform, or open the scan in the dashboard to raise a pull request automatically.
       </P>
 
-      <Callout type="note" title="Opening pull requests is web-only for now">
-        Over MCP, Emfirge <Strong>maps, simulates, and verifies</Strong> fixes, it does not open pull
-        requests yet. Raising the Terraform PR (surgical diff on your <Code>.tf</Code>, feature branch,
-        finding linked) currently happens in the <A href="https://app.emfirge.cloud">Emfirge web app</A>.
-        MCP-native PR creation is not available through MCP.
+      <Callout type="note" title="Opening pull requests is outside MCP simulation">
+        Over MCP, Emfirge <Strong>maps, simulates, and verifies</Strong> fixes; it does not open pull
+        requests. Raising the Terraform PR (surgical diff on your <Code>.tf</Code>, feature branch,
+        finding linked) is performed in the <A href="https://app.emfirge.cloud">Emfirge web app</A>.
+        The tool simulates the modeled fix and does not perform live application, deployment, or
+        connectivity verification.
       </Callout>
 
-      <Callout type="warning" title="What 'safe' means">
-        <Code>safe_to_apply</Code> is true when the change opens <Strong>no new security finding</Strong>{" "}
-        and doesn&apos;t worsen the score. It does not verify application connectivity. The tool clones and
-        models the infrastructure; it does not mutate the real scan or AWS. See{" "}
-        <A href="/docs/how-it-works">How the fork works</A>.
+      <Callout type="warning" title="What the advisory signal means">
+        <Code>safe_to_apply</Code> is an advisory simulation signal: true means the clone showed
+        <Strong> no new modeled security finding</Strong> and no score worsening. Prefer the wording
+        “no modeled security regression” or “no new exposure detected”; this is a simulation on a
+        clone, not proof of live safety or application connectivity. The tool does not mutate the real
+        scan or AWS. See <A href="/docs/how-it-works">How the fork works</A>.
       </Callout>
 
       <PrevNext prev={prev} next={next} />

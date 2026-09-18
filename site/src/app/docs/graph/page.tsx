@@ -165,8 +165,10 @@ export default function Page() {
         and security groups, S3, RDS, IAM, Lambda, KMS, VPC, CloudTrail, Config, CloudWatch,
         GuardDuty, Secrets Manager, SNS, WAF, ECS, cost, and orphaned resources). Severity is
         context-aware: an SSH port open behind an ALB is not scored like one open to the internet.
-        Findings roll up into a single <Code>0-100</Code> posture score (higher is safer) across four
-        dimensions, security, availability, cost, and disaster recovery. No LLM runs in the scoring.
+        Findings roll up into a single <Code>0-100</Code> <Strong>scan posture score</Strong> (higher
+        is safer) across four dimensions: security, availability, cost, and disaster recovery. No LLM
+        runs in the scoring. This four-dimension posture score is distinct from the branch verdict,
+        which evaluates six change lenses; see <A href="/docs/how-it-works">How the fork works</A>.
       </P>
 
       <H3>Orphaned resources</H3>
