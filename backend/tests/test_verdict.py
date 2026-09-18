@@ -99,11 +99,21 @@ def patch_diff(monkeypatch, **kwargs):
     monkeypatch.setattr("app.verdict.diff_infrastructure", lambda base, branch: DiffResult(**kwargs))
 
 
-def patch_trivy_unavailable(monkeypatch):
-    monkeypatch.setattr(
-        "app.verdict.run_trivy",
-        Mock(return_value={"available": False, "findings": []}),
-    )
+def patch_non_checkov_scanners_unavailable(monkeypatch):
+    """Stub trivy AND cloudsplaining as unavailable.
+
+    Both must be stubbed explicitly. This helper previously patched only
+    trivy, which left run_cloudsplaining pointing at the real scanner -- so
+    every test using it silently depended on cloudsplaining NOT being
+    installed in the test environment. The moment it became a declared
+    dependency (it is imported in-process by scanners.py) those tests
+    started seeing 2/3 scanners run instead of 1/3 and failed. A test's
+    scanner coverage must come from what it stubs, never from what happens
+    to be on the machine.
+    """
+    unavailable = Mock(return_value={"available": False, "findings": []})
+    monkeypatch.setattr("app.verdict.run_trivy", unavailable)
+    monkeypatch.setattr("app.verdict.run_cloudsplaining", unavailable)
 
 
 def test_native_critical_reachable_blocks(monkeypatch, infra):
@@ -140,7 +150,7 @@ def test_no_new_risk_is_pass_and_keeps_scores(monkeypatch, infra):
 
 def test_scanner_unavailable_keeps_native_only(monkeypatch, infra):
     patch_diff(monkeypatch, added_findings=[{"rule_id": "native", "resource_id": "r", "severity": "LOW"}])
-    patch_trivy_unavailable(monkeypatch)
+    patch_non_checkov_scanners_unavailable(monkeypatch)
     scanner = Mock(side_effect=RuntimeError("missing checkov"))
     monkeypatch.setattr("app.verdict.run_checkov", scanner)
     result = combined_verdict(infra, infra)
@@ -158,7 +168,7 @@ def test_scanner_unavailable_keeps_native_only(monkeypatch, infra):
 def test_scanner_status_names_each_scanner_and_its_reason(monkeypatch, infra):
     """The reason a scanner did not run must survive, not be swallowed."""
     patch_diff(monkeypatch)
-    patch_trivy_unavailable(monkeypatch)
+    patch_non_checkov_scanners_unavailable(monkeypatch)
     monkeypatch.setattr(
         "app.verdict.run_checkov",
         Mock(side_effect=FileNotFoundError("checkov")),
@@ -177,7 +187,7 @@ def test_scanner_status_names_each_scanner_and_its_reason(monkeypatch, infra):
 def test_partial_coverage_still_warns(monkeypatch, infra):
     """One scanner running is NOT full coverage, even though scanner_available is True."""
     patch_diff(monkeypatch)
-    patch_trivy_unavailable(monkeypatch)
+    patch_non_checkov_scanners_unavailable(monkeypatch)
     monkeypatch.setattr(
         "app.verdict.run_checkov",
         Mock(side_effect=[{"available": True, "findings": []}, {"available": True, "findings": []}]),
@@ -195,7 +205,7 @@ def test_partial_coverage_still_warns(monkeypatch, infra):
 
 def test_scanner_high_reachable_blocks(monkeypatch, infra):
     patch_diff(monkeypatch, newly_internet_reachable=["bucket"])
-    patch_trivy_unavailable(monkeypatch)
+    patch_non_checkov_scanners_unavailable(monkeypatch)
     scans = [
         {"available": True, "findings": []},
         {"available": True, "findings": [{"check_id": "CKV_AWS_1", "resource": "bucket", "severity": "HIGH", "title": "Public bucket"}]},
@@ -212,7 +222,7 @@ def test_scanner_high_reachable_blocks(monkeypatch, infra):
 
 def test_scanner_dict_and_list_deltas_are_identity_based(monkeypatch, infra):
     patch_diff(monkeypatch)
-    patch_trivy_unavailable(monkeypatch)
+    patch_non_checkov_scanners_unavailable(monkeypatch)
     scans = [
         {"available": True, "findings": [{"check_id": "A", "resource": "same", "severity": "LOW", "title": "old"}, {"check_id": "R", "resource": "gone", "severity": "HIGH", "title": "gone"}]},
         [{"check_id": "A", "resource": "same", "severity": "CRITICAL", "title": "new"}, {"check_id": "N", "resource": "new", "severity": "UNKNOWN", "title": "new"}],
@@ -225,7 +235,7 @@ def test_scanner_dict_and_list_deltas_are_identity_based(monkeypatch, infra):
 
 def test_duplicate_scanner_identity_uses_deterministic_representative(monkeypatch, infra):
     patch_diff(monkeypatch)
-    patch_trivy_unavailable(monkeypatch)
+    patch_non_checkov_scanners_unavailable(monkeypatch)
     scans = [
         {"available": True, "findings": []},
         {"available": True, "findings": [
