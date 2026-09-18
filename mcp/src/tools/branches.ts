@@ -2,6 +2,20 @@
 
 import { z } from "zod";
 import { backendCall } from "../client.js";
+import { redactDeep, expandTokens } from "../tokenize.js";
+
+// Every handler in this file funnels its response through `redactDeep` and any
+// caller-supplied resource identifier through `expandTokens`, matching the
+// contract the scan/simulate/verify-fix tools already follow. Skipping either
+// one silently breaks a privacy mode or rejects the tokenized ids that
+// emfirge_scan hands back, so keep both wired when adding a tool here.
+function ok(result: unknown) {
+  return {
+    content: [
+      { type: "text" as const, text: JSON.stringify(redactDeep(result), null, 2) },
+    ],
+  };
+}
 
 export const createBranchSchema = {
   base_analysis_id: z
@@ -16,9 +30,7 @@ export type CreateBranchArgs = z.infer<typeof createBranchZodObject>;
 
 export async function createBranchHandler(args: CreateBranchArgs) {
   const result = await backendCall("POST", "/branches", args);
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-  };
+  return ok(result);
 }
 
 export const applyChangeSchema = {
@@ -36,15 +48,17 @@ export const applyChangeZodObject = z.object(applyChangeSchema);
 export type ApplyChangeArgs = z.infer<typeof applyChangeZodObject>;
 
 export async function applyChangeHandler(args: ApplyChangeArgs) {
-  const { branch_id, ...change } = args;
+  // `emfirge_scan` returns tokenized ids (SG_001), so the id and any ids
+  // embedded in `fields` must be expanded back to real AWS ids before the
+  // backend looks the target up -- otherwise the branch engine answers
+  // "Target not found" for exactly the ids the agent was just given.
+  const { branch_id, ...change } = expandTokens(args) as ApplyChangeArgs;
   const result = await backendCall(
     "POST",
     `/branches/${encodeURIComponent(branch_id)}/changes`,
     { ...change, fields: change.fields ?? {} },
   );
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-  };
+  return ok(result);
 }
 
 export const branchIdSchema = {
@@ -59,9 +73,7 @@ export async function branchDiffHandler(args: BranchDiffArgs) {
     "GET",
     `/branches/${encodeURIComponent(args.branch_id)}/diff`,
   );
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-  };
+  return ok(result);
 }
 
 export const branchVerdictZodObject = z.object(branchIdSchema);
@@ -72,9 +84,7 @@ export async function branchVerdictHandler(args: BranchVerdictArgs) {
     "GET",
     `/branches/${encodeURIComponent(args.branch_id)}/verdict`,
   );
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-  };
+  return ok(result);
 }
 
 export const rollbackBranchZodObject = z.object(branchIdSchema);
@@ -86,9 +96,7 @@ export async function rollbackBranchHandler(args: RollbackBranchArgs) {
     `/branches/${encodeURIComponent(args.branch_id)}/rollback`,
     {},
   );
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-  };
+  return ok(result);
 }
 
 export const discardBranchZodObject = z.object(branchIdSchema);
@@ -100,9 +108,7 @@ export async function discardBranchHandler(args: DiscardBranchArgs) {
     `/branches/${encodeURIComponent(args.branch_id)}/discard`,
     {},
   );
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-  };
+  return ok(result);
 }
 
 export const listBranchesSchema = {
@@ -123,9 +129,7 @@ export async function listBranchesHandler(args: ListBranchesArgs) {
   }
   const queryString = query.toString();
   const result = await backendCall("GET", `/branches${queryString ? `?${queryString}` : ""}`);
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-  };
+  return ok(result);
 }
 
 export const compareBranchesSchema = {
@@ -142,7 +146,5 @@ export async function compareBranchesHandler(args: CompareBranchesArgs) {
   const result = await backendCall("POST", "/branches/compare", {
     branch_ids: args.branch_ids,
   });
-  return {
-    content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }],
-  };
+  return ok(result);
 }
