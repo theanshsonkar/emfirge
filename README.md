@@ -4,141 +4,107 @@
 
 ## Git branch for your cloud.
 
-**Give your AI a read-only map of AWS. Trace attack paths, test a security fix on a cloned graph, and see the result before touching production.**
+**Give your AI a read-only map of AWS. Trace attack paths, model security changes on an isolated branch, and inspect the result before touching production.**
 
-[Get started][quickstart] · [Read the docs][docs] · [Open dashboard][dashboard] · [npm][npm]
+[Get started][quickstart] · [Read the docs][docs] · [npm][npm]
 
-[![npm](https://img.shields.io/npm/v/@emfirge/mcp?style=flat-square&color=cb3837)](https://www.npmjs.com/package/@emfirge/mcp)
-[![CI](https://img.shields.io/github/actions/workflow/status/theanshsonkar/emfirge/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/theanshsonkar/emfirge/actions/workflows/ci.yml)
-[![MCP Registry](https://img.shields.io/badge/MCP_Registry-listed-5b5bd6?style=flat-square)][registry]
-[![License](https://img.shields.io/badge/License-AGPL--3.0%20(engine)%20%2F%20Apache--2.0%20(mcp%2F)-2563eb?style=flat-square)][license]
-
-**License:** AGPL-3.0 (engine) / Apache-2.0 (mcp/)
+**MCP version: 0.2.3**
 
 </div>
 
-## Your scanner finds problems. Emfirge tests the fix.
+Emfirge scans through a read-only role, builds an infrastructure graph, and computes security evidence from that snapshot. It can fork the graph, model a proposed change, and report a diff and advisory verdict. Branch changes never mutate AWS. Emfirge computes a security delta; it never guarantees a deployment is safe.
 
-Most cloud tools hand you a list and ask you to trust the recommendation. Emfirge builds a connected graph of your account, forks it in memory, applies the proposed security change, re-runs the rules, and shows what got safer—or riskier.
+| Capability | What it provides |
+|---|---|
+| Graph analysis | Connected resource context rather than isolated checks. |
+| Attack paths | Routes from public-facing resources toward internal resources and chokepoints. |
+| Modeled branches | Isolated add, modify, and delete changes with diff, verdict, rollback, and comparison. |
+| Privacy modes | Local `strict`, `balanced`, and `off` tokenization controls for MCP results. |
 
-| 🕸️ See the path | 🎯 Find the chokepoint | 🧪 Rehearse the fix | 💬 Stay in your AI |
-|---|---|---|---|
-| Internet → compute → IAM → data | Prioritize what breaks the most attack paths | No write access. No production mutation. | Claude, Cursor, Kiro, Cline, Continue, Codex |
-
-<div align="center">
-
-**~20 AWS service types · 58 graph-aware rules · 17 rule families · 7 MCP tools**
-
-</div>
-
-## Start in 30 seconds
+## Install
 
 ```bash
 npx @emfirge/mcp install
 ```
 
-Then ask your assistant:
+Then ask your assistant to scan using a read-only role and region. Example placeholder only:
 
 ```text
-Scan my AWS account using role
-arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
+Scan with arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 ```
 
-No role yet? Say **“help me set up Emfirge.”** You will get a one-click CloudFormation link for a read-only IAM role.
+The account ID above is intentionally non-existent example data. Use your own role when running a real scan.
 
-> **Try it now with no setup:** use demo role `arn:aws:iam::000000000000:role/EmfirgeReadOnly` in `us-east-1`.
+## The 15 MCP tools
 
-**Free:** 5 scans per AWS account per day. No signup. No API key.
+### Analyze
 
-## Ask questions your cloud can finally answer
-
-```text
-Show me the worst attack path from the internet.
-What is the blast radius if this instance is compromised?
-Which resource should I fix first?
-Will closing SSH remove the path without adding new security findings?
-Check this account against CIS AWS Foundations 1.5.
-```
-
-## One graph. Seven tools.
-
-| Tool | Answer |
+| Tool | Purpose |
 |---|---|
-| `emfirge_scan` | What does my AWS risk look like? |
-| `emfirge_get_findings` | What is wrong and how do I fix it? |
-| `emfirge_attack_paths` | How could an attacker reach my data? |
-| `emfirge_verify_fix` | What changes if I apply this security fix? |
-| `emfirge_simulate_breach` | What happens after this resource is compromised? |
-| `emfirge_check_compliance` | Which CIS AWS 1.5 or SOC 2 controls fail? |
-| `emfirge_setup_help` | How do I create the read-only role? |
+| `emfirge_scan` | Scan an AWS account and return risk score, finding counts, and `analysis_id`. |
+| `emfirge_get_findings` | Return findings for a scan, optionally filtered by severity. |
+| `emfirge_attack_paths` | Return internet-to-resource paths, chokepoints, and orphaned resources. |
+| `emfirge_simulate_breach` | Walk a natural-language scenario through entry, pivot, impact, and blast radius. |
+| `emfirge_verify_fix` | Simulate a supported finding fix and return score and finding deltas. |
+| `emfirge_check_compliance` | Return CIS AWS Foundations 1.5 or SOC 2 per-control status. |
 
-## Proof, not a prompt
+### Branch
+
+| Tool | Purpose |
+|---|---|
+| `emfirge_create_branch` | Create an isolated branch from a completed analysis. |
+| `emfirge_apply_change` | Apply an add, modify, or delete change to the branch model, not AWS. |
+| `emfirge_branch_diff` | Compare the branch model with its base analysis. |
+| `emfirge_branch_verdict` | Return advisory `block`, `warn`, or `pass` results and coverage details. |
+| `emfirge_rollback_branch` | Remove the most recent modeled change. |
+| `emfirge_discard_branch` | Discard an isolated branch. |
+| `emfirge_list_branches` | List branches, optionally by base analysis. |
+| `emfirge_compare_branches` | Compare branches and rank modeled outcomes safest-first. |
+
+### Setup
+
+| Tool | Purpose |
+|---|---|
+| `emfirge_setup_help` | Return a CloudFormation deploy URL for a read-only IAM role. |
+
+## Privacy
+
+The MCP supports `strict` (default), `balanced`, and `off` modes. In `strict`, recognized AWS identifiers are tokenized locally before results reach the LLM; the mapping stays on the local machine. The backend receives the data needed to perform the requested analysis. Credentials in presigned report URLs are scrubbed before URLs are returned. Review outputs under your own data-handling policy.
+
+```bash
+npx @emfirge/mcp privacy
+npx @emfirge/mcp privacy strict|balanced|off
+```
+
+## Typical flow
 
 ```text
-Scan AWS → build graph → fork graph → apply mutation → re-run rules → show delta
+read-only scan → fork graph → apply modeled change → diff → re-run lenses → advisory verdict
 ```
 
-The score, findings, attack paths, and fix verification come from deterministic graph analysis—not an LLM guessing what might happen. Your AI explains the evidence; Emfirge produces it.
+A non-empty `coverage_warnings` field means the verdict is degraded and must not be described as complete coverage. A `pass` is not a guarantee of safety or application connectivity.
 
-## Built for trust
+## Manual MCP configuration
 
-- **Read-only AWS access** through a role you own and can revoke anytime.
-- **One-hour STS credentials** protected by an ExternalId and never stored.
-- **Local tokenization** of recognized AWS identifiers before MCP results reach your LLM in strict mode.
-- **No production changes** during scans, breach simulations, or fix verification.
-- **Source available** for the MCP, scanner engine, rules, scoring, and docs.
-
-> Emfirge proves the simulated **security** delta against your latest scan; it does not yet prove application connectivity. Some graph-derived labels may also remain visible in strict mode. See [How it works][how-it-works] and [Privacy][privacy] for the exact boundaries.
-
-## Go deeper when you are ready
-
-[Quickstart][quickstart] · [How the fork works][how-it-works] · [MCP tools][tools] · [Privacy][privacy] · [Security][security] · [Self-hosting][self-hosting] · [Contributing][contributing]
-
-## Repository layout and deployment
-
-The public `emfirge` repository is the single source of truth: `backend/` contains the AGPL-3.0
-engine/server, `mcp/` contains the Apache-2.0 MCP package, and `site/` contains the docs. The old
-`aws-risk-agent` repository is retired and pending archive; it is not a mirror to sync.
-
-Backend checks run locally with SQLite and the repository on `PYTHONPATH`:
-
-```bash
-cd backend
-PYTHONPATH=. .venv/bin/pytest -q
+```json
+{
+  "mcpServers": {
+    "emfirge": {
+      "command": "npx",
+      "args": ["-y", "@emfirge/mcp"],
+      "env": { "EMFIRGE_PRIVACY": "strict" }
+    }
+  }
+}
 ```
 
-MCP checks are lightweight TypeScript checks from `mcp/`:
+See the [MCP README][mcp-readme] and [documentation][docs] for usage details.
 
-```bash
-cd mcp
-npm run typecheck
-```
+## License
 
-The deploy workflow builds from `backend/` and deploys the same public-repo image to EC2 only for
-pushes to the canonical `main` repository, with the existing guarded secret/env-file mechanism.
+The MCP package is licensed under Apache-2.0. The engine is licensed under AGPL-3.0.
 
----
-
-<div align="center">
-
-### Stop guessing in production.
-
-**Fork the graph. Follow the path. Prove the security delta.**
-
-[Install Emfirge][quickstart] · [Star the repo][repo]
-
-</div>
-
-[repo]: https://github.com/theanshsonkar/emfirge
 [docs]: https://emfirge.cloud/docs
 [quickstart]: https://emfirge.cloud/docs/quickstart
-[dashboard]: https://app.emfirge.cloud
 [npm]: https://www.npmjs.com/package/@emfirge/mcp
-[registry]: https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.theanshsonkar/emfirge
-[license]: https://github.com/theanshsonkar/emfirge/blob/main/LICENSE
-[how-it-works]: https://emfirge.cloud/docs/how-it-works
-[tools]: https://emfirge.cloud/docs/tools
-[privacy]: https://emfirge.cloud/docs/privacy
-[security]: https://emfirge.cloud/docs/security
-[self-hosting]: https://emfirge.cloud/docs/self-host
-[contributing]: https://github.com/theanshsonkar/emfirge/blob/main/CONTRIBUTING.md
+[mcp-readme]: https://github.com/theanshsonkar/emfirge/tree/main/mcp

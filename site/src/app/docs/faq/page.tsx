@@ -82,11 +82,10 @@ export default function Page() {
         each time.
       </P>
 
-      <H2>Is it free?</H2>
+      <H2>Are there scan limits?</H2>
       <P>
-        Yes, the hosted free tier includes five scans per AWS account each day. You do not need to sign
-        up or create an API key. Looking through findings, attack routes, possible fixes, and compliance
-        checks after a scan does not use another scan.
+        Scans are subject to an operational limit of five scans per AWS account each day. Looking through
+        findings, attack routes, possible fixes, and compliance checks after a scan does not use another scan.
       </P>
 
       <H2>What should I do after it finds a problem?</H2>

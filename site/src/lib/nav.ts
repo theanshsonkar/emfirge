@@ -29,16 +29,35 @@ export const NAV: NavSection[] = [
   },
   {
     label: "MCP Tools",
+    items: [{ title: "Overview", href: "/docs/tools" }],
+  },
+  {
+    label: "Analyze",
     items: [
-      { title: "Overview", href: "/docs/tools" },
       { title: "emfirge_scan", href: "/docs/tools/scan", mono: true },
       { title: "emfirge_get_findings", href: "/docs/tools/get-findings", mono: true },
       { title: "emfirge_attack_paths", href: "/docs/tools/attack-paths", mono: true },
-      { title: "emfirge_verify_fix", href: "/docs/tools/verify-fix", mono: true },
       { title: "emfirge_simulate_breach", href: "/docs/tools/simulate-breach", mono: true },
+      { title: "emfirge_verify_fix", href: "/docs/tools/verify-fix", mono: true },
       { title: "emfirge_check_compliance", href: "/docs/tools/check-compliance", mono: true },
-      { title: "emfirge_setup_help", href: "/docs/tools/setup-help", mono: true },
     ],
+  },
+  {
+    label: "Branch",
+    items: [
+      { title: "emfirge_create_branch", href: "/docs/tools/create-branch", mono: true },
+      { title: "emfirge_apply_change", href: "/docs/tools/apply-change", mono: true },
+      { title: "emfirge_branch_diff", href: "/docs/tools/branch-diff", mono: true },
+      { title: "emfirge_branch_verdict", href: "/docs/tools/branch-verdict", mono: true },
+      { title: "emfirge_rollback_branch", href: "/docs/tools/rollback-branch", mono: true },
+      { title: "emfirge_discard_branch", href: "/docs/tools/discard-branch", mono: true },
+      { title: "emfirge_list_branches", href: "/docs/tools/list-branches", mono: true },
+      { title: "emfirge_compare_branches", href: "/docs/tools/compare-branches", mono: true },
+    ],
+  },
+  {
+    label: "Setup",
+    items: [{ title: "emfirge_setup_help", href: "/docs/tools/setup-help", mono: true }],
   },
 ];
 
