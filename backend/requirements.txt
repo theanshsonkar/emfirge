@@ -16,3 +16,16 @@ PyGithub>=2.3.0
 cryptography>=42.0.0
 google-genai==1.47.0
 policy-sentry==0.15.2
+
+# Borrowed scanner, imported IN-PROCESS by app/scanners.py
+# (from cloudsplaining.scan.policy_document import PolicyDocument), so unlike
+# checkov and trivy it must live in this environment. It was called but never
+# declared, so every production verdict silently ran without it.
+#
+# checkov and trivy are deliberately NOT here. Both are invoked as external
+# processes, so they do not need this interpreter -- and checkov hard-pins
+# boto3==1.35.49, which is irreconcilable with the boto3 above. They are
+# installed into isolated environments in the Dockerfile instead, which is what
+# "borrowed scanners at arm's length" actually requires: a scanner's dependency
+# tree must not be able to constrain the app's.
+cloudsplaining==0.9.1

@@ -368,8 +368,26 @@ function redactLabel(s: string): string {
   return redactEmbedded(s);
 }
 
+// Deep-walk that scrubs ONLY presigned-URL credentials, changing nothing else.
+// Used for MODE="off", where the user has opted out of tokenizing their own
+// resource names -- that is not consent to have access keys and session tokens
+// echoed back through the tool channel.
+function scrubCredentialsOnly(obj: unknown): unknown {
+  if (obj == null) return obj;
+  if (typeof obj === "string") return scrubPresignedUrls(obj);
+  if (Array.isArray(obj)) return obj.map(scrubCredentialsOnly);
+  if (typeof obj === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      out[k] = scrubCredentialsOnly(v);
+    }
+    return out;
+  }
+  return obj;
+}
+
 export function redactDeep(obj: unknown, parentKey = ""): unknown {
-  if (MODE === "off") return obj;
+  if (MODE === "off") return scrubCredentialsOnly(obj);
   // First pass at the top level: pre-tokenize every value found under a
   // SENSITIVE_KEY so embedded scans below have the full name dictionary.
   // Without this, narrative strings like "User ansh-admin has stale keys"
@@ -418,31 +436,76 @@ function collectNames(obj: unknown, parentKey = ""): void {
   }
 }
 
+// Query parameters of a SigV4 presigned URL that carry credential material.
+// A presigned URL is a bearer credential: X-Amz-Credential leads with the
+// access-key id, X-Amz-Signature is the secret-derived proof, and
+// X-Amz-Security-Token is a full STS session token. `emfirge_scan` returns a
+// presigned report_url, so without this these values travel to the host LLM
+// verbatim -- through the very layer whose job is catching exactly this shape.
+const PRESIGNED_CREDENTIAL_PARAMS = new Set([
+  "x-amz-credential",
+  "x-amz-signature",
+  "x-amz-security-token",
+]);
+
+// Replace credential-bearing query values in any URL inside `value`, leaving
+// the rest of the URL (host, path, expiry) intact so it stays diagnosable.
+// Deliberately NOT gated on MODE: an access key is not a resource name the
+// user might reasonably want un-tokenized, and privacy=off is a choice to see
+// your own resource ids, not a request to have credentials echoed back.
+export function scrubPresignedUrls(value: string): string {
+  if (!value.includes("X-Amz-")) return value;
+  return value.replace(/https?:\/\/[^\s"'<>]+/g, (url) => {
+    const q = url.indexOf("?");
+    if (q === -1) return url;
+    const base = url.slice(0, q);
+    const scrubbed = url
+      .slice(q + 1)
+      .split("&")
+      .map((pair) => {
+        const eq = pair.indexOf("=");
+        if (eq === -1) return pair;
+        const key = pair.slice(0, eq);
+        return PRESIGNED_CREDENTIAL_PARAMS.has(key.toLowerCase())
+          ? `${key}=REDACTED`
+          : pair;
+      })
+      .join("&");
+    return `${base}?${scrubbed}`;
+  });
+}
+
 function redactDeepInner(obj: unknown, parentKey = ""): unknown {
   if (MODE === "off") return obj;
   if (obj == null) return obj;
 
   if (typeof obj === "string") {
+    // 0. Strip credential material out of any presigned URL first, whatever
+    //    key it arrived under. Runs before the id rules because the URL's own
+    //    host/path may also contain a bucket name those rules then tokenize.
+    //    Bound to a typed local rather than reassigning `obj`, which is
+    //    declared `unknown` and would lose its narrowing.
+    const text: string = scrubPresignedUrls(obj);
     // 1. Whole-string AWS id (hex OR friendly-prefix) under ANY key — single
     //    typed token (honors balanced/off/generic). Catches vpc_id, allocation_id,
     //    flow_logs[] entries, etc., not just fields we enumerate.
-    const whole = tokenizeWholeId(obj);
+    const whole = tokenizeWholeId(text);
     if (whole !== null) return whole;
     // 2. Graph identifier key — tokenize the id even without AWS-hex format
     //    (friendly node ids: "acme-prod-customers", "iam-role-AppServerRole").
     if (IDENTIFIER_KEYS.has(parentKey)) {
-      return tokenizeIdentifier(obj);
+      return tokenizeIdentifier(text);
     }
     // 3. Graph label "<Type>: <name>" — scrub the name half.
     if (parentKey === "label") {
-      return redactLabel(obj);
+      return redactLabel(text);
     }
     // 4. Sensitive key — tokenize the whole value as a name.
     if (SENSITIVE_KEYS.has(parentKey)) {
-      return tokenize(obj, "NAME");
+      return tokenize(text, "NAME");
     }
     // 5. Free-text — scan for embedded AWS IDs + known names (narrative captions)
-    return redactEmbedded(obj);
+    return redactEmbedded(text);
   }
 
   if (Array.isArray(obj)) {

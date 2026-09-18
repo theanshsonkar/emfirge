@@ -29,6 +29,16 @@ class CombinedVerdict(BaseModel):
     newly_internet_reachable: list[str] = Field(default_factory=list)
     no_longer_internet_reachable: list[str] = Field(default_factory=list)
     scanner_available: bool = False
+    # Per-scanner outcome, e.g. {"checkov": "ok", "trivy": "unavailable: not
+    # installed"}. `scanner_available` is True when ANY scanner ran, so on its
+    # own it cannot distinguish full coverage from one-of-three -- a verdict
+    # that silently drops two scanners is exactly the false-confidence this
+    # product exists to avoid. Always read this alongside it.
+    scanner_status: dict[str, str] = Field(default_factory=dict)
+    # Human-readable degradation notices. NON-EMPTY means this verdict was
+    # computed with less than the full lens set, so it must not be presented as
+    # a complete answer.
+    coverage_warnings: List[str] = Field(default_factory=list)
     cost_delta_monthly_usd: float = 0.0
     cost_unknown_notes: List[str] = Field(default_factory=list)
     introduces_privilege_escalation: bool = False
@@ -214,26 +224,53 @@ def combined_verdict(
     native_removed = sorted((_native_finding(item) for item in diff.removed_findings), key=_sort_finding)
 
     scanner_available = False
+    scanner_status: dict[str, str] = {}
+    coverage_warnings: list[str] = []
     scanner_added: list[dict[str, Any]] = []
     scanner_removed: list[dict[str, Any]] = []
     if run_scanners:
         scanner_results = ((run_checkov, "checkov"), (run_trivy, "trivy"), (run_cloudsplaining, "cloudsplaining"))
         base_scans: dict[str, dict[tuple[str, str, str], dict[str, Any]] | None] = {}
         branch_scans: dict[str, dict[tuple[str, str, str], dict[str, Any]] | None] = {}
+        # Why the reason is captured per side: a scanner that is missing from the
+        # image raises FileNotFoundError, and _scanner_map() collapses both that
+        # and a legitimately-empty result to None. Swallowing the reason is how a
+        # never-installed scanner became indistinguishable from a clean scan.
+        reasons: dict[str, str] = {}
+
+        def _run(scanner: Any, name: str, infra: Any, side: str):
+            try:
+                raw = scanner(infra)
+            except Exception as exc:  # noqa: BLE001 - scanners are arm's-length
+                reasons.setdefault(name, f"{side} scan raised {type(exc).__name__}")
+                return None
+            error = _value(raw, "error", None)
+            if error and name not in reasons:
+                reasons[name] = str(error)
+            mapped = _scanner_map(raw)
+            if mapped is None and name not in reasons:
+                reasons[name] = f"{side} scan returned no usable result"
+            return mapped
+
         for scanner, name in scanner_results:
-            try:
-                base_scans[name] = _scanner_map(scanner(base_infra))
-            except Exception:
-                base_scans[name] = None
-            try:
-                branch_scans[name] = _scanner_map(scanner(branch_infra))
-            except Exception:
-                branch_scans[name] = None
+            base_scans[name] = _run(scanner, name, base_infra, "base")
+            branch_scans[name] = _run(scanner, name, branch_infra, "branch")
 
         available_scanners = {
             name for name in base_scans
             if base_scans[name] is not None and branch_scans[name] is not None
         }
+        for _, name in scanner_results:
+            if name in available_scanners:
+                scanner_status[name] = "ok"
+            else:
+                scanner_status[name] = f"unavailable: {reasons.get(name, 'unknown reason')}"
+        missing = sorted(name for _, name in scanner_results if name not in available_scanners)
+        if missing:
+            coverage_warnings.append(
+                f"{len(available_scanners)}/{len(scanner_results)} borrowed scanners ran; "
+                f"no findings from {', '.join(missing)} — this verdict is NOT full coverage"
+            )
         scanner_available = bool(available_scanners)
         if scanner_available:
             base_scan = {}
@@ -267,7 +304,14 @@ def combined_verdict(
     if verdict == "pass" and introduced_capacity_breaches:
         verdict = "warn"
 
-    unavailable = " (scanner unavailable)" if run_scanners and not scanner_available else ""
+    # State degradation loudly. The old form appended a quiet
+    # "(scanner unavailable)", which read as a footnote on an otherwise
+    # confident verdict -- so a pass computed with two of three scanners
+    # missing looked identical to a fully-covered pass.
+    if run_scanners and coverage_warnings:
+        unavailable = "; DEGRADED: " + "; ".join(coverage_warnings)
+    else:
+        unavailable = ""
     cost_summary = "cost unknown" if cost_unknown_notes else f"cost_delta={cost_delta_monthly_usd:.2f}"
     privilege_summary = "; privilege escalation introduced" if introduces_privilege_escalation else ""
     capacity_summary = ""
@@ -294,6 +338,8 @@ def combined_verdict(
         newly_internet_reachable=sorted(diff.newly_internet_reachable),
         no_longer_internet_reachable=sorted(diff.no_longer_internet_reachable),
         scanner_available=scanner_available,
+        scanner_status=scanner_status,
+        coverage_warnings=coverage_warnings,
         cost_delta_monthly_usd=cost_delta_monthly_usd,
         cost_unknown_notes=cost_unknown_notes,
         introduces_privilege_escalation=introduces_privilege_escalation,
