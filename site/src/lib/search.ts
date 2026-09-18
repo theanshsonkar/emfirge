@@ -16,7 +16,7 @@ const SUMMARY: Record<string, string> = {
   "/docs/tools/scan": "scan account overall risk score analysis_id findings region role_arn",
   "/docs/tools/get-findings": "findings severity critical moderate low mitre blast radius attack path",
   "/docs/tools/attack-paths": "attack paths chokepoints orphaned crown jewels centrality internet to data",
-  "/docs/tools/verify-fix": "fork verify fix score before after safe to apply simulate delta toxic combos",
+  "/docs/tools/verify-fix": "fork verify fix score before after no modeled security regression no new exposure simulation delta toxic combos",
   "/docs/tools/simulate-breach": "kill chain breach what-if blast radius stages entry pivot impact",
   "/docs/tools/check-compliance": "cis aws 1.5 soc 2 controls compliance pass fail framework",
   "/docs/tools/setup-help": "cloudformation deploy role setup external id read-only",
