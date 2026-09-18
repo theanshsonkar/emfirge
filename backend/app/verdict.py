@@ -228,8 +228,21 @@ def combined_verdict(
     coverage_warnings: list[str] = []
     scanner_added: list[dict[str, Any]] = []
     scanner_removed: list[dict[str, Any]] = []
+    scanner_results = ((run_checkov, "checkov"), (run_trivy, "trivy"), (run_cloudsplaining, "cloudsplaining"))
+    if not run_scanners:
+        # run_scanners=False is a deliberate configuration (the verdict endpoint
+        # sets EMFIRGE_RUN_SCANNERS=0 while the host is too small to run the
+        # scanners without OOM). Report it explicitly: an empty scanner_status
+        # with no warning would let a caller mistake "scanners switched off" for
+        # "scanners ran and found nothing" — the same silent-gap trap the
+        # per-scanner status exists to close. The verdict is still honest about
+        # the native rules it DID run.
+        scanner_status = {name: "disabled" for _, name in scanner_results}
+        coverage_warnings.append(
+            "borrowed scanners are disabled on this verdict (native rules only) "
+            "— this verdict is NOT full coverage"
+        )
     if run_scanners:
-        scanner_results = ((run_checkov, "checkov"), (run_trivy, "trivy"), (run_cloudsplaining, "cloudsplaining"))
         base_scans: dict[str, dict[tuple[str, str, str], dict[str, Any]] | None] = {}
         branch_scans: dict[str, dict[tuple[str, str, str], dict[str, Any]] | None] = {}
         # Why the reason is captured per side: a scanner that is missing from the
@@ -304,11 +317,12 @@ def combined_verdict(
     if verdict == "pass" and introduced_capacity_breaches:
         verdict = "warn"
 
-    # State degradation loudly. The old form appended a quiet
+    # State degradation loudly in every degraded case -- scanners that failed
+    # AND scanners deliberately disabled. The old form appended a quiet
     # "(scanner unavailable)", which read as a footnote on an otherwise
-    # confident verdict -- so a pass computed with two of three scanners
-    # missing looked identical to a fully-covered pass.
-    if run_scanners and coverage_warnings:
+    # confident verdict, so a pass computed without the scanners looked
+    # identical to a fully-covered pass.
+    if coverage_warnings:
         unavailable = "; DEGRADED: " + "; ".join(coverage_warnings)
     else:
         unavailable = ""

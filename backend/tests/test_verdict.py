@@ -142,10 +142,27 @@ def test_no_new_risk_is_pass_and_keeps_scores(monkeypatch, infra):
     assert (result.score_before, result.score_after, result.score_delta) == (80, 95, 15)
     assert result.scanner_available is False
     assert result.scanner_added == result.scanner_removed == []
-    assert "DEGRADED" not in result.summary
-    # run_scanners=False is a deliberate caller choice, not a silent failure,
-    # so it must not raise a coverage warning.
-    assert result.coverage_warnings == []
+    # run_scanners=False is a deliberate choice, but the verdict must still SAY
+    # the borrowed scanners did not run -- a caller cannot distinguish
+    # "scanners off" from "scanners ran clean" without it. Reversed from the
+    # earlier draft, which treated the deliberate case as silent.
+    assert "DEGRADED" in result.summary
+    assert result.coverage_warnings, "scanners-off must be reported, not silent"
+    assert result.scanner_status == {
+        "checkov": "disabled",
+        "trivy": "disabled",
+        "cloudsplaining": "disabled",
+    }
+
+
+def test_scanners_off_still_gives_a_real_native_verdict(monkeypatch, infra):
+    """Reporting scanners-off must not weaken the native verdict itself."""
+    patch_diff(monkeypatch, added_findings=[{"rule_id": "native", "resource_id": "r", "severity": "CRITICAL"}], newly_internet_reachable=["r"])
+    result = combined_verdict(infra, infra, run_scanners=False)
+    # A reachable critical still blocks; the coverage warning is additive
+    # context, not a downgrade of what the native rules found.
+    assert result.verdict == "block"
+    assert result.coverage_warnings, "scanners-off is still reported on a block"
 
 
 def test_scanner_unavailable_keeps_native_only(monkeypatch, infra):
