@@ -1,6 +1,6 @@
 {
   "name": "@emfirge/mcp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "mcpName": "io.github.theanshsonkar/emfirge",
   "description": "Git branch for your cloud. Understand AWS risk, prioritize what matters, and prove fixes before touching production. Read-only by design.",
   "main": "dist/index.js",
