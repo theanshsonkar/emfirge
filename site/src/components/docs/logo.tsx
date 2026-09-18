@@ -1,31 +1,8 @@
-/**
- * EmfirgeMark — the brand glyph.
- *
- * An isometric container (cube): three visible faces meeting at a front edge,
- * with a single green marker on the top face for the brand's one-signal accent.
- * Reads as "your infrastructure, boxed" and stays crisp at favicon sizes.
- *
- * Uses `currentColor` for the container so it inherits its surroundings (e.g.
- * the primary-colored chip in the topbar), and `var(--safe)` for the accent so
- * the green reads in both light and dark themes.
- */
+/** Emfirge's custom E mark: one continuous, rounded white ribbon. */
 export function EmfirgeMark({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" className={className} fill="none" aria-hidden="true">
-      <path
-        d="M12 3.5 L20 8 L20 16 L12 20.5 L4 16 L4 8 Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M20 8 L12 12.5 L4 8 M12 12.5 L12 20.5"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-        strokeLinecap="round"
-      />
-      <circle cx="12" cy="8" r="1.5" fill="var(--safe)" />
+    <svg viewBox="0 0 32 32" className={className} fill="none" aria-hidden="true">
+      <path d="M24.5 7.5H12.25A5.25 5.25 0 0 0 7 12.75v6.5a5.25 5.25 0 0 0 5.25 5.25H24.5M7.5 16h11.25" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

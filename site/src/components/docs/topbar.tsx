@@ -12,9 +12,7 @@ export function Topbar() {
       <div className="relative flex h-14 items-center gap-4 px-4 sm:px-6">
         <MobileNav />
         <Link href="/" className="flex items-center gap-2">
-          <div className="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <EmfirgeMark className="size-4" />
-          </div>
+          <EmfirgeMark className="size-7 text-foreground" />
           <span className="font-display text-[18px] font-bold tracking-[-0.03em]">emfirge</span>
         </Link>
         <nav className="ml-3 hidden items-center gap-1 text-[13px] md:flex">

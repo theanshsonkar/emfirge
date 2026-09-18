@@ -1,12 +1,13 @@
 import { A, DocHeader, Lead, H2, P, Strong, Code, CardGrid, Card, Callout, PrevNext } from "@/components/docs/ui";
 import { CodeBlock } from "@/components/docs/code-block";
+import { HarnessDiagram } from "@/components/docs/harness-diagram";
 import { prevNext } from "@/lib/nav";
 import DocsLayout from "./docs/layout";
 
 export const metadata = {
-  title: "Emfirge — Git branch for your cloud",
+  title: "Emfirge — The harness between AI and cloud",
   description:
-    "Let your AI test AWS security changes before anything touches production.",
+    "Give your AI agent a safe branch of your cloud before anything touches production.",
 };
 
 export default function Page() {
@@ -14,14 +15,22 @@ export default function Page() {
   return (
     <DocsLayout>
       <>
-      <DocHeader eyebrow="Get Started" title="Overview">
+      <DocHeader eyebrow="Get Started · AI × Cloud" title="The harness between AI and cloud">
         <Lead>
-          Emfirge makes a copy of your AWS infrastructure, tries a change on the copy, and shows you exactly
-          what gets <Strong>safer or riskier</Strong>, before anything touches your real cloud.
-          Think <Code>git branch</Code>, for your cloud: try it on a fork, see the result, then apply
-          for real, or don&apos;t.
+          AI agents are good at proposing infrastructure changes. Clouds are not good places to let them
+          experiment directly. Emfirge is the <Strong>harness in between</Strong>: a safe, branchable copy
+          of your cloud where an agent can try a change, inspect the consequences, and earn a verdict before
+          anything touches production.
         </Lead>
       </DocHeader>
+
+      <HarnessDiagram />
+
+      <Callout type="note" title="Give your agent a branch, not your keys">
+        Emfirge keeps the live cloud read-only and turns each proposed change into a modeled branch. The
+        agent can explore security, reachability, cost, limits, and blast radius without getting a direct
+        path to production.
+      </Callout>
 
       <H2>What it does</H2>
       <P>

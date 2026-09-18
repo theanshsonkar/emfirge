@@ -1,6 +1,7 @@
 import { A, DocHeader, Lead, H2, H3, P, Strong, Code, Callout, PrevNext } from "@/components/docs/ui";
 import { CodeBlock } from "@/components/docs/code-block";
 import { ForkFlow } from "@/components/docs/flow-diagram";
+import { HarnessDiagram } from "@/components/docs/harness-diagram";
 import { prevNext } from "@/lib/nav";
 
 export const metadata = {
@@ -63,6 +64,15 @@ export default function Page() {
           change, and reports what the analysis says about the resulting branch.
         </Lead>
       </DocHeader>
+
+      <H2>The harness between AI and cloud</H2>
+      <P>
+        An agent should not need direct access to a live account to reason about infrastructure. Emfirge
+        sits between the agent and the cloud as a safe workspace: the agent proposes, Emfirge branches and
+        measures the change, and your own pipeline decides what to apply. This is why the branch is the
+        product—not a scan report bolted onto the side.
+      </P>
+      <HarnessDiagram />
 
       <H2>The graph</H2>
       <P>

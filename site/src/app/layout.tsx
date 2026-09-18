@@ -23,9 +23,9 @@ const spaceGrotesk = Space_Grotesk({
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://emfirge.cloud"),
-  title: "Emfirge — Git branch for your cloud",
+  title: "Emfirge — The harness between AI and cloud",
   description:
-    "Let your AI test AWS security changes before anything touches production.",
+    "Give your AI agent a safe branch of your cloud before anything touches production.",
 };
 
 export default function RootLayout({
