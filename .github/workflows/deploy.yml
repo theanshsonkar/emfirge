@@ -61,7 +61,8 @@ jobs:
               echo "GITHUB_PRIVATE_KEY_B64=${{ secrets.APP_PRIVATE_KEY_B64 }}" | sudo tee -a /home/ubuntu/.env > /dev/null
             fi
             sudo docker run -d --name emfirge-engine --restart=always \
-              --memory=768m --memory-swap=768m \
+              --memory=1500m --memory-swap=1500m \
+              -e EMFIRGE_RUN_SCANNERS=1 \
               --env-file /home/ubuntu/.env \
               -p 8000:8000 \
               ${{ secrets.DOCKERHUB_USERNAME }}/aws-risk-agent:latest
