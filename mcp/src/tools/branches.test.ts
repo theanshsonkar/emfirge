@@ -69,7 +69,7 @@ function textOf(result: { content: Array<{ text: string }> }): string {
 // ---------------------------------------------------------------------------
 
 test("apply_change expands a tokenized resource_id to the real AWS id", async () => {
-  const realSg = "sg-00a2e8476ffc6263c";
+  const realSg = "sg-0123456789abcdef0";
 
   // Mint the token the way a scan response would, then hand the token back in
   // as an agent would after reading a scan.
@@ -126,10 +126,10 @@ test("every branch handler redacts real identifiers out of its response", async 
   // Shaped like a real branch_verdict body, which is where the leak surfaced.
   const raw = {
     verdict: "pass",
-    instance_id: "i-0c0ca7da0c26cc0fa",
+    instance_id: "i-0123456789abcdef0",
     group_id: "sg-066a7e4eecc6f5e86",
-    bucket_name: "carto-passports-282027772803",
-    role_arn: "arn:aws:iam::282027772803:role/EmfirgeReadOnlyRole",
+    bucket_name: "example-bucket-123456789012",
+    role_arn: "arn:aws:iam::123456789012:role/EmfirgeReadOnlyRole",
   };
   const leaks = Object.values(raw).filter((v) => v !== "pass");
 

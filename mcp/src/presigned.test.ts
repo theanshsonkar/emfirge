@@ -31,7 +31,7 @@ async function load(mode: "strict" | "balanced" | "off"): Promise<TokenizeModule
 }
 
 // A realistic presigned report URL, shaped like the one emfirge_scan returns.
-const ACCESS_KEY = "AKIAUDKRKJOBVFIPDMNC";
+const ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE";
 const SIGNATURE = "ee558f7a5352e71641f92914ad41bbb0d621e9984df038bea78624942fceb18d";
 const SESSION_TOKEN = "FwoGZXIvYXdzEBYaDExAMPLESESSIONTOKEN";
 const PRESIGNED =
@@ -67,10 +67,10 @@ test("off still does NOT tokenize ordinary resource ids", async () => {
   // Guards against over-correction: credential scrubbing must not quietly turn
   // privacy=off into privacy=on for everything else.
   const t = await load("off");
-  const out = t.redactDeep({ instance_id: "i-0c0ca7da0c26cc0fa" }) as {
+  const out = t.redactDeep({ instance_id: "i-0123456789abcdef0" }) as {
     instance_id: string;
   };
-  assert.equal(out.instance_id, "i-0c0ca7da0c26cc0fa");
+  assert.equal(out.instance_id, "i-0123456789abcdef0");
 });
 
 test("a plain URL with no signature is left completely alone", async () => {
