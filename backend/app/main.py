@@ -1336,7 +1336,15 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
         rebuilt = branches.rebuild_branch_infra(branch_id)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return combined_verdict(branch.base, rebuilt)
+    # Scanners are OFF by default on this endpoint. A verdict runs 6 scanner
+    # subprocesses serially (checkov/trivy/cloudsplaining x base+branch); on the
+    # 1 GB t2.micro checkov exhausts memory and the host OOM-killer takes uvicorn
+    # down, 502-ing every caller until Docker restarts it. This is NOT the old
+    # silent degrade -- combined_verdict now reports run_scanners=False honestly
+    # via scanner_status + coverage_warnings. Flip EMFIRGE_RUN_SCANNERS=1 once the
+    # real fix lands (base-scan cache + async + bigger instance; see notes).
+    run_scanners = os.environ.get("EMFIRGE_RUN_SCANNERS", "0") == "1"
+    return combined_verdict(branch.base, rebuilt, run_scanners=run_scanners)
 
 
 @app.post('/branches/{branch_id}/rollback', dependencies=[Depends(require_api_key)])
