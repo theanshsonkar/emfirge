@@ -132,7 +132,10 @@ def test_no_new_risk_is_pass_and_keeps_scores(monkeypatch, infra):
     assert (result.score_before, result.score_after, result.score_delta) == (80, 95, 15)
     assert result.scanner_available is False
     assert result.scanner_added == result.scanner_removed == []
-    assert "(scanner unavailable)" not in result.summary
+    assert "DEGRADED" not in result.summary
+    # run_scanners=False is a deliberate caller choice, not a silent failure,
+    # so it must not raise a coverage warning.
+    assert result.coverage_warnings == []
 
 
 def test_scanner_unavailable_keeps_native_only(monkeypatch, infra):
@@ -143,8 +146,51 @@ def test_scanner_unavailable_keeps_native_only(monkeypatch, infra):
     result = combined_verdict(infra, infra)
     assert result.scanner_available is False
     assert result.scanner_added == result.scanner_removed == []
-    assert "(scanner unavailable)" in result.summary
+    # Degradation must be stated loudly, not as a trailing parenthetical: a
+    # verdict computed without the borrowed scanners previously read the same
+    # as a fully-covered one.
+    assert "DEGRADED" in result.summary
+    assert result.coverage_warnings, "a missing scanner must produce a coverage warning"
+    assert "NOT full coverage" in result.coverage_warnings[0]
     assert scanner.call_count == 2
+
+
+def test_scanner_status_names_each_scanner_and_its_reason(monkeypatch, infra):
+    """The reason a scanner did not run must survive, not be swallowed."""
+    patch_diff(monkeypatch)
+    patch_trivy_unavailable(monkeypatch)
+    monkeypatch.setattr(
+        "app.verdict.run_checkov",
+        Mock(side_effect=FileNotFoundError("checkov")),
+    )
+    result = combined_verdict(infra, infra)
+
+    # Every scanner is accounted for by name -- a scanner missing from this map
+    # is a scanner nobody can tell ran or not.
+    assert set(result.scanner_status) == {"checkov", "trivy", "cloudsplaining"}
+    assert result.scanner_status["checkov"].startswith("unavailable")
+    assert "FileNotFoundError" in result.scanner_status["checkov"], (
+        "the real failure reason must be preserved, not collapsed to 'unknown'"
+    )
+
+
+def test_partial_coverage_still_warns(monkeypatch, infra):
+    """One scanner running is NOT full coverage, even though scanner_available is True."""
+    patch_diff(monkeypatch)
+    patch_trivy_unavailable(monkeypatch)
+    monkeypatch.setattr(
+        "app.verdict.run_checkov",
+        Mock(side_effect=[{"available": True, "findings": []}, {"available": True, "findings": []}]),
+    )
+    result = combined_verdict(infra, infra)
+
+    assert result.scanner_available is True, "checkov ran"
+    assert result.scanner_status["checkov"] == "ok"
+    assert result.coverage_warnings, (
+        "scanner_available=True must not imply full coverage -- trivy and "
+        "cloudsplaining did not run and the caller has to be told"
+    )
+    assert "1/3" in result.coverage_warnings[0]
 
 
 def test_scanner_high_reachable_blocks(monkeypatch, infra):

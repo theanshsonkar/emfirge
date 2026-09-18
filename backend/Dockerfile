@@ -24,6 +24,31 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     pip uninstall -y google-generativeai && \
     pip install --no-cache-dir google-genai==1.47.0
 
+# ── STAGE 3b: BORROWED SCANNERS (arm's length) ───────────────────
+# app/scanners.py shells out to `checkov` and `trivy`. Neither was installed
+# here, so every call raised FileNotFoundError and the verdict silently
+# degraded to native-rules-only with scanner_available=False.
+#
+# Both go in ISOLATED environments rather than the app's site-packages,
+# because checkov hard-pins boto3==1.35.49 and the app needs a newer boto3.
+# Installing it alongside the app makes the image unbuildable; installing it
+# in its own venv and putting only that venv's bin on PATH keeps the
+# subprocess contract intact and the dependency trees separate. This is the
+# point of running scanners at arm's length -- a borrowed tool must never
+# get a vote on the app's own dependencies.
+RUN python -m venv /opt/checkov-venv && \
+    /opt/checkov-venv/bin/pip install --no-cache-dir checkov==3.3.19 && \
+    ln -s /opt/checkov-venv/bin/checkov /usr/local/bin/checkov
+
+# trivy is a single Go binary; take it from the official image rather than
+# curl-piping an install script.
+COPY --from=aquasec/trivy:0.74.0 /usr/local/bin/trivy /usr/local/bin/trivy
+
+# Fail the BUILD if either scanner is not callable. Without this the image
+# builds fine and the degradation only shows up as a quietly reduced verdict
+# in production -- which is precisely how this went unnoticed.
+RUN checkov --version && trivy --version
+
 # ── STAGE 4: COPY APPLICATION CODE ───────────────────────────────
 # Now copy everything else — all your Python files
 # We do this AFTER installing packages so code changes don't
