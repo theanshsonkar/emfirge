@@ -32,7 +32,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} h-full`}>
+    <html lang="en" data-scroll-behavior="smooth" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} h-full`}>
       <body className="min-h-full font-sans antialiased">
         {/* Before first paint: opt into reveal animations only when the user
             hasn't asked for reduced motion. No-JS / reduced-motion users get

@@ -1,43 +1,10 @@
 "use client";
-
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { NAV } from "@/lib/nav";
+import { ArrowUpRight, BookOpen, Search } from "lucide-react";
+import { docsNav } from "./nav";
 
-export function Sidebar() {
-  const pathname = usePathname();
-  return (
-    <nav className="space-y-7">
-      {NAV.map((section) => (
-        <div key={section.label}>
-          <div className="tag mb-2 px-3">{section.label}</div>
-          <ul className="border-l border-border-soft">
-            {section.items.map((item) => {
-              const active = pathname === item.href;
-              return (
-                <li key={item.href} className="-ml-px">
-                  <Link
-                    href={item.href}
-                    aria-current={active ? "page" : undefined}
-                    className={`relative flex items-center rounded-md py-1.5 pl-4 pr-2 text-[13px] transition-colors ${
-                      active
-                        ? "bg-accent font-medium text-foreground"
-                        : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                    } ${item.mono ? "font-mono text-[12px]" : ""}`}
-                  >
-                    <span
-                      className={`absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full transition-colors ${
-                        active ? "bg-foreground" : "bg-transparent"
-                      }`}
-                    />
-                    {item.title}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
-    </nav>
-  );
+export function DocsSidebar({onSearch,onNavigate}:{onSearch:()=>void;onNavigate?:()=>void}) {
+  const pathname=usePathname();
+  return <div className="sidebar-inner"><button className="sidebar-search" onClick={onSearch}><Search size={15}/><span>Search docs</span><kbd>⌘ K</kbd></button><nav aria-label="Documentation">{docsNav.map(group => <div className="nav-group" key={group.label}><p>{group.label}</p><ul>{group.items.map(item => <li key={item.href}><Link href={item.href} onClick={onNavigate} aria-current={pathname===item.href ? "page" : undefined} className={pathname===item.href ? "active" : ""}>{item.label}</Link></li>)}</ul></div>)}</nav><div className="sidebar-bottom"><BookOpen size={16}/><div><strong>Built for your agent.</strong><span>Grounded in your cloud.</span></div><Link href="/connect" onClick={onNavigate} aria-label="Connect your agent"><ArrowUpRight size={17}/></Link></div></div>;
 }

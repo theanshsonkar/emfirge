@@ -3,10 +3,10 @@ import { Cloud, GitBranch, ShieldCheck, Sparkles } from "lucide-react";
 /** The core Emfirge story, shared by the overview and concept docs. */
 export function HarnessDiagram() {
   return (
-    <figure className="ticks relative my-8 overflow-hidden rounded-xl border border-border bg-surface p-5 sm:p-6">
+    <figure className="ticks relative my-8 min-w-0 max-w-full overflow-hidden rounded-xl border border-border bg-surface p-5 sm:p-6">
       <div className="pointer-events-none absolute inset-0 grid-motif opacity-40 [mask-image:linear-gradient(to_bottom,black,transparent_90%)]" aria-hidden />
       <figcaption className="tag relative mb-5">the harness layer</figcaption>
-      <div className="relative grid gap-3 md:grid-cols-[1fr_auto_1.2fr_auto_1fr] md:items-center">
+      <div className="relative grid min-w-0 max-w-full grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.2fr)_auto_minmax(0,1fr)] md:items-center">
         <div className="rounded-lg border border-border bg-surface-2 p-4">
           <div className="flex items-center gap-2 text-foreground">
             <Sparkles className="size-4" style={{ color: "var(--safe)" }} />

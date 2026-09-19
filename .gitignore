@@ -63,3 +63,4 @@ TODO.md
 *.private.md
 mcp/*.tgz
 backend/accuracy_report.json
+.local/

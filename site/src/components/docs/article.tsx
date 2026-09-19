@@ -1,0 +1,12 @@
+import Link from "next/link";
+import { ArrowLeft, ArrowRight, ArrowUpRight, Info } from "lucide-react";
+import { CodeBlock } from "./code-block";
+import { documents, SOURCE_URL, type Doc } from "./content";
+
+function Inline({text}:{text:string}) {
+ return <>{text.split(/(`[^`]+`|\[[^\]]+\]\([^)]+\))/g).map((part,i)=>{if(part.startsWith("`"))return <code key={i}>{part.slice(1,-1)}</code>;const link=part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);return link?<Link key={i} href={link[2]}>{link[1]}</Link>:part;})}</>;
+}
+export function DocArticle({doc}:{doc:Doc}){
+ const index=documents.findIndex(d=>d.slug===doc.slug),previous=documents[index-1],next=documents[index+1];
+ return <article className="doc-article"><div className="doc-eyebrow">{doc.group}</div><h1>{doc.title}</h1><p className="doc-description">{doc.description}</p>{doc.sections.map(s=><section className="doc-section" key={s.id}><h2 id={s.id}><a href={`#${s.id}`}>{s.title}<span className="heading-anchor" aria-hidden="true">#</span></a></h2>{s.paragraphs?.map((text,i)=><p key={i}><Inline text={text}/></p>)}{s.code&&<CodeBlock code={s.code} language={s.language}/>} {s.table&&<div className="overflow-x-auto doc-table-wrap" tabIndex={0} role="region" aria-label={`${s.title} table`}><table className="min-w-[560px]"><thead><tr>{s.table.headers.map(header=><th key={header} scope="col">{header}</th>)}</tr></thead><tbody>{s.table.rows.map((row,i)=><tr key={i}>{row.map((cell,j)=><td key={j}><Inline text={cell}/></td>)}</tr>)}</tbody></table></div>}{s.note&&<div className="doc-note"><Info size={17}/><p><Inline text={s.note}/></p></div>}{s.bullets&&<ul>{s.bullets.map(item=><li key={item}><Inline text={item}/></li>)}</ul>}</section>)}<div className="article-source"><span>Based on the Emfirge MCP and engine source.</span><a href={SOURCE_URL} target="_blank" rel="noreferrer">View source <ArrowUpRight size={13}/></a></div><nav className="doc-pagination" aria-label="Previous and next pages">{previous?<Link href={`/docs/${previous.slug}`}><ArrowLeft size={17}/><span><small>Previous</small>{previous.title}</span></Link>:<Link href="/docs"><ArrowLeft size={17}/><span><small>Previous</small>Overview</span></Link>}{next?<Link href={`/docs/${next.slug}`}><span><small>Next</small>{next.title}</span><ArrowRight size={17}/></Link>:<Link href="/connect"><span><small>Next</small>Connect your agent</span><ArrowRight size={17}/></Link>}</nav></article>;
+}

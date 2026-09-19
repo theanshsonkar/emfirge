@@ -1,61 +1,25 @@
-import { createHighlighter, type Highlighter } from "shiki";
-import { CodeBlockClient } from "./code-block-client";
+"use client";
+import { Check, Copy } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
-export type CodeTab = { label: string; code: string };
-
-// Shared highlighter (built once per build). Always-dark rail → one dark theme.
-let hlPromise: Promise<Highlighter> | null = null;
-function getHighlighter() {
-  if (!hlPromise) {
-    hlPromise = createHighlighter({
-      themes: ["vitesse-dark"],
-      langs: ["json", "bash"],
-    });
+function highlight(line: string) {
+  return line.split(/("[^"\n]*"|\/\/.*$|#.*$|\b(?:false|true|emfirge_\w+|npx)\b)/g).map((part, index) =>
+    <span key={index} className={part.startsWith('"') ? "code-string" : /^(\/\/|#)/.test(part) ? "code-comment" : /^(false|true|emfirge_|npx)/.test(part) ? "code-keyword" : undefined}>{part}</span>);
+}
+export function CopyButton({text,label="Copy code"}:{text:string;label?:string}) {
+  const [state,setState] = useState<"idle"|"copied"|"failed">("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {if(timer.current) clearTimeout(timer.current);},[]);
+  async function copy() {
+    try { await navigator.clipboard.writeText(text); setState("copied"); }
+    catch {setState("failed");}
+    if(timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setState("idle"),2500);
   }
-  return hlPromise;
+  return <button className="copy-button" type="button" onClick={copy} aria-label={state === "copied" ? "Copied" : label} title={label}>{state === "copied" ? <Check size={15}/> : <Copy size={15}/>}<span aria-live="polite">{state === "copied" ? "Copied" : state === "failed" ? "Select to copy" : ""}</span></button>;
 }
-
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-
-function detectLang(label: string, code: string): "json" | "bash" | "text" {
-  const l = label.toLowerCase();
-  if (l.includes("json") || l.includes("argument") || l.includes("response") || l.includes("result") || l === "mcp.json") return "json";
-  if (l.includes("terminal")) return "bash";
-  const t = code.trimStart();
-  if (t.startsWith("{") || t.startsWith("[")) return "json";
-  if (/^(npx|\$|#|sudo|cd |docker|export )/m.test(t)) return "bash";
-  return "text";
-}
-
-export async function CodeBlock({
-  tabs,
-  numbered = false,
-  footer,
-  className = "",
-}: {
-  tabs: CodeTab[];
-  numbered?: boolean;
-  footer?: React.ReactNode;
-  className?: string;
-}) {
-  const hl = await getHighlighter();
-  const rendered = tabs.map((t) => {
-    const code = t.code.replace(/\n$/, "");
-    const lang = detectLang(t.label, code);
-    const html =
-      lang === "text"
-        ? `<pre class="shiki"><code>${code
-            .split("\n")
-            .map((line) => `<span class="line">${escapeHtml(line) || "&nbsp;"}</span>`)
-            .join("\n")}</code></pre>`
-        : hl.codeToHtml(code, { lang, theme: "vitesse-dark" });
-    return { label: t.label, code, html };
-  });
-
-  return <CodeBlockClient tabs={rendered} numbered={numbered} footer={footer} className={className} />;
+export function CodeBlock({code,language="MCP tool call",numbered=false,tabs}:{code?:string;language?:string;numbered?:boolean;tabs?:{label:string;code:string}[]}) {
+  const displayCode = code ?? tabs?.[0]?.code ?? "";
+  const displayLanguage = language ?? tabs?.[0]?.label ?? "MCP tool call";
+  return <div className="docs-code"><div className="code-header"><span>{displayLanguage}</span><CopyButton text={displayCode}/></div><pre tabIndex={0} aria-label={displayLanguage}><code>{displayCode.split("\n").map((line,i) => <span className="code-line" key={i}>{numbered && <span className="line-number" aria-hidden="true">{i+1}</span>}<span>{highlight(line)}{line === "" ? " " : ""}</span>{"\n"}</span>)}</code></pre></div>;
 }
