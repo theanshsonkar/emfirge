@@ -1,10 +1,12 @@
 import json
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import branches, database, verdict
+from app import main
 from app.demo_seed import build_demo_infrastructure
 from app.egraph import build_graph
 from app.mutations import Change
@@ -155,3 +157,46 @@ def test_agent_compare_does_not_rank_dependency_loss_above_safe_fix(demo_branch_
     assert comparison.ranking == [safe_id, delete_id]
     assert comparison.branches[0].lost_dependencies == 1
     assert comparison.branches[1].lost_dependencies == 0
+
+
+def test_demo_agent_http_branch_sequence(demo_branch_db, monkeypatch):
+    main._branch_request_log.clear()
+    monkeypatch.setattr(main, "get_infrastructure_for_analysis",
+                        lambda _analysis_id: build_demo_infrastructure())
+    monkeypatch.setenv("EMFIRGE_RUN_SCANNERS", "0")
+    client = TestClient(main.app)
+
+    created = client.post("/branches", json={"base_analysis_id": "demo", "name": "restrict-web"})
+    assert created.status_code == 200
+    branch_id = created.json()["branch_id"]
+    changed = client.post(f"/branches/{branch_id}/changes", json={
+        **dangerous_change().model_dump(), "expected_change_count": 0,
+    })
+    assert changed.status_code == 200
+    assert changed.json()["num_changes"] == 1
+    assert changed.json()["modeled_state_unchanged"] is False
+
+    diff = client.get(f"/branches/{branch_id}/diff")
+    verdict_response = client.get(f"/branches/{branch_id}/verdict")
+    assert diff.status_code == verdict_response.status_code == 200
+    assert "i-demo-web-001" in diff.json()["newly_internet_reachable"]
+    assert verdict_response.json()["verdict"] == "block"
+    assert verdict_response.json()["coverage_warnings"]
+
+    stale = client.post(f"/branches/{branch_id}/changes", json={
+        **safe_change().model_dump(), "expected_change_count": 0,
+    })
+    assert stale.status_code == 409
+    safe_created = client.post("/branches", json={
+        "base_analysis_id": "demo", "name": "encrypt-artifacts",
+    })
+    safe_id = safe_created.json()["branch_id"]
+    assert client.post(f"/branches/{safe_id}/changes", json=safe_change().model_dump()).status_code == 200
+    comparison = client.post("/branches/compare", json={"branch_ids": [branch_id, safe_id]})
+    assert comparison.status_code == 200
+    assert comparison.json()["ranking"][0] == safe_id
+
+    rolled_back = client.post(f"/branches/{branch_id}/rollback", json={"expected_change_count": 1})
+    assert rolled_back.status_code == 200
+    assert rolled_back.json()["num_changes"] == 0
+    assert client.get(f"/branches/{branch_id}/diff").json()["modeled_state_unchanged"] is True
