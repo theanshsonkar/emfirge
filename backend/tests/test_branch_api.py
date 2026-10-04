@@ -342,6 +342,47 @@ def test_stale_agent_rollback_returns_conflict():
     rollback.assert_called_once_with("b-1", expected_change_count=1)
 
 
+def test_rollback_to_count_endpoint_forwards_target_and_revision():
+    reset_limiter()
+    revision = "c" * 64
+    rolled = branch(changes=[{"op": "add", "resource_type": "s3_bucket", "resource_id": "one"}])
+    with patch("app.main.branches.rollback_to_change_count", return_value=rolled) as rollback:
+        response = client.post("/branches/b-1/rollback-to-count", json={
+            "target_change_count": 1, "branch_revision": revision,
+        })
+    assert response.status_code == 200
+    assert response.json()["num_changes"] == 1
+    rollback.assert_called_once_with("b-1", 1, expected_branch_revision=revision)
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"target_change_count": -1}, {"target_change_count": True},
+    {"target_change_count": 1.5}, {"target_change_count": 1, "other": True},
+    {"target_change_count": 1, "branch_revision": "stale"},
+])
+def test_rollback_to_count_endpoint_rejects_invalid_payload(payload):
+    reset_limiter()
+    response = client.post("/branches/b-1/rollback-to-count", json=payload)
+    assert response.status_code == 422
+
+
+def test_rollback_to_count_maps_out_of_range_to_422_and_stale_revision_to_409():
+    reset_limiter()
+    with patch("app.main.branches.rollback_to_change_count",
+               side_effect=branches.InvalidRollbackTargetError("target_change_count must be between 0 and 1")):
+        response = client.post("/branches/b-1/rollback-to-count", json={"target_change_count": 2})
+    assert response.status_code == 422
+
+    revision = "a" * 64
+    with patch("app.main.branches.rollback_to_change_count",
+               side_effect=branches.BranchConflictError("Branch revision is stale")) as rollback:
+        response = client.post("/branches/b-1/rollback-to-count", json={
+            "target_change_count": 0, "branch_revision": revision,
+        })
+    assert response.status_code == 409
+    rollback.assert_called_once_with("b-1", 0, expected_branch_revision=revision)
+
+
 def test_stacked_add_then_modify_validates_against_rebuilt_state():
     reset_limiter()
     base = AWSInfrastructure(region="us-east-1")

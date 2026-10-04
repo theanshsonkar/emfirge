@@ -138,6 +138,25 @@ export async function rollbackBranchHandler(args: RollbackBranchArgs) {
   return ok(result);
 }
 
+export const rollbackBranchToCountZodObject = z.object({
+  ...branchIdSchema,
+  target_change_count: z.number().int().nonnegative().describe("Number of leading changes to retain; must not exceed the current branch change count"),
+  branch_revision: z.string().regex(/^[0-9a-f]{64}$/).optional().describe("Optional observed branch_revision; stale state fails with HTTP 409"),
+});
+export type RollbackBranchToCountArgs = z.infer<typeof rollbackBranchToCountZodObject>;
+
+export async function rollbackBranchToCountHandler(args: RollbackBranchToCountArgs) {
+  const result = await backendCall(
+    "POST",
+    `/branches/${encodeURIComponent(args.branch_id)}/rollback-to-count`,
+    {
+      target_change_count: args.target_change_count,
+      ...(args.branch_revision === undefined ? {} : { branch_revision: args.branch_revision }),
+    },
+  );
+  return ok(result);
+}
+
 export const discardBranchZodObject = z.object({
   ...branchIdSchema,
   expected_change_count: z.number().int().nonnegative().optional().describe("Optional observed change count; stale discard fails with HTTP 409"),

@@ -68,6 +68,75 @@ def test_branch_round_trip_mutations_rebuild_diff_rollback_and_discard(branch_db
     assert discarded.status == "discarded"
 
 
+def test_rollback_to_change_count_truncates_history_and_rebuilds_diff(branch_db):
+    branch_id = branches.create_branch(AWSInfrastructure(region="us-east-1"), "truncate")
+    for resource_id, fields in (
+        ("i-one", {"type": "t3.micro", "state": "running"}),
+        ("i-two", {"type": "t3.small", "state": "running"}),
+        ("i-three", {"type": "t3.nano", "state": "running"}),
+    ):
+        branches.apply_change_to_branch(branch_id, Change(
+            op="add", resource_type="ec2_instance", resource_id=resource_id, fields=fields,
+        ))
+    original_revision = branches.read_branch(branch_id).branch_revision
+
+    rolled = branches.rollback_to_change_count(branch_id, 1)
+    assert [change.resource_id for change in rolled.changes] == ["i-one"]
+    assert [instance.id for instance in branches.rebuild_branch_infra(branch_id).ec2.instances] == ["i-one"]
+    diff = branches.get_branch_diff(branch_id)
+    assert diff.added_nodes == ["i-one"]
+    assert diff.removed_nodes == []
+    assert branches.read_branch(branch_id).branch_revision != original_revision
+
+
+def test_rollback_to_current_count_is_no_op_and_revision_guarded(branch_db):
+    branch_id = branches.create_branch(AWSInfrastructure(region="us-east-1"), "no-op")
+    branches.apply_change_to_branch(branch_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="kept",
+    ))
+    before = branches.read_branch(branch_id)
+
+    rolled = branches.rollback_to_change_count(
+        branch_id, 1, expected_branch_revision=before.branch_revision,
+    )
+    assert rolled.changes == branches.get_branch(branch_id).changes
+    assert branches.read_branch(branch_id).branch_revision == before.branch_revision
+    assert branches.get_branch_diff(branch_id).added_nodes == ["kept"]
+
+
+
+def test_rollback_to_count_rejects_stale_revision_without_discarding_append(branch_db):
+    branch_id = branches.create_branch(AWSInfrastructure(region="us-east-1"), "stale-truncate")
+    for resource_id in ("first", "second"):
+        branches.apply_change_to_branch(branch_id, Change(
+            op="add", resource_type="s3_bucket", resource_id=resource_id,
+        ))
+    observed_revision = branches.read_branch(branch_id).branch_revision
+    branches.apply_change_to_branch(branch_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="concurrent-append",
+    ))
+
+    with pytest.raises(branches.BranchConflictError, match="revision is stale"):
+        branches.rollback_to_change_count(
+            branch_id, 1, expected_branch_revision=observed_revision,
+        )
+    assert [change.resource_id for change in branches.get_branch(branch_id).changes] == [
+        "first", "second", "concurrent-append",
+    ]
+
+
+@pytest.mark.parametrize("target", [-1, 2, True])
+def test_rollback_to_invalid_change_count_is_rejected_without_mutation(branch_db, target):
+    branch_id = branches.create_branch(AWSInfrastructure(region="us-east-1"), "invalid-target")
+    branches.apply_change_to_branch(branch_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="kept",
+    ))
+
+    with pytest.raises(branches.InvalidRollbackTargetError):
+        branches.rollback_to_change_count(branch_id, target)
+    assert len(branches.get_branch(branch_id).changes) == 1
+
+
 def test_read_branch_returns_only_ordered_normalized_change_log(branch_db):
     branch_id = branches.create_branch(
         AWSInfrastructure(region="us-east-1"), "inspect", base_analysis_id="analysis",

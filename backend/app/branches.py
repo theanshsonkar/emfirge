@@ -38,6 +38,10 @@ class BranchConflictError(ValueError):
     """Raised when an agent's branch view is stale or a concurrent write wins."""
 
 
+class InvalidRollbackTargetError(ValueError):
+    """Raised when a rollback target is outside the branch's current history."""
+
+
 class Branch(BaseModel):
     branch_id: str
     name: str
@@ -387,6 +391,48 @@ def rollback_last(
             )
             if confirmed != 1:
                 raise BranchConflictError("Branch changed during rollback; reload it and retry")
+        return _decode(row)
+
+    return _with_session(operation)
+
+
+def rollback_to_change_count(
+    branch_id: str,
+    target_change_count: int,
+    expected_branch_revision: Optional[str] = None,
+) -> Branch:
+    """Truncate an open branch's ordered change log to an existing count.
+
+    The observed revision and previous JSON are checked in the same transaction
+    as a conditional update so an append cannot be silently erased.
+    """
+    if type(target_change_count) is not int or target_change_count < 0:
+        raise InvalidRollbackTargetError("target_change_count must be a non-negative integer")
+
+    def operation(session):
+        row = _load_branch(session, branch_id)
+        if row.status != 'open':
+            raise ValueError(f"Branch is not open: {branch_id}")
+        previous_json = row.changes_json or '[]'
+        changes = json.loads(previous_json)
+        current_count = len(changes)
+        if target_change_count > current_count:
+            raise InvalidRollbackTargetError(
+                f"target_change_count must be between 0 and {current_count}"
+            )
+        if (expected_branch_revision is not None
+                and expected_branch_revision != branch_revision(_decode(row))):
+            raise BranchConflictError("Branch revision is stale; reload the branch and retry")
+
+        next_json = json.dumps(changes[:target_change_count], sort_keys=True, separators=(",", ":"))
+        updated = session.query(BranchLog).filter(
+            BranchLog.branch_id == branch_id,
+            BranchLog.status == 'open',
+            BranchLog.changes_json == previous_json,
+        ).update({BranchLog.changes_json: next_json}, synchronize_session=False)
+        if updated != 1:
+            raise BranchConflictError("Branch changed during rollback; reload it and retry")
+        session.expire(row)
         return _decode(row)
 
     return _with_session(operation)

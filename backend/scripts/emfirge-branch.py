@@ -127,6 +127,7 @@ def _parser() -> argparse.ArgumentParser:
         ("diff", "show modeled infrastructure, finding, and dependency changes"),
         ("verdict", "evaluate the modeled branch"),
         ("rollback", "undo the most recent modeled change"),
+        ("rollback-to-count", "truncate the ordered change log to an existing count"),
         ("discard", "discard an open branch"),
     ):
         command_parser = subparsers.add_parser(command, help=help_text)
@@ -134,6 +135,10 @@ def _parser() -> argparse.ArgumentParser:
         if command in {"rollback", "discard"}:
             command_parser.add_argument("--expected-count", type=int,
                                         help="fail if the branch no longer has this many changes")
+            command_parser.add_argument("--branch-revision", help="fail if the branch state no longer matches this revision")
+        if command == "rollback-to-count":
+            command_parser.add_argument("--target-count", type=int, required=True,
+                                        help="retain exactly this many leading changes (0 through current count)")
             command_parser.add_argument("--branch-revision", help="fail if the branch state no longer matches this revision")
 
     compare = subparsers.add_parser("compare", help="compare branches from one or more bases")
@@ -188,6 +193,15 @@ def _run(args: argparse.Namespace, client: APIClient) -> Any:
         if args.branch_revision is not None:
             payload["branch_revision"] = args.branch_revision
         return client.request("POST", f"/branches/{quote(args.branch_id, safe='')}/rollback", payload)
+    if args.command == "rollback-to-count":
+        if args.target_count < 0:
+            raise CLIError("--target-count must be zero or greater")
+        payload = {"target_change_count": args.target_count}
+        if args.branch_revision is not None:
+            payload["branch_revision"] = args.branch_revision
+        return client.request(
+            "POST", f"/branches/{quote(args.branch_id, safe='')}/rollback-to-count", payload,
+        )
     if args.command == "discard":
         payload = {}
         if args.expected_count is not None:

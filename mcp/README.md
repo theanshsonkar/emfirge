@@ -54,6 +54,7 @@ Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 - `emfirge_branch_diff` — show the infrastructure diff against the base analysis.
 - `emfirge_branch_verdict` — evaluate an advisory `block`, `warn`, or `pass` verdict with coverage details.
 - `emfirge_rollback_branch` — remove the most recent modeled change.
+- `emfirge_rollback_branch_to_count` — truncate the ordered branch history to a selected existing change count.
 - `emfirge_discard_branch` — discard an isolated branch; optionally pass `expected_change_count` to reject a stale discard with HTTP 409.
 - `emfirge_list_branches` — list branches, optionally filtered by base analysis ID.
 - `emfirge_get_branch` — read branch metadata and its ordered normalized change log without returning the base infrastructure snapshot.
@@ -69,7 +70,7 @@ Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 
 Set `EMFIRGE_PRIVACY` to `strict`, `balanced`, or `off`; `strict` is the default. Strict tokenizes recognized AWS identifiers locally before MCP results reach the LLM. The token mapping remains on the local machine. The backend receives the data needed for the requested analysis. Credentials in presigned report URLs are scrubbed before URLs are returned.
 
-For concurrent branch operations, pass the `branch_revision` returned by `emfirge_get_branch` to `emfirge_apply_change`, `emfirge_rollback_branch`, `emfirge_discard_branch`, or `emfirge_fork_branch`. The backend rejects a stale revision with HTTP 409, including when another agent replaced history without changing its length. `expected_change_count` remains supported as a lighter count-only check.
+For concurrent branch operations, pass the `branch_revision` returned by `emfirge_get_branch` to `emfirge_apply_change`, `emfirge_rollback_branch`, `emfirge_rollback_branch_to_count`, `emfirge_discard_branch`, or `emfirge_fork_branch`. The backend rejects a stale revision with HTTP 409, including when another agent replaced history without changing its length. `expected_change_count` remains supported as a lighter count-only check for the existing single-step rollback and other operations.
 
 ```bash
 npx @emfirge/mcp privacy

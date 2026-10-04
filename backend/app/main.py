@@ -1437,6 +1437,38 @@ def rollback_branch_endpoint(branch_id: str, request: Request, payload: Optional
     return _branch_summary(branch)
 
 
+@app.post('/branches/{branch_id}/rollback-to-count', dependencies=[Depends(require_api_key)])
+def rollback_branch_to_count_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    if not isinstance(payload, dict) or set(payload) - {'target_change_count', 'branch_revision'}:
+        raise HTTPException(
+            status_code=422,
+            detail='Only target_change_count and branch_revision are supported',
+        )
+    target_count = payload.get('target_change_count')
+    if type(target_count) is not int or target_count < 0:
+        raise HTTPException(status_code=422, detail='target_change_count must be a non-negative integer')
+    expected_revision = payload.get('branch_revision')
+    if expected_revision is not None and (
+        not isinstance(expected_revision, str)
+        or re.fullmatch(r'[0-9a-f]{64}', expected_revision) is None
+    ):
+        raise HTTPException(status_code=422, detail='branch_revision must be a SHA-256 hex string')
+    try:
+        branch = branches.rollback_to_change_count(
+            branch_id, target_count, expected_branch_revision=expected_revision,
+        )
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except branches.BranchConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except branches.InvalidRollbackTargetError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _branch_summary(branch)
+
+
 @app.post('/branches/{branch_id}/discard', dependencies=[Depends(require_api_key)])
 def discard_branch_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
     _check_branch_rate_limit(_branch_request_ip(request))

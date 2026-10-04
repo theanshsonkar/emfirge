@@ -63,6 +63,8 @@ import {
   compareBranchesHandler,
   rollbackBranchZodObject,
   rollbackBranchHandler,
+  rollbackBranchToCountZodObject,
+  rollbackBranchToCountHandler,
 } from "./tools/branches.js";
 
 // Read the published version from package.json so the value advertised over
@@ -291,6 +293,15 @@ const tools: ToolRegistration[] = [
     schema: branchIdSchema as Record<string, z.ZodTypeAny>,
     zodObject: rollbackBranchZodObject as z.ZodObject<z.ZodRawShape>,
     handler: rollbackBranchHandler,
+  },
+  {
+    name: "emfirge_rollback_branch_to_count",
+    description:
+      "Truncate an open isolated branch's ordered change log to a specified existing count. " +
+      "Use branch_revision from emfirge_get_branch to reject stale state; this changes no AWS resources.",
+    schema: rollbackBranchToCountZodObject.shape as Record<string, z.ZodTypeAny>,
+    zodObject: rollbackBranchToCountZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: rollbackBranchToCountHandler,
   },
   {
     name: "emfirge_discard_branch",

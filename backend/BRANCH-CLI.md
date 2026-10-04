@@ -37,15 +37,18 @@ python backend/scripts/emfirge-branch.py list --analysis-id SCAN_ID
 python backend/scripts/emfirge-branch.py capabilities
 python backend/scripts/emfirge-branch.py verdict --branch-id BRANCH_ID
 python backend/scripts/emfirge-branch.py rollback --branch-id BRANCH_ID --expected-count 1 --branch-revision REVISION_FROM_SHOW
+python backend/scripts/emfirge-branch.py rollback-to-count --branch-id BRANCH_ID --target-count 2 --branch-revision REVISION_FROM_SHOW
 python backend/scripts/emfirge-branch.py discard --branch-id BRANCH_ID --expected-count 1 --branch-revision REVISION_FROM_SHOW
 python backend/scripts/emfirge-branch.py compare BRANCH_ID OTHER_BRANCH_ID
 ```
 
 `rollback` undoes the most recent modeled change. It does not reset the whole branch. `iam_role_policy` supports `modify` only and requires `access_statements` to replace the complete normalized statement list for an existing collected role. `route_table` supports `modify` only and requires `routes` to replace the complete normalized route list for an existing collected route table; route-table associations remain derived from the collected snapshot. Newly introduced internet-gateway routes require complete attachment evidence with state `available` and a matching route-table VPC. Older snapshots without that evidence cannot authorize a new IGW route, but their exact pre-existing routes remain preservable. The backend models reachability consequences from the changed snapshot and does not predict whether a real deployment will cause an outage. All other resource and operation support follows the backend's current branch mutation API.
 
+`rollback-to-count` truncates the ordered history to exactly `--target-count` retained leading changes, which must be between zero and the current count. It returns the same stable branch summary as other branch mutations. Pass `--branch-revision` from `show` to reject stale observations; a stale revision returns HTTP 409, while an invalid target returns HTTP 422.
+
 `GET /branches/capabilities` and the `capabilities` CLI command return the machine-readable contract used by backend validation. Resource entries list supported operations and special constraints; for example, `iam_role_policy` replaces the complete normalized `access_statements` list, while `route_table` replaces the complete normalized `routes` list. Treat this endpoint as authoritative when generating changes.
 
-For concurrent agents, `apply`, `rollback`, `discard`, and `fork` may pass `--branch-revision` from `show` to reject any intervening history change, including rollback followed by another append that leaves the change count unchanged. These commands also retain their `--expected-count` support where applicable. A stale token returns HTTP 409. Omitting either option remains supported; `discard` still accepts no body.
+For concurrent agents, `apply`, `rollback`, `rollback-to-count`, `discard`, and `fork` may pass `--branch-revision` from `show` to reject any intervening history change, including rollback followed by another append that leaves the change count unchanged. These commands also retain their `--expected-count` support where applicable. A stale token returns HTTP 409. Omitting the token remains supported; `discard` still accepts no body.
 
 The change response includes `modeled_state_unchanged`, comparing the rebuilt branch immediately before and after that proposed change. The `diff` and `verdict` responses expose the same field for the whole branch compared with its base. It is `true` only when the complete normalized infrastructure models are identical; `false` does not guarantee a graph, finding, or verdict change because some modeled fields may not appear in those views. A redundant change remains recorded in the branch history.
 

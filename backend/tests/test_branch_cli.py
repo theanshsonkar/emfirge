@@ -119,6 +119,10 @@ def invoke(server, *args, stdin=None, base_url_env=True):
          ("POST", "/api/branches/b-1/rollback", {"expected_change_count": 2})),
         (("rollback", "--branch-id", "b-1", "--expected-count", "2", "--branch-revision", "b" * 64),
          ("POST", "/api/branches/b-1/rollback", {"expected_change_count": 2, "branch_revision": "b" * 64})),
+        (("rollback-to-count", "--branch-id", "b-1", "--target-count", "1"),
+         ("POST", "/api/branches/b-1/rollback-to-count", {"target_change_count": 1})),
+        (("rollback-to-count", "--branch-id", "b-1", "--target-count", "0", "--branch-revision", "d" * 64),
+         ("POST", "/api/branches/b-1/rollback-to-count", {"target_change_count": 0, "branch_revision": "d" * 64})),
         (("discard", "--branch-id", "b-1"),
          ("POST", "/api/branches/b-1/discard", {})),
         (("discard", "--branch-id", "b-1", "--expected-count", "2"),
@@ -188,4 +192,15 @@ def test_invalid_fields_json_fails_before_http_request(api_server):
     assert result.returncode == 2
     assert result.stdout == ""
     assert "fields JSON must be an object" in result.stderr
+    assert api_server.requests == []
+
+
+def test_rollback_to_count_rejects_negative_target_before_http_request(api_server):
+    result = invoke(
+        api_server, "rollback-to-count", "--branch-id", "b-1", "--target-count", "-1",
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "--target-count must be zero or greater" in result.stderr
     assert api_server.requests == []

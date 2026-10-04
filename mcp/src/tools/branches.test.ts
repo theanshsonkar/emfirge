@@ -227,6 +227,31 @@ test("fork, rollback, and discard forward optional branch revisions", async () =
   assert.deepEqual(discardCalls[0].body, { branch_revision: revision });
 });
 
+test("rollback_branch_to_count validates target and forwards stable payload", async () => {
+  const revision = "e".repeat(64);
+  assert.deepEqual(branches.rollbackBranchToCountZodObject.parse({
+    branch_id: "b1", target_change_count: 2, branch_revision: revision,
+  }), { branch_id: "b1", target_change_count: 2, branch_revision: revision });
+  assert.throws(() => branches.rollbackBranchToCountZodObject.parse({
+    branch_id: "b1", target_change_count: -1,
+  }));
+  assert.throws(() => branches.rollbackBranchToCountZodObject.parse({
+    branch_id: "b1", target_change_count: 1.5,
+  }));
+
+  const response = { branch_id: "b1", status: "open", num_changes: 2 };
+  const calls = stubFetch(response);
+  const result = await branches.rollbackBranchToCountHandler({
+    branch_id: "b1", target_change_count: 2, branch_revision: revision,
+  });
+  assert.deepEqual(calls, [{
+    method: "POST",
+    url: "http://stub.invalid/api/branches/b1/rollback-to-count",
+    body: { target_change_count: 2, branch_revision: revision },
+  }]);
+  assert.deepEqual(JSON.parse(textOf(result)), response);
+});
+
 // ---------------------------------------------------------------------------
 // Bug 2 — every handler's output must go through redactDeep.
 // ---------------------------------------------------------------------------
@@ -250,6 +275,7 @@ test("every branch handler redacts real identifiers out of its response", async 
     ["branchDiffHandler", branches.branchDiffHandler],
     ["branchVerdictHandler", branches.branchVerdictHandler],
     ["rollbackBranchHandler", branches.rollbackBranchHandler],
+    ["rollbackBranchToCountHandler", branches.rollbackBranchToCountHandler],
     ["discardBranchHandler", branches.discardBranchHandler],
     ["listBranchesHandler", branches.listBranchesHandler],
     ["compareBranchesHandler", branches.compareBranchesHandler],
@@ -266,6 +292,7 @@ test("every branch handler redacts real identifiers out of its response", async 
     fields: {},
     branch_ids: ["b1"],
     branch_revision: "a".repeat(64),
+    target_change_count: 0,
   } as never;
 
   for (const [name, handler] of handlers) {
