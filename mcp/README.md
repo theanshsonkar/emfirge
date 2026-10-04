@@ -50,7 +50,7 @@ Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 ### Branch
 
 - `emfirge_create_branch` — create an isolated infrastructure branch from a completed analysis.
-- `emfirge_apply_change` — apply an add, modify, or delete change to the branch model, not AWS.
+- `emfirge_apply_change` — apply an add, modify, or delete change to the branch model, not AWS. `route_table` supports modify-only replacement of the complete normalized `routes` list on a collected table; associations stay derived from the snapshot.
 - `emfirge_branch_diff` — show the infrastructure diff against the base analysis.
 - `emfirge_branch_verdict` — evaluate an advisory `block`, `warn`, or `pass` verdict with coverage details.
 - `emfirge_rollback_branch` — remove the most recent modeled change.

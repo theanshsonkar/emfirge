@@ -8,6 +8,7 @@ from app.diffing import diff_graphs
 from app.models import (
     AccessStatement, AWSInfrastructure, EC2Instance, IAMData,
     LambdaFunction, RDSInstance, RolePolicy, SecurityGroup,
+    Route, RouteTable, VPCData, VPCSubnet,
 )
 from app.mutations import (
     Change, SUPPORTED_OPERATIONS, SUPPORTED_RESOURCE_TYPES, _MUTATION_CAPABILITIES,
@@ -247,6 +248,7 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
         "iam_role_policy": (
             "arn:aws:iam::000000000000:role/Capability", "role_arn", {},
         ),
+        "route_table": ("rt-capability", "id", {"vpc_id": "vpc-capability"}),
     }
     collection_names = {
         "ec2_instance": ("ec2", "instances"),
@@ -254,6 +256,7 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
         "rds_instance": ("rds", "rds_instances"),
         "s3_bucket": ("s3", "buckets"),
         "lambda_function": ("lambda_data", "functions"),
+        "route_table": ("vpc", "route_tables"),
     }
 
     for resource_type, operations in advertised.items():
@@ -263,11 +266,17 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
             fields = dict(add_fields) if operation == "add" else {}
             if resource_type == "iam_role_policy" and operation == "modify":
                 fields = {"access_statements": []}
+            if resource_type == "route_table" and operation == "modify":
+                fields = {"routes": []}
             if operation != "add":
                 if resource_type == "iam_role_policy":
                     infra.iam.role_policies.append(RolePolicy(
                         role_name="Capability", role_arn=resource_id,
                     ))
+                elif resource_type == "route_table":
+                    infra.vpc.route_tables.append(RouteTable(**{
+                        identity_field: resource_id, **add_fields,
+                    }))
                 else:
                     model_type = _MUTATION_CAPABILITIES[resource_type]["model"]
                     target = {identity_field: resource_id, **add_fields}
@@ -281,6 +290,77 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
             else:
                 with pytest.raises(ValueError):
                     apply_change(infra, change)
+
+
+def test_route_table_replaces_complete_routes_and_syncs_public_subnet_summary():
+    base = AWSInfrastructure(vpc=VPCData(
+        internet_gateways=["igw-route-test"],
+        public_subnet_ids=["subnet-route-test"],
+        subnets=[VPCSubnet(
+            id="subnet-route-test", vpc_id="vpc-route-test", is_public=True,
+        )],
+        route_tables=[RouteTable(
+            id="rt-route-test", vpc_id="vpc-route-test",
+            associated_subnet_ids=["subnet-route-test"],
+            routes=[Route(destination_cidr="0.0.0.0/0",
+                          target_type="internet_gateway", target_id="igw-route-test")],
+        )],
+    ))
+
+    changed = apply_change(base, Change(
+        op="modify", resource_type="route_table", resource_id="rt-route-test",
+        fields={"routes": [
+            {"destination_cidr": "0.0.0.0/0", "target_type": "nat_gateway", "target_id": "nat-route-test"},
+        ]},
+    ))
+
+    assert base.vpc.route_tables[0].routes[0].target_type == "internet_gateway"
+    assert changed.vpc.route_tables[0].routes[0].target_type == "nat_gateway"
+    assert changed.vpc.route_tables[0].associated_subnet_ids == ["subnet-route-test"]
+    assert changed.vpc.subnets[0].is_public is False
+    assert changed.vpc.public_subnet_ids == []
+
+
+def test_route_table_change_recomputes_main_table_inherited_public_flags():
+    base = AWSInfrastructure(vpc=VPCData(
+        internet_gateways=["igw-main-route-test"],
+        public_subnet_ids=["subnet-inherited"],
+        subnets=[VPCSubnet(
+            id="subnet-inherited", vpc_id="vpc-inherited", is_public=True,
+        )],
+        route_tables=[RouteTable(
+            id="rt-main-route-test", vpc_id="vpc-inherited", is_main=True,
+            routes=[Route(destination_cidr="0.0.0.0/0",
+                          target_type="internet_gateway", target_id="igw-main-route-test")],
+        )],
+    ))
+
+    changed = apply_change(base, Change(
+        op="modify", resource_type="route_table", resource_id="rt-main-route-test",
+        fields={"routes": []},
+    ))
+
+    assert base.vpc.subnets[0].is_public is True
+    assert changed.vpc.subnets[0].is_public is False
+    assert changed.vpc.public_subnet_ids == []
+    assert changed.vpc.route_tables[0].associated_subnet_ids == []
+
+
+def test_route_table_rejects_partial_or_association_mutations():
+    base = AWSInfrastructure(vpc=VPCData(route_tables=[RouteTable(
+        id="rt-guard", vpc_id="vpc-guard",
+    )]))
+
+    with pytest.raises(ValueError, match="requires only routes"):
+        apply_change(base, Change(
+            op="modify", resource_type="route_table", resource_id="rt-guard",
+            fields={"routes": [], "associated_subnet_ids": ["subnet-invented"]},
+        ))
+    with pytest.raises(ValueError, match="complete normalized route set"):
+        apply_change(base, Change(
+            op="modify", resource_type="route_table", resource_id="rt-guard",
+            fields={"routes": {"destination_cidr": "0.0.0.0/0"}},
+        ))
 
 
 def test_modify_iam_role_policy_replaces_normalized_statements_without_mutating_base():

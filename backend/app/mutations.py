@@ -15,6 +15,8 @@ from app.models import (
     EC2Instance,
     LambdaFunction,
     RDSInstance,
+    Route,
+    RouteTable,
     S3Bucket,
     SecurityGroup,
 )
@@ -51,6 +53,18 @@ _MUTATION_CAPABILITIES = {
             "required_fields": ["access_statements"],
             "allowed_fields": ["access_statements"],
             "message": "Replace the complete normalized statement list for one existing collected role identified by role ARN",
+        },),
+    },
+    "route_table": {
+        "model": RouteTable,
+        "operations": frozenset({"modify"}),
+        "constraints": ({
+            "operations": ["modify"],
+            "kind": "complete_field_replacement",
+            "fields": [],
+            "required_fields": ["routes"],
+            "allowed_fields": ["routes"],
+            "message": "Replace the complete normalized route list for one existing collected route table; associations are derived from the collected snapshot",
         },),
     },
 }
@@ -185,6 +199,53 @@ def _sync_counts(infra: AWSInfrastructure) -> None:
 def _sync_s3_public_buckets(infra: AWSInfrastructure) -> None:
     """Keep the collector's public-bucket summary aligned with bucket models."""
     infra.s3.public_buckets = [bucket.name for bucket in infra.s3.buckets if bucket.is_public]
+
+
+def _effective_route_table_associations(infra: AWSInfrastructure) -> dict[str, list[str]]:
+    """Resolve explicit subnet associations and main-table inheritance."""
+    tables = infra.vpc.route_tables
+    result = {
+        str(table.id if isinstance(table, RouteTable) else table["id"]): set(
+            table.associated_subnet_ids if isinstance(table, RouteTable)
+            else table.get("associated_subnet_ids", [])
+        )
+        for table in tables
+    }
+    explicitly_associated = set().union(*result.values()) if result else set()
+    main_by_vpc: dict[str, list[str]] = {}
+    for table in tables:
+        get = (lambda key, default=None: getattr(table, key, default)) if isinstance(table, RouteTable) else table.get
+        if get("is_main", False):
+            main_by_vpc.setdefault(str(get("vpc_id", "")), []).append(str(get("id", "")))
+    for subnet in infra.vpc.subnets:
+        get = (lambda key, default=None: getattr(subnet, key, default)) if isinstance(subnet, BaseModel) else subnet.get
+        subnet_id, vpc_id = str(get("id", "")), str(get("vpc_id", ""))
+        main_tables = main_by_vpc.get(vpc_id, [])
+        if subnet_id not in explicitly_associated and len(main_tables) == 1:
+            result[main_tables[0]].add(subnet_id)
+    return {table_id: sorted(subnet_ids) for table_id, subnet_ids in result.items()}
+
+
+def _sync_route_table_public_subnets(infra: AWSInfrastructure) -> None:
+    """Refresh public-subnet summaries after replacing normalized routes."""
+    associations = _effective_route_table_associations(infra)
+    public_subnets = set()
+    for table in infra.vpc.route_tables:
+        get = (lambda key, default=None: getattr(table, key, default)) if isinstance(table, RouteTable) else table.get
+        routes = get("routes", []) or []
+        if any(
+            str(route.destination_cidr if isinstance(route, Route) else route.get("destination_cidr", "")) == "0.0.0.0/0"
+            and str(route.target_type if isinstance(route, Route) else route.get("target_type", "")).lower() == "internet_gateway"
+            for route in routes
+        ):
+            public_subnets.update(associations.get(str(get("id", "")), []))
+    for subnet in infra.vpc.subnets:
+        subnet_id = str(subnet.id if isinstance(subnet, BaseModel) else subnet.get("id", ""))
+        if isinstance(subnet, BaseModel):
+            subnet.is_public = subnet_id in public_subnets
+        else:
+            subnet["is_public"] = subnet_id in public_subnets
+    infra.vpc.public_subnet_ids = sorted(public_subnets)
 
 
 def _append_unique(values: list[str], value: str) -> None:
@@ -345,6 +406,27 @@ def _replace_iam_role_policy_statements(
     policy.policy_names = []
 
 
+def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> None:
+    """Replace only the normalized routes on one collected route table."""
+    required_fields = {"routes"}
+    if set(change.fields) != required_fields:
+        raise ValueError("route_table modify requires only routes as the complete replacement list")
+    routes = change.fields["routes"]
+    if not isinstance(routes, list):
+        raise ValueError("routes must be a list replacing the complete normalized route set")
+    matches = [table for table in infra.vpc.route_tables if table.id == change.resource_id]
+    if not matches:
+        raise ValueError(f"Target not found: route_table/{change.resource_id}")
+    if len(matches) != 1:
+        raise ValueError("Route table target is ambiguous; ID must identify exactly one collected route table")
+    normalized = [Route.model_validate(route) for route in routes]
+    destinations = [route.destination_cidr for route in normalized]
+    if len(destinations) != len(set(destinations)):
+        raise ValueError("routes cannot contain duplicate destination_cidr values")
+    matches[0].routes = normalized
+    _sync_route_table_public_subnets(infra)
+
+
 def recompute_derived_state(
     infra: AWSInfrastructure, *, reconcile_security_group_attachments: bool = False,
 ) -> AWSInfrastructure:
@@ -399,6 +481,9 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     if resource_type == "iam_role_policy":
         _replace_iam_role_policy_statements(result, change)
         return result
+    if resource_type == "route_table":
+        _replace_route_table_routes(result, change)
+        return recompute_derived_state(result)
 
     model_type = _model_for(resource_type)
 

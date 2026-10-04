@@ -1,5 +1,5 @@
 """Focused coverage for the provider-neutral typed graph models."""
-from app.egraph import Edge, Graph, Node, NodeCategory, RelationshipType, build_graph, internet_ingress
+from app.egraph import Edge, Graph, Node, NodeCategory, RelationshipType, build_graph, get_internet_reachable_set, internet_ingress
 from app.models import (
     AWSInfrastructure,
     EC2Data,
@@ -793,6 +793,43 @@ def test_missing_route_table_assumes_public_ingress():
 
     assert edge is not None
     assert edge.attrs["confidence"] == "assumed"
+
+
+def test_route_table_change_updates_synthetic_modeled_internet_reachability():
+    base = _network_truth_infra(
+        route_table=_route_table("internet_gateway"),
+        has_public_ip=True,
+    )
+    base.vpc.public_subnet_ids = ["subnet-adversarial"]
+    base.vpc.subnets[0].is_public = True
+    before_graph = build_graph(base)
+    assert "i-adversarial" in get_internet_reachable_set(before_graph)
+
+    changed = apply_change(base, Change(
+        op="modify", resource_type="route_table", resource_id="rtb-adversarial",
+        fields={"routes": []},
+    ))
+    after_graph = build_graph(changed)
+
+    assert "i-adversarial" not in get_internet_reachable_set(after_graph)
+    assert changed.vpc.subnets[0].is_public is False
+    assert changed.vpc.public_subnet_ids == []
+    assert base.vpc.subnets[0].is_public is True
+
+
+def test_main_route_table_is_inherited_by_unassociated_subnets():
+    infrastructure = _network_truth_infra(route_table=RouteTable(
+        id="rtb-adversarial", vpc_id="vpc-adversarial", is_main=True,
+        associated_subnet_ids=[],
+        routes=[Route(destination_cidr="0.0.0.0/0",
+                      target_type="internet_gateway", target_id="igw-adversarial")],
+    ))
+    graph = build_graph(infrastructure)
+
+    assert any(edge.src == "subnet-adversarial" and edge.dst == "rtb-adversarial"
+               and edge.relationship is RelationshipType.ASSOCIATED_WITH
+               for edge in graph.edges)
+    assert "i-adversarial" in get_internet_reachable_set(graph)
 
 
 def test_repeated_build_graph_is_deterministic_including_edge_attrs():

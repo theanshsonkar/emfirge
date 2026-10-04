@@ -25,6 +25,11 @@ python backend/scripts/emfirge-branch.py apply \
   --branch-id BRANCH_ID --op modify --resource-type iam_role_policy \
   --resource-id ROLE_ARN --fields-file policy-statements.json
 
+# Replace a collected route table's complete normalized route list.
+python backend/scripts/emfirge-branch.py apply \
+  --branch-id BRANCH_ID --op modify --resource-type route_table \
+  --resource-id RTB_ID --fields-json '{"routes": []}'
+
 python backend/scripts/emfirge-branch.py show --branch-id BRANCH_ID
 python backend/scripts/emfirge-branch.py fork --branch-id BRANCH_ID --name CANDIDATE --branch-revision REVISION_FROM_SHOW
 python backend/scripts/emfirge-branch.py diff --branch-id BRANCH_ID
@@ -36,9 +41,9 @@ python backend/scripts/emfirge-branch.py discard --branch-id BRANCH_ID --expecte
 python backend/scripts/emfirge-branch.py compare BRANCH_ID OTHER_BRANCH_ID
 ```
 
-`rollback` undoes the most recent modeled change. It does not reset the whole branch. `iam_role_policy` currently supports `modify` only and requires `access_statements` to replace the complete normalized statement list for an existing collected role. The backend verdict reports IAM modeling limits. All other resource and operation support follows the backend's current branch mutation API.
+`rollback` undoes the most recent modeled change. It does not reset the whole branch. `iam_role_policy` supports `modify` only and requires `access_statements` to replace the complete normalized statement list for an existing collected role. `route_table` supports `modify` only and requires `routes` to replace the complete normalized route list for an existing collected route table; route-table associations remain derived from the collected snapshot. The backend models reachability consequences from the changed snapshot and does not predict whether a real deployment will cause an outage. All other resource and operation support follows the backend's current branch mutation API.
 
-`GET /branches/capabilities` and the `capabilities` CLI command return the machine-readable contract used by backend validation. Resource entries list supported operations and special constraints; for example, `iam_role_policy` supports only `modify`, replacing the complete normalized `access_statements` list for one existing role identified by role ARN. Treat this endpoint as authoritative when generating changes.
+`GET /branches/capabilities` and the `capabilities` CLI command return the machine-readable contract used by backend validation. Resource entries list supported operations and special constraints; for example, `iam_role_policy` replaces the complete normalized `access_statements` list, while `route_table` replaces the complete normalized `routes` list. Treat this endpoint as authoritative when generating changes.
 
 For concurrent agents, `apply`, `rollback`, `discard`, and `fork` may pass `--branch-revision` from `show` to reject any intervening history change, including rollback followed by another append that leaves the change count unchanged. These commands also retain their `--expected-count` support where applicable. A stale token returns HTTP 409. Omitting either option remains supported; `discard` still accepts no body.
 

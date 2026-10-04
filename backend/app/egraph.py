@@ -980,6 +980,31 @@ def internal_reachable(a_node, b_node, graph):
         if evidence not in results:
             results.append(evidence)
     return results
+
+
+def _effective_route_table_associations(vpc: Any) -> dict[str, list[str]]:
+    """Include main route-table inheritance for subnets without explicit RTs."""
+    tables = _value(vpc, "route_tables", []) or []
+    result = {
+        str(_value(table, "id", "")): set(_value(table, "associated_subnet_ids", []) or [])
+        for table in tables
+    }
+    explicitly_associated = set().union(*result.values()) if result else set()
+    main_by_vpc: dict[str, list[str]] = {}
+    for table in tables:
+        if _value(table, "is_main", False):
+            main_by_vpc.setdefault(str(_value(table, "vpc_id", "")), []).append(
+                str(_value(table, "id", ""))
+            )
+    for subnet in (_value(vpc, "subnets", []) or []):
+        subnet_id = str(_value(subnet, "id", ""))
+        vpc_id = str(_value(subnet, "vpc_id", ""))
+        main_tables = main_by_vpc.get(vpc_id, [])
+        if subnet_id not in explicitly_associated and len(main_tables) == 1:
+            result[main_tables[0]].add(subnet_id)
+    return {table_id: sorted(subnet_ids) for table_id, subnet_ids in result.items()}
+
+
 def build_graph(infrastructure: AWSInfrastructure) -> Graph:
 
     """
@@ -1115,6 +1140,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
     snapshot_nodes = list(nodes)
     snapshot_edges = list(edges)
     known_ids = {_value(node, 'id') for node in snapshot_nodes}
+    effective_snapshot_associations = _effective_route_table_associations(infrastructure.vpc)
     for subnet in infrastructure.vpc.subnets:
         subnet_id = _value(subnet, 'id')
         if subnet_id not in known_ids:
@@ -1126,7 +1152,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         if route_table_id not in known_ids:
             snapshot_nodes.append({'id': route_table_id, 'type': 'route_table', 'label': f'Route Table: {route_table_id}', 'base': {'routes': routes}})
             known_ids.add(route_table_id)
-        for subnet_id in _value(route_table, 'associated_subnet_ids', []) or []:
+        for subnet_id in effective_snapshot_associations.get(route_table_id, []):
             snapshot_edges.append({'from': subnet_id, 'to': route_table_id, 'relationship': 'associated_with'})
     for nacl in infrastructure.vpc.nacls:
         nacl_id = _value(nacl, 'id')
@@ -1620,15 +1646,15 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             node_ids.add(node_id)
 
     # Subnet -> route table associations and route table -> collected targets.
+    effective_route_table_associations = _effective_route_table_associations(infrastructure.vpc)
     for route_table in infrastructure.vpc.route_tables:
         if isinstance(route_table, dict):
             route_table_id = route_table['id']
-            associated_subnet_ids = route_table.get('associated_subnet_ids', [])
             route_data = route_table.get('routes', [])
         else:
             route_table_id = route_table.id
-            associated_subnet_ids = route_table.associated_subnet_ids
             route_data = route_table.routes
+        associated_subnet_ids = effective_route_table_associations.get(route_table_id, [])
         for subnet_id in associated_subnet_ids:
             if subnet_id in node_ids and route_table_id in node_ids:
                 edges.append({

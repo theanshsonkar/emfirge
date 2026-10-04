@@ -140,6 +140,11 @@ test("apply_change forwards an optional observed branch revision", async () => {
   });
 });
 
+test("apply_change documents the route-table full-replacement contract", () => {
+  assert.match(branches.applyChangeSchema.resource_type.description ?? "", /route_table/);
+  assert.match(branches.applyChangeSchema.fields.description ?? "", /complete normalized route list/);
+});
+
 test("discard_branch forwards the optional observed change count", async () => {
   assert.deepEqual(branches.discardBranchZodObject.parse({
     branch_id: "b1", expected_change_count: 3,
