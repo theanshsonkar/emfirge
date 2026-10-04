@@ -31,6 +31,8 @@ class CombinedVerdict(BaseModel):
     score_delta: int = 0
     newly_internet_reachable: list[str] = Field(default_factory=list)
     no_longer_internet_reachable: list[str] = Field(default_factory=list)
+    # These are modeled ingress paths lost in the branch, not proof of an outage.
+    possible_service_impacts: list[str] = Field(default_factory=list)
     lost_dependencies: list[dict[str, str]] = Field(default_factory=list)
     lost_connectivity: list[dict[str, str]] = Field(default_factory=list)
     deletion_impacts: list[dict[str, Any]] = Field(default_factory=list)
@@ -319,7 +321,8 @@ def combined_verdict(
     if blocking or introduced_reachable:
         verdict = "block"
     elif (new_findings or diff.newly_internet_reachable or introduces_privilege_escalation
-          or diff.lost_dependencies or diff.lost_connectivity or diff.deletion_impacts):
+          or diff.no_longer_internet_reachable or diff.lost_dependencies
+          or diff.lost_connectivity or diff.deletion_impacts):
         verdict = "warn"
     else:
         verdict = "pass"
@@ -339,6 +342,11 @@ def combined_verdict(
     privilege_summary = "; privilege escalation introduced" if introduces_privilege_escalation else ""
     dependency_summary = f"; modeled_dependencies_lost={len(diff.lost_dependencies)}" if diff.lost_dependencies else ""
     connectivity_summary = f"; modeled_internal_paths_lost={len(diff.lost_connectivity)}" if diff.lost_connectivity else ""
+    ingress_summary = (
+        f"; modeled_ingress_paths_lost={len(diff.no_longer_internet_reachable)}"
+        "; possible_service_impact=clients or integrations may depend on these paths; outage not inferred"
+        if diff.no_longer_internet_reachable else ""
+    )
     deletion_summary = f"; modeled_resources_removed={len(diff.deletion_impacts)}" if diff.deletion_impacts else ""
     capacity_summary = ""
     if introduced_capacity_breaches:
@@ -350,8 +358,12 @@ def combined_verdict(
         f"verdict={verdict}; native_added={len(native_added)}; scanner_added={len(scanner_added)}; "
         f"native_removed={len(native_removed)}; scanner_removed={len(scanner_removed)}; "
         f"newly_reachable={len(diff.newly_internet_reachable)}; score={diff.score_before}->{diff.score_after} "
-        f"(delta={diff.score_delta}); {cost_summary}{privilege_summary}{dependency_summary}{connectivity_summary}{deletion_summary}{capacity_summary}{unavailable}"
+        f"(delta={diff.score_delta}); {cost_summary}{privilege_summary}{dependency_summary}{connectivity_summary}{ingress_summary}{deletion_summary}{capacity_summary}{unavailable}"
     )
+    possible_service_impacts = [
+        f"Modeled internet ingress is no longer present for {resource_id}; clients or integrations may depend on this path. The snapshot cannot determine whether service is affected, and no outage is inferred."
+        for resource_id in sorted(diff.no_longer_internet_reachable)
+    ]
     return CombinedVerdict(
         verdict=verdict,
         modeled_state_unchanged=diff.modeled_state_unchanged,
@@ -364,6 +376,7 @@ def combined_verdict(
         score_delta=diff.score_delta,
         newly_internet_reachable=sorted(diff.newly_internet_reachable),
         no_longer_internet_reachable=sorted(diff.no_longer_internet_reachable),
+        possible_service_impacts=possible_service_impacts,
         lost_dependencies=diff.lost_dependencies,
         lost_connectivity=diff.lost_connectivity,
         deletion_impacts=diff.deletion_impacts,

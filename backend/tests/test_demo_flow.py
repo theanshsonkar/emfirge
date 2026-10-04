@@ -9,6 +9,17 @@ from app import branches, database, verdict
 from app import main
 from app.demo_seed import build_demo_infrastructure
 from app.egraph import build_graph
+from app.models import (
+    AWSInfrastructure,
+    EC2Data,
+    EC2Instance,
+    InternetGatewayAttachment,
+    Route,
+    RouteTable,
+    SecurityGroup,
+    VPCData,
+    VPCSubnet,
+)
 from app.mutations import Change
 from app.verdict import combined_verdict
 
@@ -49,6 +60,67 @@ def delete_artifacts_change():
     return Change(
         op="delete", resource_type="s3_bucket",
         resource_id="emfirge-demo-artifacts-000000000000",
+    )
+
+
+def _main_route_ingress_infrastructure():
+    """Small modeled ingress fixture using implicit main route-table association."""
+    return AWSInfrastructure(
+        region="us-east-1",
+        ec2=EC2Data(
+            instance_count=1,
+            instance_ids=["i-app"],
+            instances=[EC2Instance(
+                id="i-app", type="t3.micro", state="running", sg_ids=["sg-app"],
+                subnet_id="subnet-app", has_public_ip=True,
+            )],
+            security_groups=[SecurityGroup(
+                id="sg-app", name="app", attached_to=["i-app"], rules=[
+                    {"protocol": "tcp", "from_port": 22, "to_port": 22,
+                     "ip_ranges": ["0.0.0.0/0"]},
+                    {"protocol": "tcp", "from_port": 443, "to_port": 443,
+                     "ip_ranges": ["0.0.0.0/0"]},
+                ],
+            )],
+            ssh_open_to_internet=True,
+            ssh_security_group_id="sg-app",
+        ),
+        vpc=VPCData(
+            total_vpcs=1,
+            internet_gateways=["igw-main"],
+            internet_gateway_attachments=[InternetGatewayAttachment(
+                internet_gateway_id="igw-main", vpc_id="vpc-main", state="available",
+            )],
+            internet_gateway_attachments_complete=True,
+            subnets=[VPCSubnet(
+                id="subnet-app", vpc_id="vpc-main", cidr="10.0.1.0/24",
+                resources=["i-app"], is_public=True,
+            )],
+            route_tables=[RouteTable(
+                id="rtb-main", vpc_id="vpc-main", is_main=True,
+                routes=[Route(
+                    destination_cidr="0.0.0.0/0", target_type="internet_gateway",
+                    target_id="igw-main",
+                )],
+            )],
+        ),
+    )
+
+
+def restrict_ssh_change():
+    return Change(
+        op="modify", resource_type="security_group", resource_id="sg-app",
+        fields={"rules": [{
+            "protocol": "tcp", "from_port": 443, "to_port": 443,
+            "ip_ranges": ["0.0.0.0/0"],
+        }]},
+    )
+
+
+def remove_main_igw_route_change():
+    return Change(
+        op="modify", resource_type="route_table", resource_id="rtb-main",
+        fields={"routes": []},
     )
 
 
@@ -202,6 +274,42 @@ def test_agent_compare_does_not_rank_dependency_loss_above_safe_fix(demo_branch_
     assert comparison.ranking == [safe_id, delete_id]
     assert comparison.branches[0].lost_dependencies == 1
     assert comparison.branches[1].lost_dependencies == 0
+
+
+def test_losing_main_igw_route_warns_possible_impact_and_ranks_below_preserved_ingress(
+    demo_branch_db,
+):
+    base = _main_route_ingress_infrastructure()
+    preserved = branches.create_branch(base, "restrict-ssh-preserve-https", base_analysis_id="route")
+    route_removed = branches.create_branch(base, "restrict-ssh-remove-igw-route", base_analysis_id="route")
+    for branch_id in (preserved, route_removed):
+        branches.apply_change_to_branch(branch_id, restrict_ssh_change())
+    branches.apply_change_to_branch(route_removed, remove_main_igw_route_change())
+
+    preserved_infra = branches.rebuild_branch_infra(preserved)
+    route_removed_infra = branches.rebuild_branch_infra(route_removed)
+    assert "i-app" in {node.id for node in build_graph(base).nodes}
+    assert "i-app" in {node.id for node in build_graph(preserved_infra).nodes}
+
+    diff = branches.get_branch_diff(route_removed)
+    verdict_result = combined_verdict(base, route_removed_infra, run_scanners=False)
+    assert "i-app" in diff.no_longer_internet_reachable
+    assert diff.score_after > diff.score_before
+    assert "i-app" in verdict_result.no_longer_internet_reachable
+    assert verdict_result.verdict == "warn"
+    assert verdict_result.possible_service_impacts == [
+        "Modeled internet ingress is no longer present for i-app; clients or integrations may depend on this path. The snapshot cannot determine whether service is affected, and no outage is inferred.",
+        "Modeled internet ingress is no longer present for sg-app; clients or integrations may depend on this path. The snapshot cannot determine whether service is affected, and no outage is inferred.",
+    ]
+    assert "possible_service_impact=" in verdict_result.summary
+    assert "outage not inferred" in verdict_result.summary
+
+    comparison = branches.compare_branches([route_removed, preserved])
+    summary_by_id = {item.branch_id: item for item in comparison.branches}
+    assert summary_by_id[route_removed].score_after > summary_by_id[preserved].score_after
+    assert summary_by_id[route_removed].no_longer_internet_reachable == 2
+    assert summary_by_id[preserved].no_longer_internet_reachable == 0
+    assert comparison.ranking == [preserved, route_removed]
 
 
 def test_demo_agent_http_branch_sequence(demo_branch_db, monkeypatch):

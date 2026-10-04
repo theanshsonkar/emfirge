@@ -502,6 +502,10 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
             bool(summary.lost_dependencies),
             bool(summary.lost_connectivity),
             bool(summary.deletion_impacts),
+            # A security score can improve when ingress is cut off. Rank a
+            # branch preserving modeled external paths ahead of one that loses
+            # them, while leaving the security score visible in each summary.
+            summary.no_longer_internet_reachable,
             bool(summary.newly_internet_reachable),
             -summary.score_after,
             summary.name,
