@@ -39,6 +39,7 @@ export const applyChangeSchema = {
   resource_type: z.string().min(1).describe("Infrastructure type; iam_role_policy replaces the complete normalized access_statements list for an existing role ARN"),
   resource_id: z.string().min(1).describe("Resource ID; use the collected role ARN for iam_role_policy"),
   expected_change_count: z.number().int().nonnegative().optional().describe("Optional branch change count observed by the agent; stale appends fail with HTTP 409"),
+  branch_revision: z.string().regex(/^[0-9a-f]{64}$/).optional().describe("Optional branch_revision from emfirge_get_branch; stale state fails with HTTP 409"),
   fields: z
     .record(z.string(), z.unknown())
     .optional()

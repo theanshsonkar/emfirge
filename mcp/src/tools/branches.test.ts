@@ -118,6 +118,28 @@ test("apply_change expands tokenized ids nested inside fields", async () => {
   );
 });
 
+test("apply_change forwards an optional observed branch revision", async () => {
+  const revision = "a".repeat(64);
+  assert.equal(branches.applyChangeZodObject.parse({
+    branch_id: "b1", op: "modify", resource_type: "s3_bucket", resource_id: "bucket",
+    branch_revision: revision,
+  }).branch_revision, revision);
+  assert.throws(() => branches.applyChangeZodObject.parse({
+    branch_id: "b1", op: "modify", resource_type: "s3_bucket", resource_id: "bucket",
+    branch_revision: "stale",
+  }));
+
+  const calls = stubFetch({ branch_id: "b1", num_changes: 1 });
+  await branches.applyChangeHandler({
+    branch_id: "b1", op: "modify", resource_type: "s3_bucket", resource_id: "bucket",
+    branch_revision: revision,
+  });
+  assert.deepEqual(calls[0].body, {
+    op: "modify", resource_type: "s3_bucket", resource_id: "bucket", fields: {},
+    branch_revision: revision,
+  });
+});
+
 test("discard_branch forwards the optional observed change count", async () => {
   assert.deepEqual(branches.discardBranchZodObject.parse({
     branch_id: "b1", expected_change_count: 3,
@@ -222,6 +244,7 @@ test("every branch handler redacts real identifiers out of its response", async 
     resource_id: "sg-deadbeef",
     fields: {},
     branch_ids: ["b1"],
+    branch_revision: "a".repeat(64),
   } as never;
 
   for (const [name, handler] of handlers) {

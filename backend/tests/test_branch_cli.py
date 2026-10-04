@@ -90,6 +90,12 @@ def invoke(server, *args, stdin=None, base_url_env=True):
              "op": "modify", "resource_type": "s3_bucket", "resource_id": "bucket",
              "fields": {"encrypted": True}, "expected_change_count": 2,
          })),
+        (("apply", "--branch-id", "b-1", "--op", "modify", "--resource-type", "s3_bucket",
+          "--resource-id", "bucket", "--branch-revision", "a" * 64),
+         ("POST", "/api/branches/b-1/changes", {
+             "op": "modify", "resource_type": "s3_bucket", "resource_id": "bucket",
+             "fields": {}, "branch_revision": "a" * 64,
+         })),
         (("apply", "--branch-id", "b-1", "--op", "modify", "--resource-type", "iam_role_policy",
           "--resource-id", "arn:role", "--fields-file", "-"),
          ("POST", "/api/branches/b-1/changes", {

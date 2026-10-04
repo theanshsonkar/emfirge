@@ -101,6 +101,7 @@ class Change(BaseModel):
     resource_id: str = ""
     fields: Dict[str, Any] = Field(default_factory=dict)
     expected_change_count: int | None = Field(default=None, ge=0)
+    branch_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 def _fresh(infra: AWSInfrastructure) -> AWSInfrastructure:

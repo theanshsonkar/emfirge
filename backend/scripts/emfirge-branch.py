@@ -117,6 +117,7 @@ def _parser() -> argparse.ArgumentParser:
     apply.add_argument("--resource-type", required=True)
     apply.add_argument("--resource-id", default="")
     apply.add_argument("--expected-count", type=int, help="fail if the branch no longer has this many changes")
+    apply.add_argument("--branch-revision", help="fail if the branch state no longer matches this GET /branches revision")
     fields = apply.add_mutually_exclusive_group()
     fields.add_argument("--fields-json", default="{}", help="JSON object of resource fields")
     fields.add_argument("--fields-file", help="read a JSON object from a file, or '-' for stdin")
@@ -166,6 +167,8 @@ def _run(args: argparse.Namespace, client: APIClient) -> Any:
             if args.expected_count < 0:
                 raise CLIError("--expected-count must be zero or greater")
             change["expected_change_count"] = args.expected_count
+        if args.branch_revision is not None:
+            change["branch_revision"] = args.branch_revision
         return client.request("POST", f"/branches/{quote(args.branch_id, safe='')}/changes", change)
     if args.command == "diff":
         return client.request("GET", f"/branches/{quote(args.branch_id, safe='')}/diff")

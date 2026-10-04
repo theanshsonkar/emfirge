@@ -69,6 +69,8 @@ Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 
 Set `EMFIRGE_PRIVACY` to `strict`, `balanced`, or `off`; `strict` is the default. Strict tokenizes recognized AWS identifiers locally before MCP results reach the LLM. The token mapping remains on the local machine. The backend receives the data needed for the requested analysis. Credentials in presigned report URLs are scrubbed before URLs are returned.
 
+For concurrent branch edits, pass the `branch_revision` returned by `emfirge_get_branch` to `emfirge_apply_change`. The backend rejects a stale revision with HTTP 409, including when another agent replaced history without changing its length. `expected_change_count` remains supported as a lighter count-only check.
+
 ```bash
 npx @emfirge/mcp privacy
 npx @emfirge/mcp privacy strict|balanced|off

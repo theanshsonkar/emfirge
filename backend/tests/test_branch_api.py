@@ -144,6 +144,24 @@ def test_add_change_and_diff():
     assert diff_response.json()["score_delta"] == 1
 
 
+def test_add_change_returns_conflict_for_stale_branch_revision():
+    reset_limiter()
+    loaded = branch()
+    with patch("app.main.branches.get_branch", return_value=loaded), \
+         patch("app.main.branches.rebuild_branch_infra", return_value=loaded.base), \
+         patch("app.main.apply_change"), \
+         patch("app.main.branches.apply_change_to_branch",
+               side_effect=branches.BranchConflictError("Branch revision is stale")) as append:
+        response = client.post("/branches/b-1/changes", json={
+            "op": "add", "resource_type": "s3_bucket", "resource_id": "bucket",
+            "fields": {}, "expected_change_count": 0, "branch_revision": "a" * 64,
+        })
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Branch revision is stale"
+    assert append.call_args.args[1].branch_revision == "a" * 64
+
+
 def test_no_op_change_is_reported_in_change_diff_and_verdict_responses():
     reset_limiter()
     base = AWSInfrastructure(region="us-east-1", s3=S3Data(total_buckets=1,

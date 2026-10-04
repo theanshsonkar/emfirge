@@ -132,11 +132,11 @@ def test_branch_revision_excludes_request_only_expected_count():
     first = branches.Branch(
         branch_id="one", name="same", base=base,
         changes=[Change(op="add", resource_type="s3_bucket", resource_id="bucket",
-                        expected_change_count=0)], status="open",
+                        expected_change_count=0, branch_revision="a" * 64)], status="open",
     )
     second = first.model_copy(update={
         "changes": [Change(op="add", resource_type="s3_bucket", resource_id="bucket",
-                           expected_change_count=42)],
+                           expected_change_count=42, branch_revision="b" * 64)],
     })
     assert branches.branch_revision(first) == branches.branch_revision(second)
 
@@ -299,6 +299,53 @@ def test_stale_agent_change_count_rejects_append_and_preserves_history(branch_db
     assert len(branches.get_branch(branch_id).changes) == 1
     assert branches.get_branch(branch_id).changes[0].expected_change_count is None
     assert [bucket.name for bucket in branches.rebuild_branch_infra(branch_id).s3.buckets] == ["first-bucket"]
+
+
+def test_stale_branch_revision_rejects_same_count_different_history(branch_db):
+    branch_id = branches.create_branch(AWSInfrastructure(region="us-east-1"), "revision-guard")
+    branches.apply_change_to_branch(branch_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="first-bucket",
+    ))
+    branches.apply_change_to_branch(branch_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="second-bucket",
+    ))
+    observed = branches.read_branch(branch_id).branch_revision
+
+    branches.rollback_last(branch_id, expected_change_count=2)
+    branches.apply_change_to_branch(branch_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="replacement-bucket",
+        expected_change_count=1,
+    ))
+    assert len(branches.get_branch(branch_id).changes) == 2
+    assert branches.read_branch(branch_id).branch_revision != observed
+
+    with pytest.raises(branches.BranchConflictError, match="revision is stale"):
+        branches.apply_change_to_branch(branch_id, Change(
+            op="add", resource_type="s3_bucket", resource_id="must-not-appear",
+            expected_change_count=2, branch_revision=observed,
+        ))
+
+    current = branches.get_branch(branch_id)
+    assert [change.resource_id for change in current.changes] == [
+        "first-bucket", "replacement-bucket",
+    ]
+
+
+def test_append_stores_neither_request_only_concurrency_token(branch_db):
+    branch_id = branches.create_branch(AWSInfrastructure(region="us-east-1"), "clean-log")
+    observed = branches.read_branch(branch_id).branch_revision
+    branches.apply_change_to_branch(branch_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="bucket",
+        expected_change_count=0, branch_revision=observed,
+    ))
+
+    session = branches.SessionLocal()
+    try:
+        row = branches._load_branch(session, branch_id)
+        assert "expected_change_count" not in row.changes_json
+        assert "branch_revision" not in row.changes_json
+    finally:
+        session.close()
 
 
 def test_stale_agent_cannot_rollback_another_agents_change(branch_db):

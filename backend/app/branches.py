@@ -107,7 +107,9 @@ def branch_revision(branch: Branch) -> str:
     normalized = {
         "base": _model_dump(branch.base),
         "changes": [
-            change.model_dump(mode="json", exclude={"expected_change_count"})
+            change.model_dump(
+                mode="json", exclude={"expected_change_count", "branch_revision"},
+            )
             for change in branch.changes
         ],
     }
@@ -303,19 +305,25 @@ def apply_change_to_branch(branch_id: str, change: Change | dict) -> Branch:
             raise ValueError(f"Branch is not open: {branch_id}")
         previous_json = row.changes_json or '[]'
         changes = json.loads(previous_json)
+        persisted_branch = _decode(row)
         if (change_model.expected_change_count is not None
                 and change_model.expected_change_count != len(changes)):
             raise BranchConflictError(
                 f"Branch changed: expected {change_model.expected_change_count} change(s), "
                 f"found {len(changes)}"
             )
+        if (change_model.branch_revision is not None
+                and change_model.branch_revision != branch_revision(persisted_branch)):
+            raise BranchConflictError("Branch revision is stale; reload the branch and retry")
         base = AWSInfrastructure.model_validate(json.loads(row.base_infra_json))
         # Validate the candidate against the persisted state in this transaction.
         # API-side preflight is useful for early errors, but direct callers
         # must not be able to store an unrebuildable branch.
         before = apply_changes(base, [Change.model_validate(item) for item in changes])
         after = apply_change(before, change_model)
-        changes.append(change_model.model_dump(mode='json', exclude={'expected_change_count'}))
+        changes.append(change_model.model_dump(
+            mode='json', exclude={'expected_change_count', 'branch_revision'},
+        ))
         next_json = json.dumps(changes, sort_keys=True, separators=(",", ":"))
         updated = session.query(BranchLog).filter(
             BranchLog.branch_id == branch_id,
