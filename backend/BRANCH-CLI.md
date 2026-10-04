@@ -26,13 +26,13 @@ python backend/scripts/emfirge-branch.py apply \
   --resource-id ROLE_ARN --fields-file policy-statements.json
 
 python backend/scripts/emfirge-branch.py show --branch-id BRANCH_ID
-python backend/scripts/emfirge-branch.py fork --branch-id BRANCH_ID --name CANDIDATE
+python backend/scripts/emfirge-branch.py fork --branch-id BRANCH_ID --name CANDIDATE --branch-revision REVISION_FROM_SHOW
 python backend/scripts/emfirge-branch.py diff --branch-id BRANCH_ID
 python backend/scripts/emfirge-branch.py list --analysis-id SCAN_ID
 python backend/scripts/emfirge-branch.py capabilities
 python backend/scripts/emfirge-branch.py verdict --branch-id BRANCH_ID
-python backend/scripts/emfirge-branch.py rollback --branch-id BRANCH_ID --expected-count 1
-python backend/scripts/emfirge-branch.py discard --branch-id BRANCH_ID --expected-count 1
+python backend/scripts/emfirge-branch.py rollback --branch-id BRANCH_ID --expected-count 1 --branch-revision REVISION_FROM_SHOW
+python backend/scripts/emfirge-branch.py discard --branch-id BRANCH_ID --expected-count 1 --branch-revision REVISION_FROM_SHOW
 python backend/scripts/emfirge-branch.py compare BRANCH_ID OTHER_BRANCH_ID
 ```
 
@@ -40,7 +40,7 @@ python backend/scripts/emfirge-branch.py compare BRANCH_ID OTHER_BRANCH_ID
 
 `GET /branches/capabilities` and the `capabilities` CLI command return the machine-readable contract used by backend validation. Resource entries list supported operations and special constraints; for example, `iam_role_policy` supports only `modify`, replacing the complete normalized `access_statements` list for one existing role identified by role ARN. Treat this endpoint as authoritative when generating changes.
 
-For concurrent agents, `apply` may pass `--branch-revision` from `show` to reject any intervening history change, including rollback followed by another append that leaves the change count unchanged. It may also pass `--expected-count`; `rollback` and `discard` support that count check as well. A stale token returns HTTP 409. Omitting either option remains supported.
+For concurrent agents, `apply`, `rollback`, `discard`, and `fork` may pass `--branch-revision` from `show` to reject any intervening history change, including rollback followed by another append that leaves the change count unchanged. These commands also retain their `--expected-count` support where applicable. A stale token returns HTTP 409. Omitting either option remains supported; `discard` still accepts no body.
 
 The change response includes `modeled_state_unchanged`, comparing the rebuilt branch immediately before and after that proposed change. The `diff` and `verdict` responses expose the same field for the whole branch compared with its base. It is `true` only when the complete normalized infrastructure models are identical; `false` does not guarantee a graph, finding, or verdict change because some modeled fields may not appear in those views. A redundant change remains recorded in the branch history.
 

@@ -206,6 +206,21 @@ test("fork_branch posts a required name and returns the fork result", async () =
   assert.deepEqual(JSON.parse(textOf(result)), { branch_id: "child-1", num_changes: 2 });
 });
 
+test("fork, rollback, and discard forward optional branch revisions", async () => {
+  const revision = "d".repeat(64);
+  const forkCalls = stubFetch({ branch_id: "child-2", num_changes: 1 });
+  await branches.forkBranchHandler({ branch_id: "b1", name: "child", branch_revision: revision });
+  assert.deepEqual(forkCalls[0].body, { name: "child", branch_revision: revision });
+
+  const rollbackCalls = stubFetch({ branch_id: "b1", status: "open" });
+  await branches.rollbackBranchHandler({ branch_id: "b1", branch_revision: revision });
+  assert.deepEqual(rollbackCalls[0].body, { branch_revision: revision });
+
+  const discardCalls = stubFetch({ branch_id: "b1", status: "discarded" });
+  await branches.discardBranchHandler({ branch_id: "b1", branch_revision: revision });
+  assert.deepEqual(discardCalls[0].body, { branch_revision: revision });
+});
+
 // ---------------------------------------------------------------------------
 // Bug 2 — every handler's output must go through redactDeep.
 // ---------------------------------------------------------------------------

@@ -108,6 +108,7 @@ def _parser() -> argparse.ArgumentParser:
     fork = subparsers.add_parser("fork", help="fork an open branch into an independent branch")
     fork.add_argument("--branch-id", required=True)
     fork.add_argument("--name", required=True)
+    fork.add_argument("--branch-revision", help="fail if the parent state no longer matches this revision")
 
     subparsers.add_parser("capabilities", help="show supported branch mutation types and constraints")
 
@@ -133,6 +134,7 @@ def _parser() -> argparse.ArgumentParser:
         if command in {"rollback", "discard"}:
             command_parser.add_argument("--expected-count", type=int,
                                         help="fail if the branch no longer has this many changes")
+            command_parser.add_argument("--branch-revision", help="fail if the branch state no longer matches this revision")
 
     compare = subparsers.add_parser("compare", help="compare branches from one or more bases")
     compare.add_argument("branch_ids", nargs="+", metavar="BRANCH_ID")
@@ -151,8 +153,11 @@ def _run(args: argparse.Namespace, client: APIClient) -> Any:
     if args.command == "show":
         return client.request("GET", f"/branches/{quote(args.branch_id, safe='')}")
     if args.command == "fork":
+        payload = {"name": args.name}
+        if args.branch_revision is not None:
+            payload["branch_revision"] = args.branch_revision
         return client.request(
-            "POST", f"/branches/{quote(args.branch_id, safe='')}/fork", {"name": args.name}
+            "POST", f"/branches/{quote(args.branch_id, safe='')}/fork", payload
         )
     if args.command == "capabilities":
         return client.request("GET", "/branches/capabilities")
@@ -180,6 +185,8 @@ def _run(args: argparse.Namespace, client: APIClient) -> Any:
             if args.expected_count < 0:
                 raise CLIError("--expected-count must be zero or greater")
             payload["expected_change_count"] = args.expected_count
+        if args.branch_revision is not None:
+            payload["branch_revision"] = args.branch_revision
         return client.request("POST", f"/branches/{quote(args.branch_id, safe='')}/rollback", payload)
     if args.command == "discard":
         payload = {}
@@ -187,6 +194,8 @@ def _run(args: argparse.Namespace, client: APIClient) -> Any:
             if args.expected_count < 0:
                 raise CLIError("--expected-count must be zero or greater")
             payload["expected_change_count"] = args.expected_count
+        if args.branch_revision is not None:
+            payload["branch_revision"] = args.branch_revision
         return client.request("POST", f"/branches/{quote(args.branch_id, safe='')}/discard", payload)
     if args.command == "compare":
         return client.request("POST", "/branches/compare", {"branch_ids": args.branch_ids})

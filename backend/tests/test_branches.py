@@ -331,6 +331,41 @@ def test_stale_branch_revision_rejects_same_count_different_history(branch_db):
     ]
 
 
+def test_stale_revision_blocks_rollback_discard_and_fork_without_side_effects(branch_db):
+    branch_id = branches.create_branch(AWSInfrastructure(region="us-east-1"), "lifecycle")
+    for name in ("first-bucket", "second-bucket"):
+        branches.apply_change_to_branch(branch_id, Change(
+            op="add", resource_type="s3_bucket", resource_id=name,
+        ))
+    observed = branches.read_branch(branch_id).branch_revision
+
+    branches.rollback_last(branch_id, expected_change_count=2)
+    branches.apply_change_to_branch(branch_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="replacement-bucket",
+        expected_change_count=1,
+    ))
+    current = branches.get_branch(branch_id)
+    before = [change.resource_id for change in current.changes]
+    assert len(before) == 2
+    assert branches.read_branch(branch_id).branch_revision != observed
+
+    with pytest.raises(branches.BranchConflictError, match="revision is stale"):
+        branches.rollback_last(
+            branch_id, expected_change_count=2, expected_branch_revision=observed,
+        )
+    with pytest.raises(branches.BranchConflictError, match="revision is stale"):
+        branches.discard_branch(
+            branch_id, expected_change_count=2, expected_branch_revision=observed,
+        )
+    with pytest.raises(branches.BranchConflictError, match="revision is stale"):
+        branches.fork_branch(branch_id, "stale-child", expected_branch_revision=observed)
+
+    after = branches.get_branch(branch_id)
+    assert after.status == "open"
+    assert [change.resource_id for change in after.changes] == before
+    assert len(branches.list_branches()) == 1
+
+
 def test_append_stores_neither_request_only_concurrency_token(branch_db):
     branch_id = branches.create_branch(AWSInfrastructure(region="us-east-1"), "clean-log")
     observed = branches.read_branch(branch_id).branch_revision

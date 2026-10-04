@@ -236,7 +236,9 @@ def read_branch(branch_id: str) -> BranchDetail:
     )
 
 
-def fork_branch(branch_id: str, name: str) -> tuple[str, int]:
+def fork_branch(
+    branch_id: str, name: str, expected_branch_revision: Optional[str] = None,
+) -> tuple[str, int]:
     """Atomically copy an open branch's base and change log into a new branch."""
     # base_analysis_id is immutable. Resolve it before opening the write
     # transaction so the lock is acquired before that transaction's snapshot.
@@ -249,6 +251,10 @@ def fork_branch(branch_id: str, name: str) -> tuple[str, int]:
         if parent.status != "open":
             raise ValueError(f"Branch is not open: {branch_id}")
         base_analysis_id = parent.base_analysis_id
+        parent_view = _decode(parent)
+        if (expected_branch_revision is not None
+                and expected_branch_revision != branch_revision(parent_view)):
+            raise BranchConflictError("Branch revision is stale; reload the branch and retry")
 
         # Capture all copied columns before attempting the compare-and-swap.
         base_json = parent.base_infra_json
@@ -340,7 +346,11 @@ def apply_change_to_branch(branch_id: str, change: Change | dict) -> Branch:
     return _with_session(operation)
 
 
-def rollback_last(branch_id: str, expected_change_count: Optional[int] = None) -> Branch:
+def rollback_last(
+    branch_id: str,
+    expected_change_count: Optional[int] = None,
+    expected_branch_revision: Optional[str] = None,
+) -> Branch:
     """Remove the most recent change; an empty change list is a safe no-op."""
     def operation(session):
         row = _load_branch(session, branch_id)
@@ -352,6 +362,9 @@ def rollback_last(branch_id: str, expected_change_count: Optional[int] = None) -
             raise BranchConflictError(
                 f"Branch changed: expected {expected_change_count} change(s), found {len(changes)}"
             )
+        if (expected_branch_revision is not None
+                and expected_branch_revision != branch_revision(_decode(row))):
+            raise BranchConflictError("Branch revision is stale; reload the branch and retry")
         if changes:
             changes.pop()
             next_json = json.dumps(changes, sort_keys=True, separators=(",", ":"))
@@ -363,13 +376,26 @@ def rollback_last(branch_id: str, expected_change_count: Optional[int] = None) -
             if updated != 1:
                 raise BranchConflictError("Branch changed during rollback; reload it and retry")
             session.expire(row)
+        elif expected_branch_revision is not None:
+            confirmed = session.query(BranchLog).filter(
+                BranchLog.branch_id == branch_id,
+                BranchLog.status == 'open',
+                BranchLog.changes_json == previous_json,
+            ).update(
+                {BranchLog.changes_json: previous_json, BranchLog.updated_at: row.updated_at},
+                synchronize_session=False,
+            )
+            if confirmed != 1:
+                raise BranchConflictError("Branch changed during rollback; reload it and retry")
         return _decode(row)
 
     return _with_session(operation)
 
 
 def discard_branch(
-    branch_id: str, expected_change_count: Optional[int] = None,
+    branch_id: str,
+    expected_change_count: Optional[int] = None,
+    expected_branch_revision: Optional[str] = None,
 ) -> Branch:
     """Discard an open branch, optionally guarding the observed change count."""
     def operation(session):
@@ -380,6 +406,9 @@ def discard_branch(
             raise BranchConflictError(
                 f"Branch changed: expected {expected_change_count} change(s), found {len(changes)}"
             )
+        if (expected_branch_revision is not None
+                and expected_branch_revision != branch_revision(_decode(row))):
+            raise BranchConflictError("Branch revision is stale; reload the branch and retry")
         if row.status != 'open':
             if expected_change_count is None and row.status == 'discarded':
                 return _decode(row)

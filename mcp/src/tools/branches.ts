@@ -81,6 +81,7 @@ export async function getBranchHandler(args: GetBranchArgs) {
 export const forkBranchZodObject = z.object({
   ...branchIdSchema,
   name: z.string().min(1).describe("Name for the new branch"),
+  branch_revision: z.string().regex(/^[0-9a-f]{64}$/).optional().describe("Optional observed branch_revision; stale state fails with HTTP 409"),
 });
 export type ForkBranchArgs = z.infer<typeof forkBranchZodObject>;
 
@@ -88,7 +89,10 @@ export async function forkBranchHandler(args: ForkBranchArgs) {
   const result = await backendCall(
     "POST",
     `/branches/${encodeURIComponent(args.branch_id)}/fork`,
-    { name: args.name },
+    {
+      name: args.name,
+      ...(args.branch_revision === undefined ? {} : { branch_revision: args.branch_revision }),
+    },
   );
   return ok(result);
 }
@@ -118,6 +122,7 @@ export async function branchVerdictHandler(args: BranchVerdictArgs) {
 export const rollbackBranchZodObject = z.object({
   ...branchIdSchema,
   expected_change_count: z.number().int().nonnegative().optional().describe("Optional observed change count; stale rollback fails with HTTP 409"),
+  branch_revision: z.string().regex(/^[0-9a-f]{64}$/).optional().describe("Optional observed branch_revision; stale rollback fails with HTTP 409"),
 });
 export type RollbackBranchArgs = z.infer<typeof rollbackBranchZodObject>;
 
@@ -125,7 +130,10 @@ export async function rollbackBranchHandler(args: RollbackBranchArgs) {
   const result = await backendCall(
     "POST",
     `/branches/${encodeURIComponent(args.branch_id)}/rollback`,
-    args.expected_change_count === undefined ? {} : { expected_change_count: args.expected_change_count },
+    {
+      ...(args.expected_change_count === undefined ? {} : { expected_change_count: args.expected_change_count }),
+      ...(args.branch_revision === undefined ? {} : { branch_revision: args.branch_revision }),
+    },
   );
   return ok(result);
 }
@@ -133,6 +141,7 @@ export async function rollbackBranchHandler(args: RollbackBranchArgs) {
 export const discardBranchZodObject = z.object({
   ...branchIdSchema,
   expected_change_count: z.number().int().nonnegative().optional().describe("Optional observed change count; stale discard fails with HTTP 409"),
+  branch_revision: z.string().regex(/^[0-9a-f]{64}$/).optional().describe("Optional observed branch_revision; stale discard fails with HTTP 409"),
 });
 export type DiscardBranchArgs = z.infer<typeof discardBranchZodObject>;
 
@@ -140,9 +149,10 @@ export async function discardBranchHandler(args: DiscardBranchArgs) {
   const result = await backendCall(
     "POST",
     `/branches/${encodeURIComponent(args.branch_id)}/discard`,
-    args.expected_change_count === undefined
-      ? {}
-      : { expected_change_count: args.expected_change_count },
+    {
+      ...(args.expected_change_count === undefined ? {} : { expected_change_count: args.expected_change_count }),
+      ...(args.branch_revision === undefined ? {} : { branch_revision: args.branch_revision }),
+    },
   );
   return ok(result);
 }

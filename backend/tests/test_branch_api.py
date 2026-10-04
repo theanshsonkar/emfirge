@@ -103,6 +103,38 @@ def test_fork_endpoint_returns_child_id_and_change_count():
     fork.assert_called_once_with("parent-1", "candidate")
 
 
+def test_fork_endpoint_forwards_revision_and_returns_conflict_when_stale():
+    reset_limiter()
+    revision = "a" * 64
+    with patch("app.main.branches.fork_branch",
+               side_effect=branches.BranchConflictError("Branch revision is stale")) as fork:
+        response = client.post("/branches/parent-1/fork", json={
+            "name": "candidate", "branch_revision": revision,
+        })
+
+    assert response.status_code == 409
+    fork.assert_called_once_with("parent-1", "candidate", expected_branch_revision=revision)
+
+
+@pytest.mark.parametrize("endpoint,method", [
+    ("rollback", "rollback_last"),
+    ("discard", "discard_branch"),
+])
+def test_lifecycle_endpoints_forward_revision_and_return_conflict(endpoint, method):
+    reset_limiter()
+    revision = "b" * 64
+    with patch(f"app.main.branches.{method}",
+               side_effect=branches.BranchConflictError("Branch revision is stale")) as action:
+        response = client.post(f"/branches/b-1/{endpoint}", json={
+            "expected_change_count": 2, "branch_revision": revision,
+        })
+
+    assert response.status_code == 409
+    action.assert_called_once_with(
+        "b-1", expected_change_count=2, expected_branch_revision=revision,
+    )
+
+
 @pytest.mark.parametrize("payload", [{}, {"name": "  "}, {"name": "x", "other": True}])
 def test_fork_endpoint_validates_required_name(payload):
     reset_limiter()

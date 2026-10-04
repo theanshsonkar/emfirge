@@ -8,6 +8,7 @@ import os
 import time
 import uuid
 import json
+import re
 import subprocess
 import tempfile
 import logging
@@ -1325,10 +1326,21 @@ def fork_branch_endpoint(branch_id: str, request: Request, payload: dict):
     _check_branch_rate_limit(_branch_request_ip(request))
     if not isinstance(payload, dict) or not isinstance(payload.get('name'), str) or not payload['name'].strip():
         raise HTTPException(status_code=422, detail='name is required and must be a non-empty string')
-    if set(payload) != {'name'}:
-        raise HTTPException(status_code=422, detail='Only name is supported')
+    if set(payload) - {'name', 'branch_revision'}:
+        raise HTTPException(status_code=422, detail='Only name and branch_revision are supported')
+    expected_revision = payload.get('branch_revision')
+    if expected_revision is not None and (
+        not isinstance(expected_revision, str)
+        or re.fullmatch(r'[0-9a-f]{64}', expected_revision) is None
+    ):
+        raise HTTPException(status_code=422, detail='branch_revision must be a SHA-256 hex string')
     try:
-        new_branch_id, num_changes = branches.fork_branch(branch_id, payload['name'])
+        if expected_revision is None:
+            new_branch_id, num_changes = branches.fork_branch(branch_id, payload['name'])
+        else:
+            new_branch_id, num_changes = branches.fork_branch(
+                branch_id, payload['name'], expected_branch_revision=expected_revision,
+            )
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except branches.BranchConflictError as exc:
@@ -1397,13 +1409,25 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
 def rollback_branch_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
     _check_branch_rate_limit(_branch_request_ip(request))
     payload = payload or {}
-    if set(payload) - {'expected_change_count'}:
-        raise HTTPException(status_code=422, detail='Only expected_change_count is supported')
+    if not isinstance(payload, dict) or set(payload) - {'expected_change_count', 'branch_revision'}:
+        raise HTTPException(status_code=422, detail='Only expected_change_count and branch_revision are supported')
     expected_count = payload.get('expected_change_count')
     if expected_count is not None and (type(expected_count) is not int or expected_count < 0):
         raise HTTPException(status_code=422, detail='expected_change_count must be a non-negative integer')
+    expected_revision = payload.get('branch_revision')
+    if expected_revision is not None and (
+        not isinstance(expected_revision, str)
+        or re.fullmatch(r'[0-9a-f]{64}', expected_revision) is None
+    ):
+        raise HTTPException(status_code=422, detail='branch_revision must be a SHA-256 hex string')
     try:
-        branch = branches.rollback_last(branch_id, expected_change_count=expected_count)
+        if expected_revision is None:
+            branch = branches.rollback_last(branch_id, expected_change_count=expected_count)
+        else:
+            branch = branches.rollback_last(
+                branch_id, expected_change_count=expected_count,
+                expected_branch_revision=expected_revision,
+            )
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except branches.BranchConflictError as exc:
@@ -1420,13 +1444,25 @@ def discard_branch_endpoint(branch_id: str, request: Request, payload: Optional[
         payload = {}
     if not isinstance(payload, dict):
         raise HTTPException(status_code=422, detail='Request body must be an object')
-    if set(payload) - {'expected_change_count'}:
-        raise HTTPException(status_code=422, detail='Only expected_change_count is supported')
+    if set(payload) - {'expected_change_count', 'branch_revision'}:
+        raise HTTPException(status_code=422, detail='Only expected_change_count and branch_revision are supported')
     expected_count = payload.get('expected_change_count')
     if expected_count is not None and (type(expected_count) is not int or expected_count < 0):
         raise HTTPException(status_code=422, detail='expected_change_count must be a non-negative integer')
+    expected_revision = payload.get('branch_revision')
+    if expected_revision is not None and (
+        not isinstance(expected_revision, str)
+        or re.fullmatch(r'[0-9a-f]{64}', expected_revision) is None
+    ):
+        raise HTTPException(status_code=422, detail='branch_revision must be a SHA-256 hex string')
     try:
-        branch = branches.discard_branch(branch_id, expected_change_count=expected_count)
+        if expected_revision is None:
+            branch = branches.discard_branch(branch_id, expected_change_count=expected_count)
+        else:
+            branch = branches.discard_branch(
+                branch_id, expected_change_count=expected_count,
+                expected_branch_revision=expected_revision,
+            )
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except branches.BranchConflictError as exc:
