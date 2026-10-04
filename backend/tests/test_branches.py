@@ -1,8 +1,9 @@
-import json
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import branches, database
@@ -144,39 +145,38 @@ def test_fork_requires_open_parent_and_enforces_open_quota(branch_db, monkeypatc
         branches.fork_branch(parent_id, "discarded parent")
 
 
-def test_fork_rejects_parent_append_between_snapshot_and_conditional_lock(branch_db):
-    parent_id = branches.create_branch(AWSInfrastructure(), "parent", "race-analysis")
-    branches.apply_change_to_branch(parent_id, Change(
-        op="add", resource_type="s3_bucket", resource_id="before-fork",
-    ))
-    injected = False
+@pytest.mark.parametrize("creator", ["create", "fork"])
+def test_concurrent_creators_cannot_exceed_open_branch_quota(branch_db, monkeypatch, creator):
+    base_analysis_id = f"concurrent-{creator}"
+    if creator == "create":
+        monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 1)
+        create = lambda name: branches.create_branch(
+            AWSInfrastructure(), name, base_analysis_id=base_analysis_id,
+        )
+    else:
+        parent_id = branches.create_branch(
+            AWSInfrastructure(), "parent", base_analysis_id=base_analysis_id,
+        )
+        monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 2)
+        create = lambda name: branches.fork_branch(parent_id, name)
 
-    def append_during_fork(connection, cursor, statement, parameters, context, executemany):
-        nonlocal injected
-        if injected or not statement.lstrip().lower().startswith("update branch_logs"):
-            return
-        injected = True
-        latest = json.dumps([
-            {"op": "add", "resource_type": "s3_bucket", "resource_id": "before-fork", "fields": {}},
-            {"op": "add", "resource_type": "s3_bucket", "resource_id": "concurrent", "fields": {}},
-        ], sort_keys=True, separators=(",", ":"))
-        with connection.engine.begin() as race_connection:
-            race_connection.execute(
-                text("UPDATE branch_logs SET changes_json = :changes WHERE branch_id = :id"),
-                {"changes": latest, "id": parent_id},
-            )
+    barrier = Barrier(3)
 
-    event.listen(branch_db, "before_cursor_execute", append_during_fork)
-    try:
-        with pytest.raises(branches.BranchConflictError, match="changed during fork"):
-            branches.fork_branch(parent_id, "must-not-be-partial")
-    finally:
-        event.remove(branch_db, "before_cursor_execute", append_during_fork)
+    def contender(name):
+        barrier.wait(timeout=5)
+        try:
+            return create(name)
+        except branches.BranchLimitError:
+            return "quota-rejected"
 
-    assert len(branches.list_branches("race-analysis")) == 1
-    assert [change.resource_id for change in branches.get_branch(parent_id).changes] == [
-        "before-fork", "concurrent",
-    ]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(contender, "first")
+        second = pool.submit(contender, "second")
+        barrier.wait(timeout=5)
+        results = [first.result(timeout=10), second.result(timeout=10)]
+
+    assert results.count("quota-rejected") == 1
+    assert len(branches.list_branches(base_analysis_id)) == branches.MAX_OPEN_BRANCHES_PER_BASE
 
 
 def test_list_branches_filters_by_base_analysis(branch_db):

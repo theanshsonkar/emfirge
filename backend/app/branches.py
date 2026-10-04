@@ -13,6 +13,7 @@ import uuid
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 
 from app.database import BranchLog, SessionLocal
 from app.diffing import DiffResult, diff_infrastructure, modeled_state_unchanged
@@ -132,6 +133,29 @@ def _with_session(operation):
         session.close()
 
 
+def _lock_branch_quota(session, base_analysis_id: str) -> None:
+    """Serialize quota check-and-insert in the database transaction.
+
+    PostgreSQL uses a transaction-scoped advisory lock for this base ID. SQLite
+    has no advisory locks, so an immediate write transaction serializes its
+    database writers. These are the two database families supported by the
+    backend and its tests; other dialects must choose a lock strategy explicitly.
+    """
+    dialect = session.bind.dialect.name
+    if dialect == "postgresql":
+        session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:base_analysis_id))"),
+            {"base_analysis_id": base_analysis_id},
+        )
+    elif dialect == "sqlite":
+        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+    else:
+        raise RuntimeError(
+            f"Branch quota serialization is not supported for database dialect {dialect!r}"
+        )
+
+
 def create_branch(base_infra: AWSInfrastructure | dict, name: str,
                   base_analysis_id: Optional[str] = None) -> str:
     """Create an open branch and return its UUID string."""
@@ -139,6 +163,7 @@ def create_branch(base_infra: AWSInfrastructure | dict, name: str,
 
     def operation(session):
         if base_analysis_id is not None:
+            _lock_branch_quota(session, base_analysis_id)
             open_count = session.query(BranchLog).filter(
                 BranchLog.base_analysis_id == base_analysis_id,
                 BranchLog.status == "open",
@@ -192,10 +217,17 @@ def read_branch(branch_id: str) -> BranchDetail:
 
 def fork_branch(branch_id: str, name: str) -> tuple[str, int]:
     """Atomically copy an open branch's base and change log into a new branch."""
+    # base_analysis_id is immutable. Resolve it before opening the write
+    # transaction so the lock is acquired before that transaction's snapshot.
+    quota_base_id = get_branch(branch_id).base_analysis_id
+
     def operation(session):
+        if quota_base_id is not None:
+            _lock_branch_quota(session, quota_base_id)
         parent = _load_branch(session, branch_id)
         if parent.status != "open":
             raise ValueError(f"Branch is not open: {branch_id}")
+        base_analysis_id = parent.base_analysis_id
 
         # Capture all copied columns before attempting the compare-and-swap.
         base_json = parent.base_infra_json
