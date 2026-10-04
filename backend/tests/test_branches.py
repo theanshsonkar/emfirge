@@ -1,9 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from unittest.mock import patch
+import json
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
 from app import branches, database
@@ -143,6 +144,43 @@ def test_fork_requires_open_parent_and_enforces_open_quota(branch_db, monkeypatc
     branches.discard_branch(parent_id)
     with pytest.raises(ValueError, match="not open"):
         branches.fork_branch(parent_id, "discarded parent")
+
+
+def test_fork_rejects_parent_append_between_snapshot_and_conditional_lock(branch_db):
+    # No base_analysis_id means this fork does not take the quota lock, letting
+    # the injected append exercise the parent-log compare-and-swap directly.
+    parent_id = branches.create_branch(AWSInfrastructure(), "parent")
+    branches.apply_change_to_branch(parent_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="before-fork",
+    ))
+    injected = False
+
+    def append_during_fork(connection, cursor, statement, parameters, context, executemany):
+        nonlocal injected
+        if injected or not statement.lstrip().lower().startswith("update branch_logs"):
+            return
+        injected = True
+        latest = json.dumps([
+            {"op": "add", "resource_type": "s3_bucket", "resource_id": "before-fork", "fields": {}},
+            {"op": "add", "resource_type": "s3_bucket", "resource_id": "concurrent", "fields": {}},
+        ], sort_keys=True, separators=(",", ":"))
+        with connection.engine.begin() as race_connection:
+            race_connection.execute(
+                text("UPDATE branch_logs SET changes_json = :changes WHERE branch_id = :id"),
+                {"changes": latest, "id": parent_id},
+            )
+
+    event.listen(branch_db, "before_cursor_execute", append_during_fork)
+    try:
+        with pytest.raises(branches.BranchConflictError, match="changed during fork"):
+            branches.fork_branch(parent_id, "must-not-be-partial")
+    finally:
+        event.remove(branch_db, "before_cursor_execute", append_during_fork)
+
+    assert len(branches.list_branches()) == 1
+    assert [change.resource_id for change in branches.get_branch(parent_id).changes] == [
+        "before-fork", "concurrent",
+    ]
 
 
 @pytest.mark.parametrize("creator", ["create", "fork"])
