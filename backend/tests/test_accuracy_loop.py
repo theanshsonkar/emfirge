@@ -12,10 +12,7 @@ def test_harness_runs_both_scenarios_and_separate_rates(tmp_path, monkeypatch):
         "s3_public_bucket", "security_group_ssh_exposure"
     }
     assert "shape_rate" in report and "verdict_rate" in report
-    # The demo security-group fixture has an RDS ID in the EC2-only
-    # ``attached_to`` back-reference. Applying an SG change reconciles this
-    # stale value away, so the branch shape includes that derived correction.
-    assert report["shape_rate"] == 0.5
+    assert report["shape_rate"] == 1.0
     assert report["verdict_rate"] == 1.0
     for record in report["records"]:
         assert {"scenario", "predicted_verdict", "predicted_findings", "actual_findings",

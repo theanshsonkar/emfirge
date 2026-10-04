@@ -72,7 +72,8 @@ def build_demo_infrastructure() -> AWSInfrastructure:
         name="demo-database",
         rules=[{"protocol": "tcp", "from_port": 5432, "to_port": 5432,
                  "ip_ranges": ["10.0.0.0/16"]}],
-        attached_to=[rds_id],
+        # attached_to is the EC2 back-reference; RDS uses its own sg_ids.
+        attached_to=[],
     )
     return AWSInfrastructure(
         region=DEMO_FLOW_REGION,

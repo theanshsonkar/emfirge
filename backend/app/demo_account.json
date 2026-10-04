@@ -93,9 +93,7 @@
         ]
       },
       {
-        "attached_to": [
-          "demo-postgres"
-        ],
+        "attached_to": [],
         "egress_rules": [],
         "id": "sg-demo-db",
         "name": "demo-database",
