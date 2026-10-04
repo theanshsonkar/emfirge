@@ -194,6 +194,7 @@ def test_compare_summary_has_exact_values_and_safer_first_ranking(branch_db):
         "removed_findings": 0,
         "lost_dependencies": 0,
         "lost_connectivity": 0,
+        "deletion_impacts": 0,
         "has_privilege_escalation": False,
     }
     assert result.branches[1].model_dump() == {
@@ -209,6 +210,7 @@ def test_compare_summary_has_exact_values_and_safer_first_ranking(branch_db):
         "removed_findings": 0,
         "lost_dependencies": 0,
         "lost_connectivity": 0,
+        "deletion_impacts": 0,
         "has_privilege_escalation": False,
     }
     assert result.ranking == [safer, riskier]

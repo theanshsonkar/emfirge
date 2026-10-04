@@ -32,6 +32,7 @@ class CombinedVerdict(BaseModel):
     no_longer_internet_reachable: list[str] = Field(default_factory=list)
     lost_dependencies: list[dict[str, str]] = Field(default_factory=list)
     lost_connectivity: list[dict[str, str]] = Field(default_factory=list)
+    deletion_impacts: list[dict[str, Any]] = Field(default_factory=list)
     scanner_available: bool = False
     # Per-scanner outcome, e.g. {"checkov": "ok", "trivy": "unavailable: not
     # installed"}. `scanner_available` is True when ANY scanner ran, so on its
@@ -317,7 +318,7 @@ def combined_verdict(
     if blocking or introduced_reachable:
         verdict = "block"
     elif (new_findings or diff.newly_internet_reachable or introduces_privilege_escalation
-          or diff.lost_dependencies or diff.lost_connectivity):
+          or diff.lost_dependencies or diff.lost_connectivity or diff.deletion_impacts):
         verdict = "warn"
     else:
         verdict = "pass"
@@ -337,6 +338,7 @@ def combined_verdict(
     privilege_summary = "; privilege escalation introduced" if introduces_privilege_escalation else ""
     dependency_summary = f"; modeled_dependencies_lost={len(diff.lost_dependencies)}" if diff.lost_dependencies else ""
     connectivity_summary = f"; modeled_internal_paths_lost={len(diff.lost_connectivity)}" if diff.lost_connectivity else ""
+    deletion_summary = f"; modeled_resources_removed={len(diff.deletion_impacts)}" if diff.deletion_impacts else ""
     capacity_summary = ""
     if introduced_capacity_breaches:
         breaches = ",".join(
@@ -347,7 +349,7 @@ def combined_verdict(
         f"verdict={verdict}; native_added={len(native_added)}; scanner_added={len(scanner_added)}; "
         f"native_removed={len(native_removed)}; scanner_removed={len(scanner_removed)}; "
         f"newly_reachable={len(diff.newly_internet_reachable)}; score={diff.score_before}->{diff.score_after} "
-        f"(delta={diff.score_delta}); {cost_summary}{privilege_summary}{dependency_summary}{connectivity_summary}{capacity_summary}{unavailable}"
+        f"(delta={diff.score_delta}); {cost_summary}{privilege_summary}{dependency_summary}{connectivity_summary}{deletion_summary}{capacity_summary}{unavailable}"
     )
     return CombinedVerdict(
         verdict=verdict,
@@ -363,6 +365,7 @@ def combined_verdict(
         no_longer_internet_reachable=sorted(diff.no_longer_internet_reachable),
         lost_dependencies=diff.lost_dependencies,
         lost_connectivity=diff.lost_connectivity,
+        deletion_impacts=diff.deletion_impacts,
         scanner_available=scanner_available,
         scanner_status=scanner_status,
         coverage_warnings=coverage_warnings,

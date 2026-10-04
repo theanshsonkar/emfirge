@@ -59,6 +59,7 @@ class BranchSummary(BaseModel):
     removed_findings: int
     lost_dependencies: int = 0
     lost_connectivity: int = 0
+    deletion_impacts: int = 0
     has_privilege_escalation: bool
 
 
@@ -285,6 +286,7 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
             removed_findings=len(diff.removed_findings),
             lost_dependencies=len(diff.lost_dependencies),
             lost_connectivity=len(diff.lost_connectivity),
+            deletion_impacts=len(diff.deletion_impacts),
             has_privilege_escalation=has_privilege_escalation,
         ))
 
@@ -294,6 +296,7 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
         key=lambda summary: (
             bool(summary.lost_dependencies),
             bool(summary.lost_connectivity),
+            bool(summary.deletion_impacts),
             bool(summary.newly_internet_reachable),
             -summary.score_after,
             summary.name,

@@ -127,6 +127,29 @@ def test_identical_infrastructure_is_a_no_op():
     assert result.modeled_state_unchanged is True
 
 
+def test_deletion_impacts_exclude_virtual_and_reference_derived_nodes():
+    base = AWSInfrastructure(
+        ec2=EC2Data(instances=[EC2Instance(
+            id="i-app", type="t3.micro", state="running",
+            instance_profile_arn="arn:aws:iam::000000000000:instance-profile/AppRole",
+        )]),
+        s3=S3Data(buckets=[S3Bucket(name="bucket-with-cdn", has_cloudfront=True)]),
+    )
+    branch = apply_changes(base, [
+        Change(op="delete", resource_type="ec2_instance", resource_id="i-app"),
+        Change(op="delete", resource_type="s3_bucket", resource_id="bucket-with-cdn"),
+    ])
+
+    result = diff_infrastructure(base, branch)
+
+    assert {(item["removed_resource"]["id"], item["removed_resource"]["resource_type"])
+            for item in result.deletion_impacts} == {
+                ("i-app", "ec2_instance"), ("bucket-with-cdn", "s3_bucket"),
+            }
+    assert "iam-role-AppRole" in result.removed_nodes
+    assert "cloudfront-bucket-with-cdn" in result.removed_nodes
+
+
 def test_diff_exposes_source_collection_gaps():
     base = _internet_infra()
     base.warnings = ["Lambda scan skipped: insufficient permissions"]

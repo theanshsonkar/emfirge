@@ -1546,7 +1546,8 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             'label': f"VPC: {vpc_id}",
             'metadata': {
                 'is_default': vpc_id == infrastructure.vpc.default_vpc_id,
-                'subnet_count': subnet_count
+                'subnet_count': subnet_count,
+                'source': 'subnet_reference',
             }
         })
         node_ids.add(vpc_id)

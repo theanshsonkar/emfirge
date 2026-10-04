@@ -146,6 +146,51 @@ def test_agent_sees_lost_capability_before_and_after_rollback(demo_branch_db):
     assert restored.lost_dependencies == []
 
 
+def test_demo_resource_deletion_warns_without_iam_dependency_and_rollback_clears_it(demo_branch_db):
+    base = build_demo_infrastructure()
+    rds = base.rds.rds_instances[0]
+    rds.publicly_accessible = True
+    rds.encrypted = False
+    base.rds.publicly_accessible = [rds.id]
+    base.rds.unencrypted_instances = [rds.id]
+
+    deletion = branches.create_branch(base, "remove-demo-database", base_analysis_id="demo")
+    branches.apply_change_to_branch(deletion, Change(
+        op="delete", resource_type="rds_instance", resource_id=rds.id,
+    ))
+    diff = branches.get_branch_diff(deletion)
+    result = combined_verdict(base, branches.rebuild_branch_infra(deletion), run_scanners=False)
+
+    assert diff.lost_dependencies == []
+    assert any(item["rule_id"] == "EMFIRGE-RDS-002" for item in diff.removed_findings)
+    assert len(diff.deletion_impacts) == 1
+    impact = diff.deletion_impacts[0]
+    assert impact["removed_resource"] == {"id": rds.id, "resource_type": "rds_instance"}
+    assert {item["id"] for item in impact["surviving_related_resources"]} >= {
+        "sg-demo-db", "subnet-demo-private",
+    }
+    assert "cannot determine whether removal disrupts" in impact["possible_consequence"]
+    assert result.verdict == "warn"
+    assert result.deletion_impacts == diff.deletion_impacts
+    assert "modeled_resources_removed=1" in result.summary
+
+    safe = branches.create_branch(base, "leave-demo-database", base_analysis_id="demo")
+    branches.apply_change_to_branch(safe, safe_change())
+    comparison = branches.compare_branches([deletion, safe])
+    deletion_summary = next(item for item in comparison.branches if item.branch_id == deletion)
+    assert deletion_summary.deletion_impacts == 1
+    assert comparison.ranking == [safe, deletion]
+
+    branches.rollback_last(deletion)
+    restored_diff = branches.get_branch_diff(deletion)
+    restored_verdict = combined_verdict(
+        base, branches.rebuild_branch_infra(deletion), run_scanners=False,
+    )
+    assert restored_diff.deletion_impacts == []
+    assert restored_verdict.verdict == "pass"
+    assert restored_verdict.deletion_impacts == []
+
+
 def test_agent_compare_does_not_rank_dependency_loss_above_safe_fix(demo_branch_db):
     base = build_demo_infrastructure()
     delete_id = branches.create_branch(base, "remove-artifacts", base_analysis_id="demo")
