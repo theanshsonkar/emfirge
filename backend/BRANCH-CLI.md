@@ -17,7 +17,7 @@ The CLI emits one stable, sorted JSON response to stdout. Errors go to stderr an
 ```sh
 python backend/scripts/emfirge-branch.py apply \
   --branch-id BRANCH_ID --op modify --resource-type security_group \
-  --resource-id SG_ID --fields-json '{"rules": []}'
+  --resource-id SG_ID --expected-count 0 --fields-json '{"rules": []}'
 
 # For larger changes, pass a JSON file or pipe JSON on stdin with --fields-file -.
 python backend/scripts/emfirge-branch.py apply \
@@ -25,12 +25,15 @@ python backend/scripts/emfirge-branch.py apply \
   --resource-id ROLE_ARN --fields-file policy-statements.json
 
 python backend/scripts/emfirge-branch.py diff --branch-id BRANCH_ID
+python backend/scripts/emfirge-branch.py list --analysis-id SCAN_ID
 python backend/scripts/emfirge-branch.py verdict --branch-id BRANCH_ID
 python backend/scripts/emfirge-branch.py rollback --branch-id BRANCH_ID
 python backend/scripts/emfirge-branch.py compare BRANCH_ID OTHER_BRANCH_ID
 ```
 
 `rollback` undoes the most recent modeled change. It does not reset the whole branch. `iam_role_policy` currently supports `modify` only and requires `access_statements` to replace the complete normalized statement list for an existing collected role. The backend verdict reports IAM modeling limits. All other resource and operation support follows the backend's current branch mutation API.
+
+For concurrent agents, pass `--expected-count` from the most recent branch change response or the `num_changes` field returned by `list`. A stale count returns HTTP 409; reload the branch before retrying. Omitting this option remains supported for single-agent workflows.
 
 ## Local tests
 

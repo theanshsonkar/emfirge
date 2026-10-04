@@ -31,6 +31,7 @@ class Change(BaseModel):
     resource_type: str
     resource_id: str = ""
     fields: Dict[str, Any] = Field(default_factory=dict)
+    expected_change_count: int | None = Field(default=None, ge=0)
 
 
 def _fresh(infra: AWSInfrastructure) -> AWSInfrastructure:

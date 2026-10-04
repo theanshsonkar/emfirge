@@ -94,6 +94,22 @@ def test_direct_branch_append_rejects_invalid_change_without_corrupting_log(bran
     assert branches.rebuild_branch_infra(branch_id).region == "us-east-1"
 
 
+def test_stale_agent_change_count_rejects_append_and_preserves_history(branch_db):
+    branch_id = branches.create_branch(AWSInfrastructure(region="us-east-1"), "shared")
+    branches.apply_change_to_branch(branch_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="first-bucket",
+        expected_change_count=0,
+    ))
+    with pytest.raises(branches.BranchConflictError, match="expected 0 change"):
+        branches.apply_change_to_branch(branch_id, Change(
+            op="add", resource_type="s3_bucket", resource_id="second-bucket",
+            expected_change_count=0,
+        ))
+    assert len(branches.get_branch(branch_id).changes) == 1
+    assert branches.get_branch(branch_id).changes[0].expected_change_count is None
+    assert [bucket.name for bucket in branches.rebuild_branch_infra(branch_id).s3.buckets] == ["first-bucket"]
+
+
 
 def test_branch_limit_is_per_base_and_discard_frees_slot(branch_db, monkeypatch):
     monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 2)

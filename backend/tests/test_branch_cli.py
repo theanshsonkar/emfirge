@@ -71,11 +71,19 @@ def invoke(server, *args, stdin=None, base_url_env=True):
     [
         (("create", "--analysis-id", "scan-1", "--name", "candidate"),
          ("POST", "/api/branches", {"base_analysis_id": "scan-1", "name": "candidate"})),
+        (("list", "--analysis-id", "scan-1"),
+         ("GET", "/api/branches?base_analysis_id=scan-1", None)),
         (("apply", "--branch-id", "b-1", "--op", "modify", "--resource-type", "s3_bucket",
           "--resource-id", "bucket", "--fields-json", '{"encrypted":true}'),
          ("POST", "/api/branches/b-1/changes", {
              "op": "modify", "resource_type": "s3_bucket", "resource_id": "bucket",
              "fields": {"encrypted": True},
+         })),
+        (("apply", "--branch-id", "b-1", "--op", "modify", "--resource-type", "s3_bucket",
+          "--resource-id", "bucket", "--expected-count", "2", "--fields-json", '{"encrypted":true}'),
+         ("POST", "/api/branches/b-1/changes", {
+             "op": "modify", "resource_type": "s3_bucket", "resource_id": "bucket",
+             "fields": {"encrypted": True}, "expected_change_count": 2,
          })),
         (("apply", "--branch-id", "b-1", "--op", "modify", "--resource-type", "iam_role_policy",
           "--resource-id", "arn:role", "--fields-file", "-"),

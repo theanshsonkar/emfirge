@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 
@@ -99,11 +99,15 @@ def _parser() -> argparse.ArgumentParser:
     create.add_argument("--analysis-id", required=True)
     create.add_argument("--name", required=True)
 
+    list_branches = subparsers.add_parser("list", help="list branches and their current change counts")
+    list_branches.add_argument("--analysis-id", help="filter by base analysis ID")
+
     apply = subparsers.add_parser("apply", help="append a modeled change to a branch")
     apply.add_argument("--branch-id", required=True)
     apply.add_argument("--op", choices=("add", "modify", "delete"), required=True)
     apply.add_argument("--resource-type", required=True)
     apply.add_argument("--resource-id", default="")
+    apply.add_argument("--expected-count", type=int, help="fail if the branch no longer has this many changes")
     fields = apply.add_mutually_exclusive_group()
     fields.add_argument("--fields-json", default="{}", help="JSON object of resource fields")
     fields.add_argument("--fields-file", help="read a JSON object from a file, or '-' for stdin")
@@ -127,6 +131,9 @@ def _run(args: argparse.Namespace, client: APIClient) -> Any:
             "base_analysis_id": args.analysis_id,
             "name": args.name,
         })
+    if args.command == "list":
+        query = "" if not args.analysis_id else "?" + urlencode({"base_analysis_id": args.analysis_id})
+        return client.request("GET", f"/branches{query}")
     if args.command == "apply":
         change = {
             "op": args.op,
@@ -134,6 +141,10 @@ def _run(args: argparse.Namespace, client: APIClient) -> Any:
             "resource_id": args.resource_id,
             "fields": _fields(args),
         }
+        if args.expected_count is not None:
+            if args.expected_count < 0:
+                raise CLIError("--expected-count must be zero or greater")
+            change["expected_change_count"] = args.expected_count
         return client.request("POST", f"/branches/{quote(args.branch_id, safe='')}/changes", change)
     if args.command == "diff":
         return client.request("GET", f"/branches/{quote(args.branch_id, safe='')}/diff")

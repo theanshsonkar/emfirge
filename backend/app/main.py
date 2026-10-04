@@ -1313,6 +1313,8 @@ def add_branch_change_endpoint(branch_id: str, change: Change, request: Request)
         branch = branches.apply_change_to_branch(branch_id, change)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except branches.BranchConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         status_code = 409 if str(exc).startswith('Branch is not open:') else 422
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc

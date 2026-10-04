@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from app import branches
 from app.main import app
 from app.demo_seed import build_demo_infrastructure
 from app.models import (
@@ -120,6 +121,20 @@ def test_agent_cannot_persist_in_use_security_group_delete():
     assert response.status_code == 422
     assert "still in use by i-demo-web-001" in response.json()["detail"]
     persist.assert_not_called()
+
+
+def test_stale_agent_append_returns_conflict():
+    reset_limiter()
+    with patch("app.main.branches.get_branch", return_value=branch()), \
+         patch("app.main.branches.rebuild_branch_infra", return_value=AWSInfrastructure(region="us-east-1")), \
+         patch("app.main.branches.apply_change_to_branch",
+               side_effect=branches.BranchConflictError("Branch changed")):
+        response = client.post("/branches/b-1/changes", json={
+            "op": "add", "resource_type": "s3_bucket", "resource_id": "new-bucket",
+            "fields": {}, "expected_change_count": 0,
+        })
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Branch changed"
 
 
 def test_stacked_add_then_modify_validates_against_rebuilt_state():

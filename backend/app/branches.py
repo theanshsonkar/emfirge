@@ -32,6 +32,10 @@ class BranchLimitError(ValueError):
     """Raised when a base analysis has reached its open-branch limit."""
 
 
+class BranchConflictError(ValueError):
+    """Raised when an agent's branch view is stale or a concurrent write wins."""
+
+
 class Branch(BaseModel):
     branch_id: str
     name: str
@@ -152,14 +156,29 @@ def apply_change_to_branch(branch_id: str, change: Change | dict) -> Branch:
         row = _load_branch(session, branch_id)
         if row.status != 'open':
             raise ValueError(f"Branch is not open: {branch_id}")
-        changes = json.loads(row.changes_json or '[]')
+        previous_json = row.changes_json or '[]'
+        changes = json.loads(previous_json)
+        if (change_model.expected_change_count is not None
+                and change_model.expected_change_count != len(changes)):
+            raise BranchConflictError(
+                f"Branch changed: expected {change_model.expected_change_count} change(s), "
+                f"found {len(changes)}"
+            )
         base = AWSInfrastructure.model_validate(json.loads(row.base_infra_json))
         # Validate the candidate against the persisted state in this transaction.
         # API-side preflight is useful for early errors, but direct callers
         # must not be able to store an unrebuildable branch.
         apply_changes(base, [Change.model_validate(item) for item in changes] + [change_model])
-        changes.append(change_model.model_dump(mode='json'))
-        row.changes_json = json.dumps(changes, sort_keys=True, separators=(",", ":"))
+        changes.append(change_model.model_dump(mode='json', exclude={'expected_change_count'}))
+        next_json = json.dumps(changes, sort_keys=True, separators=(",", ":"))
+        updated = session.query(BranchLog).filter(
+            BranchLog.branch_id == branch_id,
+            BranchLog.status == 'open',
+            BranchLog.changes_json == previous_json,
+        ).update({BranchLog.changes_json: next_json}, synchronize_session=False)
+        if updated != 1:
+            raise BranchConflictError("Branch changed during append; reload it and retry")
+        session.expire(row)
         return _decode(row)
 
     return _with_session(operation)
