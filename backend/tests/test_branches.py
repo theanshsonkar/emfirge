@@ -83,6 +83,17 @@ def test_missing_branch_has_explicit_error(branch_db):
         branches.get_branch("missing")
 
 
+def test_direct_branch_append_rejects_invalid_change_without_corrupting_log(branch_db):
+    branch_id = branches.create_branch(AWSInfrastructure(region="us-east-1"), "safe")
+    with pytest.raises(ValueError, match="Target not found"):
+        branches.apply_change_to_branch(branch_id, Change(
+            op="modify", resource_type="security_group", resource_id="sg-missing",
+            fields={"rules": []},
+        ))
+    assert branches.get_branch(branch_id).changes == []
+    assert branches.rebuild_branch_infra(branch_id).region == "us-east-1"
+
+
 
 def test_branch_limit_is_per_base_and_discard_frees_slot(branch_db, monkeypatch):
     monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 2)

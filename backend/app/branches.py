@@ -153,6 +153,11 @@ def apply_change_to_branch(branch_id: str, change: Change | dict) -> Branch:
         if row.status != 'open':
             raise ValueError(f"Branch is not open: {branch_id}")
         changes = json.loads(row.changes_json or '[]')
+        base = AWSInfrastructure.model_validate(json.loads(row.base_infra_json))
+        # Validate the candidate against the persisted state in this transaction.
+        # API-side preflight is useful for early errors, but direct callers
+        # must not be able to store an unrebuildable branch.
+        apply_changes(base, [Change.model_validate(item) for item in changes] + [change_model])
         changes.append(change_model.model_dump(mode='json'))
         row.changes_json = json.dumps(changes, sort_keys=True, separators=(",", ":"))
         return _decode(row)
