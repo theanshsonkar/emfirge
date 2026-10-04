@@ -17,7 +17,8 @@ from app.verdict import CombinedVerdict
 client = TestClient(app)
 
 
-def branch(branch_id="b-1", name="fix", status="open", base_analysis_id="a-1", changes=None, base=None):
+def branch(branch_id="b-1", name="fix", status="open", base_analysis_id="a-1", changes=None, base=None,
+           last_change_modeled_state_unchanged=False):
     return SimpleNamespace(
         branch_id=branch_id,
         name=name,
@@ -25,6 +26,7 @@ def branch(branch_id="b-1", name="fix", status="open", base_analysis_id="a-1", c
         base_analysis_id=base_analysis_id,
         changes=changes or [],
         base=base or AWSInfrastructure.model_validate({"region": "us-east-1"}),
+        last_change_modeled_state_unchanged=last_change_modeled_state_unchanged,
     )
 
 
@@ -76,7 +78,7 @@ def test_no_op_change_is_reported_in_change_diff_and_verdict_responses():
     changed = branch(changes=[{
         "op": "modify", "resource_type": "s3_bucket", "resource_id": "bucket",
         "fields": {"encrypted": True},
-    }], base=base)
+    }], base=base, last_change_modeled_state_unchanged=True)
     diff = {
         "added_nodes": [], "removed_nodes": [], "modified_nodes": [], "added_edges": [],
         "removed_edges": [], "lost_dependencies": [], "coverage_warnings": [],

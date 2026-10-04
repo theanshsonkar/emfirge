@@ -15,10 +15,10 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, Field
 
 from app.database import BranchLog, SessionLocal
-from app.diffing import DiffResult, diff_infrastructure
+from app.diffing import DiffResult, diff_infrastructure, modeled_state_unchanged
 from app.egraph import build_graph
 from app.models import AWSInfrastructure
-from app.mutations import Change, apply_changes
+from app.mutations import Change, apply_change, apply_changes
 
 
 MAX_OPEN_BRANCHES_PER_BASE = int(os.getenv("EMFIRGE_MAX_OPEN_BRANCHES", "10"))
@@ -43,6 +43,7 @@ class Branch(BaseModel):
     changes: list[Change] = Field(default_factory=list)
     status: str
     base_analysis_id: Optional[str] = None
+    last_change_modeled_state_unchanged: Optional[bool] = None
 
 
 class BranchSummary(BaseModel):
@@ -168,7 +169,8 @@ def apply_change_to_branch(branch_id: str, change: Change | dict) -> Branch:
         # Validate the candidate against the persisted state in this transaction.
         # API-side preflight is useful for early errors, but direct callers
         # must not be able to store an unrebuildable branch.
-        apply_changes(base, [Change.model_validate(item) for item in changes] + [change_model])
+        before = apply_changes(base, [Change.model_validate(item) for item in changes])
+        after = apply_change(before, change_model)
         changes.append(change_model.model_dump(mode='json', exclude={'expected_change_count'}))
         next_json = json.dumps(changes, sort_keys=True, separators=(",", ":"))
         updated = session.query(BranchLog).filter(
@@ -179,7 +181,9 @@ def apply_change_to_branch(branch_id: str, change: Change | dict) -> Branch:
         if updated != 1:
             raise BranchConflictError("Branch changed during append; reload it and retry")
         session.expire(row)
-        return _decode(row)
+        branch = _decode(row)
+        branch.last_change_modeled_state_unchanged = modeled_state_unchanged(before, after)
+        return branch
 
     return _with_session(operation)
 

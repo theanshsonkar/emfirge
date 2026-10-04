@@ -92,7 +92,8 @@ def test_redundant_demo_change_is_explicitly_unchanged(demo_branch_db):
         resource_id="emfirge-demo-artifacts-000000000000",
         fields={"versioning_enabled": True},
     )
-    branches.apply_change_to_branch(branch_id, unchanged_value)
+    recorded = branches.apply_change_to_branch(branch_id, unchanged_value)
+    assert recorded.last_change_modeled_state_unchanged is True
 
     diff = branches.get_branch_diff(branch_id)
     result = combined_verdict(base, branches.rebuild_branch_infra(branch_id), run_scanners=False)
