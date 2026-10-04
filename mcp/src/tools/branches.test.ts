@@ -143,6 +143,7 @@ test("apply_change forwards an optional observed branch revision", async () => {
 test("apply_change documents the route-table full-replacement contract", () => {
   assert.match(branches.applyChangeSchema.resource_type.description ?? "", /route_table/);
   assert.match(branches.applyChangeSchema.fields.description ?? "", /complete normalized route list/);
+  assert.match(branches.applyChangeSchema.fields.description ?? "", /same-VPC attachment evidence/);
 });
 
 test("discard_branch forwards the optional observed change count", async () => {

@@ -70,7 +70,12 @@ def test_collect_vpc_skips_malformed_peering_record_and_keeps_later_valid_one(mo
             return {"Vpcs": []}
 
         def describe_internet_gateways(self):
-            return {"InternetGateways": []}
+            return {"InternetGateways": [
+                {"InternetGatewayId": "igw-vpc-1", "Attachments": [
+                    {"VpcId": "vpc-1", "State": "available"},
+                ]},
+                {"InternetGatewayId": "igw-detached", "Attachments": []},
+            ]}
 
         def describe_nat_gateways(self, **kwargs):
             return {"NatGateways": []}
@@ -93,6 +98,11 @@ def test_collect_vpc_skips_malformed_peering_record_and_keeps_later_valid_one(mo
 
     assert [connection.id for connection in result.vpc_peering_connections] == ["pcx-valid"]
     assert result.vpc_peering_connections[0].status == "active"
+    assert result.internet_gateways == ["igw-vpc-1", "igw-detached"]
+    assert result.internet_gateway_attachments_complete is True
+    assert [attachment.model_dump() for attachment in result.internet_gateway_attachments] == [{
+        "internet_gateway_id": "igw-vpc-1", "vpc_id": "vpc-1", "state": "available",
+    }]
 
 
 
@@ -168,6 +178,7 @@ def test_collect_vpc_new_network_calls_fail_safe(monkeypatch):
     assert result.transit_gateway_attachments == []
     assert result.vpn_gateways == []
     assert result.interface_endpoints == []
+    assert result.internet_gateway_attachments_complete is False
     assert result.missing_s3_endpoint is False
     assert result.missing_dynamodb_endpoint is False
 def test_build_graph_is_deterministic_and_typed(nightmare_infra):

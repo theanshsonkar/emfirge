@@ -8,7 +8,7 @@ from app.diffing import diff_graphs
 from app.models import (
     AccessStatement, AWSInfrastructure, EC2Instance, IAMData,
     LambdaFunction, RDSInstance, RolePolicy, SecurityGroup,
-    Route, RouteTable, VPCData, VPCSubnet,
+    InternetGatewayAttachment, Route, RouteTable, VPCData, VPCSubnet,
 )
 from app.mutations import (
     Change, SUPPORTED_OPERATIONS, SUPPORTED_RESOURCE_TYPES, _MUTATION_CAPABILITIES,
@@ -363,14 +363,16 @@ def test_route_table_rejects_partial_or_association_mutations():
         ))
 
 
-def test_route_table_rejects_invented_igw_but_preserves_collected_route_when_coverage_is_incomplete():
+def test_route_table_rejects_new_igw_without_attachment_evidence_but_preserves_existing_route():
     base = AWSInfrastructure(
-        warnings=["Internet Gateways check skipped: AccessDenied"],
-        vpc=VPCData(route_tables=[RouteTable(
-            id="rt-igw-guard", vpc_id="vpc-igw-guard",
-            routes=[Route(destination_cidr="0.0.0.0/0",
-                          target_type="internet_gateway", target_id="igw-unobserved")],
-        )]),
+        vpc=VPCData(
+            internet_gateways=["igw-region-known"],
+            route_tables=[RouteTable(
+                id="rt-igw-guard", vpc_id="vpc-igw-guard",
+                routes=[Route(destination_cidr="0.0.0.0/0",
+                              target_type="internet_gateway", target_id="igw-unobserved")],
+            )],
+        ),
     )
 
     preserved = apply_change(base, Change(
@@ -383,15 +385,41 @@ def test_route_table_rejects_invented_igw_but_preserves_collected_route_when_cov
     ))
     assert preserved.vpc.route_tables[0].routes[0].target_id == "igw-unobserved"
 
-    with pytest.raises(ValueError, match="not present in the collected VPC snapshot"):
+    with pytest.raises(ValueError, match="without complete IGW attachment evidence"):
         apply_change(preserved, Change(
             op="modify", resource_type="route_table", resource_id="rt-igw-guard",
             fields={"routes": [{
                 "destination_cidr": "0.0.0.0/0",
                 "target_type": "internet_gateway",
-                "target_id": "igw-invented",
+                "target_id": "igw-region-known",
             }]},
         ))
+
+
+def test_route_table_igw_target_must_be_attached_to_the_same_vpc_when_mapping_is_complete():
+    base = AWSInfrastructure(vpc=VPCData(
+        internet_gateways=["igw-known"],
+        internet_gateway_attachments=[InternetGatewayAttachment(
+            internet_gateway_id="igw-known", vpc_id="vpc-other", state="available",
+        )],
+        internet_gateway_attachments_complete=True,
+        route_tables=[RouteTable(id="rt-same-vpc", vpc_id="vpc-local")],
+    ))
+    change = Change(
+        op="modify", resource_type="route_table", resource_id="rt-same-vpc",
+        fields={"routes": [{
+            "destination_cidr": "0.0.0.0/0",
+            "target_type": "internet_gateway",
+            "target_id": "igw-known",
+        }]},
+    )
+
+    with pytest.raises(ValueError, match="not attached to route table VPC vpc-local"):
+        apply_change(base, change)
+
+    base.vpc.internet_gateway_attachments[0].vpc_id = "vpc-local"
+    changed = apply_change(base, change)
+    assert changed.vpc.route_tables[0].routes[0].target_id == "igw-known"
 
 
 def test_modify_iam_role_policy_replaces_normalized_statements_without_mutating_base():

@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
 from app import branches, database
-from app.models import AWSInfrastructure, RouteTable, VPCData
+from app.models import AWSInfrastructure, InternetGatewayAttachment, RouteTable, VPCData
 from app.mutations import Change
 
 
@@ -301,19 +301,24 @@ def test_stale_agent_change_count_rejects_append_and_preserves_history(branch_db
     assert [bucket.name for bucket in branches.rebuild_branch_infra(branch_id).s3.buckets] == ["first-bucket"]
 
 
-def test_invented_igw_route_rejection_does_not_persist_a_branch_change(branch_db):
-    base = AWSInfrastructure(vpc=VPCData(route_tables=[RouteTable(
-        id="rtb-branch-guard", vpc_id="vpc-branch-guard",
-    )]))
+def test_wrong_vpc_igw_route_rejection_does_not_persist_a_branch_change(branch_db):
+    base = AWSInfrastructure(vpc=VPCData(
+        internet_gateways=["igw-other-vpc"],
+        internet_gateway_attachments=[InternetGatewayAttachment(
+            internet_gateway_id="igw-other-vpc", vpc_id="vpc-other", state="available",
+        )],
+        internet_gateway_attachments_complete=True,
+        route_tables=[RouteTable(id="rtb-branch-guard", vpc_id="vpc-branch-guard")],
+    ))
     branch_id = branches.create_branch(base, "reject-invented-igw")
 
-    with pytest.raises(ValueError, match="not present in the collected VPC snapshot"):
+    with pytest.raises(ValueError, match="not attached to route table VPC vpc-branch-guard"):
         branches.apply_change_to_branch(branch_id, Change(
             op="modify", resource_type="route_table", resource_id="rtb-branch-guard",
             fields={"routes": [{
                 "destination_cidr": "0.0.0.0/0",
                 "target_type": "internet_gateway",
-                "target_id": "igw-fabricated",
+                "target_id": "igw-other-vpc",
             }]},
         ))
 

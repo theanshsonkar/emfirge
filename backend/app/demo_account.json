@@ -246,6 +246,14 @@
     "default_vpc_id": null,
     "default_vpc_in_use": false,
     "interface_endpoints": [],
+    "internet_gateway_attachments": [
+      {
+        "internet_gateway_id": "igw-demo-001",
+        "state": "available",
+        "vpc_id": "vpc-demo-001"
+      }
+    ],
+    "internet_gateway_attachments_complete": true,
     "internet_gateways": [
       "igw-demo-001"
     ],

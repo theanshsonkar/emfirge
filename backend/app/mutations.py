@@ -64,7 +64,7 @@ _MUTATION_CAPABILITIES = {
             "fields": [],
             "required_fields": ["routes"],
             "allowed_fields": ["routes"],
-            "message": "Replace the complete normalized route list for one existing collected route table; associations are derived from the collected snapshot",
+            "message": "Replace the complete normalized route list for one existing collected route table; associations are derived, and new IGW routes require complete same-VPC attachment evidence",
         },),
     },
 }
@@ -428,13 +428,29 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
         for route in matches[0].routes
         if route.target_type.lower() == "internet_gateway"
     }
-    known_igw_ids = set(infra.vpc.internet_gateways)
     for route in normalized:
-        if (route.target_type.lower() == "internet_gateway"
-                and route.target_id not in known_igw_ids
-                and (route.destination_cidr, route.target_id) not in existing_igw_routes):
+        if route.target_type.lower() != "internet_gateway":
+            continue
+        preexisting = (route.destination_cidr, route.target_id) in existing_igw_routes
+        if not infra.vpc.internet_gateway_attachments_complete:
+            if preexisting:
+                # Preserve legacy routes when attachment enumeration was not
+                # available; absence of mapping is not same-VPC evidence.
+                continue
             raise ValueError(
-                f"Internet gateway target is not present in the collected VPC snapshot: {route.target_id}"
+                "Cannot add an internet_gateway route without complete IGW attachment evidence; "
+                "recollect the VPC snapshot"
+            )
+        same_vpc_attachment = any(
+            attachment.internet_gateway_id == route.target_id
+            and bool(matches[0].vpc_id)
+            and attachment.vpc_id == matches[0].vpc_id
+            for attachment in infra.vpc.internet_gateway_attachments
+        )
+        if not same_vpc_attachment:
+            raise ValueError(
+                f"Internet gateway target is not attached to route table VPC {matches[0].vpc_id}: "
+                f"{route.target_id}"
             )
     matches[0].routes = normalized
     _sync_route_table_public_subnets(infra)
