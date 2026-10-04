@@ -140,6 +140,26 @@ def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> N
     index = next((i for i, item in enumerate(collection) if _identity(resource_type, item) == resource_id), None)
     if index is None:
         raise ValueError(f"Target not found: {resource_type}/{resource_id}")
+    if resource_type == "security_group":
+        users = sorted({
+            item.id for item in infra.ec2.instances if resource_id in item.sg_ids
+        } | {
+            item.id for item in infra.rds.rds_instances if resource_id in item.sg_ids
+        } | {
+            item.id for item in infra.elasticache.clusters if resource_id in item.sg_ids
+        } | {
+            group.id for group in infra.ec2.security_groups if group.id != resource_id
+            and any(
+                resource_id in (rule.get("source_sg_ids") or [])
+                or resource_id in (rule.get("dest_sg_ids") or [])
+                for rule in group.rules + group.egress_rules
+            )
+        })
+        if users:
+            raise ValueError(
+                f"Security group {resource_id} is still in use by {', '.join(users)}; "
+                "model detaching or replacing it before deletion"
+            )
     target = collection[index]
     collection.pop(index)
 
@@ -151,10 +171,6 @@ def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> N
             _remove_value(group.attached_to, resource_id)
         _remove_value(infra.ec2.stopped_instances, resource_id)
     elif resource_type == "security_group":
-        for instance in infra.ec2.instances:
-            _remove_value(instance.sg_ids, resource_id)
-        for instance in infra.rds.rds_instances:
-            _remove_value(instance.sg_ids, resource_id)
         _remove_value(infra.ec2.open_security_groups, resource_id)
         if infra.ec2.ssh_security_group_id == resource_id:
             infra.ec2.ssh_security_group_id = None

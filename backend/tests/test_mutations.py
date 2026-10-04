@@ -36,10 +36,18 @@ def test_delete_ec2_cleans_relationships_and_count(clean_infra):
     assert result.ec2.instance_count == 1
 
 
-def test_delete_security_group_cleans_instances(clean_infra):
-    result = apply_change(clean_infra, Change(op="delete", resource_type="security_group", resource_id="sg-001"))
+def test_delete_in_use_security_group_requires_explicit_detach(clean_infra):
+    with pytest.raises(ValueError, match="still in use by i-001"):
+        apply_change(clean_infra, Change(op="delete", resource_type="security_group", resource_id="sg-001"))
+    assert clean_infra.ec2.security_groups
+
+    detached = apply_changes(clean_infra, [
+        Change(op="modify", resource_type="ec2_instance", resource_id=instance_id,
+               fields={"sg_ids": []})
+        for instance_id in ("i-001", "i-002")
+    ])
+    result = apply_change(detached, Change(op="delete", resource_type="security_group", resource_id="sg-001"))
     assert not result.ec2.security_groups
-    assert all("sg-001" not in item.sg_ids for item in result.ec2.instances)
 
 
 def test_delete_ec2_removes_only_deleted_instance_type_occurrence(clean_infra):
@@ -67,10 +75,21 @@ def test_rds_summary_instances_rebuilt_from_authoritative_collection(clean_infra
     assert result.rds.instances == ["db-a", "db-z", "prod-db"]
 
 
-def test_delete_security_group_cleans_rds_instances(clean_infra):
+def test_delete_security_group_rejects_rds_reference(clean_infra):
     clean_infra.rds.rds_instances[0].sg_ids = ["sg-001", "sg-other"]
-    result = apply_change(clean_infra, Change(op="delete", resource_type="security_group", resource_id="sg-001"))
-    assert result.rds.rds_instances[0].sg_ids == ["sg-other"]
+    with pytest.raises(ValueError, match="prod-db"):
+        apply_change(clean_infra, Change(op="delete", resource_type="security_group", resource_id="sg-001"))
+
+
+def test_delete_security_group_rejects_peer_group_reference(empty_infra):
+    from app.models import SecurityGroup
+
+    empty_infra.ec2.security_groups = [
+        SecurityGroup(id="sg-target", name="target"),
+        SecurityGroup(id="sg-peer", name="peer", rules=[{"source_sg_ids": ["sg-target"]}]),
+    ]
+    with pytest.raises(ValueError, match="still in use by sg-peer"):
+        apply_change(empty_infra, Change(op="delete", resource_type="security_group", resource_id="sg-target"))
 
 
 def test_add_storage_database_and_lambda_updates_collections(empty_infra):

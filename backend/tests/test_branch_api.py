@@ -5,6 +5,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.demo_seed import build_demo_infrastructure
 from app.models import AWSInfrastructure, EC2Data, EC2Instance, S3Bucket, S3Data
 from app.verdict import CombinedVerdict
 
@@ -73,6 +74,20 @@ def test_invalid_change_returns_422_without_persistence():
         })
     assert response.status_code == 422
     assert "Unsupported operation" in response.json()["detail"]
+    persist.assert_not_called()
+
+
+def test_agent_cannot_persist_in_use_security_group_delete():
+    reset_limiter()
+    with patch("app.main.branches.get_branch", return_value=branch()), \
+         patch("app.main.branches.rebuild_branch_infra", return_value=build_demo_infrastructure()), \
+         patch("app.main.branches.apply_change_to_branch") as persist:
+        response = client.post("/branches/b-1/changes", json={
+            "op": "delete", "resource_type": "security_group",
+            "resource_id": "sg-demo-public", "fields": {},
+        })
+    assert response.status_code == 422
+    assert "still in use by i-demo-web-001" in response.json()["detail"]
     persist.assert_not_called()
 
 
