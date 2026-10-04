@@ -16,6 +16,9 @@ from app.models import (
     InterfaceEndpoint,
 )
 from app.rules import run_all_checks
+from app.diffing import diff_infrastructure
+from app.mutations import Change, apply_change
+from app.verdict import combined_verdict
 
 
 def test_internet_ingress_public_ip_gate_is_ec2_only_for_non_ec2_resources():
@@ -918,6 +921,24 @@ def _internal_pair_infra(*, same_vpc=True, egress=True, ingress_source="sg-a",
 
 def _can_reach_edges(graph):
     return [edge for edge in graph.edges if edge.relationship.value == "can_reach"]
+
+
+def test_branch_reports_lost_modeled_internal_connectivity():
+    base = _internal_pair_infra()
+    branch = apply_change(base, Change(
+        op="modify", resource_type="security_group", resource_id="sg-b",
+        fields={"rules": [{
+            "from_port": 5432, "to_port": 5432, "protocol": "tcp",
+            "source_sg_ids": ["sg-other"], "ip_ranges": [],
+        }]},
+    ))
+    diff = diff_infrastructure(base, branch)
+    assert diff.lost_connectivity == [{
+        "from": "i-a", "to": "i-b", "relationship": "can_reach",
+    }]
+    result = combined_verdict(base, branch, run_scanners=False)
+    assert result.verdict == "warn"
+    assert result.lost_connectivity == diff.lost_connectivity
 
 
 def test_internal_reachability_same_vpc_sg_allow_high_5432():

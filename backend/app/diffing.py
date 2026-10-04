@@ -23,6 +23,7 @@ class DiffResult(BaseModel):
     added_edges: list[dict] = Field(default_factory=list)
     removed_edges: list[dict] = Field(default_factory=list)
     lost_dependencies: list[dict] = Field(default_factory=list)
+    lost_connectivity: list[dict] = Field(default_factory=list)
     coverage_warnings: list[str] = Field(default_factory=list)
     collection_warnings: list[str] = Field(default_factory=list)
     added_findings: list[dict] = Field(default_factory=list)
@@ -204,6 +205,11 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
         if edge["relationship"] in dependency_relationships
         and edge["from"] in surviving
     ]
+    lost_connectivity = [
+        edge for edge in graph_diff["removed_edges"]
+        if edge["relationship"] == "can_reach"
+        and edge["from"] in surviving and edge["to"] in surviving
+    ]
 
     base_findings = run_all_checks(base_infra, base_graph)
     branch_findings = run_all_checks(branch_infra, branch_graph)
@@ -227,6 +233,7 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     return DiffResult(
         **graph_diff,
         lost_dependencies=lost_dependencies,
+        lost_connectivity=lost_connectivity,
         coverage_warnings=coverage_warnings,
         collection_warnings=collection_warnings,
         added_findings=added_findings,
