@@ -230,17 +230,7 @@ def combined_verdict(
     scanner_available = False
     scanner_status: dict[str, str] = {}
     coverage_warnings: list[str] = list(diff.coverage_warnings)
-    collection_warnings = sorted({
-        str(item).strip()
-        for infra in (base_infra, branch_infra)
-        for item in (infra.warnings or [])
-        if str(item).strip()
-    })
-    if collection_warnings:
-        coverage_warnings.append(
-            f"source snapshot has {len(collection_warnings)} collection warning(s); "
-            "branch prediction is incomplete"
-        )
+    collection_warnings = diff.collection_warnings
     scanner_added: list[dict[str, Any]] = []
     scanner_removed: list[dict[str, Any]] = []
     scanner_results = ((run_checkov, "checkov"), (run_trivy, "trivy"), (run_cloudsplaining, "cloudsplaining"))

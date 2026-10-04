@@ -127,6 +127,15 @@ def test_identical_infrastructure_is_a_no_op():
     assert result.modeled_state_unchanged is True
 
 
+def test_diff_exposes_source_collection_gaps():
+    base = _internet_infra()
+    base.warnings = ["Lambda scan skipped: insufficient permissions"]
+    branch = copy.deepcopy(base)
+    result = diff_infrastructure(base, branch)
+    assert result.collection_warnings == ["Lambda scan skipped: insufficient permissions"]
+    assert any("branch prediction is incomplete" in item for item in result.coverage_warnings)
+
+
 def test_repeated_diff_is_deterministic_and_does_not_mutate_inputs():
     base = _internet_infra()
     branch = apply_change(base, Change(

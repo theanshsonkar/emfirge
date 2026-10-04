@@ -24,6 +24,7 @@ class DiffResult(BaseModel):
     removed_edges: list[dict] = Field(default_factory=list)
     lost_dependencies: list[dict] = Field(default_factory=list)
     coverage_warnings: list[str] = Field(default_factory=list)
+    collection_warnings: list[str] = Field(default_factory=list)
     added_findings: list[dict] = Field(default_factory=list)
     removed_findings: list[dict] = Field(default_factory=list)
     score_before: int = 0
@@ -176,6 +177,17 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     branch_graph = build_graph(branch_infra)
     graph_diff = diff_graphs(base_graph, branch_graph)
     coverage_warnings = []
+    collection_warnings = sorted({
+        str(item).strip()
+        for infra in (base_infra, branch_infra)
+        for item in (_value(infra, "warnings", []) or [])
+        if str(item).strip()
+    })
+    if collection_warnings:
+        coverage_warnings.append(
+            f"source snapshot has {len(collection_warnings)} collection warning(s); "
+            "branch prediction is incomplete"
+        )
     if _iam_policy_changed(base_infra, branch_infra):
         coverage_warnings.append(
             "IAM policy impact is a graph approximation; Organizations SCPs, permissions boundaries, "
@@ -216,6 +228,7 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
         **graph_diff,
         lost_dependencies=lost_dependencies,
         coverage_warnings=coverage_warnings,
+        collection_warnings=collection_warnings,
         added_findings=added_findings,
         removed_findings=removed_findings,
         score_before=int(base_score),
