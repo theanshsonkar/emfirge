@@ -73,6 +73,7 @@ def invoke(server, *args, stdin=None, base_url_env=True):
          ("POST", "/api/branches", {"base_analysis_id": "scan-1", "name": "candidate"})),
         (("list", "--analysis-id", "scan-1"),
          ("GET", "/api/branches?base_analysis_id=scan-1", None)),
+        (("capabilities",), ("GET", "/api/branches/capabilities", None)),
         (("apply", "--branch-id", "b-1", "--op", "modify", "--resource-type", "s3_bucket",
           "--resource-id", "bucket", "--fields-json", '{"encrypted":true}'),
          ("POST", "/api/branches/b-1/changes", {

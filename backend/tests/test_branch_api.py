@@ -46,6 +46,21 @@ def test_create_branch_uses_analysis_loader_and_returns_id():
     create.assert_called_once_with(loader.return_value, "harden", "a-1")
 
 
+def test_capabilities_endpoint_returns_runtime_mutation_contract():
+    from app.mutations import mutation_capabilities
+
+    reset_limiter()
+    response = client.get("/branches/capabilities")
+
+    assert response.status_code == 200
+    assert response.json() == mutation_capabilities().model_dump(mode="json")
+    resources = {item["resource_type"]: item for item in response.json()["resources"]}
+    assert resources["iam_role_policy"]["operations"] == ["modify"]
+    constraint = resources["iam_role_policy"]["constraints"][0]
+    assert constraint["required_fields"] == ["access_statements"]
+    assert constraint["allowed_fields"] == ["access_statements"]
+
+
 def test_add_change_and_diff():
     reset_limiter()
     changed = branch(changes=[{"op": "modify", "resource_type": "s3_bucket"}])

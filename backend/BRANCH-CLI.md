@@ -26,12 +26,15 @@ python backend/scripts/emfirge-branch.py apply \
 
 python backend/scripts/emfirge-branch.py diff --branch-id BRANCH_ID
 python backend/scripts/emfirge-branch.py list --analysis-id SCAN_ID
+python backend/scripts/emfirge-branch.py capabilities
 python backend/scripts/emfirge-branch.py verdict --branch-id BRANCH_ID
 python backend/scripts/emfirge-branch.py rollback --branch-id BRANCH_ID --expected-count 1
 python backend/scripts/emfirge-branch.py compare BRANCH_ID OTHER_BRANCH_ID
 ```
 
 `rollback` undoes the most recent modeled change. It does not reset the whole branch. `iam_role_policy` currently supports `modify` only and requires `access_statements` to replace the complete normalized statement list for an existing collected role. The backend verdict reports IAM modeling limits. All other resource and operation support follows the backend's current branch mutation API.
+
+`GET /branches/capabilities` and the `capabilities` CLI command return the machine-readable contract used by backend validation. Resource entries list supported operations and special constraints; for example, `iam_role_policy` supports only `modify`, replacing the complete normalized `access_statements` list for one existing role identified by role ARN. Treat this endpoint as authoritative when generating changes.
 
 For concurrent agents, pass `--expected-count` on both `apply` and `rollback`, using the most recent branch change response or the `num_changes` field returned by `list`. A stale count returns HTTP 409; reload the branch before retrying. Omitting this option remains supported for single-agent workflows.
 

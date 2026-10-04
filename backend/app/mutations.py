@@ -20,10 +20,79 @@ from app.models import (
 )
 
 
-SUPPORTED_RESOURCE_TYPES = frozenset(
-    {"ec2_instance", "security_group", "rds_instance", "s3_bucket", "lambda_function", "iam_role_policy"}
+_CRUD_OPERATIONS = frozenset({"add", "modify", "delete"})
+
+# Authoritative branch mutation contract. Runtime validation, model lookup, the
+# capabilities endpoint, and its schema-drift tests all derive from this table.
+_MUTATION_CAPABILITIES = {
+    "ec2_instance": {"model": EC2Instance, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "security_group": {
+        "model": SecurityGroup,
+        "operations": _CRUD_OPERATIONS,
+        "constraints": ({
+            "operations": sorted(_CRUD_OPERATIONS),
+            "kind": "derived_field",
+            "fields": ["attached_to"],
+            "required_fields": [],
+            "allowed_fields": [],
+            "message": "SecurityGroup.attached_to is derived from EC2 sg_ids; change EC2 sg_ids instead",
+        },),
+    },
+    "rds_instance": {"model": RDSInstance, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "s3_bucket": {"model": S3Bucket, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "lambda_function": {"model": LambdaFunction, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "iam_role_policy": {
+        "model": None,
+        "operations": frozenset({"modify"}),
+        "constraints": ({
+            "operations": ["modify"],
+            "kind": "complete_field_replacement",
+            "fields": [],
+            "required_fields": ["access_statements"],
+            "allowed_fields": ["access_statements"],
+            "message": "Replace the complete normalized statement list for one existing collected role identified by role ARN",
+        },),
+    },
+}
+SUPPORTED_RESOURCE_TYPES = frozenset(_MUTATION_CAPABILITIES)
+SUPPORTED_OPERATIONS = frozenset().union(
+    *(capability["operations"] for capability in _MUTATION_CAPABILITIES.values())
 )
-SUPPORTED_OPERATIONS = frozenset({"add", "modify", "delete"})
+
+
+class MutationConstraint(BaseModel):
+    operations: list[str]
+    kind: str
+    fields: list[str] = Field(default_factory=list)
+    required_fields: list[str] = Field(default_factory=list)
+    allowed_fields: list[str] = Field(default_factory=list)
+    message: str
+
+
+class ResourceMutationCapability(BaseModel):
+    resource_type: str
+    operations: list[str]
+    constraints: list[MutationConstraint] = Field(default_factory=list)
+
+
+class MutationCapabilities(BaseModel):
+    operations: list[str]
+    resources: list[ResourceMutationCapability]
+
+
+def mutation_capabilities() -> MutationCapabilities:
+    """Return the public branch mutation contract from the runtime registry."""
+    return MutationCapabilities(
+        operations=sorted(SUPPORTED_OPERATIONS),
+        resources=[
+            ResourceMutationCapability(
+                resource_type=resource_type,
+                operations=sorted(capability["operations"]),
+                constraints=capability["constraints"],
+            )
+            for resource_type, capability in sorted(_MUTATION_CAPABILITIES.items())
+        ],
+    )
 
 
 class Change(BaseModel):
@@ -40,28 +109,26 @@ def _fresh(infra: AWSInfrastructure) -> AWSInfrastructure:
 
 
 def _validate_change(change: Change) -> None:
+    capability = _MUTATION_CAPABILITIES.get(change.resource_type)
     if change.op not in SUPPORTED_OPERATIONS:
         raise ValueError(f"Unsupported operation: {change.op}")
-    if change.resource_type not in SUPPORTED_RESOURCE_TYPES:
+    if capability is None:
         raise ValueError(f"Unsupported resource type: {change.resource_type}")
+    if change.op not in capability["operations"]:
+        raise ValueError(f"{change.resource_type} supports {', '.join(sorted(capability['operations']))} only")
     if not isinstance(change.fields, dict):
         raise ValueError("Change fields must be a dictionary")
-    if change.resource_type == "iam_role_policy" and change.op != "modify":
-        raise ValueError("iam_role_policy supports modify only")
-    if change.resource_type == "security_group" and "attached_to" in change.fields:
-        raise ValueError(
-            "SecurityGroup.attached_to is derived from EC2 sg_ids; change EC2 sg_ids instead"
-        )
+    for constraint in capability["constraints"]:
+        if constraint["kind"] == "derived_field" and change.op in constraint["operations"]:
+            if set(change.fields).intersection(constraint["fields"]):
+                raise ValueError(constraint["message"])
 
 
 def _model_for(resource_type: str) -> Type[BaseModel]:
-    return {
-        "ec2_instance": EC2Instance,
-        "security_group": SecurityGroup,
-        "rds_instance": RDSInstance,
-        "s3_bucket": S3Bucket,
-        "lambda_function": LambdaFunction,
-    }[resource_type]
+    model_type = _MUTATION_CAPABILITIES[resource_type]["model"]
+    if model_type is None:
+        raise ValueError(f"{resource_type} does not have a resource model")
+    return model_type
 
 
 def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
@@ -242,11 +309,18 @@ def _replace_iam_role_policy_statements(
     roles. Replacing statements clears collector-derived shortcuts so graph
     derivation uses only the supplied normalized statements on this branch.
     """
-    if change.op != "modify":
-        raise ValueError("iam_role_policy supports modify only")
-    if set(change.fields) != {"access_statements"}:
-        raise ValueError("iam_role_policy modify requires only access_statements")
-    statements = change.fields["access_statements"]
+    constraint = next(
+        item for item in _MUTATION_CAPABILITIES["iam_role_policy"]["constraints"]
+        if change.op in item["operations"] and item["kind"] == "complete_field_replacement"
+    )
+    required_fields = set(constraint["required_fields"])
+    allowed_fields = set(constraint["allowed_fields"])
+    if set(change.fields) != required_fields or required_fields != allowed_fields:
+        raise ValueError(
+            f"iam_role_policy modify requires only {', '.join(sorted(required_fields))}"
+        )
+    replacement_field = next(iter(required_fields))
+    statements = change.fields[replacement_field]
     if not isinstance(statements, list):
         raise ValueError("access_statements must be a list replacing the complete normalized statement set")
 

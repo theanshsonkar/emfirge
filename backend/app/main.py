@@ -31,7 +31,7 @@ from app.models import (
     CIAnalyzeRequest, CIAnalyzeResponse, CIAPIKeyRequest, CIAPIKeyResponse,
 )
 from app.diffing import DiffResult
-from app.mutations import Change, apply_change
+from app.mutations import Change, MutationCapabilities, apply_change, mutation_capabilities
 from app.verdict import CombinedVerdict, combined_verdict
 from app import branches
 from app.aws_collector import collect_infrastructure
@@ -1299,6 +1299,14 @@ def create_branch_endpoint(payload: dict, request: Request):
 def list_branches_endpoint(request: Request, base_analysis_id: Optional[str] = None):
     _check_branch_rate_limit(_branch_request_ip(request))
     return [_branch_summary(branch) for branch in branches.list_branches(base_analysis_id)]
+
+
+@app.get('/branches/capabilities', response_model=MutationCapabilities,
+         dependencies=[Depends(require_api_key)])
+def branch_capabilities_endpoint(request: Request):
+    """List supported branch mutation resource types, operations, and constraints."""
+    _check_branch_rate_limit(_branch_request_ip(request))
+    return mutation_capabilities()
 
 
 @app.post('/branches/{branch_id}/changes', dependencies=[Depends(require_api_key)])

@@ -9,7 +9,10 @@ from app.models import (
     AccessStatement, AWSInfrastructure, EC2Instance, IAMData,
     LambdaFunction, RDSInstance, RolePolicy, SecurityGroup,
 )
-from app.mutations import Change, apply_change, apply_changes
+from app.mutations import (
+    Change, SUPPORTED_OPERATIONS, SUPPORTED_RESOURCE_TYPES, _MUTATION_CAPABILITIES,
+    apply_change, apply_changes, mutation_capabilities,
+)
 
 
 def test_add_ec2_updates_count_and_is_pure(clean_infra):
@@ -181,10 +184,11 @@ def test_rds_and_lambda_group_changes_use_forward_edges_and_clear_stale_backrefs
     assert not any(edge.src == "sg-old" and edge.dst == consumer_id for edge in after_graph.edges)
 
 
-def test_security_group_attachment_back_reference_is_not_directly_mutable(empty_infra):
+@pytest.mark.parametrize("operation", ["add", "modify", "delete"])
+def test_security_group_attachment_back_reference_is_not_directly_mutable(empty_infra, operation):
     with pytest.raises(ValueError, match="derived from EC2 sg_ids"):
         apply_change(empty_infra, Change(
-            op="modify", resource_type="security_group", resource_id="sg-001",
+            op=operation, resource_type="security_group", resource_id="sg-001",
             fields={"attached_to": ["i-invented"]},
         ))
 
@@ -201,6 +205,64 @@ def test_unrelated_mutation_preserves_existing_security_group_back_references(em
     ))
 
     assert result.ec2.security_groups[0].attached_to == ["db-branch"]
+
+
+def test_capability_schema_matches_supported_and_executable_mutations(empty_infra):
+    contract = mutation_capabilities().model_dump(mode="json")
+    advertised = {item["resource_type"]: set(item["operations"])
+                  for item in contract["resources"]}
+    assert set(advertised) == SUPPORTED_RESOURCE_TYPES
+    assert set(contract["operations"]) == SUPPORTED_OPERATIONS
+    security_group_constraint = next(
+        item for item in next(entry for entry in contract["resources"]
+                              if entry["resource_type"] == "security_group")["constraints"]
+        if item["kind"] == "derived_field"
+    )
+    assert set(security_group_constraint["operations"]) == set(SUPPORTED_OPERATIONS)
+
+    ids = {
+        "ec2_instance": ("i-capability", "id", {"type": "t3.micro", "state": "running"}),
+        "security_group": ("sg-capability", "id", {"name": "capability"}),
+        "rds_instance": ("db-capability", "id", {}),
+        "s3_bucket": ("bucket-capability", "name", {}),
+        "lambda_function": ("fn-capability", "name", {}),
+        "iam_role_policy": (
+            "arn:aws:iam::000000000000:role/Capability", "role_arn", {},
+        ),
+    }
+    collection_names = {
+        "ec2_instance": ("ec2", "instances"),
+        "security_group": ("ec2", "security_groups"),
+        "rds_instance": ("rds", "rds_instances"),
+        "s3_bucket": ("s3", "buckets"),
+        "lambda_function": ("lambda_data", "functions"),
+    }
+
+    for resource_type, operations in advertised.items():
+        resource_id, identity_field, add_fields = ids[resource_type]
+        for operation in SUPPORTED_OPERATIONS:
+            infra = copy.deepcopy(empty_infra)
+            fields = dict(add_fields) if operation == "add" else {}
+            if resource_type == "iam_role_policy" and operation == "modify":
+                fields = {"access_statements": []}
+            if operation != "add":
+                if resource_type == "iam_role_policy":
+                    infra.iam.role_policies.append(RolePolicy(
+                        role_name="Capability", role_arn=resource_id,
+                    ))
+                else:
+                    model_type = _MUTATION_CAPABILITIES[resource_type]["model"]
+                    target = {identity_field: resource_id, **add_fields}
+                    getattr(getattr(infra, collection_names[resource_type][0]),
+                            collection_names[resource_type][1]).append(model_type(**target))
+
+            change = Change(op=operation, resource_type=resource_type,
+                            resource_id=resource_id, fields=fields)
+            if operation in operations:
+                apply_change(infra, change)
+            else:
+                with pytest.raises(ValueError):
+                    apply_change(infra, change)
 
 
 def test_modify_iam_role_policy_replaces_normalized_statements_without_mutating_base():
