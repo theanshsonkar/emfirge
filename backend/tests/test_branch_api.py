@@ -12,6 +12,7 @@ from app.models import (
     AccessStatement, AWSInfrastructure, EC2Data, EC2Instance, IAMData,
     RolePolicy, S3Bucket, S3Data,
 )
+from app.mutations import Change, apply_changes
 from app.verdict import CombinedVerdict
 
 
@@ -253,12 +254,37 @@ def test_verdict_shape():
     reset_limiter()
     verdict = CombinedVerdict(verdict="pass", summary="ok")
     with patch("app.main.branches.get_branch", return_value=branch()), \
-         patch("app.main.branches.rebuild_branch_infra", return_value=branch().base), \
+         patch("app.main.branches.rebuild_branch_state", return_value=branch().base), \
          patch("app.main.combined_verdict", return_value=verdict):
         response = client.get("/branches/b-1/verdict")
     assert response.status_code == 200
     assert response.json()["verdict"] == "pass"
     assert response.json()["summary"] == "ok"
+
+
+def test_verdict_uses_one_loaded_branch_view_for_rebuild(monkeypatch):
+    reset_limiter()
+    monkeypatch.setenv("EMFIRGE_RUN_SCANNERS", "0")
+    first_change = Change(op="add", resource_type="s3_bucket", resource_id="first")
+    first_view = branch(
+        base=AWSInfrastructure(region="us-east-1"), changes=[first_change],
+    )
+    later_view = branch(
+        base=AWSInfrastructure(region="us-west-2"),
+        changes=[Change(op="add", resource_type="s3_bucket", resource_id="later")],
+    )
+    verdict = CombinedVerdict(verdict="pass", summary="ok")
+
+    with patch("app.main.branches.get_branch", side_effect=[first_view, later_view]) as load, \
+         patch("app.main.branches.rebuild_branch_state", wraps=branches.rebuild_branch_state) as rebuild, \
+         patch("app.main.combined_verdict", return_value=verdict) as combine:
+        response = client.get("/branches/b-1/verdict")
+
+    rebuilt = apply_changes(first_view.base, first_view.changes)
+    assert response.status_code == 200
+    load.assert_called_once_with("b-1")
+    rebuild.assert_called_once_with(first_view)
+    combine.assert_called_once_with(first_view.base, rebuilt, run_scanners=False)
 
 
 def test_rollback_discard_and_closed_change_conflict():

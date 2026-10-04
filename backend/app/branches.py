@@ -262,13 +262,18 @@ def list_branches(base_analysis_id: Optional[str] = None) -> list[Branch]:
 def rebuild_branch_infra(branch_id: str) -> AWSInfrastructure:
     """Rebuild a fresh infrastructure model from base plus ordered changes."""
     branch = get_branch(branch_id)
+    return rebuild_branch_state(branch)
+
+
+def rebuild_branch_state(branch: Branch) -> AWSInfrastructure:
+    """Rebuild from one already-loaded branch snapshot without rereading storage."""
     return apply_changes(branch.base, branch.changes)
 
 
 def get_branch_diff(branch_id: str) -> DiffResult:
     """Diff the immutable base snapshot against the current rebuilt state."""
     branch = get_branch(branch_id)
-    rebuilt = apply_changes(branch.base, branch.changes)
+    rebuilt = rebuild_branch_state(branch)
     return diff_infrastructure(branch.base, rebuilt)
 
 
@@ -282,8 +287,8 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
     base_snapshots: list[str] = []
     for branch_id in branch_ids:
         branch = get_branch(branch_id)
-        diff = get_branch_diff(branch_id)
-        rebuilt = rebuild_branch_infra(branch_id)
+        rebuilt = rebuild_branch_state(branch)
+        diff = diff_infrastructure(branch.base, rebuilt)
         graph = build_graph(rebuilt)
         has_privilege_escalation = any(
             node.resource_type == "iam_role"

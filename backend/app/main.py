@@ -1347,7 +1347,7 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
     _check_branch_rate_limit(_branch_request_ip(request))
     try:
         branch = branches.get_branch(branch_id)
-        rebuilt = branches.rebuild_branch_infra(branch_id)
+        rebuilt = branches.rebuild_branch_state(branch)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     # Scanners are OFF by default on this endpoint. A verdict runs 6 scanner

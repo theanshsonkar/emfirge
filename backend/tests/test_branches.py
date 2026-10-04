@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -256,6 +258,30 @@ def test_compare_detects_privilege_escalation_from_iam_graph(branch_db):
 
     summary = branches.compare_branches([branch_id]).branches[0]
     assert summary.has_privilege_escalation is True
+
+
+def test_compare_uses_one_loaded_branch_view_for_diff_and_rebuild():
+    first_change = Change(op="add", resource_type="s3_bucket", resource_id="first")
+    second_changes = [
+        Change(op="add", resource_type="s3_bucket", resource_id="second-a"),
+        Change(op="add", resource_type="s3_bucket", resource_id="second-b"),
+    ]
+    first_view = branches.Branch(
+        branch_id="b-1", name="snapshot", base=AWSInfrastructure(region="us-east-1"),
+        changes=[first_change], status="open",
+    )
+    later_view = branches.Branch(
+        branch_id="b-1", name="snapshot", base=AWSInfrastructure(region="us-west-2"),
+        changes=second_changes, status="open",
+    )
+
+    with patch.object(branches, "get_branch", side_effect=[first_view, later_view]) as load:
+        result = branches.compare_branches(["b-1"])
+
+    load.assert_called_once_with("b-1")
+    summary = result.branches[0]
+    assert summary.added_nodes == 1
+    assert summary.name == first_view.name
 
 
 def test_compare_is_deterministic_and_reports_mixed_base_metadata(branch_db):
