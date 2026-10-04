@@ -4,7 +4,11 @@ import re
 import pytest
 
 from app.egraph import build_graph
-from app.models import AccessStatement, AWSInfrastructure, IAMData, LambdaFunction, RDSInstance, RolePolicy
+from app.diffing import diff_graphs
+from app.models import (
+    AccessStatement, AWSInfrastructure, EC2Instance, IAMData,
+    LambdaFunction, RDSInstance, RolePolicy, SecurityGroup,
+)
 from app.mutations import Change, apply_change, apply_changes
 
 
@@ -46,6 +50,13 @@ def test_delete_in_use_security_group_requires_explicit_detach(clean_infra):
                fields={"sg_ids": []})
         for instance_id in ("i-001", "i-002")
     ])
+    assert next(group for group in detached.ec2.security_groups if group.id == "sg-001").attached_to == []
+    detached_graph = build_graph(detached)
+    assert not any(
+        edge.relationship.value == "attached_to_instance"
+        and edge.src == "sg-001"
+        for edge in detached_graph.edges
+    )
     result = apply_change(detached, Change(op="delete", resource_type="security_group", resource_id="sg-001"))
     assert not result.ec2.security_groups
 
@@ -104,6 +115,92 @@ def test_add_storage_database_and_lambda_updates_collections(empty_infra):
     assert result.s3.total_buckets == 1 and result.s3.buckets[0].name == "bucket-new"
     assert result.rds.instances == ["db-new"] and result.rds.rds_instances[0].id == "db-new"
     assert result.lambda_data.function_count == 1 and result.lambda_data.functions[0].name == "fn-new"
+
+
+def test_add_and_modify_ec2_security_groups_reconcile_both_graph_directions(empty_infra):
+    empty_infra.ec2.security_groups = [
+        SecurityGroup(id="sg-old", name="old"),
+        SecurityGroup(id="sg-new", name="new", attached_to=["stale-instance"]),
+    ]
+    added = apply_change(empty_infra, Change(
+        op="add", resource_type="ec2_instance", resource_id="i-branch",
+        fields={"type": "t3.micro", "state": "running", "sg_ids": ["sg-old"]},
+    ))
+    assert added.ec2.security_groups[0].attached_to == ["i-branch"]
+    assert added.ec2.security_groups[1].attached_to == []
+
+    modified = apply_change(added, Change(
+        op="modify", resource_type="ec2_instance", resource_id="i-branch",
+        fields={"sg_ids": ["sg-new"]},
+    ))
+    graph_diff = diff_graphs(build_graph(added), build_graph(modified))
+    assert modified.ec2.security_groups[0].attached_to == []
+    assert modified.ec2.security_groups[1].attached_to == ["i-branch"]
+    assert graph_diff["removed_edges"] == [
+        {"from": "i-branch", "to": "sg-old", "relationship": "uses_security_group"},
+        {"from": "sg-old", "to": "i-branch", "relationship": "attached_to_instance"},
+    ]
+    assert graph_diff["added_edges"] == [
+        {"from": "i-branch", "to": "sg-new", "relationship": "uses_security_group"},
+        {"from": "sg-new", "to": "i-branch", "relationship": "attached_to_instance"},
+    ]
+
+
+@pytest.mark.parametrize("consumer_type", ["rds_instance", "lambda_function"])
+def test_rds_and_lambda_group_changes_use_forward_edges_and_clear_stale_backrefs(empty_infra, consumer_type):
+    consumer_id = "db-branch" if consumer_type == "rds_instance" else "fn-branch"
+    empty_infra.ec2.instances = [EC2Instance(
+        id="i-stable", type="t3.micro", state="running", sg_ids=["sg-old"],
+    )]
+    empty_infra.ec2.security_groups = [
+        SecurityGroup(id="sg-old", name="old", attached_to=["i-stable", consumer_id]),
+        SecurityGroup(id="sg-new", name="new"),
+    ]
+    if consumer_type == "rds_instance":
+        empty_infra.rds.rds_instances = [RDSInstance(id=consumer_id, sg_ids=["sg-old"])]
+    else:
+        empty_infra.lambda_data.functions = [LambdaFunction(name=consumer_id, sg_ids=["sg-old"])]
+    before_graph = build_graph(empty_infra)
+
+    updated = apply_change(empty_infra, Change(
+        op="modify", resource_type=consumer_type, resource_id=consumer_id,
+        fields={"sg_ids": ["sg-new"]},
+    ))
+    after_graph = build_graph(updated)
+    graph_diff = diff_graphs(before_graph, after_graph)
+
+    assert next(group for group in updated.ec2.security_groups if group.id == "sg-old").attached_to == ["i-stable"]
+    assert next(group for group in updated.ec2.security_groups if group.id == "sg-new").attached_to == []
+    assert {tuple(edge.values()) for edge in graph_diff["removed_edges"]} >= {
+        (consumer_id, "sg-old", "uses_security_group"),
+        ("sg-old", consumer_id, "attached_to_instance"),
+    }
+    assert {tuple(edge.values()) for edge in graph_diff["added_edges"]} >= {
+        (consumer_id, "sg-new", "uses_security_group"),
+    }
+    assert not any(edge.src == "sg-old" and edge.dst == consumer_id for edge in after_graph.edges)
+
+
+def test_security_group_attachment_back_reference_is_not_directly_mutable(empty_infra):
+    with pytest.raises(ValueError, match="derived from EC2 sg_ids"):
+        apply_change(empty_infra, Change(
+            op="modify", resource_type="security_group", resource_id="sg-001",
+            fields={"attached_to": ["i-invented"]},
+        ))
+
+
+def test_unrelated_mutation_preserves_existing_security_group_back_references(empty_infra):
+    empty_infra.ec2.security_groups = [
+        SecurityGroup(id="sg-db", name="db", attached_to=["db-branch"]),
+    ]
+    empty_infra.s3.buckets = [{"name": "bucket-branch"}]
+
+    result = apply_change(empty_infra, Change(
+        op="modify", resource_type="s3_bucket", resource_id="bucket-branch",
+        fields={"is_public": True},
+    ))
+
+    assert result.ec2.security_groups[0].attached_to == ["db-branch"]
 
 
 def test_modify_iam_role_policy_replaces_normalized_statements_without_mutating_base():

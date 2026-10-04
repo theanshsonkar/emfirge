@@ -48,6 +48,10 @@ def _validate_change(change: Change) -> None:
         raise ValueError("Change fields must be a dictionary")
     if change.resource_type == "iam_role_policy" and change.op != "modify":
         raise ValueError("iam_role_policy supports modify only")
+    if change.resource_type == "security_group" and "attached_to" in change.fields:
+        raise ValueError(
+            "SecurityGroup.attached_to is derived from EC2 sg_ids; change EC2 sg_ids instead"
+        )
 
 
 def _model_for(resource_type: str) -> Type[BaseModel]:
@@ -137,6 +141,23 @@ def _remove_one(values: list[str], value: str) -> None:
         values.remove(value)
     except ValueError:
         pass
+
+
+def _sync_security_group_attachments(infra: AWSInfrastructure) -> None:
+    """Rebuild the EC2-only SG back-reference from authoritative instance sg_ids.
+
+    RDS, Lambda, and other consumers keep their own sg_ids; their graph
+    relationships are emitted from those forward references. ``attached_to``
+    feeds the EC2-specific attached-instance edges and security rules.
+    """
+    attachments = {group.id: [] for group in infra.ec2.security_groups}
+    for instance in infra.ec2.instances:
+        for sg_id in dict.fromkeys(instance.sg_ids):
+            attached = attachments.get(sg_id)
+            if attached is not None:
+                attached.append(instance.id)
+    for group in infra.ec2.security_groups:
+        group.attached_to = attachments[group.id]
 
 
 def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> None:
@@ -244,8 +265,12 @@ def _replace_iam_role_policy_statements(
     policy.policy_names = []
 
 
-def recompute_derived_state(infra: AWSInfrastructure) -> AWSInfrastructure:
+def recompute_derived_state(
+    infra: AWSInfrastructure, *, reconcile_security_group_attachments: bool = False,
+) -> AWSInfrastructure:
     """Recompute EC2 internet-exposure summaries from authoritative resources."""
+    if reconcile_security_group_attachments:
+        _sync_security_group_attachments(infra)
     attached_sg_ids = {
         sg_id
         for instance in infra.ec2.instances
@@ -324,7 +349,11 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         _delete(result, resource_type, change.resource_id)
 
     _sync_counts(result)
-    return recompute_derived_state(result)
+    return recompute_derived_state(
+        result,
+        reconcile_security_group_attachments=resource_type in {"ec2_instance", "security_group"}
+        or (resource_type in {"rds_instance", "lambda_function"} and "sg_ids" in change.fields),
+    )
 
 
 def apply_changes(infra: AWSInfrastructure, changes: Iterable[Change]) -> AWSInfrastructure:
