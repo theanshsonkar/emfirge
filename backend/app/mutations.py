@@ -64,7 +64,7 @@ _MUTATION_CAPABILITIES = {
             "fields": [],
             "required_fields": ["routes"],
             "allowed_fields": ["routes"],
-            "message": "Replace the complete normalized route list for one existing collected route table; associations are derived, and new IGW routes require complete same-VPC attachment evidence",
+            "message": "Replace the complete normalized route list for one existing collected route table; associations are derived, and new IGW routes require complete same-VPC available-attachment evidence",
         },),
     },
 }
@@ -445,6 +445,7 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
             attachment.internet_gateway_id == route.target_id
             and bool(matches[0].vpc_id)
             and attachment.vpc_id == matches[0].vpc_id
+            and attachment.state == "available"
             for attachment in infra.vpc.internet_gateway_attachments
         )
         if not same_vpc_attachment:

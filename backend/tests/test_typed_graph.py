@@ -52,6 +52,8 @@ def test_internet_ingress_public_ip_gate_is_ec2_only_for_non_ec2_resources():
 def test_collect_vpc_skips_malformed_peering_record_and_keeps_later_valid_one(monkeypatch):
     from app import aws_collector
 
+    gateway_requests = []
+
     class FakeEC2:
         def describe_vpc_peering_connections(self):
             return {
@@ -69,11 +71,17 @@ def test_collect_vpc_skips_malformed_peering_record_and_keeps_later_valid_one(mo
         def describe_vpcs(self):
             return {"Vpcs": []}
 
-        def describe_internet_gateways(self):
+        def describe_internet_gateways(self, **kwargs):
+            gateway_requests.append(kwargs)
+            if "NextToken" not in kwargs:
+                return {
+                    "InternetGateways": [{"InternetGatewayId": "igw-vpc-1", "Attachments": [
+                        {"VpcId": "vpc-1", "State": "available"},
+                    ]}],
+                    "NextToken": "page-2",
+                }
+            assert kwargs == {"NextToken": "page-2"}
             return {"InternetGateways": [
-                {"InternetGatewayId": "igw-vpc-1", "Attachments": [
-                    {"VpcId": "vpc-1", "State": "available"},
-                ]},
                 {"InternetGatewayId": "igw-detached", "Attachments": []},
             ]}
 
@@ -98,6 +106,7 @@ def test_collect_vpc_skips_malformed_peering_record_and_keeps_later_valid_one(mo
 
     assert [connection.id for connection in result.vpc_peering_connections] == ["pcx-valid"]
     assert result.vpc_peering_connections[0].status == "active"
+    assert gateway_requests == [{}, {"NextToken": "page-2"}]
     assert result.internet_gateways == ["igw-vpc-1", "igw-detached"]
     assert result.internet_gateway_attachments_complete is True
     assert [attachment.model_dump() for attachment in result.internet_gateway_attachments] == [{

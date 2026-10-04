@@ -43,7 +43,7 @@ export const applyChangeSchema = {
   fields: z
     .record(z.string(), z.unknown())
     .optional()
-    .describe("Fields to add or modify; for iam_role_policy, provide only access_statements as the complete replacement statement list; for route_table, provide only routes as the complete normalized route list; new internet_gateway routes require collected same-VPC attachment evidence"),
+    .describe("Fields to add or modify; for iam_role_policy, provide only access_statements as the complete replacement statement list; for route_table, provide only routes as the complete normalized route list; new internet_gateway routes require complete collected same-VPC attachment evidence in the available state"),
 };
 
 export const applyChangeZodObject = z.object(applyChangeSchema);

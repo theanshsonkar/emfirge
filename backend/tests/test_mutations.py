@@ -396,7 +396,7 @@ def test_route_table_rejects_new_igw_without_attachment_evidence_but_preserves_e
         ))
 
 
-def test_route_table_igw_target_must_be_attached_to_the_same_vpc_when_mapping_is_complete():
+def test_route_table_igw_target_must_be_available_and_attached_to_the_same_vpc():
     base = AWSInfrastructure(vpc=VPCData(
         internet_gateways=["igw-known"],
         internet_gateway_attachments=[InternetGatewayAttachment(
@@ -420,6 +420,28 @@ def test_route_table_igw_target_must_be_attached_to_the_same_vpc_when_mapping_is
     base.vpc.internet_gateway_attachments[0].vpc_id = "vpc-local"
     changed = apply_change(base, change)
     assert changed.vpc.route_tables[0].routes[0].target_id == "igw-known"
+
+
+@pytest.mark.parametrize("state", ["detached", "attaching", "attached", "detaching", None])
+def test_route_table_igw_attachment_state_must_be_available(state):
+    base = AWSInfrastructure(vpc=VPCData(
+        internet_gateways=["igw-known"],
+        internet_gateway_attachments=[InternetGatewayAttachment(
+            internet_gateway_id="igw-known", vpc_id="vpc-local", state=state,
+        )],
+        internet_gateway_attachments_complete=True,
+        route_tables=[RouteTable(id="rt-same-vpc", vpc_id="vpc-local")],
+    ))
+
+    with pytest.raises(ValueError, match="not attached to route table VPC vpc-local"):
+        apply_change(base, Change(
+            op="modify", resource_type="route_table", resource_id="rt-same-vpc",
+            fields={"routes": [{
+                "destination_cidr": "0.0.0.0/0",
+                "target_type": "internet_gateway",
+                "target_id": "igw-known",
+            }]},
+        ))
 
 
 def test_modify_iam_role_policy_replaces_normalized_statements_without_mutating_base():

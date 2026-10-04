@@ -1660,46 +1660,58 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
 
         # ── INTERNET GATEWAYS ─────────────────────────────────────
         try:
-            igws_response = ec2.describe_internet_gateways()
-            igw_records = (
-                igws_response.get('InternetGateways')
-                if isinstance(igws_response, dict) else None
-            )
-            if not isinstance(igw_records, list):
-                raise ValueError('Malformed InternetGateways response')
             complete = True
-            for igw in igw_records:
-                if (not isinstance(igw, dict)
-                        or not isinstance(igw.get('InternetGatewayId'), str)
-                        or not igw.get('InternetGatewayId')):
+            next_token = None
+            seen_tokens = set()
+            while True:
+                request = {'NextToken': next_token} if next_token else {}
+                igws_response = ec2.describe_internet_gateways(**request)
+                igw_records = (
+                    igws_response.get('InternetGateways')
+                    if isinstance(igws_response, dict) else None
+                )
+                if not isinstance(igw_records, list):
+                    raise ValueError('Malformed InternetGateways response')
+                for igw in igw_records:
+                    if (not isinstance(igw, dict)
+                            or not isinstance(igw.get('InternetGatewayId'), str)
+                            or not igw.get('InternetGatewayId')):
+                        complete = False
+                        continue
+                    internet_gateway_id = igw['InternetGatewayId']
+                    internet_gateways.append(internet_gateway_id)
+                    attachments = igw.get('Attachments')
+                    if not isinstance(attachments, list):
+                        complete = False
+                        continue
+                    for attachment in attachments:
+                        if not isinstance(attachment, dict):
+                            complete = False
+                            continue
+                        vpc_id = attachment.get('VpcId')
+                        state = attachment.get('State')
+                        if vpc_id is not None and not isinstance(vpc_id, str):
+                            complete = False
+                            continue
+                        if state is not None and not isinstance(state, str):
+                            complete = False
+                            continue
+                        if not vpc_id:
+                            complete = False
+                            continue
+                        internet_gateway_attachments.append(InternetGatewayAttachment(
+                            internet_gateway_id=internet_gateway_id,
+                            vpc_id=vpc_id,
+                            state=state,
+                        ))
+                token = igws_response.get('NextToken') if isinstance(igws_response, dict) else None
+                if not token:
+                    break
+                if not isinstance(token, str) or token in seen_tokens:
                     complete = False
-                    continue
-                internet_gateway_id = igw['InternetGatewayId']
-                internet_gateways.append(internet_gateway_id)
-                attachments = igw.get('Attachments')
-                if not isinstance(attachments, list):
-                    complete = False
-                    continue
-                for attachment in attachments:
-                    if not isinstance(attachment, dict):
-                        complete = False
-                        continue
-                    vpc_id = attachment.get('VpcId')
-                    state = attachment.get('State')
-                    if vpc_id is not None and not isinstance(vpc_id, str):
-                        complete = False
-                        continue
-                    if state is not None and not isinstance(state, str):
-                        complete = False
-                        continue
-                    if not vpc_id:
-                        complete = False
-                        continue
-                    internet_gateway_attachments.append(InternetGatewayAttachment(
-                        internet_gateway_id=internet_gateway_id,
-                        vpc_id=vpc_id,
-                        state=state,
-                    ))
+                    break
+                seen_tokens.add(token)
+                next_token = token
             internet_gateway_attachments_complete = complete
         except ClientError as e:
             print(f'Internet Gateways check skipped: {get_error_code(e)}')
