@@ -40,6 +40,7 @@ class CombinedVerdict(BaseModel):
     # computed with less than the full lens set, so it must not be presented as
     # a complete answer.
     coverage_warnings: List[str] = Field(default_factory=list)
+    collection_warnings: List[str] = Field(default_factory=list)
     cost_delta_monthly_usd: float = 0.0
     cost_unknown_notes: List[str] = Field(default_factory=list)
     introduces_privilege_escalation: bool = False
@@ -227,6 +228,17 @@ def combined_verdict(
     scanner_available = False
     scanner_status: dict[str, str] = {}
     coverage_warnings: list[str] = []
+    collection_warnings = sorted({
+        str(item).strip()
+        for infra in (base_infra, branch_infra)
+        for item in (infra.warnings or [])
+        if str(item).strip()
+    })
+    if collection_warnings:
+        coverage_warnings.append(
+            f"source snapshot has {len(collection_warnings)} collection warning(s); "
+            "branch prediction is incomplete"
+        )
     scanner_added: list[dict[str, Any]] = []
     scanner_removed: list[dict[str, Any]] = []
     scanner_results = ((run_checkov, "checkov"), (run_trivy, "trivy"), (run_cloudsplaining, "cloudsplaining"))
@@ -357,6 +369,7 @@ def combined_verdict(
         scanner_available=scanner_available,
         scanner_status=scanner_status,
         coverage_warnings=coverage_warnings,
+        collection_warnings=collection_warnings,
         cost_delta_monthly_usd=cost_delta_monthly_usd,
         cost_unknown_notes=cost_unknown_notes,
         introduces_privilege_escalation=introduces_privilege_escalation,
