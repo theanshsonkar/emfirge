@@ -43,6 +43,13 @@ def safe_change():
     )
 
 
+def delete_artifacts_change():
+    return Change(
+        op="delete", resource_type="s3_bucket",
+        resource_id="emfirge-demo-artifacts-000000000000",
+    )
+
+
 def test_demo_builder_graph_and_snapshot_are_deterministic():
     first = build_demo_infrastructure()
     second = build_demo_infrastructure()
@@ -91,3 +98,28 @@ def test_compare_branches_ranks_safe_first_and_rollback_is_deterministic(demo_br
     assert result.ranking[0] == safe
     assert result.ranking[1] == dangerous
     assert result.model_dump() == branches.compare_branches([dangerous, safe]).model_dump()
+
+
+def test_agent_sees_lost_capability_before_and_after_rollback(demo_branch_db):
+    base = build_demo_infrastructure()
+    branch_id = branches.create_branch(base, "remove-artifacts", base_analysis_id="demo")
+    branches.apply_change_to_branch(branch_id, delete_artifacts_change())
+
+    diff = branches.get_branch_diff(branch_id)
+    assert diff.lost_dependencies == [{
+        "from": "iam-role-EmfirgeDemoAppRole",
+        "to": "emfirge-demo-artifacts-000000000000",
+        "relationship": "can_access",
+    }]
+    result = combined_verdict(base, branches.rebuild_branch_infra(branch_id), run_scanners=False)
+    assert result.verdict == "warn"
+    assert result.lost_dependencies == diff.lost_dependencies
+    assert result.scanner_status == {
+        "checkov": "disabled", "trivy": "disabled", "cloudsplaining": "disabled",
+    }
+    assert result.coverage_warnings
+
+    branches.rollback_last(branch_id)
+    restored = combined_verdict(base, branches.rebuild_branch_infra(branch_id), run_scanners=False)
+    assert restored.verdict == "pass"
+    assert restored.lost_dependencies == []

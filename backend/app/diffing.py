@@ -22,6 +22,7 @@ class DiffResult(BaseModel):
     modified_nodes: list[str] = Field(default_factory=list)
     added_edges: list[dict] = Field(default_factory=list)
     removed_edges: list[dict] = Field(default_factory=list)
+    lost_dependencies: list[dict] = Field(default_factory=list)
     added_findings: list[dict] = Field(default_factory=list)
     removed_findings: list[dict] = Field(default_factory=list)
     score_before: int = 0
@@ -152,6 +153,17 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     base_graph = build_graph(base_infra)
     branch_graph = build_graph(branch_infra)
     graph_diff = diff_graphs(base_graph, branch_graph)
+    # These edges describe a modeled consumer/capability. Losing one can break
+    # a workload even when removing the target also clears security findings.
+    # Keep this separate from generic removed edges (containment, exposure,
+    # etc.) and do not claim that the workload actually makes the API call.
+    dependency_relationships = {"can_access", "REFERENCES_SECRET", "uses_iam_role", "USES_ROLE"}
+    surviving = {node.id for node in branch_graph.nodes}
+    lost_dependencies = [
+        edge for edge in graph_diff["removed_edges"]
+        if edge["relationship"] in dependency_relationships
+        and edge["from"] in surviving
+    ]
 
     base_findings = run_all_checks(base_infra, base_graph)
     branch_findings = run_all_checks(branch_infra, branch_graph)
@@ -174,6 +186,7 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
 
     return DiffResult(
         **graph_diff,
+        lost_dependencies=lost_dependencies,
         added_findings=added_findings,
         removed_findings=removed_findings,
         score_before=int(base_score),

@@ -28,6 +28,7 @@ class CombinedVerdict(BaseModel):
     score_delta: int = 0
     newly_internet_reachable: list[str] = Field(default_factory=list)
     no_longer_internet_reachable: list[str] = Field(default_factory=list)
+    lost_dependencies: list[dict[str, str]] = Field(default_factory=list)
     scanner_available: bool = False
     # Per-scanner outcome, e.g. {"checkov": "ok", "trivy": "unavailable: not
     # installed"}. `scanner_available` is True when ANY scanner ran, so on its
@@ -310,7 +311,7 @@ def combined_verdict(
     introduced_reachable = introduced_escalating_roles & branch_reachable
     if blocking or introduced_reachable:
         verdict = "block"
-    elif new_findings or diff.newly_internet_reachable or introduces_privilege_escalation:
+    elif new_findings or diff.newly_internet_reachable or introduces_privilege_escalation or diff.lost_dependencies:
         verdict = "warn"
     else:
         verdict = "pass"
@@ -328,6 +329,7 @@ def combined_verdict(
         unavailable = ""
     cost_summary = "cost unknown" if cost_unknown_notes else f"cost_delta={cost_delta_monthly_usd:.2f}"
     privilege_summary = "; privilege escalation introduced" if introduces_privilege_escalation else ""
+    dependency_summary = f"; modeled_dependencies_lost={len(diff.lost_dependencies)}" if diff.lost_dependencies else ""
     capacity_summary = ""
     if introduced_capacity_breaches:
         breaches = ",".join(
@@ -338,7 +340,7 @@ def combined_verdict(
         f"verdict={verdict}; native_added={len(native_added)}; scanner_added={len(scanner_added)}; "
         f"native_removed={len(native_removed)}; scanner_removed={len(scanner_removed)}; "
         f"newly_reachable={len(diff.newly_internet_reachable)}; score={diff.score_before}->{diff.score_after} "
-        f"(delta={diff.score_delta}); {cost_summary}{privilege_summary}{capacity_summary}{unavailable}"
+        f"(delta={diff.score_delta}); {cost_summary}{privilege_summary}{dependency_summary}{capacity_summary}{unavailable}"
     )
     return CombinedVerdict(
         verdict=verdict,
@@ -351,6 +353,7 @@ def combined_verdict(
         score_delta=diff.score_delta,
         newly_internet_reachable=sorted(diff.newly_internet_reachable),
         no_longer_internet_reachable=sorted(diff.no_longer_internet_reachable),
+        lost_dependencies=diff.lost_dependencies,
         scanner_available=scanner_available,
         scanner_status=scanner_status,
         coverage_warnings=coverage_warnings,
