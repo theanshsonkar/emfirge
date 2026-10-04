@@ -182,6 +182,11 @@ def _sync_counts(infra: AWSInfrastructure) -> None:
     infra.lambda_data.function_count = len(infra.lambda_data.functions)
 
 
+def _sync_s3_public_buckets(infra: AWSInfrastructure) -> None:
+    """Keep the collector's public-bucket summary aligned with bucket models."""
+    infra.s3.public_buckets = [bucket.name for bucket in infra.s3.buckets if bucket.is_public]
+
+
 def _append_unique(values: list[str], value: str) -> None:
     if value not in values:
         values.append(value)
@@ -424,6 +429,8 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         _delete(result, resource_type, change.resource_id)
 
     _sync_counts(result)
+    if resource_type == "s3_bucket":
+        _sync_s3_public_buckets(result)
     return recompute_derived_state(
         result,
         reconcile_security_group_attachments=resource_type in {"ec2_instance", "security_group"}

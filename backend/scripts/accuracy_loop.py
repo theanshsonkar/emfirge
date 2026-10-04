@@ -175,9 +175,6 @@ def run_harness() -> dict[str, Any]:
                     branch_ids.append(branch_id)
                     branches.apply_change_to_branch(branch_id, change)
                     reality = branches.rebuild_branch_infra(branch_id)
-                    # S3's public_buckets is a derived collector summary; derive it from
-                    # the rebuilt authoritative bucket before native rules evaluate reality.
-                    reality.s3.public_buckets = [b.name for b in reality.s3.buckets if b.is_public]
                     actual = combined_verdict(base, reality, run_scanners=False)
                     record = _scenario_prediction(name, base, reality, actual, target,
                                                    change.resource_type, rule_id)

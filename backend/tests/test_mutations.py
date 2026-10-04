@@ -34,6 +34,24 @@ def test_modify_ec2_preserves_other_fields_and_is_pure(clean_infra):
     assert changed.sg_ids == original.sg_ids and changed.type == original.type
 
 
+def test_modify_s3_public_flag_rebuilds_public_bucket_summary(clean_infra):
+    clean_infra.s3.public_buckets = ["stale-summary"]
+    base = clean_infra.model_dump()
+
+    exposed = apply_change(clean_infra, Change(
+        op="modify", resource_type="s3_bucket", resource_id="my-app-data",
+        fields={"is_public": True},
+    ))
+    assert exposed.s3.public_buckets == ["my-app-data"]
+
+    secured = apply_change(exposed, Change(
+        op="modify", resource_type="s3_bucket", resource_id="my-app-data",
+        fields={"is_public": False},
+    ))
+    assert secured.s3.public_buckets == []
+    assert clean_infra.model_dump() == base
+
+
 def test_delete_ec2_cleans_relationships_and_count(clean_infra):
     result = apply_change(clean_infra, Change(op="delete", resource_type="ec2_instance", resource_id="i-001"))
     assert "i-001" not in result.ec2.instance_ids
