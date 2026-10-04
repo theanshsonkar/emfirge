@@ -6,7 +6,10 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.demo_seed import build_demo_infrastructure
-from app.models import AWSInfrastructure, EC2Data, EC2Instance, S3Bucket, S3Data
+from app.models import (
+    AccessStatement, AWSInfrastructure, EC2Data, EC2Instance, IAMData,
+    RolePolicy, S3Bucket, S3Data,
+)
 from app.verdict import CombinedVerdict
 
 
@@ -62,6 +65,34 @@ def test_add_change_and_diff():
     assert response.json()["num_changes"] == 1
     assert diff_response.status_code == 200
     assert diff_response.json()["score_delta"] == 1
+
+
+def test_agent_can_replace_collected_role_statements_on_branch():
+    reset_limiter()
+    role_arn = "arn:aws:iam::000000000000:role/AppRole"
+    base = AWSInfrastructure(iam=IAMData(role_policies=[RolePolicy(
+        role_name="AppRole",
+        role_arn=role_arn,
+        access_statements=[AccessStatement(
+            effect="allow", actions=["s3:GetObject"], resources=["*"],
+        )],
+    )]))
+    changed = branch(changes=[{"op": "modify", "resource_type": "iam_role_policy"}])
+    with patch("app.main.branches.get_branch", return_value=branch(base=base)), \
+         patch("app.main.branches.rebuild_branch_infra", return_value=base), \
+         patch("app.main.branches.apply_change_to_branch", return_value=changed) as persist:
+        response = client.post("/branches/b-1/changes", json={
+            "op": "modify",
+            "resource_type": "iam_role_policy",
+            "resource_id": role_arn,
+            "fields": {"access_statements": []},
+        })
+
+    assert response.status_code == 200
+    assert response.json()["num_changes"] == 1
+    persisted_change = persist.call_args.args[1]
+    assert persisted_change.resource_type == "iam_role_policy"
+    assert persisted_change.fields == {"access_statements": []}
 
 
 def test_invalid_change_returns_422_without_persistence():

@@ -2,14 +2,19 @@ import copy
 
 from app.diffing import diff_infrastructure
 from app.models import (
+    AccessStatement,
     AWSInfrastructure,
     EC2Data,
     EC2Instance,
+    IAMData,
     NetworkACL,
     NACLEntry,
     Route,
     RouteTable,
     SecurityGroup,
+    S3Bucket,
+    S3Data,
+    RolePolicy,
     VPCData,
     VPCSubnet,
 )
@@ -134,3 +139,34 @@ def test_repeated_diff_is_deterministic_and_does_not_mutate_inputs():
     assert first.model_dump() == second.model_dump()
     assert base.model_dump_json() == base_before
     assert branch.model_dump_json() == branch_before
+
+
+def test_iam_policy_replacement_diffs_access_edge_and_reports_scope_warning():
+    role_arn = "arn:aws:iam::000000000000:role/AppRole"
+    base = AWSInfrastructure(
+        s3=S3Data(buckets=[S3Bucket(name="reports")]),
+        iam=IAMData(role_policies=[RolePolicy(
+            role_name="AppRole",
+            role_arn=role_arn,
+            access_statements=[AccessStatement(
+                effect="allow", actions=["s3:GetObject"], resources=["arn:aws:s3:::reports/*"],
+            )],
+        )]),
+    )
+    branch = apply_change(base, Change(
+        op="modify", resource_type="iam_role_policy", resource_id=role_arn,
+        fields={"access_statements": []},
+    ))
+
+    result = diff_infrastructure(base, branch)
+
+    assert {tuple(edge.values()) for edge in result.removed_edges} >= {
+        ("iam-role-AppRole", "reports", "can_access"),
+    }
+    assert result.lost_dependencies == [{
+        "from": "iam-role-AppRole", "to": "reports", "relationship": "can_access",
+    }]
+    assert len(result.coverage_warnings) == 1
+    assert "SCPs" in result.coverage_warnings[0]
+    IAMData,
+    RolePolicy,

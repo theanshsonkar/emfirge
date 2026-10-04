@@ -227,7 +227,7 @@ def combined_verdict(
 
     scanner_available = False
     scanner_status: dict[str, str] = {}
-    coverage_warnings: list[str] = []
+    coverage_warnings: list[str] = list(diff.coverage_warnings)
     collection_warnings = sorted({
         str(item).strip()
         for infra in (base_infra, branch_infra)

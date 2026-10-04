@@ -23,6 +23,7 @@ class DiffResult(BaseModel):
     added_edges: list[dict] = Field(default_factory=list)
     removed_edges: list[dict] = Field(default_factory=list)
     lost_dependencies: list[dict] = Field(default_factory=list)
+    coverage_warnings: list[str] = Field(default_factory=list)
     added_findings: list[dict] = Field(default_factory=list)
     removed_findings: list[dict] = Field(default_factory=list)
     score_before: int = 0
@@ -148,11 +149,30 @@ def _finding_sort(item: dict) -> tuple[str, str, str]:
     return (item["rule_id"], item["resource_id"], item["severity"])
 
 
+def _iam_policy_changed(base_infra: Any, branch_infra: Any) -> bool:
+    """Detect changes to the collected, normalized role-policy model."""
+    def policies(infra: Any) -> dict[str, Any]:
+        iam = _value(infra, "iam", {})
+        role_policies = _value(iam, "role_policies", []) or []
+        return {
+            str(_value(policy, "role_arn", "")): _canonical_json(policy)
+            for policy in role_policies
+        }
+
+    return policies(base_infra) != policies(branch_infra)
+
+
 def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     """Compare infrastructure snapshots without mutating either input."""
     base_graph = build_graph(base_infra)
     branch_graph = build_graph(branch_infra)
     graph_diff = diff_graphs(base_graph, branch_graph)
+    coverage_warnings = []
+    if _iam_policy_changed(base_infra, branch_infra):
+        coverage_warnings.append(
+            "IAM policy impact is a graph approximation; Organizations SCPs, permissions boundaries, "
+            "resource policies, session policies, and full condition evaluation are outside this model"
+        )
     # These edges describe a modeled consumer/capability. Losing one can break
     # a workload even when removing the target also clears security findings.
     # Keep this separate from generic removed edges (containment, exposure,
@@ -187,6 +207,7 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     return DiffResult(
         **graph_diff,
         lost_dependencies=lost_dependencies,
+        coverage_warnings=coverage_warnings,
         added_findings=added_findings,
         removed_findings=removed_findings,
         score_before=int(base_score),

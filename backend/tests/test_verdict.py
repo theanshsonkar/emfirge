@@ -177,6 +177,18 @@ def test_scanners_off_still_gives_a_real_native_verdict(monkeypatch, infra):
     assert result.coverage_warnings, "scanners-off is still reported on a block"
 
 
+def test_modeling_warnings_from_diff_are_preserved_in_verdict(monkeypatch, infra):
+    warning = "IAM policy impact is a graph approximation; Organizations SCPs are outside this model"
+    monkeypatch.setattr(
+        "app.verdict.diff_infrastructure",
+        lambda base, branch: DiffResult(coverage_warnings=[warning]),
+    )
+
+    result = combined_verdict(infra, infra, run_scanners=False)
+
+    assert warning in result.coverage_warnings
+
+
 def test_scanner_unavailable_keeps_native_only(monkeypatch, infra):
     patch_diff(monkeypatch, added_findings=[{"rule_id": "native", "resource_id": "r", "severity": "LOW"}])
     patch_non_checkov_scanners_unavailable(monkeypatch)

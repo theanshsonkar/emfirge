@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, Type
 from pydantic import BaseModel, Field
 
 from app.models import (
+    AccessStatement,
     AWSInfrastructure,
     EC2Instance,
     LambdaFunction,
@@ -20,7 +21,7 @@ from app.models import (
 
 
 SUPPORTED_RESOURCE_TYPES = frozenset(
-    {"ec2_instance", "security_group", "rds_instance", "s3_bucket", "lambda_function"}
+    {"ec2_instance", "security_group", "rds_instance", "s3_bucket", "lambda_function", "iam_role_policy"}
 )
 SUPPORTED_OPERATIONS = frozenset({"add", "modify", "delete"})
 
@@ -44,6 +45,8 @@ def _validate_change(change: Change) -> None:
         raise ValueError(f"Unsupported resource type: {change.resource_type}")
     if not isinstance(change.fields, dict):
         raise ValueError("Change fields must be a dictionary")
+    if change.resource_type == "iam_role_policy" and change.op != "modify":
+        raise ValueError("iam_role_policy supports modify only")
 
 
 def _model_for(resource_type: str) -> Type[BaseModel]:
@@ -208,6 +211,38 @@ def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> N
             _remove_value(values, resource_id)
 
 
+def _replace_iam_role_policy_statements(
+    infra: AWSInfrastructure, change: Change
+) -> None:
+    """Replace the normalized identity-policy statement view for one collected role.
+
+    This deliberately does not accept raw IAM policy documents or create/delete
+    roles. Replacing statements clears collector-derived shortcuts so graph
+    derivation uses only the supplied normalized statements on this branch.
+    """
+    if change.op != "modify":
+        raise ValueError("iam_role_policy supports modify only")
+    if set(change.fields) != {"access_statements"}:
+        raise ValueError("iam_role_policy modify requires only access_statements")
+    statements = change.fields["access_statements"]
+    if not isinstance(statements, list):
+        raise ValueError("access_statements must be a list replacing the complete normalized statement set")
+
+    matches = [policy for policy in infra.iam.role_policies if policy.role_arn == change.resource_id]
+    if not matches:
+        raise ValueError(f"Target not found: iam_role_policy/{change.resource_id}")
+    if len(matches) != 1:
+        raise ValueError("IAM role policy target is ambiguous; role ARN must identify exactly one collected role")
+
+    policy = matches[0]
+    policy.access_statements = [AccessStatement.model_validate(statement) for statement in statements]
+    # Do not let stale collector summaries override an empty/replaced statement
+    # set in egraph.build_graph's legacy fallback path.
+    policy.has_admin = False
+    policy.accessible_resources = []
+    policy.policy_names = []
+
+
 def recompute_derived_state(infra: AWSInfrastructure) -> AWSInfrastructure:
     """Recompute EC2 internet-exposure summaries from authoritative resources."""
     attached_sg_ids = {
@@ -255,6 +290,10 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     _validate_change(change)
     result = _fresh(infra)
     resource_type = change.resource_type
+    if resource_type == "iam_role_policy":
+        _replace_iam_role_policy_statements(result, change)
+        return result
+
     model_type = _model_for(resource_type)
 
     if change.op == "add":

@@ -35,13 +35,13 @@ export async function createBranchHandler(args: CreateBranchArgs) {
 
 export const applyChangeSchema = {
   branch_id: z.string().min(1).describe("Branch ID returned by emfirge_create_branch"),
-  op: z.enum(["add", "modify", "delete"]).describe("Change operation to apply"),
-  resource_type: z.string().min(1).describe("Type of infrastructure resource"),
-  resource_id: z.string().min(1).describe("ID of the resource to change"),
+  op: z.enum(["add", "modify", "delete"]).describe("Change operation to apply; iam_role_policy currently supports modify only"),
+  resource_type: z.string().min(1).describe("Infrastructure type; iam_role_policy replaces the complete normalized access_statements list for an existing role ARN"),
+  resource_id: z.string().min(1).describe("Resource ID; use the collected role ARN for iam_role_policy"),
   fields: z
     .record(z.string(), z.unknown())
     .optional()
-    .describe("Fields to add or modify; omit for delete or when no fields are needed"),
+    .describe("Fields to add or modify; for iam_role_policy, provide only access_statements as the complete replacement statement list"),
 };
 
 export const applyChangeZodObject = z.object(applyChangeSchema);

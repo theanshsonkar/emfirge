@@ -4,7 +4,7 @@ import re
 import pytest
 
 from app.egraph import build_graph
-from app.models import AWSInfrastructure, LambdaFunction, RDSInstance
+from app.models import AccessStatement, AWSInfrastructure, IAMData, LambdaFunction, RDSInstance, RolePolicy
 from app.mutations import Change, apply_change, apply_changes
 
 
@@ -104,6 +104,54 @@ def test_add_storage_database_and_lambda_updates_collections(empty_infra):
     assert result.s3.total_buckets == 1 and result.s3.buckets[0].name == "bucket-new"
     assert result.rds.instances == ["db-new"] and result.rds.rds_instances[0].id == "db-new"
     assert result.lambda_data.function_count == 1 and result.lambda_data.functions[0].name == "fn-new"
+
+
+def test_modify_iam_role_policy_replaces_normalized_statements_without_mutating_base():
+    role_arn = "arn:aws:iam::000000000000:role/AppRole"
+    base = AWSInfrastructure(iam=IAMData(role_policies=[RolePolicy(
+        role_name="AppRole",
+        role_arn=role_arn,
+        has_admin=True,
+        accessible_resources=["*"],
+        policy_names=["AdministratorAccess"],
+        access_statements=[AccessStatement(
+            effect="allow", actions=["*"], resources=["*"],
+        )],
+    )]))
+
+    result = apply_change(base, Change(
+        op="modify",
+        resource_type="iam_role_policy",
+        resource_id=role_arn,
+        fields={"access_statements": [
+            {"effect": "allow", "actions": ["s3:GetObject"], "resources": ["arn:aws:s3:::reports/*"]},
+        ]},
+    ))
+
+    assert base.iam.role_policies[0].has_admin is True
+    changed = result.iam.role_policies[0]
+    assert changed.access_statements[0].actions == ["s3:GetObject"]
+    assert changed.has_admin is False
+    assert changed.accessible_resources == []
+    assert changed.policy_names == []
+
+
+@pytest.mark.parametrize(
+    ("op", "fields", "message"),
+    [
+        ("add", {"access_statements": []}, "modify only"),
+        ("modify", {"has_admin": True}, "requires only access_statements"),
+        ("modify", {"access_statements": "not-a-list"}, "must be a list"),
+    ],
+)
+def test_iam_role_policy_rejects_unsupported_or_ambiguous_mutation_shapes(clean_infra, op, fields, message):
+    with pytest.raises(ValueError, match=message):
+        apply_change(clean_infra, Change(
+            op=op,
+            resource_type="iam_role_policy",
+            resource_id="arn:aws:iam::000000000000:role/AppRole",
+            fields=fields,
+        ))
 
 
 def test_stacked_add_modify_delete(empty_infra):
