@@ -124,6 +124,7 @@ def test_identical_infrastructure_is_a_no_op():
     assert result.added_findings == result.removed_findings == []
     assert result.newly_internet_reachable == result.no_longer_internet_reachable == []
     assert result.score_delta == 0
+    assert result.modeled_state_unchanged is True
 
 
 def test_repeated_diff_is_deterministic_and_does_not_mutate_inputs():

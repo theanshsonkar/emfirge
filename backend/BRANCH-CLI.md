@@ -35,6 +35,8 @@ python backend/scripts/emfirge-branch.py compare BRANCH_ID OTHER_BRANCH_ID
 
 For concurrent agents, pass `--expected-count` on both `apply` and `rollback`, using the most recent branch change response or the `num_changes` field returned by `list`. A stale count returns HTTP 409; reload the branch before retrying. Omitting this option remains supported for single-agent workflows.
 
+The change response includes `modeled_state_unchanged`, comparing the rebuilt branch immediately before and after that proposed change. The `diff` and `verdict` responses expose the same field for the whole branch compared with its base. It is `true` only when the complete normalized infrastructure models are identical; `false` does not guarantee a graph, finding, or verdict change because some modeled fields may not appear in those views. A redundant change remains recorded in the branch history.
+
 ## Local tests
 
 From `backend/`, run `python -m pytest -q tests/test_branch_cli.py`. Tests use a temporary HTTP server bound to loopback and do not contact a hosted API or AWS.

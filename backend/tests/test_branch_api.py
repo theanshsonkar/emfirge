@@ -68,6 +68,47 @@ def test_add_change_and_diff():
     assert diff_response.json()["score_delta"] == 1
 
 
+def test_no_op_change_is_reported_in_change_diff_and_verdict_responses():
+    reset_limiter()
+    base = AWSInfrastructure(region="us-east-1", s3=S3Data(total_buckets=1,
+        buckets=[S3Bucket(name="bucket", encrypted=True)],
+    ))
+    changed = branch(changes=[{
+        "op": "modify", "resource_type": "s3_bucket", "resource_id": "bucket",
+        "fields": {"encrypted": True},
+    }], base=base)
+    diff = {
+        "added_nodes": [], "removed_nodes": [], "modified_nodes": [], "added_edges": [],
+        "removed_edges": [], "lost_dependencies": [], "coverage_warnings": [],
+        "added_findings": [], "removed_findings": [], "score_before": 1,
+        "score_after": 1, "score_delta": 0, "newly_internet_reachable": [],
+        "no_longer_internet_reachable": [], "modeled_state_unchanged": True,
+    }
+    with patch("app.main.branches.get_branch", return_value=branch(base=base)), \
+         patch("app.main.branches.rebuild_branch_infra", return_value=base), \
+         patch("app.main.branches.apply_change_to_branch", return_value=changed), \
+         patch("app.main.branches.get_branch_diff", return_value=diff), \
+         patch("app.main.combined_verdict", return_value=CombinedVerdict(
+             verdict="pass", summary="no modeled change", modeled_state_unchanged=True,
+         )):
+        apply_response = client.post("/branches/b-1/changes", json={
+            "op": "modify", "resource_type": "s3_bucket", "resource_id": "bucket",
+            "fields": {"encrypted": True},
+        })
+        diff_response = client.get("/branches/b-1/diff")
+        verdict_response = client.get("/branches/b-1/verdict")
+
+    assert apply_response.status_code == 200
+    assert apply_response.json() == {
+        "branch_id": "b-1", "num_changes": 1, "modeled_state_unchanged": True,
+    }
+    assert diff_response.status_code == 200
+    assert diff_response.json()["modeled_state_unchanged"] is True
+    assert verdict_response.status_code == 200
+    assert verdict_response.json()["verdict"] == "pass"
+    assert verdict_response.json()["modeled_state_unchanged"] is True
+
+
 def test_agent_can_replace_collected_role_statements_on_branch():
     reset_limiter()
     role_arn = "arn:aws:iam::000000000000:role/AppRole"

@@ -30,7 +30,7 @@ from app.models import (
     TFIndexRequest, TFIndexResponse, TFIndexStatusResponse,
     CIAnalyzeRequest, CIAnalyzeResponse, CIAPIKeyRequest, CIAPIKeyResponse,
 )
-from app.diffing import DiffResult
+from app.diffing import DiffResult, modeled_state_unchanged
 from app.mutations import Change, apply_change
 from app.verdict import CombinedVerdict, combined_verdict
 from app import branches
@@ -1309,7 +1309,8 @@ def add_branch_change_endpoint(branch_id: str, change: Change, request: Request)
         if current_branch.status != 'open':
             raise ValueError(f"Branch is not open: {branch_id}")
         rebuilt = branches.rebuild_branch_infra(branch_id)
-        apply_change(rebuilt, change)
+        proposed = apply_change(rebuilt, change)
+        unchanged = modeled_state_unchanged(rebuilt, proposed)
         branch = branches.apply_change_to_branch(branch_id, change)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -1318,7 +1319,11 @@ def add_branch_change_endpoint(branch_id: str, change: Change, request: Request)
     except ValueError as exc:
         status_code = 409 if str(exc).startswith('Branch is not open:') else 422
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
-    return {'branch_id': branch.branch_id, 'num_changes': len(branch.changes)}
+    return {
+        'branch_id': branch.branch_id,
+        'num_changes': len(branch.changes),
+        'modeled_state_unchanged': unchanged,
+    }
 
 
 @app.get('/branches/{branch_id}/diff', response_model=DiffResult, dependencies=[Depends(require_api_key)])

@@ -84,6 +84,24 @@ def test_dangerous_change_is_reachable_and_safe_change_passes(demo_branch_db):
     assert first == second
 
 
+def test_redundant_demo_change_is_explicitly_unchanged(demo_branch_db):
+    base = build_demo_infrastructure()
+    branch_id = branches.create_branch(base, "already-versioned", base_analysis_id="demo")
+    unchanged_value = Change(
+        op="modify", resource_type="s3_bucket",
+        resource_id="emfirge-demo-artifacts-000000000000",
+        fields={"versioning_enabled": True},
+    )
+    branches.apply_change_to_branch(branch_id, unchanged_value)
+
+    diff = branches.get_branch_diff(branch_id)
+    result = combined_verdict(base, branches.rebuild_branch_infra(branch_id), run_scanners=False)
+
+    assert diff.modeled_state_unchanged is True
+    assert result.verdict == "pass"
+    assert result.modeled_state_unchanged is True
+
+
 def test_compare_branches_ranks_safe_first_and_rollback_is_deterministic(demo_branch_db):
     base = build_demo_infrastructure()
     dangerous = branches.create_branch(base, "dangerous-ssh", base_analysis_id="demo")

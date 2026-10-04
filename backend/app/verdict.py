@@ -19,6 +19,8 @@ Severity = Literal["critical", "high", "medium", "low"]
 
 class CombinedVerdict(BaseModel):
     verdict: Literal["pass", "warn", "block"]
+    # True only when the complete modeled infrastructure snapshots are equal.
+    modeled_state_unchanged: bool = False
     native_added: list[dict[str, Any]] = Field(default_factory=list)
     native_removed: list[dict[str, Any]] = Field(default_factory=list)
     scanner_added: list[dict[str, Any]] = Field(default_factory=list)
@@ -356,6 +358,7 @@ def combined_verdict(
     )
     return CombinedVerdict(
         verdict=verdict,
+        modeled_state_unchanged=diff.modeled_state_unchanged,
         native_added=native_added,
         native_removed=native_removed,
         scanner_added=scanner_added,

@@ -31,6 +31,9 @@ class DiffResult(BaseModel):
     score_delta: int = 0
     newly_internet_reachable: list[str] = Field(default_factory=list)
     no_longer_internet_reachable: list[str] = Field(default_factory=list)
+    # True only when the complete canonical infrastructure snapshots match.
+    # A false value may reflect modeled data not represented in graph deltas.
+    modeled_state_unchanged: bool = False
 
 
 _LAYER_FIELDS = ("base", "security", "cost", "limits", "telemetry")
@@ -65,6 +68,11 @@ def _canonical_value(value: Any) -> Any:
 
 def _canonical_json(value: Any) -> str:
     return json.dumps(_canonical_value(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def modeled_state_unchanged(before: Any, after: Any) -> bool:
+    """Return true only when complete normalized infrastructure models match."""
+    return _canonical_json(before) == _canonical_json(after)
 
 
 def _node_structure(node: Any) -> tuple[str, str]:
@@ -215,4 +223,5 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
         score_delta=int(branch_score) - int(base_score),
         newly_internet_reachable=sorted(branch_reachable - base_reachable),
         no_longer_internet_reachable=sorted(base_reachable - branch_reachable),
+        modeled_state_unchanged=modeled_state_unchanged(base_infra, branch_infra),
     )
