@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
 from app import branches, database
-from app.models import AWSInfrastructure
+from app.models import AWSInfrastructure, RouteTable, VPCData
 from app.mutations import Change
 
 
@@ -299,6 +299,27 @@ def test_stale_agent_change_count_rejects_append_and_preserves_history(branch_db
     assert len(branches.get_branch(branch_id).changes) == 1
     assert branches.get_branch(branch_id).changes[0].expected_change_count is None
     assert [bucket.name for bucket in branches.rebuild_branch_infra(branch_id).s3.buckets] == ["first-bucket"]
+
+
+def test_invented_igw_route_rejection_does_not_persist_a_branch_change(branch_db):
+    base = AWSInfrastructure(vpc=VPCData(route_tables=[RouteTable(
+        id="rtb-branch-guard", vpc_id="vpc-branch-guard",
+    )]))
+    branch_id = branches.create_branch(base, "reject-invented-igw")
+
+    with pytest.raises(ValueError, match="not present in the collected VPC snapshot"):
+        branches.apply_change_to_branch(branch_id, Change(
+            op="modify", resource_type="route_table", resource_id="rtb-branch-guard",
+            fields={"routes": [{
+                "destination_cidr": "0.0.0.0/0",
+                "target_type": "internet_gateway",
+                "target_id": "igw-fabricated",
+            }]},
+        ))
+
+    branch = branches.get_branch(branch_id)
+    assert branch.changes == []
+    assert branches.rebuild_branch_infra(branch_id).vpc.route_tables[0].routes == []
 
 
 def test_stale_branch_revision_rejects_same_count_different_history(branch_db):

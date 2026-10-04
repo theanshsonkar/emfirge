@@ -423,6 +423,19 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
     destinations = [route.destination_cidr for route in normalized]
     if len(destinations) != len(set(destinations)):
         raise ValueError("routes cannot contain duplicate destination_cidr values")
+    existing_igw_routes = {
+        (route.destination_cidr, route.target_id)
+        for route in matches[0].routes
+        if route.target_type.lower() == "internet_gateway"
+    }
+    known_igw_ids = set(infra.vpc.internet_gateways)
+    for route in normalized:
+        if (route.target_type.lower() == "internet_gateway"
+                and route.target_id not in known_igw_ids
+                and (route.destination_cidr, route.target_id) not in existing_igw_routes):
+            raise ValueError(
+                f"Internet gateway target is not present in the collected VPC snapshot: {route.target_id}"
+            )
     matches[0].routes = normalized
     _sync_route_table_public_subnets(infra)
 

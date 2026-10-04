@@ -363,6 +363,37 @@ def test_route_table_rejects_partial_or_association_mutations():
         ))
 
 
+def test_route_table_rejects_invented_igw_but_preserves_collected_route_when_coverage_is_incomplete():
+    base = AWSInfrastructure(
+        warnings=["Internet Gateways check skipped: AccessDenied"],
+        vpc=VPCData(route_tables=[RouteTable(
+            id="rt-igw-guard", vpc_id="vpc-igw-guard",
+            routes=[Route(destination_cidr="0.0.0.0/0",
+                          target_type="internet_gateway", target_id="igw-unobserved")],
+        )]),
+    )
+
+    preserved = apply_change(base, Change(
+        op="modify", resource_type="route_table", resource_id="rt-igw-guard",
+        fields={"routes": [{
+            "destination_cidr": "0.0.0.0/0",
+            "target_type": "internet_gateway",
+            "target_id": "igw-unobserved",
+        }]},
+    ))
+    assert preserved.vpc.route_tables[0].routes[0].target_id == "igw-unobserved"
+
+    with pytest.raises(ValueError, match="not present in the collected VPC snapshot"):
+        apply_change(preserved, Change(
+            op="modify", resource_type="route_table", resource_id="rt-igw-guard",
+            fields={"routes": [{
+                "destination_cidr": "0.0.0.0/0",
+                "target_type": "internet_gateway",
+                "target_id": "igw-invented",
+            }]},
+        ))
+
+
 def test_modify_iam_role_policy_replaces_normalized_statements_without_mutating_base():
     role_arn = "arn:aws:iam::000000000000:role/AppRole"
     base = AWSInfrastructure(iam=IAMData(role_policies=[RolePolicy(
