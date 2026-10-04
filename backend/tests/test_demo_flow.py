@@ -123,3 +123,16 @@ def test_agent_sees_lost_capability_before_and_after_rollback(demo_branch_db):
     restored = combined_verdict(base, branches.rebuild_branch_infra(branch_id), run_scanners=False)
     assert restored.verdict == "pass"
     assert restored.lost_dependencies == []
+
+
+def test_agent_compare_does_not_rank_dependency_loss_above_safe_fix(demo_branch_db):
+    base = build_demo_infrastructure()
+    delete_id = branches.create_branch(base, "remove-artifacts", base_analysis_id="demo")
+    safe_id = branches.create_branch(base, "encrypt-artifacts", base_analysis_id="demo")
+    branches.apply_change_to_branch(delete_id, delete_artifacts_change())
+    branches.apply_change_to_branch(safe_id, safe_change())
+
+    comparison = branches.compare_branches([delete_id, safe_id])
+    assert comparison.ranking == [safe_id, delete_id]
+    assert comparison.branches[0].lost_dependencies == 1
+    assert comparison.branches[1].lost_dependencies == 0

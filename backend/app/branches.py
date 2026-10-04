@@ -52,6 +52,7 @@ class BranchSummary(BaseModel):
     no_longer_internet_reachable: int
     added_findings: int
     removed_findings: int
+    lost_dependencies: int = 0
     has_privilege_escalation: bool
 
 
@@ -235,12 +236,14 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
             no_longer_internet_reachable=len(diff.no_longer_internet_reachable),
             added_findings=len(diff.added_findings),
             removed_findings=len(diff.removed_findings),
+            lost_dependencies=len(diff.lost_dependencies),
             has_privilege_escalation=has_privilege_escalation,
         ))
 
     ranked = sorted(
         summaries,
         key=lambda summary: (
+            bool(summary.lost_dependencies),
             -summary.score_after,
             summary.newly_internet_reachable,
             summary.name,
