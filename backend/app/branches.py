@@ -62,6 +62,7 @@ class ComparisonResult(BaseModel):
     ranking: List[str] = Field(default_factory=list)
     has_mixed_bases: bool = False
     base_analysis_ids: List[Optional[str]] = Field(default_factory=list)
+    comparison_warnings: List[str] = Field(default_factory=list)
 
 
 def _model_dump(value: Any) -> dict:
@@ -214,6 +215,7 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
 
     summaries: list[BranchSummary] = []
     base_analysis_ids: list[Optional[str]] = []
+    base_snapshots: list[str] = []
     for branch_id in branch_ids:
         branch = get_branch(branch_id)
         diff = get_branch_diff(branch_id)
@@ -225,6 +227,7 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
             for node in graph.nodes
         )
         base_analysis_ids.append(branch.base_analysis_id)
+        base_snapshots.append(json.dumps(_model_dump(branch.base), sort_keys=True, separators=(",", ":")))
         summaries.append(BranchSummary(
             branch_id=branch.branch_id,
             name=branch.name,
@@ -240,12 +243,13 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
             has_privilege_escalation=has_privilege_escalation,
         ))
 
+    mixed_bases = len(set(base_analysis_ids)) > 1 or len(set(base_snapshots)) > 1
     ranked = sorted(
         summaries,
         key=lambda summary: (
             bool(summary.lost_dependencies),
+            bool(summary.newly_internet_reachable),
             -summary.score_after,
-            summary.newly_internet_reachable,
             summary.name,
             summary.branch_id,
         ),
@@ -253,7 +257,11 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
     return ComparisonResult(
         base_analysis_id=base_analysis_ids[0],
         branches=summaries,
-        ranking=[summary.branch_id for summary in ranked],
-        has_mixed_bases=len(set(base_analysis_ids)) > 1,
+        ranking=[] if mixed_bases else [summary.branch_id for summary in ranked],
+        has_mixed_bases=mixed_bases,
         base_analysis_ids=base_analysis_ids,
+        comparison_warnings=(
+            ["Branches have different base snapshots or analysis IDs; ranking is unavailable"]
+            if mixed_bases else []
+        ),
     )

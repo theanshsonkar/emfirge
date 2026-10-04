@@ -204,6 +204,16 @@ def test_compare_is_deterministic_and_reports_mixed_base_metadata(branch_db):
     assert first_result.base_analysis_id == "a"
     assert first_result.base_analysis_ids == ["a", "b"]
     assert first_result.has_mixed_bases is True
+    assert first_result.ranking == []
+    assert first_result.comparison_warnings
+
+
+def test_compare_refuses_ranking_for_same_analysis_id_with_different_snapshots(branch_db):
+    first = branches.create_branch(AWSInfrastructure(region="us-east-1"), "first", base_analysis_id="a")
+    second = branches.create_branch(AWSInfrastructure(region="us-west-2"), "second", base_analysis_id="a")
+    result = branches.compare_branches([first, second])
+    assert result.has_mixed_bases is True
+    assert result.ranking == []
 
 
 def test_compare_empty_and_unknown_behavior(branch_db):
@@ -213,6 +223,7 @@ def test_compare_empty_and_unknown_behavior(branch_db):
         "ranking": [],
         "has_mixed_bases": False,
         "base_analysis_ids": [],
+        "comparison_warnings": [],
     }
     with pytest.raises(branches.BranchNotFoundError, match="Branch not found"):
         branches.compare_branches(["missing"])
