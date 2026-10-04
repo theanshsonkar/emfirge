@@ -218,11 +218,30 @@ def rollback_last(branch_id: str, expected_change_count: Optional[int] = None) -
     return _with_session(operation)
 
 
-def discard_branch(branch_id: str) -> Branch:
-    """Soft-delete a branch by marking it discarded."""
+def discard_branch(
+    branch_id: str, expected_change_count: Optional[int] = None,
+) -> Branch:
+    """Discard an open branch, optionally guarding the observed change count."""
     def operation(session):
         row = _load_branch(session, branch_id)
-        row.status = 'discarded'
+        previous_json = row.changes_json or '[]'
+        changes = json.loads(previous_json)
+        if expected_change_count is not None and expected_change_count != len(changes):
+            raise BranchConflictError(
+                f"Branch changed: expected {expected_change_count} change(s), found {len(changes)}"
+            )
+        if row.status != 'open':
+            if expected_change_count is None and row.status == 'discarded':
+                return _decode(row)
+            raise BranchConflictError(f"Branch is not open: {branch_id}")
+        updated = session.query(BranchLog).filter(
+            BranchLog.branch_id == branch_id,
+            BranchLog.status == 'open',
+            BranchLog.changes_json == previous_json,
+        ).update({BranchLog.status: 'discarded'}, synchronize_session=False)
+        if updated != 1:
+            raise BranchConflictError("Branch changed during discard; reload it and retry")
+        session.expire(row)
         return _decode(row)
 
     return _with_session(operation)

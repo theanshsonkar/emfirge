@@ -29,6 +29,7 @@ python backend/scripts/emfirge-branch.py list --analysis-id SCAN_ID
 python backend/scripts/emfirge-branch.py capabilities
 python backend/scripts/emfirge-branch.py verdict --branch-id BRANCH_ID
 python backend/scripts/emfirge-branch.py rollback --branch-id BRANCH_ID --expected-count 1
+python backend/scripts/emfirge-branch.py discard --branch-id BRANCH_ID --expected-count 1
 python backend/scripts/emfirge-branch.py compare BRANCH_ID OTHER_BRANCH_ID
 ```
 
@@ -36,7 +37,7 @@ python backend/scripts/emfirge-branch.py compare BRANCH_ID OTHER_BRANCH_ID
 
 `GET /branches/capabilities` and the `capabilities` CLI command return the machine-readable contract used by backend validation. Resource entries list supported operations and special constraints; for example, `iam_role_policy` supports only `modify`, replacing the complete normalized `access_statements` list for one existing role identified by role ARN. Treat this endpoint as authoritative when generating changes.
 
-For concurrent agents, pass `--expected-count` on both `apply` and `rollback`, using the most recent branch change response or the `num_changes` field returned by `list`. A stale count returns HTTP 409; reload the branch before retrying. Omitting this option remains supported for single-agent workflows.
+For concurrent agents, pass `--expected-count` on `apply`, `rollback`, and `discard`, using the most recent branch change response or the `num_changes` field returned by `list`. A stale count returns HTTP 409; reload the branch before retrying. Omitting this option remains supported for single-agent workflows.
 
 The change response includes `modeled_state_unchanged`, comparing the rebuilt branch immediately before and after that proposed change. The `diff` and `verdict` responses expose the same field for the whole branch compared with its base. It is `true` only when the complete normalized infrastructure models are identical; `false` does not guarantee a graph, finding, or verdict change because some modeled fields may not appear in those views. A redundant change remains recorded in the branch history.
 

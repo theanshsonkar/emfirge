@@ -118,6 +118,28 @@ test("apply_change expands tokenized ids nested inside fields", async () => {
   );
 });
 
+test("discard_branch forwards the optional observed change count", async () => {
+  assert.deepEqual(branches.discardBranchZodObject.parse({
+    branch_id: "b1", expected_change_count: 3,
+  }), { branch_id: "b1", expected_change_count: 3 });
+  assert.throws(() => branches.discardBranchZodObject.parse({
+    branch_id: "b1", expected_change_count: -1,
+  }));
+
+  const calls = stubFetch({ branch_id: "b1", status: "discarded" });
+
+  await branches.discardBranchHandler({
+    branch_id: "b1",
+    expected_change_count: 3,
+  });
+
+  assert.deepEqual(calls, [{
+    method: "POST",
+    url: "http://stub.invalid/api/branches/b1/discard",
+    body: { expected_change_count: 3 },
+  }]);
+});
+
 // ---------------------------------------------------------------------------
 // Bug 2 — every handler's output must go through redactDeep.
 // ---------------------------------------------------------------------------

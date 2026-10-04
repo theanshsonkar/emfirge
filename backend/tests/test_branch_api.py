@@ -2,6 +2,7 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app import branches
@@ -274,6 +275,32 @@ def test_rollback_discard_and_closed_change_conflict():
     assert rollback.json()["num_changes"] == 0
     assert discard.json() == {"branch_id": "b-1", "status": "discarded"}
     assert conflict.status_code == 409
+
+
+def test_discard_maps_stale_change_count_to_conflict():
+    reset_limiter()
+    with patch("app.main.branches.discard_branch",
+               side_effect=branches.BranchConflictError("Branch changed: expected 1 change(s), found 2")) as discard:
+        response = client.post("/branches/b-1/discard", json={"expected_change_count": 1})
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Branch changed: expected 1 change(s), found 2"
+    discard.assert_called_once_with("b-1", expected_change_count=1)
+
+
+@pytest.mark.parametrize("payload", [
+    {"expected_change_count": -1},
+    {"expected_change_count": True},
+    {"unexpected": 1},
+    ["expected_change_count"],
+])
+def test_discard_rejects_invalid_guard_payload(payload):
+    reset_limiter()
+    with patch("app.main.branches.discard_branch") as discard:
+        response = client.post("/branches/b-1/discard", json=payload)
+
+    assert response.status_code == 422
+    discard.assert_not_called()
 
 
 def test_compare_returns_ranking():

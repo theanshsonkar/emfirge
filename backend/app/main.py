@@ -1382,13 +1382,26 @@ def rollback_branch_endpoint(branch_id: str, request: Request, payload: Optional
 
 
 @app.post('/branches/{branch_id}/discard', dependencies=[Depends(require_api_key)])
-def discard_branch_endpoint(branch_id: str, request: Request):
+def discard_branch_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
     _check_branch_rate_limit(_branch_request_ip(request))
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail='Request body must be an object')
+    if set(payload) - {'expected_change_count'}:
+        raise HTTPException(status_code=422, detail='Only expected_change_count is supported')
+    expected_count = payload.get('expected_change_count')
+    if expected_count is not None and (type(expected_count) is not int or expected_count < 0):
+        raise HTTPException(status_code=422, detail='expected_change_count must be a non-negative integer')
     try:
-        branch = branches.discard_branch(branch_id)
+        branch = branches.discard_branch(branch_id, expected_change_count=expected_count)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except branches.BranchConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {'branch_id': branch.branch_id, 'status': branch.status}
+
+
 @app.post('/remediation/verify-fix', response_model=VerifyFixResponse, dependencies=[Depends(require_api_key)])
 def verify_fix(request: VerifyFixRequest, http_request: Request):
     """

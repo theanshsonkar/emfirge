@@ -103,14 +103,19 @@ export async function rollbackBranchHandler(args: RollbackBranchArgs) {
   return ok(result);
 }
 
-export const discardBranchZodObject = z.object(branchIdSchema);
+export const discardBranchZodObject = z.object({
+  ...branchIdSchema,
+  expected_change_count: z.number().int().nonnegative().optional().describe("Optional observed change count; stale discard fails with HTTP 409"),
+});
 export type DiscardBranchArgs = z.infer<typeof discardBranchZodObject>;
 
 export async function discardBranchHandler(args: DiscardBranchArgs) {
   const result = await backendCall(
     "POST",
     `/branches/${encodeURIComponent(args.branch_id)}/discard`,
-    {},
+    args.expected_change_count === undefined
+      ? {}
+      : { expected_change_count: args.expected_change_count },
   );
   return ok(result);
 }

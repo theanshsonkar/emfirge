@@ -54,7 +54,7 @@ Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 - `emfirge_branch_diff` — show the infrastructure diff against the base analysis.
 - `emfirge_branch_verdict` — evaluate an advisory `block`, `warn`, or `pass` verdict with coverage details.
 - `emfirge_rollback_branch` — remove the most recent modeled change.
-- `emfirge_discard_branch` — discard an isolated branch.
+- `emfirge_discard_branch` — discard an isolated branch; optionally pass `expected_change_count` to reject a stale discard with HTTP 409.
 - `emfirge_list_branches` — list branches, optionally filtered by base analysis ID.
 - `emfirge_compare_branches` — compare branch models and rank outcomes safest-first.
 

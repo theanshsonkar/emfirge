@@ -122,6 +122,29 @@ def test_stale_agent_cannot_rollback_another_agents_change(branch_db):
     assert len(branches.rollback_last(branch_id, expected_change_count=2).changes) == 1
 
 
+def test_stale_agent_cannot_discard_after_another_append(branch_db):
+    branch_id = branches.create_branch(AWSInfrastructure(region="us-east-1"), "shared")
+    branches.apply_change_to_branch(branch_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="first-bucket",
+        expected_change_count=0,
+    ))
+    branches.apply_change_to_branch(branch_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="second-bucket",
+        expected_change_count=1,
+    ))
+
+    with pytest.raises(branches.BranchConflictError, match="expected 1 change.*found 2"):
+        branches.discard_branch(branch_id, expected_change_count=1)
+    still_open = branches.get_branch(branch_id)
+    assert still_open.status == "open"
+    assert len(still_open.changes) == 2
+
+    discarded = branches.discard_branch(branch_id, expected_change_count=2)
+    assert discarded.status == "discarded"
+    # The legacy no-body request stays idempotent.
+    assert branches.discard_branch(branch_id).status == "discarded"
+
+
 
 def test_branch_limit_is_per_base_and_discard_frees_slot(branch_db, monkeypatch):
     monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 2)
