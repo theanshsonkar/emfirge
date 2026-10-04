@@ -67,6 +67,7 @@ def test_get_branch_endpoint_returns_ordered_changes_without_base():
     reset_limiter()
     detail = branches.BranchDetail(
         branch_id="b-1", name="inspect", status="open", base_analysis_id="a-1",
+        branch_revision="a" * 64,
         num_changes=2, changes=[
             {"op": "add", "resource_type": "s3_bucket", "resource_id": "one", "fields": {}},
             {"op": "delete", "resource_type": "s3_bucket", "resource_id": "two", "fields": {}},
@@ -182,6 +183,30 @@ def test_no_op_change_is_reported_in_change_diff_and_verdict_responses():
     assert verdict_response.status_code == 200
     assert verdict_response.json()["verdict"] == "pass"
     assert verdict_response.json()["modeled_state_unchanged"] is True
+
+
+def test_inspect_diff_and_verdict_share_the_loaded_branch_revision():
+    reset_limiter()
+    loaded = branches.Branch(
+        branch_id="b-revision", name="snapshot", base=AWSInfrastructure(region="us-east-1"),
+        status="open", changes=[Change(
+            op="add", resource_type="s3_bucket", resource_id="revision-bucket",
+        )],
+    )
+    expected_revision = branches.branch_revision(loaded)
+    with patch("app.main.branches.get_branch", return_value=loaded), \
+         patch("app.branches.diff_infrastructure", return_value=branches.DiffResult()), \
+         patch("app.main.combined_verdict", return_value=CombinedVerdict(
+             verdict="pass", summary="ok",
+         )):
+        inspect_response = client.get("/branches/b-revision")
+        diff_response = client.get("/branches/b-revision/diff")
+        verdict_response = client.get("/branches/b-revision/verdict")
+
+    assert inspect_response.status_code == diff_response.status_code == verdict_response.status_code == 200
+    assert inspect_response.json()["branch_revision"] == expected_revision
+    assert diff_response.json()["branch_revision"] == expected_revision
+    assert verdict_response.json()["branch_revision"] == expected_revision
 
 
 def test_agent_can_replace_collected_role_statements_on_branch():

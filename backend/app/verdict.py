@@ -19,6 +19,7 @@ Severity = Literal["critical", "high", "medium", "low"]
 
 class CombinedVerdict(BaseModel):
     verdict: Literal["pass", "warn", "block"]
+    branch_revision: str | None = None
     # True only when the complete modeled infrastructure snapshots are equal.
     modeled_state_unchanged: bool = False
     native_added: list[dict[str, Any]] = Field(default_factory=list)

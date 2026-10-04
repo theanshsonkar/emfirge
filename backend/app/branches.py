@@ -8,6 +8,7 @@ remain queryable but cannot accept new changes.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import uuid
 from typing import Any, List, Optional
@@ -65,11 +66,13 @@ class BranchDetail(BaseModel):
     base_analysis_id: Optional[str] = None
     num_changes: int
     changes: list[BranchChangeRecord] = Field(default_factory=list)
+    branch_revision: str
 
 
 class BranchSummary(BaseModel):
     branch_id: str
     name: str
+    branch_revision: str
     score_after: int
     score_delta: int
     added_nodes: int
@@ -97,6 +100,21 @@ def _model_dump(value: Any) -> dict:
     if isinstance(value, AWSInfrastructure):
         return value.model_dump(mode="json")
     return AWSInfrastructure.model_validate(value).model_dump(mode="json")
+
+
+def branch_revision(branch: Branch) -> str:
+    """Fingerprint one loaded branch's normalized base and persisted changes."""
+    normalized = {
+        "base": _model_dump(branch.base),
+        "changes": [
+            change.model_dump(mode="json", exclude={"expected_change_count"})
+            for change in branch.changes
+        ],
+    }
+    payload = json.dumps(
+        normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _load_branch(session, branch_id: str) -> BranchLog:
@@ -212,6 +230,7 @@ def read_branch(branch_id: str) -> BranchDetail:
         base_analysis_id=branch.base_analysis_id,
         num_changes=len(changes),
         changes=changes,
+        branch_revision=branch_revision(branch),
     )
 
 
@@ -397,7 +416,8 @@ def get_branch_diff(branch_id: str) -> DiffResult:
     """Diff the immutable base snapshot against the current rebuilt state."""
     branch = get_branch(branch_id)
     rebuilt = rebuild_branch_state(branch)
-    return diff_infrastructure(branch.base, rebuilt)
+    diff = diff_infrastructure(branch.base, rebuilt)
+    return diff.model_copy(update={"branch_revision": branch_revision(branch)})
 
 
 def compare_branches(branch_ids: List[str]) -> ComparisonResult:
@@ -423,6 +443,7 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
         summaries.append(BranchSummary(
             branch_id=branch.branch_id,
             name=branch.name,
+            branch_revision=branch_revision(branch),
             score_after=diff.score_after,
             score_delta=diff.score_delta,
             added_nodes=len(diff.added_nodes),

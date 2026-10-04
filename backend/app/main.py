@@ -1389,7 +1389,8 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
     # via scanner_status + coverage_warnings. Flip EMFIRGE_RUN_SCANNERS=1 once the
     # real fix lands (base-scan cache + async + bigger instance; see notes).
     run_scanners = os.environ.get("EMFIRGE_RUN_SCANNERS", "0") == "1"
-    return combined_verdict(branch.base, rebuilt, run_scanners=run_scanners)
+    result = combined_verdict(branch.base, rebuilt, run_scanners=run_scanners)
+    return result.model_copy(update={"branch_revision": branches.branch_revision(branch)})
 
 
 @app.post('/branches/{branch_id}/rollback', dependencies=[Depends(require_api_key)])

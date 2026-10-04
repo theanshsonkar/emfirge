@@ -37,6 +37,7 @@ class DiffResult(BaseModel):
     # True only when the complete canonical infrastructure snapshots match.
     # A false value may reflect modeled data not represented in graph deltas.
     modeled_state_unchanged: bool = False
+    branch_revision: str | None = None
 
 
 _LAYER_FIELDS = ("base", "security", "cost", "limits", "telemetry")

@@ -86,6 +86,7 @@ def test_read_branch_returns_only_ordered_normalized_change_log(branch_db):
         "status": "open",
         "base_analysis_id": "analysis",
         "num_changes": 2,
+        "branch_revision": branches.branch_revision(branches.get_branch(branch_id)),
         "changes": [
             {"op": "add", "resource_type": "s3_bucket", "resource_id": "first",
              "fields": {"encrypted": True}},
@@ -94,9 +95,50 @@ def test_read_branch_returns_only_ordered_normalized_change_log(branch_db):
         ],
     }
     assert not hasattr(detail, "base")
-
     branches.discard_branch(branch_id)
     assert branches.read_branch(branch_id).status == "discarded"
+
+
+def test_branch_revision_is_stable_and_tracks_persisted_state_changes(branch_db):
+    parent_id = branches.create_branch(
+        AWSInfrastructure(region="us-east-1"), "parent", base_analysis_id="revision",
+    )
+    initial = branches.read_branch(parent_id).branch_revision
+    assert branches.read_branch(parent_id).branch_revision == initial
+
+    branches.apply_change_to_branch(parent_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="revision-bucket",
+        expected_change_count=0,
+    ))
+    appended = branches.read_branch(parent_id).branch_revision
+    assert appended != initial
+    assert branches.read_branch(parent_id).branch_revision == appended
+
+    child_id, _ = branches.fork_branch(parent_id, "child")
+    assert branches.read_branch(child_id).branch_revision == appended
+    branches.apply_change_to_branch(child_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="child-only",
+    ))
+    assert branches.read_branch(child_id).branch_revision != appended
+    assert branches.rollback_last(child_id).changes[0].resource_id == "revision-bucket"
+    assert branches.read_branch(child_id).branch_revision == appended
+
+    branches.rollback_last(parent_id)
+    assert branches.read_branch(parent_id).branch_revision == initial
+
+
+def test_branch_revision_excludes_request_only_expected_count():
+    base = AWSInfrastructure(region="us-east-1")
+    first = branches.Branch(
+        branch_id="one", name="same", base=base,
+        changes=[Change(op="add", resource_type="s3_bucket", resource_id="bucket",
+                        expected_change_count=0)], status="open",
+    )
+    second = first.model_copy(update={
+        "changes": [Change(op="add", resource_type="s3_bucket", resource_id="bucket",
+                           expected_change_count=42)],
+    })
+    assert branches.branch_revision(first) == branches.branch_revision(second)
 
 
 def test_fork_copies_snapshot_and_ordered_log_without_parent_coupling(branch_db):
@@ -356,6 +398,7 @@ def test_compare_summary_has_exact_values_and_safer_first_ranking(branch_db):
     assert result.branches[0].model_dump() == {
         "branch_id": riskier,
         "name": "riskier",
+        "branch_revision": branches.branch_revision(branches.get_branch(riskier)),
         "score_after": 89,
         "score_delta": -5,
         "added_nodes": 1,
@@ -372,6 +415,7 @@ def test_compare_summary_has_exact_values_and_safer_first_ranking(branch_db):
     assert result.branches[1].model_dump() == {
         "branch_id": safer,
         "name": "safer",
+        "branch_revision": branches.branch_revision(branches.get_branch(safer)),
         "score_after": 93,
         "score_delta": -1,
         "added_nodes": 1,
