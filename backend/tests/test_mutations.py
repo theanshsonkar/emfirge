@@ -81,15 +81,18 @@ def test_delete_security_group_rejects_rds_reference(clean_infra):
         apply_change(clean_infra, Change(op="delete", resource_type="security_group", resource_id="sg-001"))
 
 
-def test_delete_security_group_rejects_peer_group_reference(empty_infra):
+def test_delete_security_group_rejects_lambda_and_peer_group_references(empty_infra):
     from app.models import SecurityGroup
 
     empty_infra.ec2.security_groups = [
         SecurityGroup(id="sg-target", name="target"),
         SecurityGroup(id="sg-peer", name="peer", rules=[{"source_sg_ids": ["sg-target"]}]),
     ]
-    with pytest.raises(ValueError, match="still in use by sg-peer"):
+    empty_infra.lambda_data.functions = [LambdaFunction(name="fn-uses-sg", sg_ids=["sg-target"])]
+    with pytest.raises(ValueError, match="fn-uses-sg, sg-peer"):
         apply_change(empty_infra, Change(op="delete", resource_type="security_group", resource_id="sg-target"))
+    assert any(edge.src == "fn-uses-sg" and edge.dst == "sg-target"
+               for edge in build_graph(empty_infra).edges)
 
 
 def test_add_storage_database_and_lambda_updates_collections(empty_infra):

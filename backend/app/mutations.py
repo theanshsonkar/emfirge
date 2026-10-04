@@ -146,6 +146,8 @@ def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> N
         } | {
             item.id for item in infra.rds.rds_instances if resource_id in item.sg_ids
         } | {
+            item.name for item in infra.lambda_data.functions if resource_id in item.sg_ids
+        } | {
             item.id for item in infra.elasticache.clusters if resource_id in item.sg_ids
         } | {
             group.id for group in infra.ec2.security_groups if group.id != resource_id

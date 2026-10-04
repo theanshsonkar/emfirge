@@ -1454,6 +1454,7 @@ def collect_lambda(key, secret, token, region, warnings) -> LambdaData:
                 vpc_config = fn.get('VpcConfig', {})
                 vpc_id = vpc_config.get('VpcId')
                 subnet_ids = vpc_config.get('SubnetIds', [])
+                sg_ids = vpc_config.get('SecurityGroupIds', [])
 
                 if runtime in DEPRECATED_RUNTIMES:
                     functions_with_outdated_runtime.append(fn_name)
@@ -1476,6 +1477,7 @@ def collect_lambda(key, secret, token, region, warnings) -> LambdaData:
                     'role_arn': role_arn,
                     'vpc_id': vpc_id,
                     'subnet_ids': subnet_ids,
+                    'sg_ids': sg_ids,
                     'secret_refs': secret_refs
                 })
 

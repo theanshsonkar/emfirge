@@ -1345,6 +1345,13 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'to': subnet_id,
                 'relationship': 'in_subnet'
             })
+
+        for sg_id in sg_ids:
+            edges.append({
+                'from': func_name,
+                'to': sg_id,
+                'relationship': 'uses_security_group'
+            })
         
         # Edge: Lambda -> Secrets (env var refs)
         secret_refs = func.get('secret_refs', []) if isinstance(func, dict) else func.secret_refs
@@ -2074,7 +2081,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             eligible.append(node)
         elif resource_type == 'rds_instance' and _sg_ids(node) and _resource_subnets(node, reachability_graph):
             eligible.append(node)
-        elif resource_type == 'lambda_function' and _sg_ids(node) and _resource_subnets(node):
+        elif resource_type == 'lambda_function' and _sg_ids(node) and _resource_subnets(node, reachability_graph):
             eligible.append(node)
     eligible.sort(key=lambda node: node.id)
     existing_can_reach = {(edge['from'], edge['to']) for edge in edges

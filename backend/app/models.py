@@ -63,6 +63,7 @@ class LambdaFunction(BaseModel):
     role_arn: Optional[str] = None
     vpc_id: Optional[str] = None
     subnet_ids: List[str] = []
+    sg_ids: List[str] = []
     secret_refs: List[str] = []
 
 class LoadBalancer(BaseModel):
