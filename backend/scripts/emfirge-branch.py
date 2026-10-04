@@ -119,6 +119,9 @@ def _parser() -> argparse.ArgumentParser:
     ):
         command_parser = subparsers.add_parser(command, help=help_text)
         command_parser.add_argument("--branch-id", required=True)
+        if command == "rollback":
+            command_parser.add_argument("--expected-count", type=int,
+                                        help="fail if the branch no longer has this many changes")
 
     compare = subparsers.add_parser("compare", help="compare branches from one or more bases")
     compare.add_argument("branch_ids", nargs="+", metavar="BRANCH_ID")
@@ -151,7 +154,12 @@ def _run(args: argparse.Namespace, client: APIClient) -> Any:
     if args.command == "verdict":
         return client.request("GET", f"/branches/{quote(args.branch_id, safe='')}/verdict")
     if args.command == "rollback":
-        return client.request("POST", f"/branches/{quote(args.branch_id, safe='')}/rollback", {})
+        payload = {}
+        if args.expected_count is not None:
+            if args.expected_count < 0:
+                raise CLIError("--expected-count must be zero or greater")
+            payload["expected_change_count"] = args.expected_count
+        return client.request("POST", f"/branches/{quote(args.branch_id, safe='')}/rollback", payload)
     if args.command == "compare":
         return client.request("POST", "/branches/compare", {"branch_ids": args.branch_ids})
     raise CLIError(f"unsupported command: {args.command}")

@@ -184,14 +184,29 @@ def apply_change_to_branch(branch_id: str, change: Change | dict) -> Branch:
     return _with_session(operation)
 
 
-def rollback_last(branch_id: str) -> Branch:
+def rollback_last(branch_id: str, expected_change_count: Optional[int] = None) -> Branch:
     """Remove the most recent change; an empty change list is a safe no-op."""
     def operation(session):
         row = _load_branch(session, branch_id)
-        changes = json.loads(row.changes_json or '[]')
+        if row.status != 'open':
+            raise ValueError(f"Branch is not open: {branch_id}")
+        previous_json = row.changes_json or '[]'
+        changes = json.loads(previous_json)
+        if expected_change_count is not None and expected_change_count != len(changes):
+            raise BranchConflictError(
+                f"Branch changed: expected {expected_change_count} change(s), found {len(changes)}"
+            )
         if changes:
             changes.pop()
-            row.changes_json = json.dumps(changes, sort_keys=True, separators=(",", ":"))
+            next_json = json.dumps(changes, sort_keys=True, separators=(",", ":"))
+            updated = session.query(BranchLog).filter(
+                BranchLog.branch_id == branch_id,
+                BranchLog.status == 'open',
+                BranchLog.changes_json == previous_json,
+            ).update({BranchLog.changes_json: next_json}, synchronize_session=False)
+            if updated != 1:
+                raise BranchConflictError("Branch changed during rollback; reload it and retry")
+            session.expire(row)
         return _decode(row)
 
     return _with_session(operation)

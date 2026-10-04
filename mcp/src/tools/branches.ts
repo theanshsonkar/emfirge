@@ -88,14 +88,17 @@ export async function branchVerdictHandler(args: BranchVerdictArgs) {
   return ok(result);
 }
 
-export const rollbackBranchZodObject = z.object(branchIdSchema);
+export const rollbackBranchZodObject = z.object({
+  ...branchIdSchema,
+  expected_change_count: z.number().int().nonnegative().optional().describe("Optional observed change count; stale rollback fails with HTTP 409"),
+});
 export type RollbackBranchArgs = z.infer<typeof rollbackBranchZodObject>;
 
 export async function rollbackBranchHandler(args: RollbackBranchArgs) {
   const result = await backendCall(
     "POST",
     `/branches/${encodeURIComponent(args.branch_id)}/rollback`,
-    {},
+    args.expected_change_count === undefined ? {} : { expected_change_count: args.expected_change_count },
   );
   return ok(result);
 }

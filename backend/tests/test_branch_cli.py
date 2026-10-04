@@ -94,6 +94,8 @@ def invoke(server, *args, stdin=None, base_url_env=True):
         (("diff", "--branch-id", "b-1"), ("GET", "/api/branches/b-1/diff", None)),
         (("verdict", "--branch-id", "b-1"), ("GET", "/api/branches/b-1/verdict", None)),
         (("rollback", "--branch-id", "b-1"), ("POST", "/api/branches/b-1/rollback", {})),
+        (("rollback", "--branch-id", "b-1", "--expected-count", "2"),
+         ("POST", "/api/branches/b-1/rollback", {"expected_change_count": 2})),
         (("compare", "b-1", "b-2"), ("POST", "/api/branches/compare", {"branch_ids": ["b-1", "b-2"]})),
     ],
 )

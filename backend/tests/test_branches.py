@@ -110,6 +110,18 @@ def test_stale_agent_change_count_rejects_append_and_preserves_history(branch_db
     assert [bucket.name for bucket in branches.rebuild_branch_infra(branch_id).s3.buckets] == ["first-bucket"]
 
 
+def test_stale_agent_cannot_rollback_another_agents_change(branch_db):
+    branch_id = branches.create_branch(AWSInfrastructure(region="us-east-1"), "shared")
+    for name in ("first-bucket", "second-bucket"):
+        branches.apply_change_to_branch(branch_id, Change(
+            op="add", resource_type="s3_bucket", resource_id=name,
+        ))
+    with pytest.raises(branches.BranchConflictError, match="expected 1 change"):
+        branches.rollback_last(branch_id, expected_change_count=1)
+    assert len(branches.get_branch(branch_id).changes) == 2
+    assert len(branches.rollback_last(branch_id, expected_change_count=2).changes) == 1
+
+
 
 def test_branch_limit_is_per_base_and_discard_frees_slot(branch_db, monkeypatch):
     monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 2)

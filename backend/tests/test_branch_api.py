@@ -137,6 +137,15 @@ def test_stale_agent_append_returns_conflict():
     assert response.json()["detail"] == "Branch changed"
 
 
+def test_stale_agent_rollback_returns_conflict():
+    reset_limiter()
+    with patch("app.main.branches.rollback_last",
+               side_effect=branches.BranchConflictError("Branch changed")) as rollback:
+        response = client.post("/branches/b-1/rollback", json={"expected_change_count": 1})
+    assert response.status_code == 409
+    rollback.assert_called_once_with("b-1", expected_change_count=1)
+
+
 def test_stacked_add_then_modify_validates_against_rebuilt_state():
     reset_limiter()
     base = AWSInfrastructure(region="us-east-1")
