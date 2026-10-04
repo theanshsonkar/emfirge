@@ -63,6 +63,35 @@ def test_capabilities_endpoint_returns_runtime_mutation_contract():
     assert constraint["allowed_fields"] == ["access_statements"]
 
 
+def test_get_branch_endpoint_returns_ordered_changes_without_base():
+    reset_limiter()
+    detail = branches.BranchDetail(
+        branch_id="b-1", name="inspect", status="open", base_analysis_id="a-1",
+        num_changes=2, changes=[
+            {"op": "add", "resource_type": "s3_bucket", "resource_id": "one", "fields": {}},
+            {"op": "delete", "resource_type": "s3_bucket", "resource_id": "two", "fields": {}},
+        ],
+    )
+    with patch("app.main.branches.read_branch", return_value=detail) as read:
+        response = client.get("/branches/b-1")
+
+    assert response.status_code == 200
+    assert response.json() == detail.model_dump(mode="json")
+    assert "base" not in response.json()
+    assert [change["resource_id"] for change in response.json()["changes"]] == ["one", "two"]
+    read.assert_called_once_with("b-1")
+
+
+def test_get_branch_endpoint_returns_404_for_missing_id():
+    reset_limiter()
+    with patch("app.main.branches.read_branch",
+               side_effect=branches.BranchNotFoundError("Branch not found: missing")):
+        response = client.get("/branches/missing")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Branch not found: missing"
+
+
 def test_add_change_and_diff():
     reset_limiter()
     changed = branch(changes=[{"op": "modify", "resource_type": "s3_bucket"}])

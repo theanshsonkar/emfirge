@@ -63,11 +63,37 @@ def test_branch_round_trip_mutations_rebuild_diff_rollback_and_discard(branch_db
                                                 "fields": {"type": "t3.nano", "state": "running"}})
     discarded = branches.discard_branch(branch_id)
     assert discarded.status == "discarded"
-    with pytest.raises(ValueError, match="not open"):
+
+
+def test_read_branch_returns_only_ordered_normalized_change_log(branch_db):
+    branch_id = branches.create_branch(
+        AWSInfrastructure(region="us-east-1"), "inspect", base_analysis_id="analysis",
+    )
+    for bucket_name in ("first", "second"):
         branches.apply_change_to_branch(branch_id, Change(
-            op="modify", resource_type="ec2_instance", resource_id="i-other",
-            fields={"state": "stopped"},
+            op="add", resource_type="s3_bucket", resource_id=bucket_name,
+            fields={"encrypted": True}, expected_change_count=len(branches.get_branch(branch_id).changes),
         ))
+
+    detail = branches.read_branch(branch_id)
+
+    assert detail.model_dump(mode="json") == {
+        "branch_id": branch_id,
+        "name": "inspect",
+        "status": "open",
+        "base_analysis_id": "analysis",
+        "num_changes": 2,
+        "changes": [
+            {"op": "add", "resource_type": "s3_bucket", "resource_id": "first",
+             "fields": {"encrypted": True}},
+            {"op": "add", "resource_type": "s3_bucket", "resource_id": "second",
+             "fields": {"encrypted": True}},
+        ],
+    }
+    assert not hasattr(detail, "base")
+
+    branches.discard_branch(branch_id)
+    assert branches.read_branch(branch_id).status == "discarded"
 
 
 def test_list_branches_filters_by_base_analysis(branch_db):

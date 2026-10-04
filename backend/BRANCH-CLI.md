@@ -24,6 +24,7 @@ python backend/scripts/emfirge-branch.py apply \
   --branch-id BRANCH_ID --op modify --resource-type iam_role_policy \
   --resource-id ROLE_ARN --fields-file policy-statements.json
 
+python backend/scripts/emfirge-branch.py show --branch-id BRANCH_ID
 python backend/scripts/emfirge-branch.py diff --branch-id BRANCH_ID
 python backend/scripts/emfirge-branch.py list --analysis-id SCAN_ID
 python backend/scripts/emfirge-branch.py capabilities
@@ -40,6 +41,8 @@ python backend/scripts/emfirge-branch.py compare BRANCH_ID OTHER_BRANCH_ID
 For concurrent agents, pass `--expected-count` on `apply`, `rollback`, and `discard`, using the most recent branch change response or the `num_changes` field returned by `list`. A stale count returns HTTP 409; reload the branch before retrying. Omitting this option remains supported for single-agent workflows.
 
 The change response includes `modeled_state_unchanged`, comparing the rebuilt branch immediately before and after that proposed change. The `diff` and `verdict` responses expose the same field for the whole branch compared with its base. It is `true` only when the complete normalized infrastructure models are identical; `false` does not guarantee a graph, finding, or verdict change because some modeled fields may not appear in those views. A redundant change remains recorded in the branch history.
+
+`GET /branches/{branch_id}` and `show` return branch metadata and the ordered normalized change log, including status and change count. They intentionally omit the full base infrastructure snapshot.
 
 ## Local tests
 

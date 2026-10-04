@@ -49,6 +49,8 @@ import {
   createBranchSchema,
   createBranchZodObject,
   createBranchHandler,
+  getBranchZodObject,
+  getBranchHandler,
   discardBranchZodObject,
   discardBranchHandler,
   listBranchesSchema,
@@ -247,6 +249,14 @@ const tools: ToolRegistration[] = [
     schema: applyChangeSchema as Record<string, z.ZodTypeAny>,
     zodObject: applyChangeZodObject as z.ZodObject<z.ZodRawShape>,
     handler: applyChangeHandler,
+  },
+  {
+    name: "emfirge_get_branch",
+    description:
+      "Read branch metadata and its ordered normalized change log without returning the base infrastructure snapshot.",
+    schema: branchIdSchema as Record<string, z.ZodTypeAny>,
+    zodObject: getBranchZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: getBranchHandler,
   },
   {
     name: "emfirge_branch_diff",

@@ -1309,6 +1309,17 @@ def branch_capabilities_endpoint(request: Request):
     return mutation_capabilities()
 
 
+@app.get('/branches/{branch_id}', response_model=branches.BranchDetail,
+         dependencies=[Depends(require_api_key)])
+def get_branch_endpoint(branch_id: str, request: Request):
+    """Read branch metadata and ordered changes without returning its base snapshot."""
+    _check_branch_rate_limit(_branch_request_ip(request))
+    try:
+        return branches.read_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
 @app.post('/branches/{branch_id}/changes', dependencies=[Depends(require_api_key)])
 def add_branch_change_endpoint(branch_id: str, change: Change, request: Request):
     _check_branch_rate_limit(_branch_request_ip(request))

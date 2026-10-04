@@ -46,6 +46,26 @@ class Branch(BaseModel):
     last_change_modeled_state_unchanged: Optional[bool] = None
 
 
+class BranchChangeRecord(BaseModel):
+    """Normalized persisted mutation without request-only concurrency metadata."""
+
+    op: str
+    resource_type: str
+    resource_id: str
+    fields: dict[str, Any] = Field(default_factory=dict)
+
+
+class BranchDetail(BaseModel):
+    """Read-only branch metadata and ordered changes, excluding the base snapshot."""
+
+    branch_id: str
+    name: str
+    status: str
+    base_analysis_id: Optional[str] = None
+    num_changes: int
+    changes: list[BranchChangeRecord] = Field(default_factory=list)
+
+
 class BranchSummary(BaseModel):
     branch_id: str
     name: str
@@ -149,6 +169,25 @@ def get_branch(branch_id: str) -> Branch:
         return _decode(_load_branch(session, branch_id))
     finally:
         session.close()
+
+
+def read_branch(branch_id: str) -> BranchDetail:
+    """Read safe branch metadata and its ordered normalized change log."""
+    branch = get_branch(branch_id)
+    changes = [
+        BranchChangeRecord.model_validate(
+            change.model_dump(mode="json", exclude={"expected_change_count"})
+        )
+        for change in branch.changes
+    ]
+    return BranchDetail(
+        branch_id=branch.branch_id,
+        name=branch.name,
+        status=branch.status,
+        base_analysis_id=branch.base_analysis_id,
+        num_changes=len(changes),
+        changes=changes,
+    )
 
 
 def apply_change_to_branch(branch_id: str, change: Change | dict) -> Branch:

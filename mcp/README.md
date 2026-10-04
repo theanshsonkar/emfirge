@@ -56,6 +56,7 @@ Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 - `emfirge_rollback_branch` — remove the most recent modeled change.
 - `emfirge_discard_branch` — discard an isolated branch; optionally pass `expected_change_count` to reject a stale discard with HTTP 409.
 - `emfirge_list_branches` — list branches, optionally filtered by base analysis ID.
+- `emfirge_get_branch` — read branch metadata and its ordered normalized change log without returning the base infrastructure snapshot.
 - `emfirge_compare_branches` — compare branch models and rank outcomes safest-first.
 
 ### Setup

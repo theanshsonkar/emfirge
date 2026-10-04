@@ -102,6 +102,9 @@ def _parser() -> argparse.ArgumentParser:
     list_branches = subparsers.add_parser("list", help="list branches and their current change counts")
     list_branches.add_argument("--analysis-id", help="filter by base analysis ID")
 
+    show = subparsers.add_parser("show", help="show branch metadata and its ordered changes")
+    show.add_argument("--branch-id", required=True)
+
     subparsers.add_parser("capabilities", help="show supported branch mutation types and constraints")
 
     apply = subparsers.add_parser("apply", help="append a modeled change to a branch")
@@ -140,6 +143,8 @@ def _run(args: argparse.Namespace, client: APIClient) -> Any:
     if args.command == "list":
         query = "" if not args.analysis_id else "?" + urlencode({"base_analysis_id": args.analysis_id})
         return client.request("GET", f"/branches{query}")
+    if args.command == "show":
+        return client.request("GET", f"/branches/{quote(args.branch_id, safe='')}")
     if args.command == "capabilities":
         return client.request("GET", "/branches/capabilities")
     if args.command == "apply":

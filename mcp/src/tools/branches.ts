@@ -66,6 +66,17 @@ export const branchIdSchema = {
   branch_id: z.string().min(1).describe("Branch ID returned by emfirge_create_branch"),
 };
 
+export const getBranchZodObject = z.object(branchIdSchema);
+export type GetBranchArgs = z.infer<typeof getBranchZodObject>;
+
+export async function getBranchHandler(args: GetBranchArgs) {
+  const result = await backendCall(
+    "GET",
+    `/branches/${encodeURIComponent(args.branch_id)}`,
+  );
+  return ok(result);
+}
+
 export const branchDiffZodObject = z.object(branchIdSchema);
 export type BranchDiffArgs = z.infer<typeof branchDiffZodObject>;
 
