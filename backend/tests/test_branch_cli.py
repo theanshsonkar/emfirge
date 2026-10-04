@@ -75,6 +75,8 @@ def invoke(server, *args, stdin=None, base_url_env=True):
          ("GET", "/api/branches?base_analysis_id=scan-1", None)),
         (("show", "--branch-id", "b-1"),
          ("GET", "/api/branches/b-1", None)),
+        (("fork", "--branch-id", "b-1", "--name", "candidate"),
+         ("POST", "/api/branches/b-1/fork", {"name": "candidate"})),
         (("capabilities",), ("GET", "/api/branches/capabilities", None)),
         (("apply", "--branch-id", "b-1", "--op", "modify", "--resource-type", "s3_bucket",
           "--resource-id", "bucket", "--fields-json", '{"encrypted":true}'),
@@ -130,6 +132,14 @@ def test_show_url_encodes_branch_id(api_server):
 
     assert result.returncode == 0
     assert api_server.requests[-1][1] == "/api/branches/branch%2Fone"
+
+
+def test_fork_url_encodes_branch_id(api_server):
+    result = invoke(api_server, "fork", "--branch-id", "branch/one", "--name", "child")
+
+    assert result.returncode == 0
+    assert api_server.requests[-1][1] == "/api/branches/branch%2Fone/fork"
+    assert api_server.requests[-1][2] == {"name": "child"}
 
 
 def test_api_error_is_plain_stderr_and_nonzero(api_server):

@@ -1320,6 +1320,26 @@ def get_branch_endpoint(branch_id: str, request: Request):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+@app.post('/branches/{branch_id}/fork', dependencies=[Depends(require_api_key)])
+def fork_branch_endpoint(branch_id: str, request: Request, payload: dict):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    if not isinstance(payload, dict) or not isinstance(payload.get('name'), str) or not payload['name'].strip():
+        raise HTTPException(status_code=422, detail='name is required and must be a non-empty string')
+    if set(payload) != {'name'}:
+        raise HTTPException(status_code=422, detail='Only name is supported')
+    try:
+        new_branch_id, num_changes = branches.fork_branch(branch_id, payload['name'])
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except branches.BranchConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except branches.BranchLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {'branch_id': new_branch_id, 'num_changes': num_changes}
+
+
 @app.post('/branches/{branch_id}/changes', dependencies=[Depends(require_api_key)])
 def add_branch_change_endpoint(branch_id: str, change: Change, request: Request):
     _check_branch_rate_limit(_branch_request_ip(request))

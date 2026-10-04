@@ -77,6 +77,21 @@ export async function getBranchHandler(args: GetBranchArgs) {
   return ok(result);
 }
 
+export const forkBranchZodObject = z.object({
+  ...branchIdSchema,
+  name: z.string().min(1).describe("Name for the new branch"),
+});
+export type ForkBranchArgs = z.infer<typeof forkBranchZodObject>;
+
+export async function forkBranchHandler(args: ForkBranchArgs) {
+  const result = await backendCall(
+    "POST",
+    `/branches/${encodeURIComponent(args.branch_id)}/fork`,
+    { name: args.name },
+  );
+  return ok(result);
+}
+
 export const branchDiffZodObject = z.object(branchIdSchema);
 export type BranchDiffArgs = z.infer<typeof branchDiffZodObject>;
 

@@ -190,6 +190,58 @@ def read_branch(branch_id: str) -> BranchDetail:
     )
 
 
+def fork_branch(branch_id: str, name: str) -> tuple[str, int]:
+    """Atomically copy an open branch's base and change log into a new branch."""
+    def operation(session):
+        parent = _load_branch(session, branch_id)
+        if parent.status != "open":
+            raise ValueError(f"Branch is not open: {branch_id}")
+
+        # Capture all copied columns before attempting the compare-and-swap.
+        base_json = parent.base_infra_json
+        changes_json = parent.changes_json or "[]"
+        base_analysis_id = parent.base_analysis_id
+
+        # Synchronize with append/rollback/discard, whose writes also compare
+        # changes_json. A successful conditional update holds the row write
+        # lock until the child insert commits, so the copied log is one instant.
+        locked = session.query(BranchLog).filter(
+            BranchLog.branch_id == branch_id,
+            BranchLog.status == "open",
+            BranchLog.base_infra_json == base_json,
+            BranchLog.changes_json == changes_json,
+        ).update(
+            {BranchLog.changes_json: changes_json, BranchLog.updated_at: parent.updated_at},
+            synchronize_session=False,
+        )
+        if locked != 1:
+            raise BranchConflictError("Branch changed during fork; reload it and retry")
+
+        if base_analysis_id is not None:
+            open_count = session.query(BranchLog).filter(
+                BranchLog.base_analysis_id == base_analysis_id,
+                BranchLog.status == "open",
+            ).count()
+            if open_count >= MAX_OPEN_BRANCHES_PER_BASE:
+                raise BranchLimitError(
+                    f"Open branch limit ({MAX_OPEN_BRANCHES_PER_BASE}) reached for "
+                    f"base_analysis_id={base_analysis_id!r}; currently {open_count} open branches"
+                )
+
+        child_id = str(uuid.uuid4())
+        session.add(BranchLog(
+            branch_id=child_id,
+            name=name,
+            base_analysis_id=base_analysis_id,
+            base_infra_json=base_json,
+            changes_json=changes_json,
+            status="open",
+        ))
+        return child_id, len(json.loads(changes_json))
+
+    return _with_session(operation)
+
+
 def apply_change_to_branch(branch_id: str, change: Change | dict) -> Branch:
     """Append one validated change in order; only open branches are mutable."""
     change_model = Change.model_validate(change)

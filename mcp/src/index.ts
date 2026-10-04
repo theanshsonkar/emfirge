@@ -51,6 +51,8 @@ import {
   createBranchHandler,
   getBranchZodObject,
   getBranchHandler,
+  forkBranchZodObject,
+  forkBranchHandler,
   discardBranchZodObject,
   discardBranchHandler,
   listBranchesSchema,
@@ -257,6 +259,14 @@ const tools: ToolRegistration[] = [
     schema: branchIdSchema as Record<string, z.ZodTypeAny>,
     zodObject: getBranchZodObject as z.ZodObject<z.ZodRawShape>,
     handler: getBranchHandler,
+  },
+  {
+    name: "emfirge_fork_branch",
+    description:
+      "Fork an open branch into a new independent branch with the same base and ordered modeled changes. Does not modify AWS or the parent branch.",
+    schema: { ...branchIdSchema, name: z.string().min(1).describe("Name for the new branch") } as Record<string, z.ZodTypeAny>,
+    zodObject: forkBranchZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: forkBranchHandler,
   },
   {
     name: "emfirge_branch_diff",

@@ -6,7 +6,7 @@
 //      a tokenized id from emfirge_scan (SG_001) reached the backend verbatim
 //      and came back "Target not found" — the branch tools could not act on any
 //      id an agent actually had.
-//   2. None of the nine handlers ran their response through redactDeep, so
+//   2. None of the ten handlers ran their response through redactDeep, so
 //      branch_verdict returned raw instance ids, security-group ids, bucket
 //      names and role ARNs regardless of EMFIRGE_PRIVACY.
 //
@@ -168,6 +168,22 @@ test("get_branch reads one branch and preserves the backend's detail shape", asy
   assert.ok(!Object.hasOwn(response, "base"));
 });
 
+test("fork_branch posts a required name and returns the fork result", async () => {
+  assert.deepEqual(branches.forkBranchZodObject.parse({ branch_id: "branch/one", name: "child" }), {
+    branch_id: "branch/one", name: "child",
+  });
+  assert.throws(() => branches.forkBranchZodObject.parse({ branch_id: "b1", name: "" }));
+
+  const calls = stubFetch({ branch_id: "child-1", num_changes: 2 });
+  const result = await branches.forkBranchHandler({ branch_id: "branch/one", name: "child" });
+  assert.deepEqual(calls, [{
+    method: "POST",
+    url: "http://stub.invalid/api/branches/branch%2Fone/fork",
+    body: { name: "child" },
+  }]);
+  assert.deepEqual(JSON.parse(textOf(result)), { branch_id: "child-1", num_changes: 2 });
+});
+
 // ---------------------------------------------------------------------------
 // Bug 2 — every handler's output must go through redactDeep.
 // ---------------------------------------------------------------------------
@@ -187,6 +203,7 @@ test("every branch handler redacts real identifiers out of its response", async 
     ["createBranchHandler", branches.createBranchHandler],
     ["applyChangeHandler", branches.applyChangeHandler],
     ["getBranchHandler", branches.getBranchHandler],
+    ["forkBranchHandler", branches.forkBranchHandler],
     ["branchDiffHandler", branches.branchDiffHandler],
     ["branchVerdictHandler", branches.branchVerdictHandler],
     ["rollbackBranchHandler", branches.rollbackBranchHandler],
@@ -195,7 +212,7 @@ test("every branch handler redacts real identifiers out of its response", async 
     ["compareBranchesHandler", branches.compareBranchesHandler],
   ];
 
-  // One arg bag that satisfies all nine schemas; extra keys are ignored.
+  // One arg bag that satisfies all ten schemas; extra keys are ignored.
   const args = {
     branch_id: "b1",
     base_analysis_id: "a1",

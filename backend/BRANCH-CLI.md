@@ -25,6 +25,7 @@ python backend/scripts/emfirge-branch.py apply \
   --resource-id ROLE_ARN --fields-file policy-statements.json
 
 python backend/scripts/emfirge-branch.py show --branch-id BRANCH_ID
+python backend/scripts/emfirge-branch.py fork --branch-id BRANCH_ID --name CANDIDATE
 python backend/scripts/emfirge-branch.py diff --branch-id BRANCH_ID
 python backend/scripts/emfirge-branch.py list --analysis-id SCAN_ID
 python backend/scripts/emfirge-branch.py capabilities
@@ -43,6 +44,8 @@ For concurrent agents, pass `--expected-count` on `apply`, `rollback`, and `disc
 The change response includes `modeled_state_unchanged`, comparing the rebuilt branch immediately before and after that proposed change. The `diff` and `verdict` responses expose the same field for the whole branch compared with its base. It is `true` only when the complete normalized infrastructure models are identical; `false` does not guarantee a graph, finding, or verdict change because some modeled fields may not appear in those views. A redundant change remains recorded in the branch history.
 
 `GET /branches/{branch_id}` and `show` return branch metadata and the ordered normalized change log, including status and change count. They intentionally omit the full base infrastructure snapshot.
+
+`POST /branches/{branch_id}/fork` and `fork` create a new open branch from an open parent, copying its immutable base snapshot and complete ordered change log. The child has an independent ID and can be edited without changing the parent. The fork operation is serialized against parent change-log writes and returns the child ID and copied change count.
 
 ## Local tests
 

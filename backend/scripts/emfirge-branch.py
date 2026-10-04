@@ -105,6 +105,10 @@ def _parser() -> argparse.ArgumentParser:
     show = subparsers.add_parser("show", help="show branch metadata and its ordered changes")
     show.add_argument("--branch-id", required=True)
 
+    fork = subparsers.add_parser("fork", help="fork an open branch into an independent branch")
+    fork.add_argument("--branch-id", required=True)
+    fork.add_argument("--name", required=True)
+
     subparsers.add_parser("capabilities", help="show supported branch mutation types and constraints")
 
     apply = subparsers.add_parser("apply", help="append a modeled change to a branch")
@@ -145,6 +149,10 @@ def _run(args: argparse.Namespace, client: APIClient) -> Any:
         return client.request("GET", f"/branches{query}")
     if args.command == "show":
         return client.request("GET", f"/branches/{quote(args.branch_id, safe='')}")
+    if args.command == "fork":
+        return client.request(
+            "POST", f"/branches/{quote(args.branch_id, safe='')}/fork", {"name": args.name}
+        )
     if args.command == "capabilities":
         return client.request("GET", "/branches/capabilities")
     if args.command == "apply":

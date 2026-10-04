@@ -92,6 +92,33 @@ def test_get_branch_endpoint_returns_404_for_missing_id():
     assert response.json()["detail"] == "Branch not found: missing"
 
 
+def test_fork_endpoint_returns_child_id_and_change_count():
+    reset_limiter()
+    with patch("app.main.branches.fork_branch", return_value=("child-1", 3)) as fork:
+        response = client.post("/branches/parent-1/fork", json={"name": "candidate"})
+
+    assert response.status_code == 200
+    assert response.json() == {"branch_id": "child-1", "num_changes": 3}
+    fork.assert_called_once_with("parent-1", "candidate")
+
+
+@pytest.mark.parametrize("payload", [{}, {"name": "  "}, {"name": "x", "other": True}])
+def test_fork_endpoint_validates_required_name(payload):
+    reset_limiter()
+    response = client.post("/branches/parent-1/fork", json=payload)
+    assert response.status_code == 422
+
+
+def test_fork_endpoint_maps_missing_quota_and_conflict_errors():
+    reset_limiter()
+    with patch("app.main.branches.fork_branch", side_effect=branches.BranchNotFoundError("Branch not found")):
+        assert client.post("/branches/missing/fork", json={"name": "child"}).status_code == 404
+    with patch("app.main.branches.fork_branch", side_effect=branches.BranchLimitError("limit")):
+        assert client.post("/branches/full/fork", json={"name": "child"}).status_code == 429
+    with patch("app.main.branches.fork_branch", side_effect=branches.BranchConflictError("changed")):
+        assert client.post("/branches/raced/fork", json={"name": "child"}).status_code == 409
+
+
 def test_add_change_and_diff():
     reset_limiter()
     changed = branch(changes=[{"op": "modify", "resource_type": "s3_bucket"}])

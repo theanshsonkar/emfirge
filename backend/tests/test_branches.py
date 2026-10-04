@@ -1,7 +1,8 @@
+import json
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
 from app import branches, database
@@ -16,7 +17,7 @@ def branch_db(monkeypatch, tmp_path):
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(database, "SessionLocal", factory)
     monkeypatch.setattr(branches, "SessionLocal", factory)
-    yield
+    yield engine
     database.Base.metadata.drop_all(engine)
     engine.dispose()
 
@@ -94,6 +95,88 @@ def test_read_branch_returns_only_ordered_normalized_change_log(branch_db):
 
     branches.discard_branch(branch_id)
     assert branches.read_branch(branch_id).status == "discarded"
+
+
+def test_fork_copies_snapshot_and_ordered_log_without_parent_coupling(branch_db):
+    base = AWSInfrastructure(region="us-west-2")
+    parent_id = branches.create_branch(base, "parent", base_analysis_id="analysis-fork")
+    for bucket in ("one", "two"):
+        branches.apply_change_to_branch(parent_id, Change(
+            op="add", resource_type="s3_bucket", resource_id=bucket,
+            fields={"encrypted": True},
+        ))
+
+    child_id, count = branches.fork_branch(parent_id, "child")
+    parent = branches.get_branch(parent_id)
+    child = branches.get_branch(child_id)
+
+    assert child_id != parent_id
+    assert count == 2
+    assert child.status == "open"
+    assert child.name == "child"
+    assert child.base_analysis_id == parent.base_analysis_id == "analysis-fork"
+    assert child.base.model_dump(mode="json") == parent.base.model_dump(mode="json") == base.model_dump(mode="json")
+    assert [change.model_dump(mode="json") for change in child.changes] == [
+        change.model_dump(mode="json") for change in parent.changes
+    ]
+
+    branches.apply_change_to_branch(child_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="child-only",
+    ))
+    assert len(branches.get_branch(child_id).changes) == 3
+    assert len(branches.get_branch(parent_id).changes) == 2
+    comparison = branches.compare_branches([parent_id, child_id])
+    assert {item.branch_id for item in comparison.branches} == {parent_id, child_id}
+
+
+def test_fork_requires_open_parent_and_enforces_open_quota(branch_db, monkeypatch):
+    parent_id = branches.create_branch(
+        AWSInfrastructure(), "parent", base_analysis_id="limited-fork",
+    )
+    monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 1)
+    with pytest.raises(branches.BranchLimitError):
+        branches.fork_branch(parent_id, "over quota")
+    assert len(branches.list_branches("limited-fork")) == 1
+
+    monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 2)
+    branches.discard_branch(parent_id)
+    with pytest.raises(ValueError, match="not open"):
+        branches.fork_branch(parent_id, "discarded parent")
+
+
+def test_fork_rejects_parent_append_between_snapshot_and_conditional_lock(branch_db):
+    parent_id = branches.create_branch(AWSInfrastructure(), "parent", "race-analysis")
+    branches.apply_change_to_branch(parent_id, Change(
+        op="add", resource_type="s3_bucket", resource_id="before-fork",
+    ))
+    injected = False
+
+    def append_during_fork(connection, cursor, statement, parameters, context, executemany):
+        nonlocal injected
+        if injected or not statement.lstrip().lower().startswith("update branch_logs"):
+            return
+        injected = True
+        latest = json.dumps([
+            {"op": "add", "resource_type": "s3_bucket", "resource_id": "before-fork", "fields": {}},
+            {"op": "add", "resource_type": "s3_bucket", "resource_id": "concurrent", "fields": {}},
+        ], sort_keys=True, separators=(",", ":"))
+        with connection.engine.begin() as race_connection:
+            race_connection.execute(
+                text("UPDATE branch_logs SET changes_json = :changes WHERE branch_id = :id"),
+                {"changes": latest, "id": parent_id},
+            )
+
+    event.listen(branch_db, "before_cursor_execute", append_during_fork)
+    try:
+        with pytest.raises(branches.BranchConflictError, match="changed during fork"):
+            branches.fork_branch(parent_id, "must-not-be-partial")
+    finally:
+        event.remove(branch_db, "before_cursor_execute", append_during_fork)
+
+    assert len(branches.list_branches("race-analysis")) == 1
+    assert [change.resource_id for change in branches.get_branch(parent_id).changes] == [
+        "before-fork", "concurrent",
+    ]
 
 
 def test_list_branches_filters_by_base_analysis(branch_db):
