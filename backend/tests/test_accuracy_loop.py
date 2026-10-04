@@ -15,11 +15,32 @@ def test_harness_runs_both_scenarios_and_separate_rates(tmp_path, monkeypatch):
     assert report["shape_rate"] == 1.0
     assert report["verdict_rate"] == 1.0
     for record in report["records"]:
-        assert {"scenario", "predicted_verdict", "predicted_findings", "actual_findings",
+        assert {"scenario", "predicted_verdict", "expected_verdict", "predicted_findings",
+                "expected_findings", "predicted_shape", "expected_shape",
                 "shape_match", "verdict_checkable", "verdict_correct"} <= set(record)
     with open("accuracy_report.json", encoding="utf-8") as report_file:
         persisted = json.load(report_file)
     assert len(persisted["records"]) == 2
+
+
+def test_offline_harness_detects_a_perturbed_prediction():
+    report = run_harness()
+    record = report["records"][0]
+    perturbed_shape = json.loads(json.dumps(record["predicted_shape"]))
+    perturbed_shape["modified"][0]["id"] = "wrong-bucket"
+
+    rescored = score_prediction(
+        perturbed_shape,
+        record["expected_shape"],
+        record["predicted_findings"],
+        record["expected_findings"],
+        verdict_checkable=True,
+        predicted_verdict=record["predicted_verdict"],
+        actual_verdict=record["expected_verdict"],
+    )
+
+    assert rescored["shape_match"] is False
+    assert rescored["verdict_correct"] is True
 
 
 def test_scorer_rejects_missing_finding_and_wrong_shape():

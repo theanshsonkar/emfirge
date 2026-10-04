@@ -121,25 +121,27 @@ def score_prediction(
     }
 
 
-def _scenario_prediction(name: str, base: Any, branch: Any, actual: Any, target: str,
-                         resource_type: str, expected_rule: str) -> dict[str, Any]:
-    predicted_findings = [{"source": "native", "rule_id": expected_rule,
-                           "resource_id": target, "severity": "unknown", "status": "confirmed"}]
-    actual_findings = [_normal_finding(item) for item in actual.native_added]
-    for scanner_name, status in actual.scanner_status.items():
+def _scenario_prediction(name: str, base: Any, branch: Any, prediction: Any,
+                         expected: dict[str, Any]) -> dict[str, Any]:
+    """Compare engine output to a separately specified synthetic observation."""
+    predicted_findings = [_normal_finding(item) for item in prediction.native_added]
+    for scanner_name, status in prediction.scanner_status.items():
         if status != "ok":
-            actual_findings.append({"source": "scanner", "scanner": scanner_name,
+            predicted_findings.append({"source": "scanner", "scanner": scanner_name,
                                     "status": "unavailable", "rule_id": "", "resource_id": "",
                                     "severity": "unknown"})
-    predicted_verdict = "warn" if name == "s3_public_bucket" else "block"
-    predicted_shape = {"added": [], "removed": [],
-                       "modified": [{"type": resource_type, "id": target}]}
-    scores = score_prediction(predicted_shape, _shape(base, branch), predicted_findings,
-                              actual_findings, verdict_checkable=True,
-                              predicted_verdict=predicted_verdict, actual_verdict=actual.verdict)
-    return {"scenario": name, "predicted_verdict": predicted_verdict,
+    predicted_shape = _shape(base, branch)
+    scores = score_prediction(
+        predicted_shape, expected["shape"], predicted_findings, expected["findings"],
+        verdict_checkable=True, predicted_verdict=prediction.verdict,
+        actual_verdict=expected["verdict"],
+    )
+    return {"scenario": name, "predicted_verdict": prediction.verdict,
+            "expected_verdict": expected["verdict"],
+            "predicted_shape": predicted_shape,
+            "expected_shape": expected["shape"],
             "predicted_findings": predicted_findings,
-            "actual_findings": actual_findings, **scores}
+            "expected_findings": expected["findings"], **scores}
 
 
 def run_harness() -> dict[str, Any]:
@@ -161,23 +163,38 @@ def run_harness() -> dict[str, Any]:
             try:
                 base = build_demo_infrastructure()
                 bucket = "emfirge-demo-artifacts-000000000000"
+                # Expected observations are explicit scenario facts from the
+                # synthetic fixture. The engine's Change/rebuild/graph/verdict
+                # path never produces this oracle.
                 scenarios = [
                     ("s3_public_bucket", Change(op="modify", resource_type="s3_bucket",
-                        resource_id=bucket, fields={"is_public": True}), bucket, "EMFIRGE-S3-001"),
+                        resource_id=bucket, fields={"is_public": True}), {
+                            "shape": {"added": [], "removed": [],
+                                      "modified": [{"type": "s3_bucket", "id": bucket}]},
+                            "findings": [{"source": "native", "rule_id": "EMFIRGE-S3-001",
+                                          "resource_id": bucket, "severity": "unknown",
+                                          "status": "confirmed"}],
+                            "verdict": "warn",
+                        }),
                     ("security_group_ssh_exposure", Change(op="modify", resource_type="security_group",
                         resource_id="sg-demo-public", fields={"rules": [{"protocol": "tcp",
-                        "from_port": 22, "to_port": 22, "ip_ranges": ["0.0.0.0/0"]}]}),
-                     "sg-demo-public", "EMFIRGE-EC2-002"),
+                        "from_port": 22, "to_port": 22, "ip_ranges": ["0.0.0.0/0"]}]}), {
+                            "shape": {"added": [], "removed": [],
+                                      "modified": [{"type": "security_group", "id": "sg-demo-public"}]},
+                            "findings": [{"source": "native", "rule_id": "EMFIRGE-EC2-002",
+                                          "resource_id": "sg-demo-public", "severity": "unknown",
+                                          "status": "confirmed"}],
+                            "verdict": "block",
+                        }),
                 ]
                 records = []
-                for name, change, target, rule_id in scenarios:
+                for name, change, expected in scenarios:
                     branch_id = branches.create_branch(base, name, base_analysis_id="accuracy-demo")
                     branch_ids.append(branch_id)
                     branches.apply_change_to_branch(branch_id, change)
-                    reality = branches.rebuild_branch_infra(branch_id)
-                    actual = combined_verdict(base, reality, run_scanners=False)
-                    record = _scenario_prediction(name, base, reality, actual, target,
-                                                   change.resource_type, rule_id)
+                    predicted_state = branches.rebuild_branch_infra(branch_id)
+                    prediction = combined_verdict(base, predicted_state, run_scanners=False)
+                    record = _scenario_prediction(name, base, predicted_state, prediction, expected)
                     records.append(record)
                 report = {"mode": "offline demo mechanics check (not true AWS accuracy)",
                           "records": records,
