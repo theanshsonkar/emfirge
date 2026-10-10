@@ -35,7 +35,7 @@ Scan with arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 
 The account ID above is intentionally non-existent example data. Use your own role when running a real scan.
 
-## The 15 MCP tools
+## The 16 MCP tools
 
 ### Analyze
 
@@ -57,6 +57,7 @@ The account ID above is intentionally non-existent example data. Use your own ro
 | `emfirge_branch_diff` | Compare the branch model with its base analysis. |
 | `emfirge_branch_verdict` | Return advisory `block`, `warn`, or `pass` results and coverage details. |
 | `emfirge_rollback_branch` | Remove the most recent modeled change. |
+| `emfirge_rollback_branch_to_count` | Truncate a branch to a selected existing change count. |
 | `emfirge_discard_branch` | Discard an isolated branch. |
 | `emfirge_list_branches` | List branches, optionally by base analysis. |
 | `emfirge_compare_branches` | Compare branches and rank modeled outcomes safest-first. |

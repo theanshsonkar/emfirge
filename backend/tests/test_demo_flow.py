@@ -1,12 +1,25 @@
 import json
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app import branches, database, verdict
+from app import main
 from app.demo_seed import build_demo_infrastructure
 from app.egraph import build_graph
+from app.models import (
+    AWSInfrastructure,
+    EC2Data,
+    EC2Instance,
+    InternetGatewayAttachment,
+    Route,
+    RouteTable,
+    SecurityGroup,
+    VPCData,
+    VPCSubnet,
+)
 from app.mutations import Change
 from app.verdict import combined_verdict
 
@@ -40,6 +53,74 @@ def safe_change():
         op="modify", resource_type="s3_bucket",
         resource_id="emfirge-demo-artifacts-000000000000",
         fields={"encrypted": True},
+    )
+
+
+def delete_artifacts_change():
+    return Change(
+        op="delete", resource_type="s3_bucket",
+        resource_id="emfirge-demo-artifacts-000000000000",
+    )
+
+
+def _main_route_ingress_infrastructure():
+    """Small modeled ingress fixture using implicit main route-table association."""
+    return AWSInfrastructure(
+        region="us-east-1",
+        ec2=EC2Data(
+            instance_count=1,
+            instance_ids=["i-app"],
+            instances=[EC2Instance(
+                id="i-app", type="t3.micro", state="running", sg_ids=["sg-app"],
+                subnet_id="subnet-app", has_public_ip=True,
+            )],
+            security_groups=[SecurityGroup(
+                id="sg-app", name="app", attached_to=["i-app"], rules=[
+                    {"protocol": "tcp", "from_port": 22, "to_port": 22,
+                     "ip_ranges": ["0.0.0.0/0"]},
+                    {"protocol": "tcp", "from_port": 443, "to_port": 443,
+                     "ip_ranges": ["0.0.0.0/0"]},
+                ],
+            )],
+            ssh_open_to_internet=True,
+            ssh_security_group_id="sg-app",
+        ),
+        vpc=VPCData(
+            total_vpcs=1,
+            internet_gateways=["igw-main"],
+            internet_gateway_attachments=[InternetGatewayAttachment(
+                internet_gateway_id="igw-main", vpc_id="vpc-main", state="available",
+            )],
+            internet_gateway_attachments_complete=True,
+            subnets=[VPCSubnet(
+                id="subnet-app", vpc_id="vpc-main", cidr="10.0.1.0/24",
+                resources=["i-app"], is_public=True,
+            )],
+            route_tables=[RouteTable(
+                id="rtb-main", vpc_id="vpc-main", is_main=True,
+                routes=[Route(
+                    destination_cidr="0.0.0.0/0", target_type="internet_gateway",
+                    target_id="igw-main",
+                )],
+            )],
+        ),
+    )
+
+
+def restrict_ssh_change():
+    return Change(
+        op="modify", resource_type="security_group", resource_id="sg-app",
+        fields={"rules": [{
+            "protocol": "tcp", "from_port": 443, "to_port": 443,
+            "ip_ranges": ["0.0.0.0/0"],
+        }]},
+    )
+
+
+def remove_main_igw_route_change():
+    return Change(
+        op="modify", resource_type="route_table", resource_id="rtb-main",
+        fields={"routes": []},
     )
 
 
@@ -77,6 +158,25 @@ def test_dangerous_change_is_reachable_and_safe_change_passes(demo_branch_db):
     assert first == second
 
 
+def test_redundant_demo_change_is_explicitly_unchanged(demo_branch_db):
+    base = build_demo_infrastructure()
+    branch_id = branches.create_branch(base, "already-versioned", base_analysis_id="demo")
+    unchanged_value = Change(
+        op="modify", resource_type="s3_bucket",
+        resource_id="emfirge-demo-artifacts-000000000000",
+        fields={"versioning_enabled": True},
+    )
+    recorded = branches.apply_change_to_branch(branch_id, unchanged_value)
+    assert recorded.last_change_modeled_state_unchanged is True
+
+    diff = branches.get_branch_diff(branch_id)
+    result = combined_verdict(base, branches.rebuild_branch_infra(branch_id), run_scanners=False)
+
+    assert diff.modeled_state_unchanged is True
+    assert result.verdict == "pass"
+    assert result.modeled_state_unchanged is True
+
+
 def test_compare_branches_ranks_safe_first_and_rollback_is_deterministic(demo_branch_db):
     base = build_demo_infrastructure()
     dangerous = branches.create_branch(base, "dangerous-ssh", base_analysis_id="demo")
@@ -91,3 +191,165 @@ def test_compare_branches_ranks_safe_first_and_rollback_is_deterministic(demo_br
     assert result.ranking[0] == safe
     assert result.ranking[1] == dangerous
     assert result.model_dump() == branches.compare_branches([dangerous, safe]).model_dump()
+
+
+def test_agent_sees_lost_capability_before_and_after_rollback(demo_branch_db):
+    base = build_demo_infrastructure()
+    branch_id = branches.create_branch(base, "remove-artifacts", base_analysis_id="demo")
+    branches.apply_change_to_branch(branch_id, delete_artifacts_change())
+
+    diff = branches.get_branch_diff(branch_id)
+    assert diff.lost_dependencies == [{
+        "from": "iam-role-EmfirgeDemoAppRole",
+        "to": "emfirge-demo-artifacts-000000000000",
+        "relationship": "can_access",
+    }]
+    result = combined_verdict(base, branches.rebuild_branch_infra(branch_id), run_scanners=False)
+    assert result.verdict == "warn"
+    assert result.lost_dependencies == diff.lost_dependencies
+    assert result.scanner_status == {
+        "checkov": "disabled", "trivy": "disabled", "cloudsplaining": "disabled",
+    }
+    assert result.coverage_warnings
+
+    branches.rollback_last(branch_id)
+    restored = combined_verdict(base, branches.rebuild_branch_infra(branch_id), run_scanners=False)
+    assert restored.verdict == "pass"
+    assert restored.lost_dependencies == []
+
+
+def test_demo_resource_deletion_warns_without_iam_dependency_and_rollback_clears_it(demo_branch_db):
+    base = build_demo_infrastructure()
+    rds = base.rds.rds_instances[0]
+    rds.publicly_accessible = True
+    rds.encrypted = False
+    base.rds.publicly_accessible = [rds.id]
+    base.rds.unencrypted_instances = [rds.id]
+
+    deletion = branches.create_branch(base, "remove-demo-database", base_analysis_id="demo")
+    branches.apply_change_to_branch(deletion, Change(
+        op="delete", resource_type="rds_instance", resource_id=rds.id,
+    ))
+    diff = branches.get_branch_diff(deletion)
+    result = combined_verdict(base, branches.rebuild_branch_infra(deletion), run_scanners=False)
+
+    assert diff.lost_dependencies == []
+    assert any(item["rule_id"] == "EMFIRGE-RDS-002" for item in diff.removed_findings)
+    assert len(diff.deletion_impacts) == 1
+    impact = diff.deletion_impacts[0]
+    assert impact["removed_resource"] == {"id": rds.id, "resource_type": "rds_instance"}
+    assert {item["id"] for item in impact["surviving_related_resources"]} >= {
+        "sg-demo-db", "subnet-demo-private",
+    }
+    assert "cannot determine whether removal disrupts" in impact["possible_consequence"]
+    assert result.verdict == "warn"
+    assert result.deletion_impacts == diff.deletion_impacts
+    assert "modeled_resources_removed=1" in result.summary
+
+    safe = branches.create_branch(base, "leave-demo-database", base_analysis_id="demo")
+    branches.apply_change_to_branch(safe, safe_change())
+    comparison = branches.compare_branches([deletion, safe])
+    deletion_summary = next(item for item in comparison.branches if item.branch_id == deletion)
+    assert deletion_summary.deletion_impacts == 1
+    assert comparison.ranking == [safe, deletion]
+
+    branches.rollback_last(deletion)
+    restored_diff = branches.get_branch_diff(deletion)
+    restored_verdict = combined_verdict(
+        base, branches.rebuild_branch_infra(deletion), run_scanners=False,
+    )
+    assert restored_diff.deletion_impacts == []
+    assert restored_verdict.verdict == "pass"
+    assert restored_verdict.deletion_impacts == []
+
+
+def test_agent_compare_does_not_rank_dependency_loss_above_safe_fix(demo_branch_db):
+    base = build_demo_infrastructure()
+    delete_id = branches.create_branch(base, "remove-artifacts", base_analysis_id="demo")
+    safe_id = branches.create_branch(base, "encrypt-artifacts", base_analysis_id="demo")
+    branches.apply_change_to_branch(delete_id, delete_artifacts_change())
+    branches.apply_change_to_branch(safe_id, safe_change())
+
+    comparison = branches.compare_branches([delete_id, safe_id])
+    assert comparison.ranking == [safe_id, delete_id]
+    assert comparison.branches[0].lost_dependencies == 1
+    assert comparison.branches[1].lost_dependencies == 0
+
+
+def test_losing_main_igw_route_warns_possible_impact_and_ranks_below_preserved_ingress(
+    demo_branch_db,
+):
+    base = _main_route_ingress_infrastructure()
+    preserved = branches.create_branch(base, "restrict-ssh-preserve-https", base_analysis_id="route")
+    route_removed = branches.create_branch(base, "restrict-ssh-remove-igw-route", base_analysis_id="route")
+    for branch_id in (preserved, route_removed):
+        branches.apply_change_to_branch(branch_id, restrict_ssh_change())
+    branches.apply_change_to_branch(route_removed, remove_main_igw_route_change())
+
+    preserved_infra = branches.rebuild_branch_infra(preserved)
+    route_removed_infra = branches.rebuild_branch_infra(route_removed)
+    assert "i-app" in {node.id for node in build_graph(base).nodes}
+    assert "i-app" in {node.id for node in build_graph(preserved_infra).nodes}
+
+    diff = branches.get_branch_diff(route_removed)
+    verdict_result = combined_verdict(base, route_removed_infra, run_scanners=False)
+    assert "i-app" in diff.no_longer_internet_reachable
+    assert diff.score_after > diff.score_before
+    assert "i-app" in verdict_result.no_longer_internet_reachable
+    assert verdict_result.verdict == "warn"
+    assert verdict_result.possible_service_impacts == [
+        "Modeled internet ingress is no longer present for i-app; clients or integrations may depend on this path. The snapshot cannot determine whether service is affected, and no outage is inferred.",
+        "Modeled internet ingress is no longer present for sg-app; clients or integrations may depend on this path. The snapshot cannot determine whether service is affected, and no outage is inferred.",
+    ]
+    assert "possible_service_impact=" in verdict_result.summary
+    assert "outage not inferred" in verdict_result.summary
+
+    comparison = branches.compare_branches([route_removed, preserved])
+    summary_by_id = {item.branch_id: item for item in comparison.branches}
+    assert summary_by_id[route_removed].score_after > summary_by_id[preserved].score_after
+    assert summary_by_id[route_removed].no_longer_internet_reachable == 2
+    assert summary_by_id[preserved].no_longer_internet_reachable == 0
+    assert comparison.ranking == [preserved, route_removed]
+
+
+def test_demo_agent_http_branch_sequence(demo_branch_db, monkeypatch):
+    main._branch_request_log.clear()
+    monkeypatch.setattr(main, "get_infrastructure_for_analysis",
+                        lambda _analysis_id: build_demo_infrastructure())
+    monkeypatch.setenv("EMFIRGE_RUN_SCANNERS", "0")
+    client = TestClient(main.app)
+
+    created = client.post("/branches", json={"base_analysis_id": "demo", "name": "restrict-web"})
+    assert created.status_code == 200
+    branch_id = created.json()["branch_id"]
+    changed = client.post(f"/branches/{branch_id}/changes", json={
+        **dangerous_change().model_dump(), "expected_change_count": 0,
+    })
+    assert changed.status_code == 200
+    assert changed.json()["num_changes"] == 1
+    assert changed.json()["modeled_state_unchanged"] is False
+
+    diff = client.get(f"/branches/{branch_id}/diff")
+    verdict_response = client.get(f"/branches/{branch_id}/verdict")
+    assert diff.status_code == verdict_response.status_code == 200
+    assert "i-demo-web-001" in diff.json()["newly_internet_reachable"]
+    assert verdict_response.json()["verdict"] == "block"
+    assert verdict_response.json()["coverage_warnings"]
+
+    stale = client.post(f"/branches/{branch_id}/changes", json={
+        **safe_change().model_dump(), "expected_change_count": 0,
+    })
+    assert stale.status_code == 409
+    safe_created = client.post("/branches", json={
+        "base_analysis_id": "demo", "name": "encrypt-artifacts",
+    })
+    safe_id = safe_created.json()["branch_id"]
+    assert client.post(f"/branches/{safe_id}/changes", json=safe_change().model_dump()).status_code == 200
+    comparison = client.post("/branches/compare", json={"branch_ids": [branch_id, safe_id]})
+    assert comparison.status_code == 200
+    assert comparison.json()["ranking"][0] == safe_id
+
+    rolled_back = client.post(f"/branches/{branch_id}/rollback", json={"expected_change_count": 1})
+    assert rolled_back.status_code == 200
+    assert rolled_back.json()["num_changes"] == 0
+    assert client.get(f"/branches/{branch_id}/diff").json()["modeled_state_unchanged"] is True

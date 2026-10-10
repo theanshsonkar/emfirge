@@ -6,7 +6,7 @@
 //      a tokenized id from emfirge_scan (SG_001) reached the backend verbatim
 //      and came back "Target not found" — the branch tools could not act on any
 //      id an agent actually had.
-//   2. None of the eight handlers ran their response through redactDeep, so
+//   2. None of the ten handlers ran their response through redactDeep, so
 //      branch_verdict returned raw instance ids, security-group ids, bucket
 //      names and role ARNs regardless of EMFIRGE_PRIVACY.
 //
@@ -118,6 +118,140 @@ test("apply_change expands tokenized ids nested inside fields", async () => {
   );
 });
 
+test("apply_change forwards an optional observed branch revision", async () => {
+  const revision = "a".repeat(64);
+  assert.equal(branches.applyChangeZodObject.parse({
+    branch_id: "b1", op: "modify", resource_type: "s3_bucket", resource_id: "bucket",
+    branch_revision: revision,
+  }).branch_revision, revision);
+  assert.throws(() => branches.applyChangeZodObject.parse({
+    branch_id: "b1", op: "modify", resource_type: "s3_bucket", resource_id: "bucket",
+    branch_revision: "stale",
+  }));
+
+  const calls = stubFetch({ branch_id: "b1", num_changes: 1 });
+  await branches.applyChangeHandler({
+    branch_id: "b1", op: "modify", resource_type: "s3_bucket", resource_id: "bucket",
+    branch_revision: revision,
+  });
+  assert.deepEqual(calls[0].body, {
+    op: "modify", resource_type: "s3_bucket", resource_id: "bucket", fields: {},
+    branch_revision: revision,
+  });
+});
+
+test("apply_change documents the route-table full-replacement contract", () => {
+  assert.match(branches.applyChangeSchema.resource_type.description ?? "", /route_table/);
+  assert.match(branches.applyChangeSchema.fields.description ?? "", /complete normalized route list/);
+  assert.match(branches.applyChangeSchema.fields.description ?? "", /same-VPC attachment evidence in the available state/);
+});
+
+test("discard_branch forwards the optional observed change count", async () => {
+  assert.deepEqual(branches.discardBranchZodObject.parse({
+    branch_id: "b1", expected_change_count: 3,
+  }), { branch_id: "b1", expected_change_count: 3 });
+  assert.throws(() => branches.discardBranchZodObject.parse({
+    branch_id: "b1", expected_change_count: -1,
+  }));
+
+  const calls = stubFetch({ branch_id: "b1", status: "discarded" });
+
+  await branches.discardBranchHandler({
+    branch_id: "b1",
+    expected_change_count: 3,
+  });
+
+  assert.deepEqual(calls, [{
+    method: "POST",
+    url: "http://stub.invalid/api/branches/b1/discard",
+    body: { expected_change_count: 3 },
+  }]);
+});
+
+test("get_branch reads one branch and preserves the backend's detail shape", async () => {
+  assert.deepEqual(branches.getBranchZodObject.parse({ branch_id: "branch/one" }), {
+    branch_id: "branch/one",
+  });
+  assert.throws(() => branches.getBranchZodObject.parse({ branch_id: "" }));
+
+  const detail = {
+    branch_id: "branch/one",
+    name: "Inspect role policy",
+    status: "active",
+    base_analysis_id: "analysis-1",
+    num_changes: 1,
+    changes: [{ op: "modify", resource_type: "iam_role_policy", resource_id: "arn:aws:iam::123456789012:role/Test", fields: {} }],
+  };
+  const calls = stubFetch(detail);
+
+  const result = await branches.getBranchHandler({ branch_id: "branch/one" });
+
+  assert.deepEqual(calls, [{
+    method: "GET",
+    url: "http://stub.invalid/api/branches/branch%2Fone",
+    body: undefined,
+  }]);
+  const response = JSON.parse(textOf(result)) as Record<string, unknown>;
+  assert.deepEqual(response, redactDeep(detail));
+  assert.ok(!Object.hasOwn(response, "base"));
+});
+
+test("fork_branch posts a required name and returns the fork result", async () => {
+  assert.deepEqual(branches.forkBranchZodObject.parse({ branch_id: "branch/one", name: "child" }), {
+    branch_id: "branch/one", name: "child",
+  });
+  assert.throws(() => branches.forkBranchZodObject.parse({ branch_id: "b1", name: "" }));
+
+  const calls = stubFetch({ branch_id: "child-1", num_changes: 2 });
+  const result = await branches.forkBranchHandler({ branch_id: "branch/one", name: "child" });
+  assert.deepEqual(calls, [{
+    method: "POST",
+    url: "http://stub.invalid/api/branches/branch%2Fone/fork",
+    body: { name: "child" },
+  }]);
+  assert.deepEqual(JSON.parse(textOf(result)), { branch_id: "child-1", num_changes: 2 });
+});
+
+test("fork, rollback, and discard forward optional branch revisions", async () => {
+  const revision = "d".repeat(64);
+  const forkCalls = stubFetch({ branch_id: "child-2", num_changes: 1 });
+  await branches.forkBranchHandler({ branch_id: "b1", name: "child", branch_revision: revision });
+  assert.deepEqual(forkCalls[0].body, { name: "child", branch_revision: revision });
+
+  const rollbackCalls = stubFetch({ branch_id: "b1", status: "open" });
+  await branches.rollbackBranchHandler({ branch_id: "b1", branch_revision: revision });
+  assert.deepEqual(rollbackCalls[0].body, { branch_revision: revision });
+
+  const discardCalls = stubFetch({ branch_id: "b1", status: "discarded" });
+  await branches.discardBranchHandler({ branch_id: "b1", branch_revision: revision });
+  assert.deepEqual(discardCalls[0].body, { branch_revision: revision });
+});
+
+test("rollback_branch_to_count validates target and forwards stable payload", async () => {
+  const revision = "e".repeat(64);
+  assert.deepEqual(branches.rollbackBranchToCountZodObject.parse({
+    branch_id: "b1", target_change_count: 2, branch_revision: revision,
+  }), { branch_id: "b1", target_change_count: 2, branch_revision: revision });
+  assert.throws(() => branches.rollbackBranchToCountZodObject.parse({
+    branch_id: "b1", target_change_count: -1,
+  }));
+  assert.throws(() => branches.rollbackBranchToCountZodObject.parse({
+    branch_id: "b1", target_change_count: 1.5,
+  }));
+
+  const response = { branch_id: "b1", status: "open", num_changes: 2 };
+  const calls = stubFetch(response);
+  const result = await branches.rollbackBranchToCountHandler({
+    branch_id: "b1", target_change_count: 2, branch_revision: revision,
+  });
+  assert.deepEqual(calls, [{
+    method: "POST",
+    url: "http://stub.invalid/api/branches/b1/rollback-to-count",
+    body: { target_change_count: 2, branch_revision: revision },
+  }]);
+  assert.deepEqual(JSON.parse(textOf(result)), response);
+});
+
 // ---------------------------------------------------------------------------
 // Bug 2 — every handler's output must go through redactDeep.
 // ---------------------------------------------------------------------------
@@ -136,15 +270,18 @@ test("every branch handler redacts real identifiers out of its response", async 
   const handlers: Array<[string, (args: never) => Promise<unknown>]> = [
     ["createBranchHandler", branches.createBranchHandler],
     ["applyChangeHandler", branches.applyChangeHandler],
+    ["getBranchHandler", branches.getBranchHandler],
+    ["forkBranchHandler", branches.forkBranchHandler],
     ["branchDiffHandler", branches.branchDiffHandler],
     ["branchVerdictHandler", branches.branchVerdictHandler],
     ["rollbackBranchHandler", branches.rollbackBranchHandler],
+    ["rollbackBranchToCountHandler", branches.rollbackBranchToCountHandler],
     ["discardBranchHandler", branches.discardBranchHandler],
     ["listBranchesHandler", branches.listBranchesHandler],
     ["compareBranchesHandler", branches.compareBranchesHandler],
   ];
 
-  // One arg bag that satisfies all eight schemas; extra keys are ignored.
+  // One arg bag that satisfies all ten schemas; extra keys are ignored.
   const args = {
     branch_id: "b1",
     base_analysis_id: "a1",
@@ -154,6 +291,8 @@ test("every branch handler redacts real identifiers out of its response", async 
     resource_id: "sg-deadbeef",
     fields: {},
     branch_ids: ["b1"],
+    branch_revision: "a".repeat(64),
+    target_change_count: 0,
   } as never;
 
   for (const [name, handler] of handlers) {

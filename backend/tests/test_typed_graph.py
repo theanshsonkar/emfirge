@@ -1,5 +1,5 @@
 """Focused coverage for the provider-neutral typed graph models."""
-from app.egraph import Edge, Graph, Node, NodeCategory, RelationshipType, build_graph, internet_ingress
+from app.egraph import Edge, Graph, Node, NodeCategory, RelationshipType, build_graph, get_internet_reachable_set, internet_ingress
 from app.models import (
     AWSInfrastructure,
     EC2Data,
@@ -16,6 +16,9 @@ from app.models import (
     InterfaceEndpoint,
 )
 from app.rules import run_all_checks
+from app.diffing import diff_infrastructure
+from app.mutations import Change, apply_change
+from app.verdict import combined_verdict
 
 
 def test_internet_ingress_public_ip_gate_is_ec2_only_for_non_ec2_resources():
@@ -49,6 +52,8 @@ def test_internet_ingress_public_ip_gate_is_ec2_only_for_non_ec2_resources():
 def test_collect_vpc_skips_malformed_peering_record_and_keeps_later_valid_one(monkeypatch):
     from app import aws_collector
 
+    gateway_requests = []
+
     class FakeEC2:
         def describe_vpc_peering_connections(self):
             return {
@@ -66,8 +71,19 @@ def test_collect_vpc_skips_malformed_peering_record_and_keeps_later_valid_one(mo
         def describe_vpcs(self):
             return {"Vpcs": []}
 
-        def describe_internet_gateways(self):
-            return {"InternetGateways": []}
+        def describe_internet_gateways(self, **kwargs):
+            gateway_requests.append(kwargs)
+            if "NextToken" not in kwargs:
+                return {
+                    "InternetGateways": [{"InternetGatewayId": "igw-vpc-1", "Attachments": [
+                        {"VpcId": "vpc-1", "State": "available"},
+                    ]}],
+                    "NextToken": "page-2",
+                }
+            assert kwargs == {"NextToken": "page-2"}
+            return {"InternetGateways": [
+                {"InternetGatewayId": "igw-detached", "Attachments": []},
+            ]}
 
         def describe_nat_gateways(self, **kwargs):
             return {"NatGateways": []}
@@ -90,6 +106,12 @@ def test_collect_vpc_skips_malformed_peering_record_and_keeps_later_valid_one(mo
 
     assert [connection.id for connection in result.vpc_peering_connections] == ["pcx-valid"]
     assert result.vpc_peering_connections[0].status == "active"
+    assert gateway_requests == [{}, {"NextToken": "page-2"}]
+    assert result.internet_gateways == ["igw-vpc-1", "igw-detached"]
+    assert result.internet_gateway_attachments_complete is True
+    assert [attachment.model_dump() for attachment in result.internet_gateway_attachments] == [{
+        "internet_gateway_id": "igw-vpc-1", "vpc_id": "vpc-1", "state": "available",
+    }]
 
 
 
@@ -165,6 +187,7 @@ def test_collect_vpc_new_network_calls_fail_safe(monkeypatch):
     assert result.transit_gateway_attachments == []
     assert result.vpn_gateways == []
     assert result.interface_endpoints == []
+    assert result.internet_gateway_attachments_complete is False
     assert result.missing_s3_endpoint is False
     assert result.missing_dynamodb_endpoint is False
 def test_build_graph_is_deterministic_and_typed(nightmare_infra):
@@ -792,6 +815,43 @@ def test_missing_route_table_assumes_public_ingress():
     assert edge.attrs["confidence"] == "assumed"
 
 
+def test_route_table_change_updates_synthetic_modeled_internet_reachability():
+    base = _network_truth_infra(
+        route_table=_route_table("internet_gateway"),
+        has_public_ip=True,
+    )
+    base.vpc.public_subnet_ids = ["subnet-adversarial"]
+    base.vpc.subnets[0].is_public = True
+    before_graph = build_graph(base)
+    assert "i-adversarial" in get_internet_reachable_set(before_graph)
+
+    changed = apply_change(base, Change(
+        op="modify", resource_type="route_table", resource_id="rtb-adversarial",
+        fields={"routes": []},
+    ))
+    after_graph = build_graph(changed)
+
+    assert "i-adversarial" not in get_internet_reachable_set(after_graph)
+    assert changed.vpc.subnets[0].is_public is False
+    assert changed.vpc.public_subnet_ids == []
+    assert base.vpc.subnets[0].is_public is True
+
+
+def test_main_route_table_is_inherited_by_unassociated_subnets():
+    infrastructure = _network_truth_infra(route_table=RouteTable(
+        id="rtb-adversarial", vpc_id="vpc-adversarial", is_main=True,
+        associated_subnet_ids=[],
+        routes=[Route(destination_cidr="0.0.0.0/0",
+                      target_type="internet_gateway", target_id="igw-adversarial")],
+    ))
+    graph = build_graph(infrastructure)
+
+    assert any(edge.src == "subnet-adversarial" and edge.dst == "rtb-adversarial"
+               and edge.relationship is RelationshipType.ASSOCIATED_WITH
+               for edge in graph.edges)
+    assert "i-adversarial" in get_internet_reachable_set(graph)
+
+
 def test_repeated_build_graph_is_deterministic_including_edge_attrs():
     infrastructure = _network_truth_infra(
         route_table=_route_table("internet_gateway"),
@@ -918,6 +978,24 @@ def _internal_pair_infra(*, same_vpc=True, egress=True, ingress_source="sg-a",
 
 def _can_reach_edges(graph):
     return [edge for edge in graph.edges if edge.relationship.value == "can_reach"]
+
+
+def test_branch_reports_lost_modeled_internal_connectivity():
+    base = _internal_pair_infra()
+    branch = apply_change(base, Change(
+        op="modify", resource_type="security_group", resource_id="sg-b",
+        fields={"rules": [{
+            "from_port": 5432, "to_port": 5432, "protocol": "tcp",
+            "source_sg_ids": ["sg-other"], "ip_ranges": [],
+        }]},
+    ))
+    diff = diff_infrastructure(base, branch)
+    assert diff.lost_connectivity == [{
+        "from": "i-a", "to": "i-b", "relationship": "can_reach",
+    }]
+    result = combined_verdict(base, branch, run_scanners=False)
+    assert result.verdict == "warn"
+    assert result.lost_connectivity == diff.lost_connectivity
 
 
 def test_internal_reachability_same_vpc_sg_allow_high_5432():

@@ -19,6 +19,9 @@ Severity = Literal["critical", "high", "medium", "low"]
 
 class CombinedVerdict(BaseModel):
     verdict: Literal["pass", "warn", "block"]
+    branch_revision: str | None = None
+    # True only when the complete modeled infrastructure snapshots are equal.
+    modeled_state_unchanged: bool = False
     native_added: list[dict[str, Any]] = Field(default_factory=list)
     native_removed: list[dict[str, Any]] = Field(default_factory=list)
     scanner_added: list[dict[str, Any]] = Field(default_factory=list)
@@ -28,6 +31,11 @@ class CombinedVerdict(BaseModel):
     score_delta: int = 0
     newly_internet_reachable: list[str] = Field(default_factory=list)
     no_longer_internet_reachable: list[str] = Field(default_factory=list)
+    # These are modeled ingress paths lost in the branch, not proof of an outage.
+    possible_service_impacts: list[str] = Field(default_factory=list)
+    lost_dependencies: list[dict[str, str]] = Field(default_factory=list)
+    lost_connectivity: list[dict[str, str]] = Field(default_factory=list)
+    deletion_impacts: list[dict[str, Any]] = Field(default_factory=list)
     scanner_available: bool = False
     # Per-scanner outcome, e.g. {"checkov": "ok", "trivy": "unavailable: not
     # installed"}. `scanner_available` is True when ANY scanner ran, so on its
@@ -39,6 +47,7 @@ class CombinedVerdict(BaseModel):
     # computed with less than the full lens set, so it must not be presented as
     # a complete answer.
     coverage_warnings: List[str] = Field(default_factory=list)
+    collection_warnings: List[str] = Field(default_factory=list)
     cost_delta_monthly_usd: float = 0.0
     cost_unknown_notes: List[str] = Field(default_factory=list)
     introduces_privilege_escalation: bool = False
@@ -225,7 +234,8 @@ def combined_verdict(
 
     scanner_available = False
     scanner_status: dict[str, str] = {}
-    coverage_warnings: list[str] = []
+    coverage_warnings: list[str] = list(diff.coverage_warnings)
+    collection_warnings = diff.collection_warnings
     scanner_added: list[dict[str, Any]] = []
     scanner_removed: list[dict[str, Any]] = []
     scanner_results = ((run_checkov, "checkov"), (run_trivy, "trivy"), (run_cloudsplaining, "cloudsplaining"))
@@ -310,7 +320,9 @@ def combined_verdict(
     introduced_reachable = introduced_escalating_roles & branch_reachable
     if blocking or introduced_reachable:
         verdict = "block"
-    elif new_findings or diff.newly_internet_reachable or introduces_privilege_escalation:
+    elif (new_findings or diff.newly_internet_reachable or introduces_privilege_escalation
+          or diff.no_longer_internet_reachable or diff.lost_dependencies
+          or diff.lost_connectivity or diff.deletion_impacts):
         verdict = "warn"
     else:
         verdict = "pass"
@@ -328,6 +340,14 @@ def combined_verdict(
         unavailable = ""
     cost_summary = "cost unknown" if cost_unknown_notes else f"cost_delta={cost_delta_monthly_usd:.2f}"
     privilege_summary = "; privilege escalation introduced" if introduces_privilege_escalation else ""
+    dependency_summary = f"; modeled_dependencies_lost={len(diff.lost_dependencies)}" if diff.lost_dependencies else ""
+    connectivity_summary = f"; modeled_internal_paths_lost={len(diff.lost_connectivity)}" if diff.lost_connectivity else ""
+    ingress_summary = (
+        f"; modeled_ingress_paths_lost={len(diff.no_longer_internet_reachable)}"
+        "; possible_service_impact=clients or integrations may depend on these paths; outage not inferred"
+        if diff.no_longer_internet_reachable else ""
+    )
+    deletion_summary = f"; modeled_resources_removed={len(diff.deletion_impacts)}" if diff.deletion_impacts else ""
     capacity_summary = ""
     if introduced_capacity_breaches:
         breaches = ",".join(
@@ -338,10 +358,15 @@ def combined_verdict(
         f"verdict={verdict}; native_added={len(native_added)}; scanner_added={len(scanner_added)}; "
         f"native_removed={len(native_removed)}; scanner_removed={len(scanner_removed)}; "
         f"newly_reachable={len(diff.newly_internet_reachable)}; score={diff.score_before}->{diff.score_after} "
-        f"(delta={diff.score_delta}); {cost_summary}{privilege_summary}{capacity_summary}{unavailable}"
+        f"(delta={diff.score_delta}); {cost_summary}{privilege_summary}{dependency_summary}{connectivity_summary}{ingress_summary}{deletion_summary}{capacity_summary}{unavailable}"
     )
+    possible_service_impacts = [
+        f"Modeled internet ingress is no longer present for {resource_id}; clients or integrations may depend on this path. The snapshot cannot determine whether service is affected, and no outage is inferred."
+        for resource_id in sorted(diff.no_longer_internet_reachable)
+    ]
     return CombinedVerdict(
         verdict=verdict,
+        modeled_state_unchanged=diff.modeled_state_unchanged,
         native_added=native_added,
         native_removed=native_removed,
         scanner_added=scanner_added,
@@ -351,9 +376,14 @@ def combined_verdict(
         score_delta=diff.score_delta,
         newly_internet_reachable=sorted(diff.newly_internet_reachable),
         no_longer_internet_reachable=sorted(diff.no_longer_internet_reachable),
+        possible_service_impacts=possible_service_impacts,
+        lost_dependencies=diff.lost_dependencies,
+        lost_connectivity=diff.lost_connectivity,
+        deletion_impacts=diff.deletion_impacts,
         scanner_available=scanner_available,
         scanner_status=scanner_status,
         coverage_warnings=coverage_warnings,
+        collection_warnings=collection_warnings,
         cost_delta_monthly_usd=cost_delta_monthly_usd,
         cost_unknown_notes=cost_unknown_notes,
         introduces_privilege_escalation=introduces_privilege_escalation,

@@ -10,19 +10,103 @@ from typing import Any, Dict, Iterable, Type
 from pydantic import BaseModel, Field
 
 from app.models import (
+    AccessStatement,
     AWSInfrastructure,
     EC2Instance,
     LambdaFunction,
     RDSInstance,
+    Route,
+    RouteTable,
     S3Bucket,
     SecurityGroup,
 )
 
 
-SUPPORTED_RESOURCE_TYPES = frozenset(
-    {"ec2_instance", "security_group", "rds_instance", "s3_bucket", "lambda_function"}
+_CRUD_OPERATIONS = frozenset({"add", "modify", "delete"})
+
+# Authoritative branch mutation contract. Runtime validation, model lookup, the
+# capabilities endpoint, and its schema-drift tests all derive from this table.
+_MUTATION_CAPABILITIES = {
+    "ec2_instance": {"model": EC2Instance, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "security_group": {
+        "model": SecurityGroup,
+        "operations": _CRUD_OPERATIONS,
+        "constraints": ({
+            "operations": sorted(_CRUD_OPERATIONS),
+            "kind": "derived_field",
+            "fields": ["attached_to"],
+            "required_fields": [],
+            "allowed_fields": [],
+            "message": "SecurityGroup.attached_to is derived from EC2 sg_ids; change EC2 sg_ids instead",
+        },),
+    },
+    "rds_instance": {"model": RDSInstance, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "s3_bucket": {"model": S3Bucket, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "lambda_function": {"model": LambdaFunction, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "iam_role_policy": {
+        "model": None,
+        "operations": frozenset({"modify"}),
+        "constraints": ({
+            "operations": ["modify"],
+            "kind": "complete_field_replacement",
+            "fields": [],
+            "required_fields": ["access_statements"],
+            "allowed_fields": ["access_statements"],
+            "message": "Replace the complete normalized statement list for one existing collected role identified by role ARN",
+        },),
+    },
+    "route_table": {
+        "model": RouteTable,
+        "operations": frozenset({"modify"}),
+        "constraints": ({
+            "operations": ["modify"],
+            "kind": "complete_field_replacement",
+            "fields": [],
+            "required_fields": ["routes"],
+            "allowed_fields": ["routes"],
+            "message": "Replace the complete normalized route list for one existing collected route table; associations are derived, and new IGW routes require complete same-VPC available-attachment evidence",
+        },),
+    },
+}
+SUPPORTED_RESOURCE_TYPES = frozenset(_MUTATION_CAPABILITIES)
+SUPPORTED_OPERATIONS = frozenset().union(
+    *(capability["operations"] for capability in _MUTATION_CAPABILITIES.values())
 )
-SUPPORTED_OPERATIONS = frozenset({"add", "modify", "delete"})
+
+
+class MutationConstraint(BaseModel):
+    operations: list[str]
+    kind: str
+    fields: list[str] = Field(default_factory=list)
+    required_fields: list[str] = Field(default_factory=list)
+    allowed_fields: list[str] = Field(default_factory=list)
+    message: str
+
+
+class ResourceMutationCapability(BaseModel):
+    resource_type: str
+    operations: list[str]
+    constraints: list[MutationConstraint] = Field(default_factory=list)
+
+
+class MutationCapabilities(BaseModel):
+    operations: list[str]
+    resources: list[ResourceMutationCapability]
+
+
+def mutation_capabilities() -> MutationCapabilities:
+    """Return the public branch mutation contract from the runtime registry."""
+    return MutationCapabilities(
+        operations=sorted(SUPPORTED_OPERATIONS),
+        resources=[
+            ResourceMutationCapability(
+                resource_type=resource_type,
+                operations=sorted(capability["operations"]),
+                constraints=capability["constraints"],
+            )
+            for resource_type, capability in sorted(_MUTATION_CAPABILITIES.items())
+        ],
+    )
 
 
 class Change(BaseModel):
@@ -30,6 +114,8 @@ class Change(BaseModel):
     resource_type: str
     resource_id: str = ""
     fields: Dict[str, Any] = Field(default_factory=dict)
+    expected_change_count: int | None = Field(default=None, ge=0)
+    branch_revision: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 def _fresh(infra: AWSInfrastructure) -> AWSInfrastructure:
@@ -38,22 +124,26 @@ def _fresh(infra: AWSInfrastructure) -> AWSInfrastructure:
 
 
 def _validate_change(change: Change) -> None:
+    capability = _MUTATION_CAPABILITIES.get(change.resource_type)
     if change.op not in SUPPORTED_OPERATIONS:
         raise ValueError(f"Unsupported operation: {change.op}")
-    if change.resource_type not in SUPPORTED_RESOURCE_TYPES:
+    if capability is None:
         raise ValueError(f"Unsupported resource type: {change.resource_type}")
+    if change.op not in capability["operations"]:
+        raise ValueError(f"{change.resource_type} supports {', '.join(sorted(capability['operations']))} only")
     if not isinstance(change.fields, dict):
         raise ValueError("Change fields must be a dictionary")
+    for constraint in capability["constraints"]:
+        if constraint["kind"] == "derived_field" and change.op in constraint["operations"]:
+            if set(change.fields).intersection(constraint["fields"]):
+                raise ValueError(constraint["message"])
 
 
 def _model_for(resource_type: str) -> Type[BaseModel]:
-    return {
-        "ec2_instance": EC2Instance,
-        "security_group": SecurityGroup,
-        "rds_instance": RDSInstance,
-        "s3_bucket": S3Bucket,
-        "lambda_function": LambdaFunction,
-    }[resource_type]
+    model_type = _MUTATION_CAPABILITIES[resource_type]["model"]
+    if model_type is None:
+        raise ValueError(f"{resource_type} does not have a resource model")
+    return model_type
 
 
 def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
@@ -106,6 +196,58 @@ def _sync_counts(infra: AWSInfrastructure) -> None:
     infra.lambda_data.function_count = len(infra.lambda_data.functions)
 
 
+def _sync_s3_public_buckets(infra: AWSInfrastructure) -> None:
+    """Keep the collector's public-bucket summary aligned with bucket models."""
+    infra.s3.public_buckets = [bucket.name for bucket in infra.s3.buckets if bucket.is_public]
+
+
+def _effective_route_table_associations(infra: AWSInfrastructure) -> dict[str, list[str]]:
+    """Resolve explicit subnet associations and main-table inheritance."""
+    tables = infra.vpc.route_tables
+    result = {
+        str(table.id if isinstance(table, RouteTable) else table["id"]): set(
+            table.associated_subnet_ids if isinstance(table, RouteTable)
+            else table.get("associated_subnet_ids", [])
+        )
+        for table in tables
+    }
+    explicitly_associated = set().union(*result.values()) if result else set()
+    main_by_vpc: dict[str, list[str]] = {}
+    for table in tables:
+        get = (lambda key, default=None: getattr(table, key, default)) if isinstance(table, RouteTable) else table.get
+        if get("is_main", False):
+            main_by_vpc.setdefault(str(get("vpc_id", "")), []).append(str(get("id", "")))
+    for subnet in infra.vpc.subnets:
+        get = (lambda key, default=None: getattr(subnet, key, default)) if isinstance(subnet, BaseModel) else subnet.get
+        subnet_id, vpc_id = str(get("id", "")), str(get("vpc_id", ""))
+        main_tables = main_by_vpc.get(vpc_id, [])
+        if subnet_id not in explicitly_associated and len(main_tables) == 1:
+            result[main_tables[0]].add(subnet_id)
+    return {table_id: sorted(subnet_ids) for table_id, subnet_ids in result.items()}
+
+
+def _sync_route_table_public_subnets(infra: AWSInfrastructure) -> None:
+    """Refresh public-subnet summaries after replacing normalized routes."""
+    associations = _effective_route_table_associations(infra)
+    public_subnets = set()
+    for table in infra.vpc.route_tables:
+        get = (lambda key, default=None: getattr(table, key, default)) if isinstance(table, RouteTable) else table.get
+        routes = get("routes", []) or []
+        if any(
+            str(route.destination_cidr if isinstance(route, Route) else route.get("destination_cidr", "")) == "0.0.0.0/0"
+            and str(route.target_type if isinstance(route, Route) else route.get("target_type", "")).lower() == "internet_gateway"
+            for route in routes
+        ):
+            public_subnets.update(associations.get(str(get("id", "")), []))
+    for subnet in infra.vpc.subnets:
+        subnet_id = str(subnet.id if isinstance(subnet, BaseModel) else subnet.get("id", ""))
+        if isinstance(subnet, BaseModel):
+            subnet.is_public = subnet_id in public_subnets
+        else:
+            subnet["is_public"] = subnet_id in public_subnets
+    infra.vpc.public_subnet_ids = sorted(public_subnets)
+
+
 def _append_unique(values: list[str], value: str) -> None:
     if value not in values:
         values.append(value)
@@ -135,11 +277,50 @@ def _remove_one(values: list[str], value: str) -> None:
         pass
 
 
+def _sync_security_group_attachments(infra: AWSInfrastructure) -> None:
+    """Rebuild the EC2-only SG back-reference from authoritative instance sg_ids.
+
+    RDS, Lambda, and other consumers keep their own sg_ids; their graph
+    relationships are emitted from those forward references. ``attached_to``
+    feeds the EC2-specific attached-instance edges and security rules.
+    """
+    attachments = {group.id: [] for group in infra.ec2.security_groups}
+    for instance in infra.ec2.instances:
+        for sg_id in dict.fromkeys(instance.sg_ids):
+            attached = attachments.get(sg_id)
+            if attached is not None:
+                attached.append(instance.id)
+    for group in infra.ec2.security_groups:
+        group.attached_to = attachments[group.id]
+
+
 def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> None:
     collection = _collection(infra, resource_type)
     index = next((i for i, item in enumerate(collection) if _identity(resource_type, item) == resource_id), None)
     if index is None:
         raise ValueError(f"Target not found: {resource_type}/{resource_id}")
+    if resource_type == "security_group":
+        users = sorted({
+            item.id for item in infra.ec2.instances if resource_id in item.sg_ids
+        } | {
+            item.id for item in infra.rds.rds_instances if resource_id in item.sg_ids
+        } | {
+            item.name for item in infra.lambda_data.functions if resource_id in item.sg_ids
+        } | {
+            item.id for item in infra.elasticache.clusters if resource_id in item.sg_ids
+        } | {
+            group.id for group in infra.ec2.security_groups if group.id != resource_id
+            and any(
+                resource_id in (rule.get("source_sg_ids") or [])
+                or resource_id in (rule.get("dest_sg_ids") or [])
+                for rule in group.rules + group.egress_rules
+            )
+        })
+        if users:
+            raise ValueError(
+                f"Security group {resource_id} is still in use by {', '.join(users)}; "
+                "model detaching or replacing it before deletion"
+            )
     target = collection[index]
     collection.pop(index)
 
@@ -151,10 +332,6 @@ def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> N
             _remove_value(group.attached_to, resource_id)
         _remove_value(infra.ec2.stopped_instances, resource_id)
     elif resource_type == "security_group":
-        for instance in infra.ec2.instances:
-            _remove_value(instance.sg_ids, resource_id)
-        for instance in infra.rds.rds_instances:
-            _remove_value(instance.sg_ids, resource_id)
         _remove_value(infra.ec2.open_security_groups, resource_id)
         if infra.ec2.ssh_security_group_id == resource_id:
             infra.ec2.ssh_security_group_id = None
@@ -190,8 +367,102 @@ def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> N
             _remove_value(values, resource_id)
 
 
-def recompute_derived_state(infra: AWSInfrastructure) -> AWSInfrastructure:
+def _replace_iam_role_policy_statements(
+    infra: AWSInfrastructure, change: Change
+) -> None:
+    """Replace the normalized identity-policy statement view for one collected role.
+
+    This deliberately does not accept raw IAM policy documents or create/delete
+    roles. Replacing statements clears collector-derived shortcuts so graph
+    derivation uses only the supplied normalized statements on this branch.
+    """
+    constraint = next(
+        item for item in _MUTATION_CAPABILITIES["iam_role_policy"]["constraints"]
+        if change.op in item["operations"] and item["kind"] == "complete_field_replacement"
+    )
+    required_fields = set(constraint["required_fields"])
+    allowed_fields = set(constraint["allowed_fields"])
+    if set(change.fields) != required_fields or required_fields != allowed_fields:
+        raise ValueError(
+            f"iam_role_policy modify requires only {', '.join(sorted(required_fields))}"
+        )
+    replacement_field = next(iter(required_fields))
+    statements = change.fields[replacement_field]
+    if not isinstance(statements, list):
+        raise ValueError("access_statements must be a list replacing the complete normalized statement set")
+
+    matches = [policy for policy in infra.iam.role_policies if policy.role_arn == change.resource_id]
+    if not matches:
+        raise ValueError(f"Target not found: iam_role_policy/{change.resource_id}")
+    if len(matches) != 1:
+        raise ValueError("IAM role policy target is ambiguous; role ARN must identify exactly one collected role")
+
+    policy = matches[0]
+    policy.access_statements = [AccessStatement.model_validate(statement) for statement in statements]
+    # Do not let stale collector summaries override an empty/replaced statement
+    # set in egraph.build_graph's legacy fallback path.
+    policy.has_admin = False
+    policy.accessible_resources = []
+    policy.policy_names = []
+
+
+def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> None:
+    """Replace only the normalized routes on one collected route table."""
+    required_fields = {"routes"}
+    if set(change.fields) != required_fields:
+        raise ValueError("route_table modify requires only routes as the complete replacement list")
+    routes = change.fields["routes"]
+    if not isinstance(routes, list):
+        raise ValueError("routes must be a list replacing the complete normalized route set")
+    matches = [table for table in infra.vpc.route_tables if table.id == change.resource_id]
+    if not matches:
+        raise ValueError(f"Target not found: route_table/{change.resource_id}")
+    if len(matches) != 1:
+        raise ValueError("Route table target is ambiguous; ID must identify exactly one collected route table")
+    normalized = [Route.model_validate(route) for route in routes]
+    destinations = [route.destination_cidr for route in normalized]
+    if len(destinations) != len(set(destinations)):
+        raise ValueError("routes cannot contain duplicate destination_cidr values")
+    existing_igw_routes = {
+        (route.destination_cidr, route.target_id)
+        for route in matches[0].routes
+        if route.target_type.lower() == "internet_gateway"
+    }
+    for route in normalized:
+        if route.target_type.lower() != "internet_gateway":
+            continue
+        preexisting = (route.destination_cidr, route.target_id) in existing_igw_routes
+        if not infra.vpc.internet_gateway_attachments_complete:
+            if preexisting:
+                # Preserve legacy routes when attachment enumeration was not
+                # available; absence of mapping is not same-VPC evidence.
+                continue
+            raise ValueError(
+                "Cannot add an internet_gateway route without complete IGW attachment evidence; "
+                "recollect the VPC snapshot"
+            )
+        same_vpc_attachment = any(
+            attachment.internet_gateway_id == route.target_id
+            and bool(matches[0].vpc_id)
+            and attachment.vpc_id == matches[0].vpc_id
+            and attachment.state == "available"
+            for attachment in infra.vpc.internet_gateway_attachments
+        )
+        if not same_vpc_attachment:
+            raise ValueError(
+                f"Internet gateway target is not attached to route table VPC {matches[0].vpc_id}: "
+                f"{route.target_id}"
+            )
+    matches[0].routes = normalized
+    _sync_route_table_public_subnets(infra)
+
+
+def recompute_derived_state(
+    infra: AWSInfrastructure, *, reconcile_security_group_attachments: bool = False,
+) -> AWSInfrastructure:
     """Recompute EC2 internet-exposure summaries from authoritative resources."""
+    if reconcile_security_group_attachments:
+        _sync_security_group_attachments(infra)
     attached_sg_ids = {
         sg_id
         for instance in infra.ec2.instances
@@ -237,6 +508,13 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     _validate_change(change)
     result = _fresh(infra)
     resource_type = change.resource_type
+    if resource_type == "iam_role_policy":
+        _replace_iam_role_policy_statements(result, change)
+        return result
+    if resource_type == "route_table":
+        _replace_route_table_routes(result, change)
+        return recompute_derived_state(result)
+
     model_type = _model_for(resource_type)
 
     if change.op == "add":
@@ -266,7 +544,13 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         _delete(result, resource_type, change.resource_id)
 
     _sync_counts(result)
-    return recompute_derived_state(result)
+    if resource_type == "s3_bucket":
+        _sync_s3_public_buckets(result)
+    return recompute_derived_state(
+        result,
+        reconcile_security_group_attachments=resource_type in {"ec2_instance", "security_group"}
+        or (resource_type in {"rds_instance", "lambda_function"} and "sg_ids" in change.fields),
+    )
 
 
 def apply_changes(infra: AWSInfrastructure, changes: Iterable[Change]) -> AWSInfrastructure:

@@ -90,6 +90,18 @@ from app.models import AWSInfrastructure, EC2Data, ElasticIP, VPCData, VPCSubnet
 from app.verdict import combined_verdict
 
 
+def test_collection_warnings_are_visible_in_agent_verdict():
+    base = AWSInfrastructure(region="us-east-1", warnings=[
+        "Lambda scan skipped: insufficient permissions",
+    ])
+    branch = AWSInfrastructure(region="us-east-1", warnings=list(base.warnings))
+    result = combined_verdict(base, branch, run_scanners=False)
+    assert result.verdict == "pass"
+    assert result.collection_warnings == ["Lambda scan skipped: insufficient permissions"]
+    assert any("source snapshot has 1 collection warning" in item for item in result.coverage_warnings)
+    assert "DEGRADED" in result.summary
+
+
 @pytest.fixture
 def infra():
     return AWSInfrastructure(region="us-east-1")
@@ -163,6 +175,18 @@ def test_scanners_off_still_gives_a_real_native_verdict(monkeypatch, infra):
     # context, not a downgrade of what the native rules found.
     assert result.verdict == "block"
     assert result.coverage_warnings, "scanners-off is still reported on a block"
+
+
+def test_modeling_warnings_from_diff_are_preserved_in_verdict(monkeypatch, infra):
+    warning = "IAM policy impact is a graph approximation; Organizations SCPs are outside this model"
+    monkeypatch.setattr(
+        "app.verdict.diff_infrastructure",
+        lambda base, branch: DiffResult(coverage_warnings=[warning]),
+    )
+
+    result = combined_verdict(infra, infra, run_scanners=False)
+
+    assert warning in result.coverage_warnings
 
 
 def test_scanner_unavailable_keeps_native_only(monkeypatch, infra):

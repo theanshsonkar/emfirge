@@ -10,7 +10,7 @@ from app.models import (
     EC2Data, S3Data, RDSData, IAMData, IAMUser,
     CloudTrailData, CostData, CloudWatchData,
     GuardDutyData, LambdaData, SecretsManagerData,
-    VPCData, KMSData, ConfigData, SNSData, ECSData, WAFData,
+    VPCData, InternetGatewayAttachment, KMSData, ConfigData, SNSData, ECSData, WAFData,
     APIGatewayData, APIGatewayInstance,
     ElastiCacheData, ElastiCacheCluster,
     SQSData, SQSQueue,
@@ -1454,6 +1454,7 @@ def collect_lambda(key, secret, token, region, warnings) -> LambdaData:
                 vpc_config = fn.get('VpcConfig', {})
                 vpc_id = vpc_config.get('VpcId')
                 subnet_ids = vpc_config.get('SubnetIds', [])
+                sg_ids = vpc_config.get('SecurityGroupIds', [])
 
                 if runtime in DEPRECATED_RUNTIMES:
                     functions_with_outdated_runtime.append(fn_name)
@@ -1476,6 +1477,7 @@ def collect_lambda(key, secret, token, region, warnings) -> LambdaData:
                     'role_arn': role_arn,
                     'vpc_id': vpc_id,
                     'subnet_ids': subnet_ids,
+                    'sg_ids': sg_ids,
                     'secret_refs': secret_refs
                 })
 
@@ -1599,6 +1601,8 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
     
     # Network topology
     internet_gateways = []
+    internet_gateway_attachments = []
+    internet_gateway_attachments_complete = False
     nat_gateways = []
     public_subnet_ids = set()
     
@@ -1656,9 +1660,59 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
 
         # ── INTERNET GATEWAYS ─────────────────────────────────────
         try:
-            igws_response = ec2.describe_internet_gateways()
-            for igw in igws_response.get('InternetGateways', []):
-                internet_gateways.append(igw['InternetGatewayId'])
+            complete = True
+            next_token = None
+            seen_tokens = set()
+            while True:
+                request = {'NextToken': next_token} if next_token else {}
+                igws_response = ec2.describe_internet_gateways(**request)
+                igw_records = (
+                    igws_response.get('InternetGateways')
+                    if isinstance(igws_response, dict) else None
+                )
+                if not isinstance(igw_records, list):
+                    raise ValueError('Malformed InternetGateways response')
+                for igw in igw_records:
+                    if (not isinstance(igw, dict)
+                            or not isinstance(igw.get('InternetGatewayId'), str)
+                            or not igw.get('InternetGatewayId')):
+                        complete = False
+                        continue
+                    internet_gateway_id = igw['InternetGatewayId']
+                    internet_gateways.append(internet_gateway_id)
+                    attachments = igw.get('Attachments')
+                    if not isinstance(attachments, list):
+                        complete = False
+                        continue
+                    for attachment in attachments:
+                        if not isinstance(attachment, dict):
+                            complete = False
+                            continue
+                        vpc_id = attachment.get('VpcId')
+                        state = attachment.get('State')
+                        if vpc_id is not None and not isinstance(vpc_id, str):
+                            complete = False
+                            continue
+                        if state is not None and not isinstance(state, str):
+                            complete = False
+                            continue
+                        if not vpc_id:
+                            complete = False
+                            continue
+                        internet_gateway_attachments.append(InternetGatewayAttachment(
+                            internet_gateway_id=internet_gateway_id,
+                            vpc_id=vpc_id,
+                            state=state,
+                        ))
+                token = igws_response.get('NextToken') if isinstance(igws_response, dict) else None
+                if not token:
+                    break
+                if not isinstance(token, str) or token in seen_tokens:
+                    complete = False
+                    break
+                seen_tokens.add(token)
+                next_token = token
+            internet_gateway_attachments_complete = complete
         except ClientError as e:
             print(f'Internet Gateways check skipped: {get_error_code(e)}')
         except Exception:
@@ -1952,6 +2006,8 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         missing_s3_endpoint=missing_s3_endpoint,
         missing_dynamodb_endpoint=missing_dynamodb_endpoint,
         internet_gateways=internet_gateways,
+        internet_gateway_attachments=internet_gateway_attachments,
+        internet_gateway_attachments_complete=internet_gateway_attachments_complete,
         nat_gateways=nat_gateways,
         public_subnet_ids=list(public_subnet_ids),
         subnets=subnets,

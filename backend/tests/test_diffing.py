@@ -2,14 +2,19 @@ import copy
 
 from app.diffing import diff_infrastructure
 from app.models import (
+    AccessStatement,
     AWSInfrastructure,
     EC2Data,
     EC2Instance,
+    IAMData,
     NetworkACL,
     NACLEntry,
     Route,
     RouteTable,
     SecurityGroup,
+    S3Bucket,
+    S3Data,
+    RolePolicy,
     VPCData,
     VPCSubnet,
 )
@@ -119,6 +124,39 @@ def test_identical_infrastructure_is_a_no_op():
     assert result.added_findings == result.removed_findings == []
     assert result.newly_internet_reachable == result.no_longer_internet_reachable == []
     assert result.score_delta == 0
+    assert result.modeled_state_unchanged is True
+
+
+def test_deletion_impacts_exclude_virtual_and_reference_derived_nodes():
+    base = AWSInfrastructure(
+        ec2=EC2Data(instances=[EC2Instance(
+            id="i-app", type="t3.micro", state="running",
+            instance_profile_arn="arn:aws:iam::000000000000:instance-profile/AppRole",
+        )]),
+        s3=S3Data(buckets=[S3Bucket(name="bucket-with-cdn", has_cloudfront=True)]),
+    )
+    branch = apply_changes(base, [
+        Change(op="delete", resource_type="ec2_instance", resource_id="i-app"),
+        Change(op="delete", resource_type="s3_bucket", resource_id="bucket-with-cdn"),
+    ])
+
+    result = diff_infrastructure(base, branch)
+
+    assert {(item["removed_resource"]["id"], item["removed_resource"]["resource_type"])
+            for item in result.deletion_impacts} == {
+                ("i-app", "ec2_instance"), ("bucket-with-cdn", "s3_bucket"),
+            }
+    assert "iam-role-AppRole" in result.removed_nodes
+    assert "cloudfront-bucket-with-cdn" in result.removed_nodes
+
+
+def test_diff_exposes_source_collection_gaps():
+    base = _internet_infra()
+    base.warnings = ["Lambda scan skipped: insufficient permissions"]
+    branch = copy.deepcopy(base)
+    result = diff_infrastructure(base, branch)
+    assert result.collection_warnings == ["Lambda scan skipped: insufficient permissions"]
+    assert any("branch prediction is incomplete" in item for item in result.coverage_warnings)
 
 
 def test_repeated_diff_is_deterministic_and_does_not_mutate_inputs():
@@ -134,3 +172,34 @@ def test_repeated_diff_is_deterministic_and_does_not_mutate_inputs():
     assert first.model_dump() == second.model_dump()
     assert base.model_dump_json() == base_before
     assert branch.model_dump_json() == branch_before
+
+
+def test_iam_policy_replacement_diffs_access_edge_and_reports_scope_warning():
+    role_arn = "arn:aws:iam::000000000000:role/AppRole"
+    base = AWSInfrastructure(
+        s3=S3Data(buckets=[S3Bucket(name="reports")]),
+        iam=IAMData(role_policies=[RolePolicy(
+            role_name="AppRole",
+            role_arn=role_arn,
+            access_statements=[AccessStatement(
+                effect="allow", actions=["s3:GetObject"], resources=["arn:aws:s3:::reports/*"],
+            )],
+        )]),
+    )
+    branch = apply_change(base, Change(
+        op="modify", resource_type="iam_role_policy", resource_id=role_arn,
+        fields={"access_statements": []},
+    ))
+
+    result = diff_infrastructure(base, branch)
+
+    assert {tuple(edge.values()) for edge in result.removed_edges} >= {
+        ("iam-role-AppRole", "reports", "can_access"),
+    }
+    assert result.lost_dependencies == [{
+        "from": "iam-role-AppRole", "to": "reports", "relationship": "can_access",
+    }]
+    assert len(result.coverage_warnings) == 1
+    assert "SCPs" in result.coverage_warnings[0]
+    IAMData,
+    RolePolicy,

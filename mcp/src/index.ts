@@ -49,6 +49,10 @@ import {
   createBranchSchema,
   createBranchZodObject,
   createBranchHandler,
+  getBranchZodObject,
+  getBranchHandler,
+  forkBranchZodObject,
+  forkBranchHandler,
   discardBranchZodObject,
   discardBranchHandler,
   listBranchesSchema,
@@ -59,6 +63,8 @@ import {
   compareBranchesHandler,
   rollbackBranchZodObject,
   rollbackBranchHandler,
+  rollbackBranchToCountZodObject,
+  rollbackBranchToCountHandler,
 } from "./tools/branches.js";
 
 // Read the published version from package.json so the value advertised over
@@ -249,6 +255,22 @@ const tools: ToolRegistration[] = [
     handler: applyChangeHandler,
   },
   {
+    name: "emfirge_get_branch",
+    description:
+      "Read branch metadata and its ordered normalized change log without returning the base infrastructure snapshot.",
+    schema: branchIdSchema as Record<string, z.ZodTypeAny>,
+    zodObject: getBranchZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: getBranchHandler,
+  },
+  {
+    name: "emfirge_fork_branch",
+    description:
+      "Fork an open branch into a new independent branch with the same base and ordered modeled changes. Does not modify AWS or the parent branch.",
+    schema: { ...branchIdSchema, name: z.string().min(1).describe("Name for the new branch") } as Record<string, z.ZodTypeAny>,
+    zodObject: forkBranchZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: forkBranchHandler,
+  },
+  {
     name: "emfirge_branch_diff",
     description:
       "Show the infrastructure diff for an isolated branch compared with its base analysis.",
@@ -271,6 +293,15 @@ const tools: ToolRegistration[] = [
     schema: branchIdSchema as Record<string, z.ZodTypeAny>,
     zodObject: rollbackBranchZodObject as z.ZodObject<z.ZodRawShape>,
     handler: rollbackBranchHandler,
+  },
+  {
+    name: "emfirge_rollback_branch_to_count",
+    description:
+      "Truncate an open isolated branch's ordered change log to a specified existing count. " +
+      "Use branch_revision from emfirge_get_branch to reject stale state; this changes no AWS resources.",
+    schema: rollbackBranchToCountZodObject.shape as Record<string, z.ZodTypeAny>,
+    zodObject: rollbackBranchToCountZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: rollbackBranchToCountHandler,
   },
   {
     name: "emfirge_discard_branch",

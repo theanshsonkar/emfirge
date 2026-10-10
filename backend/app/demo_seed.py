@@ -28,7 +28,7 @@ from app.models import (
     GuardDutyData,
     LambdaData, LambdaFunction,
     SecretsManagerData,
-    VPCData, VPCSubnet, RouteTable, Route,
+    VPCData, VPCSubnet, RouteTable, Route, InternetGatewayAttachment,
     KMSData,
     ConfigData,
     SNSData,
@@ -72,7 +72,8 @@ def build_demo_infrastructure() -> AWSInfrastructure:
         name="demo-database",
         rules=[{"protocol": "tcp", "from_port": 5432, "to_port": 5432,
                  "ip_ranges": ["10.0.0.0/16"]}],
-        attached_to=[rds_id],
+        # attached_to is the EC2 back-reference; RDS uses its own sg_ids.
+        attached_to=[],
     )
     return AWSInfrastructure(
         region=DEMO_FLOW_REGION,
@@ -115,6 +116,10 @@ def build_demo_infrastructure() -> AWSInfrastructure:
         vpc=VPCData(
             total_vpcs=1,
             internet_gateways=["igw-demo-001"],
+            internet_gateway_attachments=[InternetGatewayAttachment(
+                internet_gateway_id="igw-demo-001", vpc_id=vpc_id, state="available",
+            )],
+            internet_gateway_attachments_complete=True,
             nat_gateways=["nat-demo-001"],
             public_subnet_ids=[public_subnet_id],
             subnets=[

@@ -63,6 +63,7 @@ class LambdaFunction(BaseModel):
     role_arn: Optional[str] = None
     vpc_id: Optional[str] = None
     subnet_ids: List[str] = []
+    sg_ids: List[str] = []
     secret_refs: List[str] = []
 
 class LoadBalancer(BaseModel):
@@ -101,6 +102,13 @@ class RouteTable(BaseModel):
     is_main: bool = False
     associated_subnet_ids: List[str] = Field(default_factory=list)
     routes: List[Route] = Field(default_factory=list)
+
+
+class InternetGatewayAttachment(BaseModel):
+    internet_gateway_id: str
+    vpc_id: Optional[str] = None
+    state: Optional[str] = None
+
 
 class VPCPeeringConnection(BaseModel):
     id: str
@@ -250,7 +258,10 @@ class VPCData(BaseModel):
     missing_s3_endpoint: bool = False
     missing_dynamodb_endpoint: bool = False
     # Network topology for reachability
-    internet_gateways: List[str] = []            # IGW IDs attached to VPCs
+    internet_gateways: List[str] = []            # IGW IDs returned for this region
+    internet_gateway_attachments: List[InternetGatewayAttachment] = Field(default_factory=list)
+    # False for older snapshots or incomplete describe_internet_gateways results.
+    internet_gateway_attachments_complete: bool = False
     nat_gateways: List[str] = []                 # NAT gateway IDs
     public_subnet_ids: List[str] = []            # Subnet IDs with route to IGW
     # Relationship tracking

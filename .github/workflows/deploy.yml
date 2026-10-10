@@ -62,7 +62,7 @@ jobs:
             fi
             sudo docker run -d --name emfirge-engine --restart=always \
               --memory=1500m --memory-swap=1500m \
-              -e EMFIRGE_RUN_SCANNERS=1 \
+              -e EMFIRGE_RUN_SCANNERS=0 \
               --env-file /home/ubuntu/.env \
               -p 8000:8000 \
               ${{ secrets.DOCKERHUB_USERNAME }}/aws-risk-agent:latest

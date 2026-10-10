@@ -8,6 +8,7 @@ import os
 import time
 import uuid
 import json
+import re
 import subprocess
 import tempfile
 import logging
@@ -31,7 +32,7 @@ from app.models import (
     CIAnalyzeRequest, CIAnalyzeResponse, CIAPIKeyRequest, CIAPIKeyResponse,
 )
 from app.diffing import DiffResult
-from app.mutations import Change, apply_change
+from app.mutations import Change, MutationCapabilities, apply_change, mutation_capabilities
 from app.verdict import CombinedVerdict, combined_verdict
 from app import branches
 from app.aws_collector import collect_infrastructure
@@ -1301,6 +1302,56 @@ def list_branches_endpoint(request: Request, base_analysis_id: Optional[str] = N
     return [_branch_summary(branch) for branch in branches.list_branches(base_analysis_id)]
 
 
+@app.get('/branches/capabilities', response_model=MutationCapabilities,
+         dependencies=[Depends(require_api_key)])
+def branch_capabilities_endpoint(request: Request):
+    """List supported branch mutation resource types, operations, and constraints."""
+    _check_branch_rate_limit(_branch_request_ip(request))
+    return mutation_capabilities()
+
+
+@app.get('/branches/{branch_id}', response_model=branches.BranchDetail,
+         dependencies=[Depends(require_api_key)])
+def get_branch_endpoint(branch_id: str, request: Request):
+    """Read branch metadata and ordered changes without returning its base snapshot."""
+    _check_branch_rate_limit(_branch_request_ip(request))
+    try:
+        return branches.read_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post('/branches/{branch_id}/fork', dependencies=[Depends(require_api_key)])
+def fork_branch_endpoint(branch_id: str, request: Request, payload: dict):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    if not isinstance(payload, dict) or not isinstance(payload.get('name'), str) or not payload['name'].strip():
+        raise HTTPException(status_code=422, detail='name is required and must be a non-empty string')
+    if set(payload) - {'name', 'branch_revision'}:
+        raise HTTPException(status_code=422, detail='Only name and branch_revision are supported')
+    expected_revision = payload.get('branch_revision')
+    if expected_revision is not None and (
+        not isinstance(expected_revision, str)
+        or re.fullmatch(r'[0-9a-f]{64}', expected_revision) is None
+    ):
+        raise HTTPException(status_code=422, detail='branch_revision must be a SHA-256 hex string')
+    try:
+        if expected_revision is None:
+            new_branch_id, num_changes = branches.fork_branch(branch_id, payload['name'])
+        else:
+            new_branch_id, num_changes = branches.fork_branch(
+                branch_id, payload['name'], expected_branch_revision=expected_revision,
+            )
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except branches.BranchConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except branches.BranchLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {'branch_id': new_branch_id, 'num_changes': num_changes}
+
+
 @app.post('/branches/{branch_id}/changes', dependencies=[Depends(require_api_key)])
 def add_branch_change_endpoint(branch_id: str, change: Change, request: Request):
     _check_branch_rate_limit(_branch_request_ip(request))
@@ -1313,10 +1364,16 @@ def add_branch_change_endpoint(branch_id: str, change: Change, request: Request)
         branch = branches.apply_change_to_branch(branch_id, change)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except branches.BranchConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         status_code = 409 if str(exc).startswith('Branch is not open:') else 422
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
-    return {'branch_id': branch.branch_id, 'num_changes': len(branch.changes)}
+    return {
+        'branch_id': branch.branch_id,
+        'num_changes': len(branch.changes),
+        'modeled_state_unchanged': branch.last_change_modeled_state_unchanged,
+    }
 
 
 @app.get('/branches/{branch_id}/diff', response_model=DiffResult, dependencies=[Depends(require_api_key)])
@@ -1333,7 +1390,7 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
     _check_branch_rate_limit(_branch_request_ip(request))
     try:
         branch = branches.get_branch(branch_id)
-        rebuilt = branches.rebuild_branch_infra(branch_id)
+        rebuilt = branches.rebuild_branch_state(branch)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     # Scanners are OFF by default on this endpoint. A verdict runs 6 scanner
@@ -1344,27 +1401,107 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
     # via scanner_status + coverage_warnings. Flip EMFIRGE_RUN_SCANNERS=1 once the
     # real fix lands (base-scan cache + async + bigger instance; see notes).
     run_scanners = os.environ.get("EMFIRGE_RUN_SCANNERS", "0") == "1"
-    return combined_verdict(branch.base, rebuilt, run_scanners=run_scanners)
+    result = combined_verdict(branch.base, rebuilt, run_scanners=run_scanners)
+    return result.model_copy(update={"branch_revision": branches.branch_revision(branch)})
 
 
 @app.post('/branches/{branch_id}/rollback', dependencies=[Depends(require_api_key)])
-def rollback_branch_endpoint(branch_id: str, request: Request):
+def rollback_branch_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
     _check_branch_rate_limit(_branch_request_ip(request))
+    payload = payload or {}
+    if not isinstance(payload, dict) or set(payload) - {'expected_change_count', 'branch_revision'}:
+        raise HTTPException(status_code=422, detail='Only expected_change_count and branch_revision are supported')
+    expected_count = payload.get('expected_change_count')
+    if expected_count is not None and (type(expected_count) is not int or expected_count < 0):
+        raise HTTPException(status_code=422, detail='expected_change_count must be a non-negative integer')
+    expected_revision = payload.get('branch_revision')
+    if expected_revision is not None and (
+        not isinstance(expected_revision, str)
+        or re.fullmatch(r'[0-9a-f]{64}', expected_revision) is None
+    ):
+        raise HTTPException(status_code=422, detail='branch_revision must be a SHA-256 hex string')
     try:
-        branch = branches.rollback_last(branch_id)
+        if expected_revision is None:
+            branch = branches.rollback_last(branch_id, expected_change_count=expected_count)
+        else:
+            branch = branches.rollback_last(
+                branch_id, expected_change_count=expected_count,
+                expected_branch_revision=expected_revision,
+            )
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except branches.BranchConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _branch_summary(branch)
+
+
+@app.post('/branches/{branch_id}/rollback-to-count', dependencies=[Depends(require_api_key)])
+def rollback_branch_to_count_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    if not isinstance(payload, dict) or set(payload) - {'target_change_count', 'branch_revision'}:
+        raise HTTPException(
+            status_code=422,
+            detail='Only target_change_count and branch_revision are supported',
+        )
+    target_count = payload.get('target_change_count')
+    if type(target_count) is not int or target_count < 0:
+        raise HTTPException(status_code=422, detail='target_change_count must be a non-negative integer')
+    expected_revision = payload.get('branch_revision')
+    if expected_revision is not None and (
+        not isinstance(expected_revision, str)
+        or re.fullmatch(r'[0-9a-f]{64}', expected_revision) is None
+    ):
+        raise HTTPException(status_code=422, detail='branch_revision must be a SHA-256 hex string')
+    try:
+        branch = branches.rollback_to_change_count(
+            branch_id, target_count, expected_branch_revision=expected_revision,
+        )
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except branches.BranchConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except branches.InvalidRollbackTargetError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _branch_summary(branch)
 
 
 @app.post('/branches/{branch_id}/discard', dependencies=[Depends(require_api_key)])
-def discard_branch_endpoint(branch_id: str, request: Request):
+def discard_branch_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
     _check_branch_rate_limit(_branch_request_ip(request))
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail='Request body must be an object')
+    if set(payload) - {'expected_change_count', 'branch_revision'}:
+        raise HTTPException(status_code=422, detail='Only expected_change_count and branch_revision are supported')
+    expected_count = payload.get('expected_change_count')
+    if expected_count is not None and (type(expected_count) is not int or expected_count < 0):
+        raise HTTPException(status_code=422, detail='expected_change_count must be a non-negative integer')
+    expected_revision = payload.get('branch_revision')
+    if expected_revision is not None and (
+        not isinstance(expected_revision, str)
+        or re.fullmatch(r'[0-9a-f]{64}', expected_revision) is None
+    ):
+        raise HTTPException(status_code=422, detail='branch_revision must be a SHA-256 hex string')
     try:
-        branch = branches.discard_branch(branch_id)
+        if expected_revision is None:
+            branch = branches.discard_branch(branch_id, expected_change_count=expected_count)
+        else:
+            branch = branches.discard_branch(
+                branch_id, expected_change_count=expected_count,
+                expected_branch_revision=expected_revision,
+            )
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except branches.BranchConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {'branch_id': branch.branch_id, 'status': branch.status}
+
+
 @app.post('/remediation/verify-fix', response_model=VerifyFixResponse, dependencies=[Depends(require_api_key)])
 def verify_fix(request: VerifyFixRequest, http_request: Request):
     """
