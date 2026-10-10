@@ -7,7 +7,7 @@ import { DocsSidebar } from "./sidebar";
 import { DocsSearch } from "./search";
 import { OnThisPage } from "./on-this-page";
 export function DocsShell({children,connect=false}:{children:ReactNode;connect?:boolean}){
- const pathname=usePathname();const home=pathname==="/docs";
+ const pathname=usePathname();const home=pathname==="/"||pathname==="/docs";
  const [search,setSearch]=useState(false);const [mobile,setMobile]=useState(false);const [theme,setTheme]=useState<"dark"|"light">("dark");const drawer=useRef<HTMLDialogElement>(null);
  const closeSearch=useCallback(()=>setSearch(false),[]);
  useEffect(()=>{try{const saved=localStorage.getItem("emfirge-docs-theme");if(saved==="light"||saved==="dark")setTheme(saved);}catch{}},[]);
