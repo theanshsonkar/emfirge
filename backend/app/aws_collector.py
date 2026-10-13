@@ -958,6 +958,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
     role_policies = []
     role_last_used = {}
     role_last_used_denied = False
+    role_last_used_error = False
     collection_status = {'iam_role_last_used': 'error'}
     instance_profile_roles = {}
 
@@ -1167,8 +1168,10 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                             role_last_used_denied = True
                             warnings.append('IAM role last-used scan skipped: insufficient permissions')
                         else:
+                            role_last_used_error = True
                             warnings.append(f'IAM role last-used scan skipped: {code}')
                     except Exception as e:
+                        role_last_used_error = True
                         warnings.append(f'IAM role last-used scan skipped: unexpected error — {str(e)}')
 
                     accessible_resources = []
@@ -1337,6 +1340,8 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
         for policy in role_policies:
             policy.last_used_at = None
         collection_status['iam_role_last_used'] = 'denied'
+    elif role_last_used_error:
+        collection_status['iam_role_last_used'] = 'error'
     else:
         collection_status['iam_role_last_used'] = 'ok'
 
