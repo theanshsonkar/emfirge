@@ -38,6 +38,7 @@ class CombinedVerdict(BaseModel):
     newly_exposed: list[dict[str, Any]] = Field(default_factory=list)
     no_longer_exposed: list[dict[str, Any]] = Field(default_factory=list)
     reasons: list[dict[str, str]] = Field(default_factory=list)
+    plans: list[dict[str, str]] = Field(default_factory=list)
     # These are modeled ingress paths lost in the branch, not proof of an outage.
     possible_service_impacts: list[str] = Field(default_factory=list)
     lost_dependencies: list[dict[str, str]] = Field(default_factory=list)

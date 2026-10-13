@@ -17,10 +17,37 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app import cost
-from app.database import BranchLog, SessionLocal
+from app.database import BranchLog, PlanLog, SessionLocal
 from app.diffing import DiffResult, diff_infrastructure, modeled_state_unchanged
 from app.egraph import build_graph
 from app.models import AWSInfrastructure
+
+
+def save_plan(plan_id: str, branch_id: str, input_sha256: str, raw_input: str,
+              branch_revision_after: str, rejected: list, unmodeled: list,
+              unknown_fields: list) -> None:
+    """Persist one raw plan and its ingest outcome."""
+    def operation(session):
+        session.add(PlanLog(
+            plan_id=plan_id, branch_id=branch_id, input_sha256=input_sha256,
+            raw_input=raw_input, branch_revision_after=branch_revision_after,
+            rejected_json=json.dumps(rejected, separators=(",", ":")),
+            unmodeled_json=json.dumps(unmodeled, separators=(",", ":")),
+            unknown_fields_json=json.dumps(unknown_fields, separators=(",", ":")),
+        ))
+    _with_session(operation)
+
+
+def list_plans(branch_id: str) -> list[dict]:
+    session = SessionLocal()
+    try:
+        rows = session.query(PlanLog).filter(PlanLog.branch_id == branch_id).order_by(PlanLog.created_at, PlanLog.plan_id).all()
+        return [{"plan_id": row.plan_id, "input_sha256": row.input_sha256,
+                 "rejected": json.loads(row.rejected_json or "[]"),
+                 "unmodeled": json.loads(row.unmodeled_json or "[]"),
+                 "unknown_fields": json.loads(row.unknown_fields_json or "[]")} for row in rows]
+    finally:
+        session.close()
 from app.mutations import Change, apply_change, apply_changes
 
 

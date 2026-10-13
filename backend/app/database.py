@@ -115,6 +115,21 @@ class BranchLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class PlanLog(Base):
+    """Raw Terraform plan receipt and ingest outcome for one branch."""
+    __tablename__ = 'plan_logs'
+    plan_id = Column(String(36), primary_key=True, unique=True)
+    branch_id = Column(String(36), nullable=False, index=True)
+    input_sha256 = Column(String(64), nullable=False)
+    raw_input = Column(Text, nullable=False)
+    branch_revision_after = Column(String(64), nullable=False)
+    rejected_json = Column(Text, nullable=False, default='[]')
+    unmodeled_json = Column(Text, nullable=False, default='[]')
+    unknown_fields_json = Column(Text, nullable=False, default='[]')
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class CIAPIKey(Base):
     """API keys for CI/CD gate endpoint authentication."""
     __tablename__ = 'ci_api_keys'
