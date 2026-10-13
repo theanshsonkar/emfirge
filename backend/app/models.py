@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 from typing import Dict, List, Optional, Literal, Union
 
 # ── INPUT MODEL ───────────────────────────────────────────────────
@@ -410,6 +410,7 @@ class DynamoDBData(BaseModel):
 
 # Master infrastructure object — holds all collected data + warnings from skipped services
 class AWSInfrastructure(BaseModel):
+    _deletions: list[dict] = PrivateAttr(default_factory=list)
     ec2: EC2Data = EC2Data()
     s3: S3Data = S3Data()
     rds: RDSData = RDSData()
