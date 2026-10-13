@@ -9,7 +9,6 @@ process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.EMFIRGE_PRIVACY = "strict";
 process.env.EMFIRGE_BASE_URL = "http://stub.invalid/api";
-process.env.EMFIRGE_ROLE_ARN = "arn:aws:iam::123456789012:role/EmfirgeReadOnly";
 
 type Call = { method: string; url: string; body?: unknown };
 const evidence = await import("./evidence.js");
@@ -36,16 +35,28 @@ const estimate = {
 
 test("estimate-first calls GET with sources and next step", async () => {
   const calls = stubFetch(estimate);
-  const result = await evidence.inUseEvidenceHandler({ branch_id: "branch/one", sources: ["cloudtrail_events", "cloudwatch_metrics"] });
+  const roleArn = "arn:aws:iam::123456789012:role/EstimateOnlyRole";
+  const result = await evidence.inUseEvidenceHandler({ branch_id: "branch/one", sources: ["cloudtrail_events", "cloudwatch_metrics"], role_arn: roleArn });
   assert.deepEqual(calls[0], { method: "GET", url: "http://stub.invalid/api/branches/branch%2Fone/in-use-evidence/estimate?sources=cloudtrail_events%2Ccloudwatch_metrics", body: undefined });
   assert.equal(output(result).next_step, "Show this estimate to the user. Call again with accept_estimate_id only after the user agrees.");
   assert.notEqual(output(result).resources[0].resource_id, "i-0123456789abcdef0");
 });
 
-test("accepted estimate posts the exact body", async () => {
-  const calls = stubFetch({ estimate_id: "a".repeat(64), observed_at: "2026-01-01T00:00:00Z", window_days: 90, records: [] });
-  await evidence.inUseEvidenceHandler({ branch_id: "b1", sources: ["cloudwatch_metrics"], accept_estimate_id: "a".repeat(64) });
-  assert.deepEqual(calls[0], { method: "POST", url: "http://stub.invalid/api/branches/b1/in-use-evidence", body: { role_arn: process.env.EMFIRGE_ROLE_ARN, sources: ["cloudwatch_metrics"], accept_estimate_id: "a".repeat(64) } });
+test("accepted estimate requires role ARN before backend calls", async () => {
+  const calls = stubFetch({});
+  await assert.rejects(
+    evidence.inUseEvidenceHandler({ branch_id: "b1", sources: ["cloudwatch_metrics"], accept_estimate_id: "a".repeat(64) }),
+    { message: "role_arn is required with accept_estimate_id (use the same role ARN as emfirge_scan)" },
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("accepted estimate posts the exact body and never returns the role ARN", async () => {
+  const roleArn = "arn:aws:iam::123456789012:role/EmfirgeReadOnly";
+  const calls = stubFetch({ estimate_id: "a".repeat(64), observed_at: "2026-01-01T00:00:00Z", role_arn: roleArn, window_days: 90, records: [] });
+  const result = await evidence.inUseEvidenceHandler({ branch_id: "b1", sources: ["cloudwatch_metrics"], role_arn: roleArn, accept_estimate_id: "a".repeat(64) });
+  assert.deepEqual(calls[0], { method: "POST", url: "http://stub.invalid/api/branches/b1/in-use-evidence", body: { role_arn: roleArn, sources: ["cloudwatch_metrics"], accept_estimate_id: "a".repeat(64) } });
+  assert.equal(result.content[0].text.includes(roleArn), false);
 });
 
 test("invalid sources and estimate ids are rejected before backend calls", () => {
@@ -56,7 +67,7 @@ test("invalid sources and estimate ids are rejected before backend calls", () =>
 test("409 returns the replacement estimate and next step", async () => {
   const replacement = { ...estimate, estimate_id: "c".repeat(64) };
   const calls = stubFetch({ detail: "Estimate changed", estimate: replacement }, 409);
-  const result = await evidence.inUseEvidenceHandler({ branch_id: "b1", sources: ["cloudtrail_events"], accept_estimate_id: "a".repeat(64) });
+  const result = await evidence.inUseEvidenceHandler({ branch_id: "b1", sources: ["cloudtrail_events"], role_arn: "arn:aws:iam::123456789012:role/EmfirgeReadOnly", accept_estimate_id: "a".repeat(64) });
   assert.equal(calls.length, 1);
   const body = output(result);
   assert.equal(body.detail, "Estimate changed");

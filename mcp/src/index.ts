@@ -323,7 +323,7 @@ const tools: ToolRegistration[] = [
   {
     name: "emfirge_in_use_evidence",
     description:
-      "Read-only: reads CloudTrail event history (free) and CloudWatch metrics (billed API requests beyond the free tier) only for resources the branch deletes; can only make a verdict stricter, never looser. Never call with accept_estimate_id unless the user agreed to the shown estimate.",
+      "Read-only: reads CloudTrail event history (free) and CloudWatch metrics (billed API requests beyond the free tier) only for resources the branch deletes; can only make a verdict stricter, never looser. role_arn is required only when accepting an estimate and must be the same role used by emfirge_scan. Never call with accept_estimate_id unless the user agreed to the shown estimate.",
     schema: inUseEvidenceSchema as Record<string, z.ZodTypeAny>,
     zodObject: inUseEvidenceZodObject as z.ZodObject<z.ZodRawShape>,
     handler: inUseEvidenceHandler,
