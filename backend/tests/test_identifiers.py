@@ -21,3 +21,11 @@ def test_tokenize_is_deterministic_and_preserves_ordinary_words():
     ordinary = "open tcp port 22 on a running t3.micro"
     assert tokenize(ordinary, identifiers) == ordinary
     assert tokenize_obj({"query": text}, identifiers)["query"] == tokenize(text, identifiers)
+
+
+def test_delete_base_snapshot_and_volume_identifiers_are_customer_owned():
+    from tests.incidents.synthetic_base import load_synthetic_base
+
+    identifiers = customer_identifiers(load_synthetic_base("delete"))
+    for expected in ("snap-dl-root", "vol-dl-root", "vol-dl-data", "dlsnap-reports"):
+        assert expected in identifiers

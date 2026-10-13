@@ -4,14 +4,10 @@ from pathlib import Path
 from app.models import (
     AWSInfrastructure, EC2Data, EC2Instance, IAMData, LambdaData, LambdaFunction,
     NetworkInterface, RDSData, RDSInstance, RolePolicy, Route, RouteTable, S3Bucket,
-    S3Data, SecurityGroup, VPCData, VPCSubnet, InternetGatewayAttachment,
+    S3Data, SecurityGroup, VPCData, VPCSubnet, InternetGatewayAttachment, EBSVolume, EBSSnapshot, RDSSnapshot,
 )
 
-PENDING_FIELDS = {
-    'ec2_instances.block_devices', 'ebs_volumes', 'ebs_snapshots',
-    'rds_instances.engine', 'rds_instances.backup_retention_days',
-    'rds_instances.deletion_protection', 'rds_snapshots', 'iam_roles.last_used_at',
-}
+PENDING_FIELDS = set()
 
 
 def merge_patch(target, patch):
@@ -93,10 +89,11 @@ def load_synthetic_base(name: str, patch: dict | None = None):
         iam_roles.append(RolePolicy(role_name=row['name'], role_arn=row['arn'], access_statements=row.get('access_statements', []),
                                     accessible_resources=[resource for statement in row.get('access_statements', []) if statement.get('effect') == 'Allow' for resource in statement.get('resources', [])]))
     return AWSInfrastructure(
-        region=data.get('region', ''), ec2=EC2Data(instance_count=len(instance_rows), instance_ids=[row['id'] for row in instance_rows], instances=[EC2Instance(**{key: value for key, value in row.items() if key not in {'block_devices'}}) for row in instance_rows], security_groups=groups),
+        region=data.get('region', ''), ec2=EC2Data(instance_count=len(instance_rows), instance_ids=[row['id'] for row in instance_rows], instances=[EC2Instance(**row) for row in instance_rows], security_groups=groups, ebs_volumes=[EBSVolume(**row) for row in data.get('ebs_volumes', [])], ebs_snapshots=[EBSSnapshot(**row) for row in data.get('ebs_snapshots', [])]),
         s3=S3Data(total_buckets=len(data.get('s3_buckets', [])), buckets=[S3Bucket(**row) for row in data.get('s3_buckets', [])]),
-        rds=RDSData(instances=[row['id'] for row in rds_rows], rds_instances=[RDSInstance(**{key: value for key, value in row.items() if key not in {'engine', 'backup_retention_days', 'deletion_protection'}}) for row in rds_rows]),
-        iam=IAMData(role_policies=iam_roles), lambda_data=LambdaData(function_count=len(lambda_rows), functions=[LambdaFunction(**row) for row in lambda_rows]),
+        rds=RDSData(instances=[row['id'] for row in rds_rows], rds_instances=[RDSInstance(**row) for row in rds_rows], rds_snapshots=[RDSSnapshot(**row) for row in data.get('rds_snapshots', [])]),
+        iam=IAMData(role_policies=[RolePolicy(role_name=row['name'], role_arn=row['arn'], last_used_at=row.get('last_used_at'), access_statements=row.get('access_statements', []),
+                                    accessible_resources=[resource for statement in row.get('access_statements', []) if statement.get('effect') == 'Allow' for resource in statement.get('resources', [])]) for row in data.get('iam_roles', [])]), lambda_data=LambdaData(function_count=len(lambda_rows), functions=[LambdaFunction(**row) for row in lambda_rows]),
         vpc=vpc, network_interfaces=(None if data.get('collection', {}).get('network_interfaces') != 'ok' else
             (None if data.get('network_interfaces') is None else [NetworkInterface(**row) for row in data.get('network_interfaces', [])])) ,
         collection=data.get('collection', {}),

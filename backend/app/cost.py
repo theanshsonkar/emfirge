@@ -106,6 +106,8 @@ def estimate_monthly_cost(infra: AWSInfrastructure) -> CostEstimate:
         ))
 
     for volume in infra.ec2.ebs_volumes:
+        if volume.state != "available":
+            continue
         monthly = None
         if volume.volume_type.lower() == "gp3" and volume.size_gb > 0:
             monthly = volume.size_gb * EBS_GP3_GB_MONTH_USD

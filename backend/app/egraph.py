@@ -1677,6 +1677,9 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
     # ── EBS VOLUME NODES ──────────────────────────────────────────
     # Unattached volumes (state=available) — no edges, isolated for orphan detection
     for vol in infrastructure.ec2.ebs_volumes:
+        state = vol['state'] if isinstance(vol, dict) else vol.state
+        if state != 'available':
+            continue
         vol_id = vol['id'] if isinstance(vol, dict) else vol.id
         size_gb = vol['size_gb'] if isinstance(vol, dict) else vol.size_gb
         volume_type = vol['volume_type'] if isinstance(vol, dict) else vol.volume_type

@@ -37,6 +37,7 @@
   },
   "ec2": {
     "auto_scaling_enabled": false,
+    "ebs_snapshots": [],
     "ebs_volumes": [],
     "elastic_ips": [],
     "free_tier_eligible": true,
@@ -50,6 +51,7 @@
     ],
     "instances": [
       {
+        "block_devices": [],
         "has_public_ip": true,
         "id": "i-demo-web-001",
         "imdsv2_required": true,
@@ -154,6 +156,7 @@
           "arn:aws:s3:::emfirge-demo-artifacts-000000000000"
         ],
         "has_admin": false,
+        "last_used_at": null,
         "policy_names": [
           "DemoReadArtifacts"
         ],
@@ -196,7 +199,10 @@
     "publicly_accessible": [],
     "rds_instances": [
       {
+        "backup_retention_days": null,
+        "deletion_protection": null,
         "encrypted": true,
+        "engine": null,
         "id": "demo-postgres",
         "publicly_accessible": false,
         "sg_ids": [
@@ -205,6 +211,7 @@
         "subnet_id": "subnet-demo-private"
       }
     ],
+    "rds_snapshots": [],
     "unencrypted_instances": []
   },
   "region": "us-east-1",
