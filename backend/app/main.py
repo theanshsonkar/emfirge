@@ -34,7 +34,7 @@ from app.models import (
 from app.diffing import DiffResult
 from app.mutations import Change, MutationCapabilities, apply_change, mutation_capabilities
 from app.verdict import CombinedVerdict, combined_verdict
-from app import branches
+from app import branches, identifiers
 from app.aws_collector import collect_infrastructure
 from app.rules import run_all_checks, find_toxic_combos
 from app.scoring import calculate_score, count_scored_resources, score_snapshot
@@ -678,34 +678,9 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
     layers = slice_dict.get('layers', {})
 
     # Keep customer identifiers out of third-party prompts and narrative fields.
-    sensitive_values = {
-        value for value in infrastructure.model_dump(mode='json').values()
-        if isinstance(value, str) and value
-    }
-    def _collect_strings(value):
-        if isinstance(value, str):
-            sensitive_values.add(value)
-        elif isinstance(value, dict):
-            for child in value.values():
-                _collect_strings(child)
-        elif isinstance(value, list):
-            for child in value:
-                _collect_strings(child)
-    _collect_strings(infrastructure.model_dump(mode='json'))
-    if aws_account_id:
-        sensitive_values.add(aws_account_id)
-    def _redact(value):
-        if isinstance(value, str):
-            for secret in sorted(sensitive_values, key=len, reverse=True):
-                value = value.replace(secret, '[redacted]')
-            return value
-        if isinstance(value, dict):
-            return {key: _redact(child) for key, child in value.items()}
-        if isinstance(value, list):
-            return [_redact(child) for child in value]
-        return value
-    graph_text = _redact(graph_text)
-    safe_query = _redact(request.query)
+    customer_ids = identifiers.customer_identifiers(infrastructure, aws_account_id)
+    graph_text = identifiers.tokenize(graph_text, customer_ids)
+    safe_query = identifiers.tokenize(request.query, customer_ids)
     layers = slice_dict.get('layers', {})
 
     # ── DETERMINISTIC: Build attack chain from BFS ────────────────
@@ -966,7 +941,7 @@ Respond with ONLY JSON (no markdown):
                         messages=[{"role": "user", "content": haiku_prompt}]
                     )
                     haiku_raw = haiku_msg.content[0].text.strip().replace('```json', '').replace('```', '').strip()
-                    haiku_data = _redact(json.loads(haiku_raw))
+                    haiku_data = identifiers.tokenize_obj(json.loads(haiku_raw), customer_ids)
                     break  # success
                 except Exception as e:
                     logger.warning(f"simulate: Haiku attempt {attempt + 1} failed: {e}")
