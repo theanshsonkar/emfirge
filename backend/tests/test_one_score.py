@@ -56,3 +56,13 @@ def test_real_fix_increases_score_and_new_critical_is_capped():
     netted_diff = diff_infrastructure(base, netted)
     assert netted_diff.score_after <= netted_diff.score_before
     assert "capped: new Critical finding" in netted_diff.score_notes
+
+
+def test_deleting_unused_security_group_and_fixing_ssh_increases_score():
+    base = build_incident_base()
+    branch = apply_change(base, Change(
+        op="delete", resource_type="security_group", resource_id="sg-inc-latent",
+    ))
+    branch = _restricted(branch)
+    diff = diff_infrastructure(base, branch)
+    assert diff.score_after > diff.score_before

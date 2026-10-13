@@ -355,16 +355,34 @@ def score_branch(base, branch, base_findings, branch_findings) -> dict:
     carried = []
     deleted_carried = 0
     related_carried = 0
+    changed_carried = 0
     for key, finding in base_by_key.items():
         resource_id = _finding_value(finding, 'resource_id')
-        if resource_id in deleted_ids:
+        branch_finding = branch_by_key.get(key)
+        if resource_id in deleted_ids and key not in branch_by_key:
             carried.append(finding)
             deleted_carried += 1
         elif key not in branch_by_key and resource_id in related_ids:
             carried.append(finding)
             related_carried += 1
+        elif deleted_ids and branch_finding is not None and (
+            _finding_value(finding, 'severity') != _finding_value(branch_finding, 'severity')
+            or _finding_value(finding, 'confidence') != _finding_value(branch_finding, 'confidence')
+        ):
+            # A deletion cannot itself remediate or worsen a finding. Preserve
+            # the base finding when graph context changes its scoring fields;
+            # explicit fixes remain represented by findings that disappear.
+            carried.append(finding)
+            changed_carried += 1
 
-    scored_findings = {bucket: list(branch_findings.get(bucket, [])) for bucket in _finding_buckets(branch_findings)}
+    carried_keys = {_finding_key(finding) for finding in carried}
+    scored_findings = {
+        bucket: [
+            finding for finding in branch_findings.get(bucket, [])
+            if _finding_key(finding) not in carried_keys
+        ]
+        for bucket in _finding_buckets(branch_findings)
+    }
     for finding in carried:
         severity = _finding_value(finding, 'severity')
         bucket = {
@@ -382,7 +400,7 @@ def score_branch(base, branch, base_findings, branch_findings) -> dict:
         base_denominator_after = calculate_score(scored_findings, count_scored_resources(base), base)
         for key in ('overall_risk_score', 'security_score', 'availability_score',
                     'disaster_recovery_score', 'cost_score'):
-            after[key] = min(after[key], base_denominator_after[key], score_before[key])
+            after[key] = min(after[key], base_denominator_after[key])
 
     introduced = set(branch_by_key) - set(base_by_key)
     if any(_finding_value(branch_by_key[key], 'severity') == 'Critical' for key in introduced):
@@ -395,6 +413,8 @@ def score_branch(base, branch, base_findings, branch_findings) -> dict:
         notes.append(f'{deleted_carried} findings on deleted resources still counted')
     if related_carried:
         notes.append(f'{related_carried} findings on related resources still counted')
+    if changed_carried:
+        notes.append(f'{changed_carried} findings changed by deletion context still counted')
     if any(_finding_value(branch_by_key[key], 'severity') == 'Critical' for key in introduced):
         notes.append('capped: new Critical finding')
     return {
