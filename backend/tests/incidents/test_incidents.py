@@ -2,7 +2,7 @@ import json
 import os
 from pathlib import Path
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./phase0-test-import.sqlite")
+os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -53,11 +53,16 @@ def _assert_expectation(expect, diff, verdict_json):
         assert verdict_json["introduces_privilege_escalation"] is expect["introduces_privilege_escalation"]
 
 
-@pytest.mark.parametrize("scenario", SCENARIOS, ids=[s["id"] for s in SCENARIOS])
+@pytest.mark.parametrize(
+    "scenario",
+    [pytest.param(
+        s,
+        id=s["id"],
+        marks=pytest.mark.xfail(strict=True, reason=KNOWN_GAPS[s["id"]])
+        if s["id"] in KNOWN_GAPS else (),
+    ) for s in SCENARIOS],
+)
 def test_incident_scenario(incident_branch_db, scenario):
-    marker = pytest.mark.xfail(strict=True, reason=KNOWN_GAPS[scenario["id"]]) if scenario["id"] in KNOWN_GAPS else None
-    if marker:
-        pytest.xfail(reason=marker.kwargs["reason"])
     client = TestClient(main.app)
     created = client.post("/branches", json={"base_analysis_id": "incident", "name": scenario["id"]})
     assert created.status_code == 200
