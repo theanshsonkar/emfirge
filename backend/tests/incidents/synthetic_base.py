@@ -97,4 +97,5 @@ def load_synthetic_base(name: str, patch: dict | None = None):
         vpc=vpc, network_interfaces=(None if data.get('collection', {}).get('network_interfaces') != 'ok' else
             (None if data.get('network_interfaces') is None else [NetworkInterface(**row) for row in data.get('network_interfaces', [])])) ,
         collection=data.get('collection', {}),
+        collected_at=data.get('collected_at'),
     )

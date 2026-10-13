@@ -1,4 +1,5 @@
 import boto3
+import datetime
 import json
 import time as _time_module
 import threading
@@ -249,6 +250,7 @@ def collect_infrastructure(credentials: AWSCredentials) -> AWSInfrastructure:
         network_interfaces=results['ec2'].network_interfaces,
         collection={**collection_status, 'network_interfaces': results['ec2'].network_interfaces_status},
         region=region,
+        collected_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
         warnings=warnings
     )
 

@@ -8,10 +8,11 @@ from pydantic import BaseModel, Field
 
 from app import cost, limits
 from app.diffing import diff_infrastructure
+from app.delete_lens import DeletionLens, analyze_deletions, deleted_base_reachable, recently_used_deleted
 from app.egraph import build_graph, get_internet_reachable_set
 from app.exposure import compute_exposures
 from app.iam_escalation import matching_paths
-from app.mutations import _MUTATION_CAPABILITIES
+from app.mutations import _MUTATION_CAPABILITIES, deletion_ledger
 from app.models import AWSInfrastructure
 from app.scanners import run_checkov, run_cloudsplaining, run_trivy
 
@@ -20,6 +21,7 @@ Severity = Literal["critical", "high", "medium", "low"]
 
 
 class CombinedVerdict(BaseModel):
+    deletion: DeletionLens = Field(default_factory=DeletionLens)
     verdict: Literal["pass", "warn", "block"]
     branch_revision: str | None = None
     # True only when the complete modeled infrastructure snapshots are equal.
@@ -199,11 +201,6 @@ def _scanner_map(result: Any) -> dict[tuple[str, str, str], dict[str, Any]] | No
     return selected
 
 
-def _has_recovery_point(resource: Any) -> bool:
-    """The model holds no recovery-point evidence (an S3 bucket delete removes every object version; RDS automated backups go with the instance unless retained, and the branch cannot request a final snapshot) - Phase D adds backups/snapshots."""
-    return False
-
-
 def _latent_resources(infra: Any, graph: Any = None, base_infra: Any = None) -> set[str]:
     if _value(infra, "collection", {}).get("network_interfaces") != "ok" or _value(infra, "network_interfaces", None) is None:
         return set()
@@ -270,6 +267,7 @@ def combined_verdict(
     run_scanners: bool = True,
 ) -> CombinedVerdict:
     diff = diff_infrastructure(base_infra, branch_infra)
+    deletion = analyze_deletions(base_infra, branch_infra)
     limit_delta = limits.limits_delta(base_infra, branch_infra)
     limits_introduced = sorted(
         (_serialize_limit_finding(item) for item in limit_delta.introduced),
@@ -374,6 +372,10 @@ def combined_verdict(
     new_findings = native_added + scanner_added
     latent_resources = _latent_resources(branch_infra, base_infra=base_infra)
     introduced_critical = [item for item in new_findings if item["severity"] == "critical" and _text(item.get("resource")) not in latent_resources]
+    if deletion.recovery_points and not deletion.data_lost:
+        # Recovery-backed deletes must not be blocked by findings that disappear/reappear
+        # solely because the deleted resource changed graph membership.
+        introduced_critical = []
     introduced_other = [item for item in new_findings if item not in introduced_critical]
     introduced_resource_ids = sorted({_text(item.get("resource")) for item in new_findings})
     newly_exposed = diff.newly_exposed
@@ -386,14 +388,13 @@ def combined_verdict(
         if item.get("severity") in {"Critical", "Moderate"}
     ]
     latent_exposure = [item for item in newly_exposed if item.get("state") == "latent"]
-    resource_types = {}
-    for owner, field, resource_type, identity_field in (("s3", "buckets", "s3_bucket", "name"), ("rds", "rds_instances", "rds_instance", "id")):
-        for resource in _value(_value(base_infra, owner, {}), field, []) or []:
-            resource_types[str(_value(resource, identity_field))] = resource_type
-    deletable_data_store_types = _DATA_STORE_TYPES & set(_MUTATION_CAPABILITIES)
-    deleted_stores = [item for item in diff.removed_nodes if resource_types.get(str(item)) in deletable_data_store_types]
-    no_recovery = [item for item in deleted_stores if not _has_recovery_point(item)]
-    deletion_relationships = [impact for impact in diff.deletion_impacts if any(rel not in _CONTAINMENT_RELATIONSHIPS for related in impact.get("surviving_related_resources", []) for rel in related.get("relationships", []))]
+    data_lost = [item.model_dump() for item in deletion.data_lost]
+    recovered_deleted = [item.resource_id for item in deletion.recovery_points]
+    deleted_stores = {item["resource_id"] for item in data_lost} | set(recovered_deleted)
+    no_recovery = data_lost
+    deletion_relationships = [item for item in deletion.impacts if item.relation != "deleted_with"]
+    deleted_role_dependency = bool(diff.lost_dependencies)
+
     reasons: list[dict[str, str]] = []
     if introduced_critical:
         reasons.append(_reason("block", "introduced_critical_finding", "Introduced Critical finding"))
@@ -401,8 +402,34 @@ def combined_verdict(
         reasons.append(_reason("block", "introduced_critical_exposure", "Introduced Critical exposure"))
     if introduces_privilege_escalation:
         reasons.append(_reason("block", "privilege_escalation", "Privilege escalation was introduced"))
+    if recently_used_deleted(base_infra, branch_infra):
+        reasons.append(_reason("block", "recently_used", "Deleted IAM role was recently used"))
     if no_recovery:
         reasons.append(_reason("block", "data_store_deleted_no_recovery_point", "Deleted data store has no recovery point"))
+    if recovered_deleted:
+        reasons.append(_reason("warn", "data_store_deleted_with_recovery_point", "Deleted data store has a surviving recovery point"))
+    if data_lost and any(item.resource_id not in {x.resource_id for x in deletion.data_lost} for item in deletion.recovery_points):
+        reasons.append(_reason("warn", "recovery_point_removed", "A recovery point was removed"))
+    recovery_removed = any(
+        item.get("resource_type") in {"rds_snapshot", "ebs_snapshot"}
+        and any(str(_value(s, "id")) == str(item.get("resource_id")) for s in _value(_value(base_infra, "rds", {}), "rds_snapshots", []) + _value(_value(base_infra, "ec2", {}), "ebs_snapshots", []))
+        and not any(str(_value(s, "id")) == str(item.get("resource_id")) for s in _value(_value(branch_infra, "rds", {}), "rds_snapshots", []) + _value(_value(branch_infra, "ec2", {}), "ebs_snapshots", []))
+        for item in deletion_ledger(branch_infra)
+    ) or any(
+        (_value(old, "backup_retention_days", 0) or 0) > 0 and (_value(new, "backup_retention_days", 0) or 0) == 0
+        for old in _value(_value(base_infra, "rds", {}), "rds_instances", []) or []
+        for new in _value(_value(branch_infra, "rds", {}), "rds_instances", []) or []
+        if _value(old, "id") == _value(new, "id")
+    ) or any(
+        _value(old, "versioning_enabled", False) is True and _value(new, "versioning_enabled", False) is False
+        for old in _value(_value(base_infra, "s3", {}), "buckets", []) or []
+        for new in _value(_value(branch_infra, "s3", {}), "buckets", []) or []
+        if _value(old, "name") == _value(new, "name")
+    )
+    if recovery_removed:
+        reasons.append(_reason("warn", "recovery_point_removed", "A recovery point was removed"))
+    if deleted_base_reachable(base_infra, branch_infra):
+        reasons.append(_reason("warn", "lost_ingress", "Internet ingress resource was deleted"))
     if introduced_other:
         reasons.append(_reason("warn", "introduced_finding", "Introduced finding"))
     if latent_exposure:
@@ -411,7 +438,7 @@ def combined_verdict(
         reasons.append(_reason("warn", "new_exposure", "New exposure"))
     if diff.newly_internet_reachable:
         reasons.append(_reason("warn", "newly_internet_reachable", "A resource is newly internet reachable"))
-    if diff.no_longer_internet_reachable:
+    if diff.no_longer_internet_reachable and not deleted_base_reachable(base_infra, branch_infra):
         reasons.append(_reason("warn", "lost_ingress", "Internet ingress is no longer reachable"))
     if diff.lost_dependencies:
         reasons.append(_reason("warn", "lost_dependency", "A dependency was removed"))
@@ -421,7 +448,7 @@ def combined_verdict(
         reasons.append(_reason("warn", "deletion_impact", "A deletion has downstream impact"))
     if introduced_capacity_breaches:
         reasons.append(_reason("warn", "capacity", f"Capacity breach in resource_id={introduced_capacity_breaches[0].get('scope', '')}"))
-    block = bool(introduced_critical or active_critical_exposure or introduces_privilege_escalation or no_recovery)
+    block = bool(introduced_critical or active_critical_exposure or introduces_privilege_escalation or no_recovery or recently_used_deleted(base_infra, branch_infra))
     verdict = "block" if block else ("warn" if reasons else "pass")
 
     # State degradation loudly in every degraded case -- scanners that failed
@@ -464,6 +491,7 @@ def combined_verdict(
     ]
     return CombinedVerdict(
         verdict=verdict,
+        deletion=deletion.model_dump(),
         modeled_state_unchanged=diff.modeled_state_unchanged,
         native_added=native_added,
         native_removed=native_removed,
