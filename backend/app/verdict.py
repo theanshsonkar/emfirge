@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any, Literal, Mapping, List
 
 from pydantic import BaseModel, Field
@@ -10,6 +9,8 @@ from pydantic import BaseModel, Field
 from app import cost, limits
 from app.diffing import diff_infrastructure
 from app.egraph import build_graph, get_internet_reachable_set
+from app.exposure import compute_exposures
+from app.mutations import _MUTATION_CAPABILITIES
 from app.models import AWSInfrastructure
 from app.scanners import run_checkov, run_cloudsplaining, run_trivy
 
@@ -31,6 +32,9 @@ class CombinedVerdict(BaseModel):
     score_delta: int = 0
     newly_internet_reachable: list[str] = Field(default_factory=list)
     no_longer_internet_reachable: list[str] = Field(default_factory=list)
+    newly_exposed: list[dict[str, Any]] = Field(default_factory=list)
+    no_longer_exposed: list[dict[str, Any]] = Field(default_factory=list)
+    reasons: list[dict[str, str]] = Field(default_factory=list)
     # These are modeled ingress paths lost in the branch, not proof of an outage.
     possible_service_impacts: list[str] = Field(default_factory=list)
     lost_dependencies: list[dict[str, str]] = Field(default_factory=list)
@@ -48,7 +52,8 @@ class CombinedVerdict(BaseModel):
     # a complete answer.
     coverage_warnings: List[str] = Field(default_factory=list)
     collection_warnings: List[str] = Field(default_factory=list)
-    cost_delta_monthly_usd: float = 0.0
+    cost_delta: dict[str, Any] = Field(default_factory=dict)
+    cost_delta_monthly_usd: float | None = None
     cost_unknown_notes: List[str] = Field(default_factory=list)
     introduces_privilege_escalation: bool = False
     limits_introduced: List[dict] = Field(default_factory=list)
@@ -89,14 +94,27 @@ def _role_ids_with_privilege_escalation(graph: Any) -> set[str]:
     return escalating
 
 
-def _cost_details(base_infra: AWSInfrastructure, branch_infra: AWSInfrastructure) -> tuple[float, List[str]]:
+def _cost_details(base_infra: AWSInfrastructure, branch_infra: AWSInfrastructure) -> tuple[dict[str, Any], float | None, List[str]]:
     try:
         delta = cost.cost_delta(base_infra, branch_infra)
-        monthly = _value(delta, "monthly_delta_usd", 0.0)
-        notes = _value(delta, "unknown_notes", []) or []
-        return float(monthly), [str(note) for note in notes]
+        if hasattr(delta, "model_dump"):
+            details = delta.model_dump(mode="json")
+        else:
+            # Keep lightweight legacy test doubles usable while the wire shape is typed.
+            monthly = _value(delta, "monthly_delta_usd", None)
+            notes = _value(delta, "unknown_notes", []) or []
+            unknown = bool(notes)
+            details = {"value": None if unknown else monthly, "status": "unknown" if unknown else "estimated",
+                       "reason": ("unknown cost" if unknown else "legacy price estimate"),
+                       "unknown_count": len(notes), "known_provisioned_delta": monthly,
+                       "currency": "USD"}
+        value = details.get("value")
+        notes = ([details["reason"]] if details.get("status") == "unknown" else [])
+        return details, value, notes
     except Exception:
-        return 0.0, []
+        details = {"value": None, "status": "unknown", "reason": "cost unavailable",
+                   "unknown_count": 0, "known_provisioned_delta": None, "currency": "USD"}
+        return details, None, [details["reason"]]
 
 
 def _graph_escalation_details(base_infra: AWSInfrastructure, branch_infra: AWSInfrastructure) -> tuple[set[str], set[str]]:
@@ -179,20 +197,36 @@ def _scanner_map(result: Any) -> dict[tuple[str, str, str], dict[str, Any]] | No
     return selected
 
 
-def _privilege_escalation(finding: Mapping[str, Any]) -> bool:
-    text = " ".join(_text(finding.get(field)) for field in ("check_id", "title", "guideline", "rule_id"))
-    lowered = text.lower()
-    if re.search(r"privilege\s+escalation", lowered):
-        return True
-    if re.search(r"iam\s*:\s*passrole|\bpassrole\b", lowered):
-        return True
-    if re.search(r"\badministrator(?:access)?\b|\badmin\s+access\b", lowered):
-        return True
-    if re.search(r"\b(?:iam|action)\s*[:=]\s*\*", lowered):
-        return True
-    if "wildcard" in lowered and re.search(r"\b(?:iam|action)\b", lowered):
-        return True
+def _has_recovery_point(resource: Any) -> bool:
+    """The model holds no recovery-point evidence (an S3 bucket delete removes every object version; RDS automated backups go with the instance unless retained, and the branch cannot request a final snapshot) - Phase D adds backups/snapshots."""
     return False
+
+
+def _latent_resources(infra: Any, graph: Any = None) -> set[str]:
+    groups = list(_value(_value(infra, "ec2", {}), "security_groups", []) or [])
+    consumed = set()
+    for collection_name in (("ec2", "instances"), ("rds", "rds_instances"), ("lambda_data", "functions"), ("elasticache", "clusters")):
+        collection = _value(_value(infra, collection_name[0], {}), collection_name[1], []) or []
+        for item in collection:
+            consumed.update(_value(item, "sg_ids", []) or [])
+    ids = {str(_value(group, "id")) for group in groups}
+    for group in groups:
+        gid = str(_value(group, "id"))
+        if any(gid in (_value(rule, field, []) or []) for other in groups if str(_value(other, "id")) != gid for rule in ((_value(other, "rules", []) or []) + (_value(other, "egress_rules", []) or [])) for field in ("source_sg_ids", "dest_sg_ids")):
+            consumed.add(gid)
+    return ids - consumed
+
+
+_CONTAINMENT_RELATIONSHIPS = {"in_subnet", "belongs_to_vpc", "in_vpc", "contains_resource"}
+_DATA_STORE_TYPES = {"s3_bucket", "rds_instance", "dynamodb_table", "elasticache_cluster", "ebs_volume", "sqs_queue"}
+
+
+def _resource_id(item: Any) -> str:
+    return _text(item.get("id", item.get("resource_id", ""))) if isinstance(item, Mapping) else _text(_value(item, "id", ""))
+
+
+def _reason(level: str, code: str, message: str) -> dict[str, str]:
+    return {"level": level, "code": code, "message": message}
 
 
 def _serialize_limit_finding(finding: Any) -> dict[str, Any]:
@@ -226,7 +260,7 @@ def combined_verdict(
     introduced_capacity_breaches = [
         item for item in limits_introduced if item.get("status") == "exceeded"
     ]
-    cost_delta_monthly_usd, cost_unknown_notes = _cost_details(base_infra, branch_infra)
+    cost_delta, cost_delta_monthly_usd, cost_unknown_notes = _cost_details(base_infra, branch_infra)
     introduced_escalating_roles, branch_reachable = _graph_escalation_details(base_infra, branch_infra)
     introduces_privilege_escalation = bool(introduced_escalating_roles)
     native_added = sorted((_native_finding(item) for item in diff.added_findings), key=_sort_finding)
@@ -311,23 +345,57 @@ def combined_verdict(
             )
 
     new_findings = native_added + scanner_added
-    reachable = set(diff.newly_internet_reachable)
-    blocking = any(
-        item["severity"] in {"critical", "high"}
-        and (_text(item.get("resource")) in reachable or _privilege_escalation(item))
-        for item in new_findings
-    )
-    introduced_reachable = introduced_escalating_roles & branch_reachable
-    if blocking or introduced_reachable:
-        verdict = "block"
-    elif (new_findings or diff.newly_internet_reachable or introduces_privilege_escalation
-          or diff.no_longer_internet_reachable or diff.lost_dependencies
-          or diff.lost_connectivity or diff.deletion_impacts):
-        verdict = "warn"
-    else:
-        verdict = "pass"
-    if verdict == "pass" and introduced_capacity_breaches:
-        verdict = "warn"
+    latent_resources = _latent_resources(branch_infra)
+    introduced_critical = [item for item in new_findings if item["severity"] == "critical" and _text(item.get("resource")) not in latent_resources]
+    introduced_other = [item for item in new_findings if item not in introduced_critical]
+    introduced_resource_ids = sorted({_text(item.get("resource")) for item in new_findings})
+    newly_exposed = diff.newly_exposed
+    active_critical_exposure = [
+        item for item in newly_exposed
+        if item.get("state") == "active" and item.get("severity") == "Critical"
+    ]
+    warn_exposures = [
+        item for item in newly_exposed
+        if item.get("severity") in {"Critical", "Moderate"}
+    ]
+    latent_exposure = [item for item in newly_exposed if item.get("state") == "latent"]
+    resource_types = {}
+    for owner, field, resource_type, identity_field in (("s3", "buckets", "s3_bucket", "name"), ("rds", "rds_instances", "rds_instance", "id")):
+        for resource in _value(_value(base_infra, owner, {}), field, []) or []:
+            resource_types[str(_value(resource, identity_field))] = resource_type
+    deletable_data_store_types = _DATA_STORE_TYPES & set(_MUTATION_CAPABILITIES)
+    deleted_stores = [item for item in diff.removed_nodes if resource_types.get(str(item)) in deletable_data_store_types]
+    no_recovery = [item for item in deleted_stores if not _has_recovery_point(item)]
+    deletion_relationships = [impact for impact in diff.deletion_impacts if any(rel not in _CONTAINMENT_RELATIONSHIPS for related in impact.get("surviving_related_resources", []) for rel in related.get("relationships", []))]
+    reasons: list[dict[str, str]] = []
+    if introduced_critical:
+        reasons.append(_reason("block", "introduced_critical_finding", f"Introduced Critical finding on resource_id={_text(introduced_critical[0].get('resource'))}"))
+    if active_critical_exposure:
+        reasons.append(_reason("block", "introduced_critical_exposure", f"Introduced Critical exposure on resource_id={_text(active_critical_exposure[0].get('resource_id'))}"))
+    if introduces_privilege_escalation:
+        reasons.append(_reason("block", "privilege_escalation", "Privilege escalation was introduced"))
+    if no_recovery:
+        reasons.append(_reason("block", "data_store_deleted_no_recovery_point", f"Deleted data store resource_id={_text(no_recovery[0])} has no recovery point"))
+    if introduced_other:
+        reasons.append(_reason("warn", "introduced_finding", f"Introduced finding on resource_id={introduced_resource_ids[0] if introduced_resource_ids else ''}"))
+    if latent_exposure:
+        reasons.append(_reason("warn", "latent_exposure", f"Latent exposure on resource_id={_text(latent_exposure[0].get('resource_id'))}"))
+    if warn_exposures and not latent_exposure:
+        reasons.append(_reason("warn", "new_exposure", f"New exposure on resource_id={_text(warn_exposures[0].get('resource_id'))}"))
+    if diff.newly_internet_reachable:
+        reasons.append(_reason("warn", "newly_internet_reachable", f"Newly internet reachable resource_id={diff.newly_internet_reachable[0]}"))
+    if diff.no_longer_internet_reachable:
+        reasons.append(_reason("warn", "lost_ingress", f"Ingress lost for resource_id={diff.no_longer_internet_reachable[0]}"))
+    if diff.lost_dependencies:
+        reasons.append(_reason("warn", "lost_dependency", f"Lost dependency from resource_id={diff.lost_dependencies[0].get('from', '')}"))
+    if diff.lost_connectivity:
+        reasons.append(_reason("warn", "lost_connectivity", f"Lost connectivity from resource_id={diff.lost_connectivity[0].get('from', '')}"))
+    if deletion_relationships:
+        reasons.append(_reason("warn", "deletion_impact", f"Deletion impact on resource_id={deletion_relationships[0].get('removed_resource', {}).get('id', '')}"))
+    if introduced_capacity_breaches:
+        reasons.append(_reason("warn", "capacity", f"Capacity breach in resource_id={introduced_capacity_breaches[0].get('scope', '')}"))
+    block = bool(introduced_critical or active_critical_exposure or introduces_privilege_escalation or no_recovery)
+    verdict = "block" if block else ("warn" if reasons else "pass")
 
     # State degradation loudly in every degraded case -- scanners that failed
     # AND scanners deliberately disabled. The old form appended a quiet
@@ -338,7 +406,9 @@ def combined_verdict(
         unavailable = "; DEGRADED: " + "; ".join(coverage_warnings)
     else:
         unavailable = ""
-    cost_summary = "cost unknown" if cost_unknown_notes else f"cost_delta={cost_delta_monthly_usd:.2f}"
+    cost_summary = "cost unknown" if cost_unknown_notes else (
+        "cost n/a" if cost_delta.get("status") == "n/a" else f"cost_delta={cost_delta_monthly_usd:.2f}"
+    )
     privilege_summary = "; privilege escalation introduced" if introduces_privilege_escalation else ""
     dependency_summary = f"; modeled_dependencies_lost={len(diff.lost_dependencies)}" if diff.lost_dependencies else ""
     connectivity_summary = f"; modeled_internal_paths_lost={len(diff.lost_connectivity)}" if diff.lost_connectivity else ""
@@ -374,8 +444,12 @@ def combined_verdict(
         score_before=diff.score_before,
         score_after=diff.score_after,
         score_delta=diff.score_delta,
+        cost_delta=cost_delta,
         newly_internet_reachable=sorted(diff.newly_internet_reachable),
         no_longer_internet_reachable=sorted(diff.no_longer_internet_reachable),
+        newly_exposed=diff.newly_exposed,
+        no_longer_exposed=diff.no_longer_exposed,
+        reasons=reasons,
         possible_service_impacts=possible_service_impacts,
         lost_dependencies=diff.lost_dependencies,
         lost_connectivity=diff.lost_connectivity,

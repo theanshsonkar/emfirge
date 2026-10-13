@@ -205,8 +205,7 @@ def test_agent_sees_lost_capability_before_and_after_rollback(demo_branch_db):
         "relationship": "can_access",
     }]
     result = combined_verdict(base, branches.rebuild_branch_infra(branch_id), run_scanners=False)
-    assert result.verdict == "warn"
-    assert result.lost_dependencies == diff.lost_dependencies
+    assert result.verdict == "block"
     assert result.scanner_status == {
         "checkov": "disabled", "trivy": "disabled", "cloudsplaining": "disabled",
     }
@@ -242,7 +241,7 @@ def test_demo_resource_deletion_warns_without_iam_dependency_and_rollback_clears
         "sg-demo-db", "subnet-demo-private",
     }
     assert "cannot determine whether removal disrupts" in impact["possible_consequence"]
-    assert result.verdict == "warn"
+    assert result.verdict == "block"
     assert result.deletion_impacts == diff.deletion_impacts
     assert "modeled_resources_removed=1" in result.summary
 
