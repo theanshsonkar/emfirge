@@ -8,25 +8,13 @@ the former is a small permissive security-review heuristic.
 from functools import lru_cache
 from typing import Any
 
+from app.iam_escalation import paths_for_classifier
+
 _ACCESS_LEVELS = frozenset({
     "Permissions management", "Write", "Tagging", "List", "Read",
 })
 
-# Curated, intentionally permissive review set.  This is not a replacement for
-# policy-sentry's IAM datastore and errs toward flagging possible escalation.
-_PRIVILEGE_ESCALATION_ACTIONS = frozenset({
-    "iam:PassRole", "iam:CreatePolicyVersion", "iam:SetDefaultPolicyVersion",
-    "iam:AttachUserPolicy", "iam:AttachRolePolicy", "iam:PutUserPolicy",
-    "iam:PutRolePolicy", "iam:CreateAccessKey", "iam:UpdateAssumeRolePolicy",
-    "iam:CreateRole", "iam:DeleteRolePermissionsBoundary",
-    "iam:PutRolePermissionsBoundary", "iam:AttachGroupPolicy",
-    "iam:DetachUserPolicy", "iam:DetachRolePolicy", "iam:UpdateRole",
-    "iam:UpdateUser", "iam:CreateLoginProfile", "iam:UpdateLoginProfile",
-    "iam:CreateServiceLinkedRole", "sts:AssumeRole",
-    "lambda:UpdateFunctionCode", "lambda:UpdateFunctionConfiguration",
-    "lambda:AddPermission", "cloudformation:CreateStack",
-    "cloudformation:UpdateStack", "ec2:RunInstances",
-})
+_PRIVILEGE_ESCALATION_ACTIONS = paths_for_classifier()
 
 
 def _normalise(action: Any) -> str:

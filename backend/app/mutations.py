@@ -65,12 +65,19 @@ class SecurityGroupRuleChange(_StrictModel):
 
 
 class AccessStatementChange(_StrictModel):
-    effect: Literal["allow", "deny"]
+    effect: str
     actions: list[str] = Field(default_factory=list)
     resources: list[str] = Field(default_factory=list)
     is_not_action: bool = False
     is_not_resource: bool = False
     has_condition: bool = False
+
+    @field_validator("effect", mode="before")
+    @classmethod
+    def normalize_effect(cls, value: str) -> str:
+        if value not in {"Allow", "Deny", "allow", "deny"}:
+            raise ValueError("must be exactly Allow, Deny, allow, or deny")
+        return value.lower()
 
 
 class RouteChange(_StrictModel):
@@ -530,7 +537,10 @@ def _replace_iam_role_policy_statements(
         raise ValueError("IAM role policy target is ambiguous; role ARN must identify exactly one collected role")
 
     policy = matches[0]
-    policy.access_statements = [AccessStatement.model_validate(statement) for statement in statements]
+    policy.access_statements = [
+        AccessStatement.model_validate(AccessStatementChange.model_validate(statement).model_dump())
+        for statement in statements
+    ]
     # Do not let stale collector summaries override an empty/replaced statement
     # set in egraph.build_graph's legacy fallback path.
     policy.has_admin = False
