@@ -207,3 +207,29 @@ def test_L9_http_free_text_never_contains_planted_identifiers(
     for response in final_responses[:-1]:
         assert response.status_code == 200, response.text
     assert final_responses[-1].status_code == 404, final_responses[-1].text
+
+
+def test_L9_evidence_endpoints_do_not_echo_cloudtrail_customer_markers(incident_branch_db, monkeypatch):
+    from datetime import datetime, timezone
+    from app.evidence_models import EvidenceRecord
+    marker = "CUSTOMER-USERNAME-MARKER"
+    base = build_incident_base()
+    analysis_id = "privacy-evidence-analysis"
+    monkeypatch.setattr(main, "get_infrastructure_for_analysis", lambda _: base)
+    monkeypatch.setattr(main, "_check_branch_rate_limit", lambda _: None)
+    monkeypatch.setattr(main, "_scanned_account_id", lambda _: "111122223333")
+    monkeypatch.setattr(main, "assume_role_credentials", lambda _: ({"AccessKeyId": "x", "SecretAccessKey": "y"}, "111122223333"))
+    monkeypatch.setattr(main, "read_evidence", lambda *args, **kwargs: [EvidenceRecord(
+        resource_id="none", resource_type="rds_instance", source="cloudtrail_events", status="ok", used=None,
+        window_days=90, observed_at=datetime.now(timezone.utc).isoformat(), event_name="DeleteDB")])
+    main.app.dependency_overrides[main.require_api_key] = lambda: None
+    client = TestClient(main.app)
+    branch_id = client.post("/branches", json={"base_analysis_id": analysis_id, "name": "privacy"}).json()["branch_id"]
+    estimate = client.get(f"/branches/{branch_id}/in-use-evidence/estimate?sources=cloudtrail_events")
+    assert estimate.status_code == 200
+    payload = {"role_arn": "arn:aws:iam::111122223333:role/Role", "sources": ["cloudtrail_events"],
+               "accept_estimate_id": estimate.json()["estimate_id"]}
+    response = client.post(f"/branches/{branch_id}/in-use-evidence", json=payload)
+    assert response.status_code == 200
+    assert marker not in response.text
+    main.app.dependency_overrides.pop(main.require_api_key, None)
