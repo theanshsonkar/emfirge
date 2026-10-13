@@ -398,9 +398,27 @@ def score_branch(base, branch, base_findings, branch_findings) -> dict:
     after = calculate_score(scored_findings, count_scored_resources(base), branch)
     if deleted_ids:
         base_denominator_after = calculate_score(scored_findings, count_scored_resources(base), base)
+        deletion_only = True
+        try:
+            from app.mutations import Change, apply_change, deletion_ledger
+            replay = base
+            for entry in deletion_ledger(branch):
+                if entry.get('implicit'):
+                    continue
+                replay = apply_change(replay, Change(
+                    op='delete', resource_type=entry['resource_type'],
+                    resource_id=entry['resource_id'],
+                    fields=({key: value for key, value in (entry.get('options') or {}).items() if value is not None}
+                            if entry['resource_type'] == 'rds_instance' else {}),
+                ))
+            deletion_only = replay.model_dump() == branch.model_dump()
+        except (ValueError, TypeError, AttributeError):
+            deletion_only = False
         for key in ('overall_risk_score', 'security_score', 'availability_score',
                     'disaster_recovery_score', 'cost_score'):
             after[key] = min(after[key], base_denominator_after[key])
+            if deletion_only:
+                after[key] = min(after[key], score_before[key])
 
     introduced = set(branch_by_key) - set(base_by_key)
     if any(_finding_value(branch_by_key[key], 'severity') == 'Critical' for key in introduced):
