@@ -302,7 +302,7 @@ def _identity(resource_type: str, resource: BaseModel) -> str:
 def _field_check(model_type: Type[BaseModel], fields: Dict[str, Any]) -> None:
     unknown = set(fields) - set(model_type.model_fields)
     if unknown:
-        raise ValueError(f"Unknown field(s) for {model_type.__name__}: {sorted(unknown)}")
+        raise ValueError(f"Unknown field(s) for {model_type.__name__}")
 
 
 def _auto_id(infra: AWSInfrastructure, change: Change) -> str:
