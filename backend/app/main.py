@@ -1475,7 +1475,11 @@ def _handback_verdict_id(input_sha256: str, base_analysis_id: str | None,
 def _current_handback_state(branch_id: str):
     branch = branches.get_branch(branch_id)
     rebuilt = branches.rebuild_branch_state(branch)
-    result = combined_verdict(branch.base, rebuilt, run_scanners=False)
+    plan_records = branches.list_plans(branch_id)
+    verdict_kwargs = {"run_scanners": False}
+    if plan_records:
+        verdict_kwargs["plans"] = plan_records
+    result = combined_verdict(branch.base, rebuilt, **verdict_kwargs)
     return branch, result, branches.branch_revision(branch)
 
 
@@ -1558,20 +1562,13 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
     # via scanner_status + coverage_warnings. Flip EMFIRGE_RUN_SCANNERS=1 once the
     # real fix lands (base-scan cache + async + bigger instance; see notes).
     run_scanners = os.environ.get("EMFIRGE_RUN_SCANNERS", "0") == "1"
-    result = combined_verdict(branch.base, rebuilt, run_scanners=run_scanners)
     plans = branches.list_plans(branch_id)
-    reasons = list(result.reasons)
-    coverage = list(result.coverage_warnings)
-    if any(item["unmodeled"] for item in plans):
-        reasons.append({"severity": "medium", "code": "unmodeled_change", "message": "Terraform plan contains unmodeled resources"})
-        coverage.append("unmodeled_plan_resources")
-    if any(item["rejected"] for item in plans):
-        reasons.append({"severity": "medium", "code": "plan_change_rejected", "message": "Terraform plan changes were rejected"})
-    if any(item["unknown_fields"] for item in plans):
-        reasons.append({"severity": "medium", "code": "unknown_plan_values", "message": "Terraform plan contains unknown or unsupported values"})
+    verdict_kwargs = {"run_scanners": run_scanners}
+    if plans:
+        verdict_kwargs["plans"] = plans
+    result = combined_verdict(branch.base, rebuilt, **verdict_kwargs)
     return result.model_copy(update={"branch_revision": branches.branch_revision(branch),
-        "plans": [{"plan_id": item["plan_id"], "input_sha256": item["input_sha256"]} for item in plans],
-        "reasons": reasons, "coverage_warnings": coverage})
+        "plans": [{"plan_id": item["plan_id"], "input_sha256": item["input_sha256"]} for item in plans]})
 
 
 @app.post('/branches/{branch_id}/rollback', dependencies=[Depends(require_api_key)])

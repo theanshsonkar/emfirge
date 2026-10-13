@@ -262,10 +262,31 @@ def _limit_sort_key(item: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(_text(item.get(field)) for field in ("check", "scope", "status", "current", "limit", "basis"))
 
 
+def _plan_reasons(plans: list[Mapping[str, Any]] | None) -> list[dict[str, str]]:
+    """Convert persisted plan receipt gaps into verdict reasons."""
+    reasons: list[dict[str, str]] = []
+    for plan in plans or []:
+        for item in plan.get("unmodeled", []) or []:
+            actions = item.get("actions", []) if isinstance(item, Mapping) else []
+            is_delete = "delete" in actions and "create" not in actions
+            reasons.append(_reason(
+                "block" if is_delete else "warn",
+                "unmodeled_delete" if is_delete else "unmodeled_change",
+                "Terraform plan contains an unmodeled resource deletion" if is_delete
+                else "Terraform plan contains unmodeled resources",
+            ))
+        if plan.get("rejected"):
+            reasons.append(_reason("warn", "plan_change_rejected", "Terraform plan changes were rejected"))
+        if plan.get("unknown_fields"):
+            reasons.append(_reason("warn", "unknown_plan_values", "Terraform plan contains unknown or unsupported values"))
+    return reasons
+
+
 def combined_verdict(
     base_infra: AWSInfrastructure,
     branch_infra: AWSInfrastructure,
     run_scanners: bool = True,
+    plans: list[Mapping[str, Any]] | None = None,
 ) -> CombinedVerdict:
     diff = diff_infrastructure(base_infra, branch_infra)
     deletion = analyze_deletions(base_infra, branch_infra)
@@ -451,8 +472,12 @@ def combined_verdict(
         reasons.append(_reason("warn", "deletion_impact", "A deletion has downstream impact"))
     if introduced_capacity_breaches:
         reasons.append(_reason("warn", "capacity", f"Capacity breach in resource_id={introduced_capacity_breaches[0].get('scope', '')}"))
-    block = bool(introduced_critical or active_critical_exposure or introduces_privilege_escalation or no_recovery or deleted_role_usage_unknown(base_infra, branch_infra) or recently_used_deleted(base_infra, branch_infra))
-    verdict = "block" if block else ("warn" if reasons else "pass")
+    plan_reasons = _plan_reasons(plans)
+    reasons.extend(plan_reasons)
+    if any(item.get("unmodeled") for item in plans or []):
+        coverage_warnings.append("unmodeled_plan_resources")
+    severity_rank = {"pass": 0, "warn": 1, "block": 2}
+    verdict = max((reason["level"] for reason in reasons), key=severity_rank.get, default="pass")
 
     # State degradation loudly in every degraded case -- scanners that failed
     # AND scanners deliberately disabled. The old form appended a quiet

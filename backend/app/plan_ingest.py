@@ -65,7 +65,10 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
     for source, target in supported.items():
         if update and (change.get("before") or {}).get(source) == after.get(source):
             continue
-        if source in after and not _unknown(change, address, source, unknown):
+        if source in (change.get("after_unknown") or {}):
+            _unknown(change, address, source, unknown)
+            continue
+        if source in after:
             fields[target] = after[source]
     if resource == "aws_instance":
         if "metadata_options" in after and not update and not _unknown(change, address, "metadata_options", unknown):
