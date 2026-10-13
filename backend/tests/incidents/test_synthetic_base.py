@@ -26,3 +26,25 @@ def test_load_synthetic_base_applies_patch_then_loads():
 def test_load_synthetic_base_rejects_unknown_key():
     with pytest.raises(ValueError, match="Unknown synthetic base key"):
         load_synthetic_base("delete", {"unknown": True})
+
+
+def test_delete_synthetic_base_contains_phase_d_relationships():
+    base = load_synthetic_base("delete")
+    volume = next(item for item in base.ec2.ebs_volumes if item.id == "vol-dl-root")
+    instance = next(item for item in base.ec2.instances if item.id == "i-dl-web")
+    assert volume.attached_to == "i-dl-web"
+    device = next(item for item in instance.block_devices if item.volume_id == "vol-dl-root")
+    assert device.delete_on_termination is True
+    assert any(item.id == "snap-dl-root" for item in base.ec2.ebs_snapshots)
+
+    prod = next(item for item in base.rds.rds_instances if item.id == "db-dl-prod")
+    assert prod.backup_retention_days == 7
+    assert prod.deletion_protection is False
+    report = next(item for item in base.rds.rds_snapshots if item.id == "dlsnap-reports")
+    assert report.db_instance_id == "db-dl-reports"
+
+    roles = {item.role_name: item.last_used_at for item in base.iam.role_policies}
+    assert roles["DlBatchRole"] == "2026-09-30T00:00:00Z"
+    assert roles["DlAppRole"] is None
+    from tests.incidents.synthetic_base import PENDING_FIELDS
+    assert PENDING_FIELDS == set()
