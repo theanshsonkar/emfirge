@@ -101,6 +101,22 @@ TRAVERSABLE_RELATIONSHIPS = frozenset({
 })
 
 
+
+
+# Explicit dependency direction for every edge type emitted by build_graph.
+# ``source_depends_on_target`` means deleting the target impacts the source.
+DEPENDENCY_EDGES: dict[str, str | None] = {
+    "uses_security_group": "source_depends_on_target", "in_subnet": "source_depends_on_target",
+    "uses_iam_role": "source_depends_on_target", "attached_to_instance": "target_depends_on_source",
+    "REACHES": "target_depends_on_source", "REACHES_VIA_SG": "target_depends_on_source",
+    "targets_instance": "source_depends_on_target", "serves_from_bucket": "source_depends_on_target",
+    "in_vpc": "source_depends_on_target", "REFERENCES_SECRET": "source_depends_on_target",
+    "USES_ROLE": "source_depends_on_target", "belongs_to_vpc": "source_depends_on_target",
+    "contains_resource": "target_depends_on_source", "associated_with": "source_depends_on_target",
+    "protected_by": "source_depends_on_target", "routes_to": "source_depends_on_target",
+    "peered_with": None, "can_access": "source_depends_on_target", "CAN_ASSUME": "source_depends_on_target",
+    "CAN_REACH": "target_depends_on_source", "UNKNOWN": None,
+}
 _RESOURCE_CATEGORIES = {
     "ec2_instance": NodeCategory.COMPUTE,
     "lambda_function": NodeCategory.COMPUTE,

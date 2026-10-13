@@ -434,6 +434,7 @@ class AWSInfrastructure(BaseModel):
     sqs: SQSData = SQSData()                             # NEW
     dynamodb: DynamoDBData = DynamoDBData()               # NEW
     region: str = ''
+    collected_at: Optional[str] = Field(default=None, exclude_if=lambda value: value is None)
     warnings: List[str] = []          # services skipped due to insufficient permissions
 
 # ── SIMULATION BASELINE MODEL ────────────────────────────────────
