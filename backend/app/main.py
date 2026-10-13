@@ -11,6 +11,7 @@ import json
 import re
 import subprocess
 import tempfile
+import hashlib
 import logging
 from datetime import datetime, date
 from collections import defaultdict
@@ -33,6 +34,7 @@ from app.models import (
 )
 from app.diffing import DiffResult
 from app.mutations import Change, MutationCapabilities, apply_change, mutation_capabilities
+from app.plan_ingest import translate_plan
 from app.verdict import CombinedVerdict, combined_verdict
 from app import branches, identifiers
 from app.aws_collector import collect_infrastructure
@@ -1396,6 +1398,44 @@ def fork_branch_endpoint(branch_id: str, request: Request, payload: dict):
     return {'branch_id': new_branch_id, 'num_changes': num_changes}
 
 
+@app.post('/branches/{branch_id}/plans/terraform', dependencies=[Depends(require_api_key)])
+async def terraform_plan_endpoint(branch_id: str, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    raw = await request.body()
+    digest = hashlib.sha256(raw).hexdigest()
+    try:
+        plan = json.loads(raw)
+        translated = translate_plan(plan)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        raise HTTPException(status_code=422, detail='Invalid Terraform plan JSON schema')
+    try:
+        branches.get_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    applied, rejected = [], []
+    for change, address in zip(translated['changes'], translated['addresses']):
+        try:
+            expected = branches.get_branch(branch_id)
+            if expected.status != 'open':
+                raise ValueError(f'Branch is not open: {branch_id}')
+            candidate = branches.rebuild_branch_infra(branch_id)
+            apply_change(candidate, change)
+            branches.apply_change_to_branch(branch_id, change.model_copy(update={"expected_change_count": len(expected.changes)}))
+            applied.append(address)
+        except branches.BranchNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            reason = 'dependency_violation' if 'depend' in str(exc).lower() or 'in use' in str(exc).lower() else 'mutation_rejected'
+            rejected.append({'address': address, 'reason_code': reason})
+    final_branch = branches.get_branch(branch_id)
+    plan_id = str(uuid.uuid4())
+    branches.save_plan(plan_id, branch_id, digest, raw.decode('utf-8', errors='replace'),
+                       branches.branch_revision(final_branch), rejected,
+                       translated['unmodeled'], translated['unknown_fields'])
+    revision = branches.branch_revision(final_branch)
+    return {'plan_id': plan_id, 'input_sha256': digest, 'branch_revision': revision,
+            'applied': applied, 'rejected': rejected,
+            'unmodeled': translated['unmodeled'], 'unknown_fields': translated['unknown_fields']}
 @app.post('/branches/{branch_id}/changes', dependencies=[Depends(require_api_key)])
 def add_branch_change_endpoint(branch_id: str, change: Change, request: Request):
     _check_branch_rate_limit(_branch_request_ip(request))
@@ -1446,7 +1486,19 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
     # real fix lands (base-scan cache + async + bigger instance; see notes).
     run_scanners = os.environ.get("EMFIRGE_RUN_SCANNERS", "0") == "1"
     result = combined_verdict(branch.base, rebuilt, run_scanners=run_scanners)
-    return result.model_copy(update={"branch_revision": branches.branch_revision(branch)})
+    plans = branches.list_plans(branch_id)
+    reasons = list(result.reasons)
+    coverage = list(result.coverage_warnings)
+    if any(item["unmodeled"] for item in plans):
+        reasons.append({"severity": "medium", "code": "unmodeled_change", "message": "Terraform plan contains unmodeled resources"})
+        coverage.append("unmodeled_plan_resources")
+    if any(item["rejected"] for item in plans):
+        reasons.append({"severity": "medium", "code": "plan_change_rejected", "message": "Terraform plan changes were rejected"})
+    if any(item["unknown_fields"] for item in plans):
+        reasons.append({"severity": "medium", "code": "unknown_plan_values", "message": "Terraform plan contains unknown or unsupported values"})
+    return result.model_copy(update={"branch_revision": branches.branch_revision(branch),
+        "plans": [{"plan_id": item["plan_id"], "input_sha256": item["input_sha256"]} for item in plans],
+        "reasons": reasons, "coverage_warnings": coverage})
 
 
 @app.post('/branches/{branch_id}/rollback', dependencies=[Depends(require_api_key)])
