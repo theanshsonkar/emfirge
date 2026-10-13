@@ -1,9 +1,10 @@
 """L9 privacy law: customer identifiers never enter free-text API fields."""
 import copy
 import json
+from types import SimpleNamespace
 
 import pytest
-from hypothesis import HealthCheck, given, settings, strategies as st
+from hypothesis import HealthCheck, event, given, settings, strategies as st
 from fastapi.encoders import jsonable_encoder
 from fastapi.testclient import TestClient
 
@@ -100,7 +101,22 @@ def test_L9_http_free_text_never_contains_planted_identifiers(
         "findings_json": {"analysis_id": analysis_id, "infrastructure": base.model_dump(mode="json"), **findings},
     })
     monkeypatch.setattr(main, "_check_branch_rate_limit", lambda _ip: None)
+    monkeypatch.setattr(main, "get_simulation_count_today", lambda _account: 0)
     monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 10000)
+    monkeypatch.setitem(main.app.dependency_overrides, main.require_api_key, lambda: None)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    llm_inputs = []
+
+    class AdversarialMessages:
+        def create(self, **kwargs):
+            llm_inputs.append(kwargs)
+            return SimpleNamespace(content=[SimpleNamespace(text=repr(kwargs))])
+
+    class AdversarialAnthropic:
+        def __init__(self, **_kwargs):
+            self.messages = AdversarialMessages()
+
+    monkeypatch.setattr("anthropic.Anthropic", AdversarialAnthropic)
     main._branch_request_log.clear()
     main._simulate_request_log.clear()
     client = TestClient(main.app)
@@ -112,12 +128,18 @@ def test_L9_http_free_text_never_contains_planted_identifiers(
     _assert_safe(created, markers, account)
     assert created.status_code == 200, created.text
     branch_id = created.json()["branch_id"]
+    accepted = 0
+    bucket_seen = False
     for op in operations:
-        if op == "sg":
+        event(op)
+        if op == "bucket":
+            if bucket_seen:
+                continue
+            bucket_seen = True
+            payload = {"op": "delete", "resource_type": "s3_bucket", "resource_id": bucket_name, "fields": {}}
+        elif op == "sg":
             payload = {"op": "modify", "resource_type": "security_group", "resource_id": sg_id,
                        "fields": {"rules": rules}}
-        elif op == "bucket":
-            payload = {"op": "delete", "resource_type": "s3_bucket", "resource_id": bucket_name, "fields": {}}
         elif op == "unknown":
             payload = {"op": "modify", "resource_type": "security_group", "resource_id": unknown,
                        "fields": {"rules": rules}}
@@ -125,25 +147,34 @@ def test_L9_http_free_text_never_contains_planted_identifiers(
             payload = {"op": "modify", "resource_type": "security_group", "resource_id": sg_id,
                        "fields": {f"{unknown}-field": unknown}}
         elif op == "iam":
-            payload = {"op": "modify", "resource_type": "iam_role", "resource_id": role_arn,
-                       "fields": {"access_statements": [{"effect": "Allow", "actions": ["s3:GetObject"],
-                       "resources": [role_arn]}]}}
+            payload = {"op": "modify", "resource_type": "iam_role_policy", "resource_id": role_arn,
+                       "fields": {"access_statements": [{"effect": "Allow", "actions": ["iam:CreatePolicyVersion"],
+                       "resources": ["*"]}]}}
         else:
             response = client.post("/simulate", json={"analysis_id": analysis_id,
                 "query": f"Explain changes involving {sg_id}, {instance_id}, {bucket_name}, {role_arn}, {lambda_marker}"})
+            assert response.status_code == 200, response.text
+            assert any(line.startswith("data:") for line in response.text.splitlines()), response.text
             _assert_safe(response, markers, account)
+            assert llm_inputs
+            assert not any(marker in repr(llm_inputs[-1]) or account in repr(llm_inputs[-1]) for marker in markers)
             continue
+        payload["expected_change_count"] = accepted
         response = client.post(f"/branches/{branch_id}/changes", json=payload)
         _assert_safe(response, markers, account)
         if op in {"unknown", "malformed"}:
             assert response.status_code == 422, response.text
+        else:
+            assert response.status_code == 200, response.text
+            accepted += 1
 
-    for response in (client.get(f"/branches/{branch_id}/verdict"), client.get(f"/branches/{branch_id}/diff"),
-                      client.get(f"/branches/{branch_id}"), client.post("/branches/compare", json={"branch_ids": [branch_id]}),
-                      client.get("/branches/unknown-branch")):
+    final_responses = (
+        client.get(f"/branches/{branch_id}/verdict"), client.get(f"/branches/{branch_id}/diff"),
+        client.get(f"/branches/{branch_id}"), client.post("/branches/compare", json={"branch_ids": [branch_id]}),
+        client.get("/branches/unknown-branch"),
+    )
+    for response in final_responses:
         _assert_safe(response, markers, account)
-
-
-@pytest.mark.parametrize("endpoint", ["findings", "analysis", "branch-create", "branch-change", "branch-diff", "branch-verdict", "branch-compare", "branch-inspect"])
-def test_L9_endpoint_inventory_is_explicit(endpoint):
-    assert endpoint
+    for response in final_responses[:-1]:
+        assert response.status_code == 200, response.text
+    assert final_responses[-1].status_code == 404, final_responses[-1].text

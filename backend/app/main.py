@@ -677,6 +677,37 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
     graph_text = format_graph_for_claude(slice_dict)
     layers = slice_dict.get('layers', {})
 
+    # Keep customer identifiers out of third-party prompts and narrative fields.
+    sensitive_values = {
+        value for value in infrastructure.model_dump(mode='json').values()
+        if isinstance(value, str) and value
+    }
+    def _collect_strings(value):
+        if isinstance(value, str):
+            sensitive_values.add(value)
+        elif isinstance(value, dict):
+            for child in value.values():
+                _collect_strings(child)
+        elif isinstance(value, list):
+            for child in value:
+                _collect_strings(child)
+    _collect_strings(infrastructure.model_dump(mode='json'))
+    if aws_account_id:
+        sensitive_values.add(aws_account_id)
+    def _redact(value):
+        if isinstance(value, str):
+            for secret in sorted(sensitive_values, key=len, reverse=True):
+                value = value.replace(secret, '[redacted]')
+            return value
+        if isinstance(value, dict):
+            return {key: _redact(child) for key, child in value.items()}
+        if isinstance(value, list):
+            return [_redact(child) for child in value]
+        return value
+    graph_text = _redact(graph_text)
+    safe_query = _redact(request.query)
+    layers = slice_dict.get('layers', {})
+
     # ── DETERMINISTIC: Build attack chain from BFS ────────────────
     def _build_attack_stages(slice_data: dict, graph_obj: Graph) -> list:
         """Build attack chain stages from BFS layers with narrative captions."""
@@ -918,7 +949,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
 INFRASTRUCTURE (real, IAM-scanned):
 {trimmed_graph}
 
-Query: {request.query}
+Query: {safe_query}
 Blast radius: {blast_radius['total']} resources reachable ({', '.join(f'{v} {k}' for k, v in blast_radius['by_type'].items())})
 Attack chain: {' → '.join(s['caption'][:60] for s in attack_stages[:4])}
 
@@ -935,13 +966,13 @@ Respond with ONLY JSON (no markdown):
                         messages=[{"role": "user", "content": haiku_prompt}]
                     )
                     haiku_raw = haiku_msg.content[0].text.strip().replace('```json', '').replace('```', '').strip()
-                    haiku_data = json.loads(haiku_raw)
+                    haiku_data = _redact(json.loads(haiku_raw))
                     break  # success
                 except Exception as e:
                     logger.warning(f"simulate: Haiku attempt {attempt + 1} failed: {e}")
                     if attempt == 0:
                         # Retry with even shorter prompt
-                        haiku_prompt = f"""AWS security query: "{request.query}"
+                        haiku_prompt = f"""AWS security query: "{safe_query}"
 Blast radius: {blast_radius['total']} resources. Types: {blast_radius['by_type']}
 Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical", "summary": "2 sentences", "follow_up": "next question"}}"""
                         anthropic_client = anthropic_lib.Anthropic(api_key=api_key, timeout=10)
@@ -976,7 +1007,7 @@ Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical
             "blast_radius": blast_radius,
             "follow_up": haiku_data.get("follow_up", ""),
             "category": category,
-            "query": request.query,
+            "query": safe_query,
         }
         yield f"event: complete\ndata: {json.dumps(complete_data)}\n\n"
 
