@@ -1439,6 +1439,21 @@ async def terraform_plan_endpoint(branch_id: str, request: Request):
             'unmodeled': translated['unmodeled'], 'unknown_fields': translated['unknown_fields']}
 
 
+def _scanned_account_id(analysis_id: str) -> str | None:
+    if not analysis_id or re.fullmatch(r'[A-Za-z0-9-]{1,64}', analysis_id) is None:
+        return None
+    from app.database import AnalysisLog, SessionLocal
+    session = SessionLocal()
+    try:
+        log = (session.query(AnalysisLog.aws_account_id)
+               .filter(AnalysisLog.findings_json.like(f'%"analysis_id": "{analysis_id}"%'))
+               .order_by(AnalysisLog.timestamp.desc())
+               .first())
+        return log[0] if log and log[0] else None
+    finally:
+        session.close()
+
+
 @app.get('/branches/{branch_id}/in-use-evidence/estimate', response_model=EvidenceEstimate, dependencies=[Depends(require_api_key)])
 def in_use_evidence_estimate(branch_id: str, request: Request, sources: str = 'cloudtrail_events,cloudwatch_metrics'):
     _check_branch_rate_limit(_branch_request_ip(request))
@@ -1460,27 +1475,23 @@ def collect_in_use_evidence(branch_id: str, payload: EvidenceRequest, request: R
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail='Branch not found') from exc
     estimate = build_estimate(branch.base, branches.rebuild_branch_state(branch), branches.branch_revision(branch), payload.sources)
+    if len(estimate.resources) > estimate.max_resources:
+        raise HTTPException(status_code=422, detail='Too many deleted resources for one evidence read (max 50)')
     if payload.accept_estimate_id != estimate.estimate_id:
         return JSONResponse(status_code=409, content={'detail': 'Estimate changed; review it and accept the new estimate_id', 'estimate': estimate.model_dump(mode='json')})
     role_match = re.fullmatch(r'arn:[^:]+:iam::(\d{12}):role/.+', payload.role_arn)
     account_id = role_match.group(1) if role_match else None
-    from app.database import AnalysisLog, SessionLocal
-    session = SessionLocal()
-    try:
-        analysis = session.query(AnalysisLog).filter(AnalysisLog.id == branch.base_analysis_id).first()
-        scanned = analysis.aws_account_id if analysis else None
-    finally:
-        session.close()
+    scanned = _scanned_account_id(branch.base_analysis_id)
     if not account_id or not scanned or account_id != scanned:
         raise HTTPException(status_code=409, detail='Role account does not match the scanned account')
     try:
         creds, assumed_account = assume_role_credentials(payload.role_arn)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    if assumed_account and assumed_account != scanned:
+        raise HTTPException(status_code=400, detail='Could not assume the Emfirge role') from exc
+    if assumed_account != scanned:
         raise HTTPException(status_code=409, detail='Role account does not match the scanned account')
     now = datetime.now(timezone.utc)
-    records = read_evidence(creds, branch.base.region, estimate.resources, payload.sources, now=now, own_session_name=ROLE_SESSION_NAME)
+    records = read_evidence(creds, branch.base.region, estimate.resources, payload.sources, now=now, own_session_name=ROLE_SESSION_NAME, client_factory=None, sleep=None)
     branches.save_evidence(branch_id, estimate.estimate_id, records)
     return {'estimate_id': estimate.estimate_id, 'observed_at': now.isoformat().replace('+00:00', 'Z'), 'window_days': WINDOW_DAYS, 'records': [record.model_dump(mode='json') for record in records]}
 @app.post('/branches/{branch_id}/changes', dependencies=[Depends(require_api_key)])
@@ -1527,7 +1538,8 @@ def _current_handback_state(branch_id: str):
     if plan_records:
         verdict_kwargs["plans"] = plan_records
     evidence = branches.list_evidence(branch_id)
-    verdict_kwargs["evidence"] = evidence
+    if evidence:
+        verdict_kwargs["evidence"] = evidence
     result = combined_verdict(branch.base, rebuilt, **verdict_kwargs)
     return branch, result, branches.branch_revision(branch)
 
@@ -1616,7 +1628,8 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
     if plans:
         verdict_kwargs["plans"] = plans
     evidence = branches.list_evidence(branch_id)
-    verdict_kwargs["evidence"] = evidence
+    if evidence:
+        verdict_kwargs["evidence"] = evidence
     result = combined_verdict(branch.base, rebuilt, **verdict_kwargs)
     return result.model_copy(update={"branch_revision": branches.branch_revision(branch),
         "plans": [{"plan_id": item["plan_id"], "input_sha256": item["input_sha256"]} for item in plans]})

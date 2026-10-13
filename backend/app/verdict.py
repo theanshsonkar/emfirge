@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field
 
 from app import cost, limits, delete_lens
+from app.evidence_models import parse_iso
 from app.diffing import diff_infrastructure
 from app.delete_lens import DeletionLens, analyze_deletions, deleted_base_reachable, deleted_role_usage_unknown, recently_used_deleted
 from app.egraph import build_graph, get_internet_reachable_set
@@ -88,15 +89,6 @@ def _value(item: Any, name: str, default: Any = None) -> Any:
 def _role_ids_with_privilege_escalation(graph: Any) -> set[str]:
     nodes = _value(graph, "nodes", []) or []
     escalating = set()
-
-
-def _parse_time(value: Any):
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
-    except ValueError:
-        return None
     for node in nodes:
         if _text(_value(node, "resource_type", _value(node, "type", ""))) != "iam_role":
             continue
@@ -456,8 +448,14 @@ def combined_verdict(
         reasons.append(_reason("block", "recently_used", "Deleted IAM role was recently used"))
     if any(_value(item, "source") == "cloudwatch_metrics" and _value(item, "status") == "ok" and _value(item, "used") is True for item in deletion.in_use_evidence):
         reasons.append(_reason("block", "recently_used", "CloudWatch metrics show a deleted resource was used in the last 90 days"))
-    observed = _parse_time(_value(base_infra, "collected_at", None)) or datetime.now(timezone.utc)
-    if any(_value(item, "source") == "cloudtrail_events" and _value(item, "status") == "ok" and (_parse_time(_v(item, "last_event_at")) is not None) and observed - timedelta(days=delete_lens.RECENT_USE_DAYS) <= _parse_time(_v(item, "last_event_at")) <= observed for item in deletion.in_use_evidence):
+    if any(
+        _value(item, "source") == "cloudtrail_events"
+        and _value(item, "status") == "ok"
+        and (parse_iso(_value(item, "last_event_at")) is not None)
+        and (observed_at := parse_iso(_value(item, "observed_at"))) is not None
+        and observed_at - timedelta(days=delete_lens.RECENT_USE_DAYS) <= parse_iso(_value(item, "last_event_at")) <= observed_at
+        for item in deletion.in_use_evidence
+    ):
         reasons.append(_reason("warn", "recent_activity", "CloudTrail shows recent changes to a deleted resource"))
     if no_recovery:
         reasons.append(_reason("block", "data_store_deleted_no_recovery_point", "Deleted data store has no recovery point"))

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.egraph import DEPENDENCY_EDGES, build_graph, get_internet_reachable_set
 from app.mutations import deletion_ledger
+from app.evidence_models import EvidenceRecord, METRIC_SPECS
 
 # matches the default unused-access tracking period of AWS IAM Access Analyzer.
 RECENT_USE_DAYS = 90
@@ -38,7 +39,7 @@ class DeletionLens(BaseModel):
     impacts: list[DeletionImpact] = Field(default_factory=list)
     max_depth: int = 0
     coverage: DeletionCoverage = Field(default_factory=DeletionCoverage)
-    in_use_evidence: list[Any] = Field(default_factory=list)
+    in_use_evidence: list[EvidenceRecord] = Field(default_factory=list)
 
 
 def _v(obj: Any, key: str, default=None):
@@ -109,10 +110,10 @@ def analyze_deletions(base: Any, branch: Any, evidence=None) -> DeletionLens:
     deleted_set = {str(x.get("resource_id")) for x in ledger}
     scoped = [item for item in evidence if str(_v(item, "resource_id", "")) in deleted_set]
     for item in scoped:
-        if _v(item, "resource_type") == "s3_bucket" and _v(item, "holds_data") is True:
-            lost = [x for x in lost if x.resource_id != str(_v(item, "resource_id"))]
-            if not any(x.resource_id == str(_v(item, "resource_id")) for x in lost):
-                lost.append(DataLost(resource_id=str(_v(item, "resource_id")), resource_type="s3_bucket", why="deleted_without_surviving_recovery_point"))
+        if _v(item, "resource_type") == "s3_bucket" and _v(item, "status") == "ok" and _v(item, "holds_data") is True:
+            rid = str(_v(item, "resource_id"))
+            if not any(x.resource_id == rid for x in lost):
+                lost.append(DataLost(resource_id=rid, resource_type="s3_bucket", why="deleted_without_surviving_recovery_point"))
     # BFS follows dependency direction only; implicit deletes are represented at depth one.
     impacts: list[DeletionImpact] = []
     seen = set(deleted_ids)
@@ -143,13 +144,28 @@ def analyze_deletions(base: Any, branch: Any, evidence=None) -> DeletionLens:
     statuses = _v(base, "collection", {}) or {}
     can = sorted(k for k, v in statuses.items() if v == "ok" and k in _COLLECTION_KEYS)
     cannot = sorted(_FIXED_CANNOT_SEE | {k for k, v in statuses.items() if v != "ok" and k in _COLLECTION_KEYS})
+    deleted_resource_ids = {str(x.get("resource_id")) for x in ledger}
     for source in ("cloudtrail_events", "cloudwatch_metrics"):
-        applicable = [x for x in scoped if _v(x, "source") == source]
-        if applicable and len({str(_v(x, "resource_id")) for x in applicable}) == len(deleted_set) and all(_v(x, "status") in {"ok", "no_data"} for x in applicable):
-            if source in cannot: cannot.remove(source)
-            if source not in can: can.append(source)
+        in_scope = deleted_resource_ids if source == "cloudtrail_events" else {
+            str(x.get("resource_id")) for x in ledger if str(x.get("resource_type")) in METRIC_SPECS
+        }
+        if not in_scope:
+            continue
+        records = {
+            str(_v(item, "resource_id")): item
+            for item in scoped if _v(item, "source") == source and str(_v(item, "resource_id")) in in_scope
+        }
+        if len(records) == len(in_scope) and all(
+            _v(records[rid], "status") == "ok"
+            or (_v(records[rid], "status") == "no_data" and str(_v(records[rid], "resource_type")) != "s3_bucket")
+            for rid in in_scope
+        ):
+            if source in cannot:
+                cannot.remove(source)
+            if source not in can:
+                can.append(source)
     can = sorted(can)
-    return DeletionLens(data_lost=sorted(lost, key=lambda x: x.resource_id), recovery_points=sorted(recovery, key=lambda x: (x.resource_id, x.kind)), impacts=impacts, max_depth=max((x.depth for x in impacts), default=0), coverage=DeletionCoverage(can_see=can, cannot_see=cannot), in_use_evidence=scoped)
+    return DeletionLens(data_lost=lost, recovery_points=sorted(recovery, key=lambda x: (x.resource_id, x.kind)), impacts=impacts, max_depth=max((x.depth for x in impacts), default=0), coverage=DeletionCoverage(can_see=can, cannot_see=cannot), in_use_evidence=scoped)
 
 
 def deleted_ids(lens: DeletionLens, branch: Any) -> set[str]:
