@@ -156,6 +156,11 @@ def translate_plan(plan: Any) -> dict[str, Any]:
     for item in plan["resource_changes"]:
         if not isinstance(item, dict):
             raise ValueError("Terraform plan resource_changes entries must be objects")
+        change = item.get("change")
+        actions = change.get("actions") if isinstance(change, dict) else None
+        if (not isinstance(change, dict) or not isinstance(actions, list)
+                or not actions or not all(isinstance(action, str) for action in actions)):
+            raise ValueError("Terraform plan change actions must be a non-empty list of strings")
         changes, unsupported = _translate_item(item, unknown_fields)
         if unsupported:
             unmodeled.append(unsupported)

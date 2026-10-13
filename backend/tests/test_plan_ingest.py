@@ -149,6 +149,16 @@ def test_unmodeled_aws_replace_blocks(plan_client, actions):
     assert {reason["code"] for reason in result["reasons"]} == {"unmodeled_delete"}
 
 
+
+@pytest.mark.parametrize("actions", [None, "delete", [], [1]])
+def test_malformed_plan_change_actions_rejected_without_echoing_address(plan_client, actions):
+    address = "submitted-sensitive-address"
+    branch_id, _, response = _post(plan_client, {"format_version": "1.0", "resource_changes": [
+        _item(address, "aws_instance", actions, {}, {})
+    ]})
+    assert response.status_code == 422
+    assert address not in response.text
+
 def test_unmodeled_missing_provider_is_aws_and_blocks(plan_client):
     branch_id, _, response = _post(plan_client, {"format_version": "1.0", "resource_changes": [
         _item("aws_dynamodb_table.x", "aws_dynamodb_table", ["delete"], {}, {})
