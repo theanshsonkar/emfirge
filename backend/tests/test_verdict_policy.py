@@ -1,5 +1,6 @@
 from app.mutations import Change, apply_change
 from app.diffing import diff_infrastructure
+from app.models import NetworkInterface
 from app.verdict import combined_verdict
 from tests.incidents.base import build_incident_base
 
@@ -96,3 +97,30 @@ def test_latent_exposure_warns_with_latent_reason():
     result = combined_verdict(base, branch, run_scanners=False)
     assert result.verdict == "warn"
     assert any(reason["code"] == "latent_exposure" for reason in result.reasons)
+
+
+def test_denied_network_interface_scan_blocks_latent_candidate():
+    base = build_incident_base()
+    branch = apply_change(base, _sg_change("sg-inc-latent", base.ec2.security_groups[1].rules + [{"protocol": "tcp", "from_port": 22, "to_port": 22, "ip_ranges": ["0.0.0.0/0"]}]))
+    branch.network_interfaces = None
+    branch.collection = {"network_interfaces": "denied"}
+    result = combined_verdict(base, branch, run_scanners=False)
+    assert result.verdict == "block"
+    assert "latent_exposure" not in {reason["code"] for reason in result.reasons}
+
+
+def test_interface_using_security_group_blocks():
+    base = build_incident_base()
+    branch = apply_change(base, _sg_change("sg-inc-latent", base.ec2.security_groups[1].rules + [{"protocol": "tcp", "from_port": 22, "to_port": 22, "ip_ranges": ["0.0.0.0/0"]}]))
+    branch.network_interfaces = [NetworkInterface(id="eni-extra", sg_ids=["sg-inc-latent"])]
+    branch.collection = {"network_interfaces": "ok"}
+    assert combined_verdict(base, branch, run_scanners=False).verdict == "block"
+
+
+def test_deleted_instance_attachment_is_ignored_for_latent_exposure():
+    base = build_incident_base()
+    base.network_interfaces = [NetworkInterface(id="eni-latent", sg_ids=["sg-inc-latent"], attached_resource="i-inc-web")]
+    branch = apply_change(base, _sg_change("sg-inc-latent", base.ec2.security_groups[1].rules + [{"protocol": "tcp", "from_port": 22, "to_port": 22, "ip_ranges": ["0.0.0.0/0"]}]))
+    branch = apply_change(branch, Change(op="delete", resource_type="ec2_instance", resource_id="i-inc-web"))
+    assert combined_verdict(base, branch, run_scanners=False).verdict == "warn"
+    assert "latent_exposure" in {reason["code"] for reason in combined_verdict(base, branch, run_scanners=False).reasons}

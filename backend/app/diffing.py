@@ -235,8 +235,8 @@ def _exposure_covered(branch: Any, base: Any) -> bool:
 
 
 def _exposure_deltas(base_infra: Any, branch_infra: Any, base_graph: Any, branch_graph: Any) -> tuple[list[dict], list[dict]]:
-    base = compute_exposures(base_infra, base_graph)
-    branch = compute_exposures(branch_infra, branch_graph)
+    base = compute_exposures(base_infra, base_graph, base_infra)
+    branch = compute_exposures(branch_infra, branch_graph, base_infra)
     newly = [item.model_dump() for item in branch if not any(_exposure_covered(item, old) for old in base)]
     lost = [item.model_dump() for item in base if not any(_exposure_covered(item, new) for new in branch)]
     key = lambda item: tuple(str(item.get(field, "")) for field in ("resource_id", "resource_type", "protocol", "from_port", "to_port", "source", "via_sg", "state"))

@@ -60,7 +60,7 @@ def _assert_expectation(expect, response):
 
 @pytest.mark.parametrize(
     "scenario",
-    [pytest.param(s, id=s["id"], marks=pytest.mark.xfail(strict=True, reason=KNOWN_GAPS_PHASE_D[s["id"]])) for s in SCENARIOS],
+    [pytest.param(s, id=s["id"], marks=pytest.mark.xfail(strict=True, reason=KNOWN_GAPS_PHASE_D[s["id"]])) if s["id"] in KNOWN_GAPS_PHASE_D else pytest.param(s, id=s["id"]) for s in SCENARIOS],
 )
 def test_phase_d_scenario(phase_d_branch_db, scenario, monkeypatch):
     base = load_synthetic_base(scenario["base"], scenario.get("base_patch"))

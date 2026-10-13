@@ -14,6 +14,7 @@ from app.mutations import Change, apply_change, apply_changes
 from app.rules import run_all_checks
 from app.scoring import calculate_score
 from app.verdict import combined_verdict
+from app.models import NetworkInterface
 from tests.incidents.base import build_incident_base
 from tests.incidents.test_incidents import incident_branch_db
 
@@ -124,36 +125,30 @@ def test_L3_ingress_monotonic_reachability(sg_id, rules, remove_count):
     assert get_internet_reachable_set(build_graph(removed)) <= old
 
 
-@given(
-    st.sampled_from(["sg-inc-web", "sg-inc-latent"]),
-    RULES,
-    st.booleans(),
-)
-def test_L4_only_introduced_critical_findings_block(sg_id, rules, public_bucket):
+@pytest.mark.parametrize("evidence", ["read-and-unused", "read-and-used-by-an-interface", "denied"])
+def test_L4_only_introduced_critical_findings_block(evidence):
     base = build_incident_base()
-    change = _changes_for_rules(sg_id, rules)
-    if public_bucket:
-        branch = apply_change(base, Change(
-            op="modify", resource_type="s3_bucket", resource_id="inc-data-bucket", fields={"is_public": True},
-        ))
+    branch = apply_change(base, _changes_for_rules("sg-inc-latent", [{
+        "protocol": "tcp", "from_port": 22, "to_port": 22, "ip_ranges": ["0.0.0.0/0"]
+    }]))
+    if evidence == "read-and-unused":
+        branch.network_interfaces = []
+        branch.collection = {"network_interfaces": "ok"}
+    elif evidence == "read-and-used-by-an-interface":
+        branch.network_interfaces = [NetworkInterface(id="eni-extra", sg_ids=["sg-inc-latent"], attached_resource="i-extra")]
+        branch.collection = {"network_interfaces": "ok"}
     else:
-        branch = apply_change(base, change)
+        branch.network_interfaces = None
+        branch.collection = {"network_interfaces": "denied"}
     result = combined_verdict(base, branch, run_scanners=False)
-    base_findings = run_all_checks(base, build_graph(base))
-    branch_findings = run_all_checks(branch, build_graph(branch))
-    def keyed(findings):
-        return {
-            (finding.rule_id, finding.resource_id): finding
-            for bucket in findings.values() if isinstance(bucket, list)
-            for finding in bucket
-        }
-    introduced = set(keyed(branch_findings)) - set(keyed(base_findings))
-    introduced_critical = any(keyed(branch_findings)[key].severity == "Critical" for key in introduced)
-    if introduced_critical:
-        if sg_id == "sg-inc-latent":
-            assert result.verdict in {"warn", "block"}
-        else:
-            assert result.verdict == "block"
+    codes = {reason["code"] for reason in result.reasons}
+    blocking = {"introduced_critical_exposure", "introduced_critical_finding", "privilege_escalation", "data_store_deleted_no_recovery_point"}
+    if evidence == "read-and-unused":
+        assert "latent_exposure" in codes
+        assert result.verdict == ("block" if codes & blocking else "warn")
+    else:
+        assert result.verdict == "block"
+        assert "latent_exposure" not in codes
 
 
 @given(st.lists(st.sampled_from(["inc-data-bucket", "inc-assets-bucket", "i-inc-web", "sg-inc-latent", "inc-worker"]), min_size=1, max_size=3, unique=True))

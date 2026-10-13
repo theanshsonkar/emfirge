@@ -2,7 +2,7 @@
 
 IDENTIFIER_KEYS = {
     "id", "name", "arn", "role_arn", "role_name", "instance_profile_arn",
-    "allocation_id", "public_ip", "attached_to", "target_instances", "resources",
+    "allocation_id", "public_ip", "attached_to", "attached_resource", "target_instances", "resources",
     "policy_arn", "function_name", "bucket", "bucket_name",
 }
 NOT_IDENTIFIERS = {"*", "local", "0.0.0.0/0", "::/0"}
