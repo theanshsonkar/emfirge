@@ -4,15 +4,13 @@
 
 ## Git branch for your cloud.
 
-**Give your AI a read-only map of AWS. Trace attack paths, model security changes on an isolated branch, and inspect the result before touching production.**
+Emfirge is the harness between AI agents and your cloud. Your agent gets a branch — a Git-style copy of a model of your live AWS — tries changes there, and gets back a diff and a pass / warn / block verdict before anything touches production. Emfirge is read-only and never applies changes. Security is the first lens; cost and limits signals are early lenses.
 
 [Get started][quickstart] · [Read the docs][docs] · [npm][npm]
 
 **MCP version: 0.2.3**
 
 </div>
-
-Emfirge scans through a read-only role, builds an infrastructure graph, and computes security evidence from that snapshot. It can fork the graph, model a proposed change, and report a diff and advisory verdict. Branch changes never mutate AWS. Emfirge computes a security delta; it never guarantees a deployment is safe.
 
 | Capability | What it provides |
 |---|---|
@@ -35,7 +33,7 @@ Scan with arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 
 The account ID above is intentionally non-existent example data. Use your own role when running a real scan.
 
-## The 16 MCP tools
+## The 18 MCP tools
 
 ### Analyze
 
