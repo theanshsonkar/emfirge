@@ -130,6 +130,16 @@ class PlanLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class BranchEvidenceLog(Base):
+    """Persisted opt-in in-use evidence for a branch."""
+    __tablename__ = 'branch_evidence_logs'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    branch_id = Column(String(36), nullable=False, index=True)
+    estimate_id = Column(String(64), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    records_json = Column(Text, nullable=False, default='[]')
+
+
 class CIAPIKey(Base):
     """API keys for CI/CD gate endpoint authentication."""
     __tablename__ = 'ci_api_keys'

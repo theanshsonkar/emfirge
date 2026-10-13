@@ -18,7 +18,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from app import cost
-from app.database import BranchLog, PlanLog, SessionLocal
+from app.database import BranchEvidenceLog, BranchLog, PlanLog, SessionLocal
+from app.in_use_evidence import EvidenceRecord
 from app.diffing import DiffResult, diff_infrastructure, modeled_state_unchanged
 from app.egraph import build_graph
 from app.models import AWSInfrastructure
@@ -627,3 +628,25 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
             if mixed_bases else []
         ),
     )
+
+
+def save_evidence(branch_id: str, estimate_id: str, records: list[EvidenceRecord]) -> None:
+    def operation(session):
+        session.add(BranchEvidenceLog(branch_id=branch_id, estimate_id=estimate_id,
+                                      records_json=json.dumps([r.model_dump(mode='json') for r in records], separators=(',', ':'))))
+    _with_session(operation)
+
+
+def list_evidence(branch_id: str) -> list[EvidenceRecord]:
+    session = SessionLocal()
+    try:
+        rows = session.query(BranchEvidenceLog).filter(BranchEvidenceLog.branch_id == branch_id).order_by(BranchEvidenceLog.created_at, BranchEvidenceLog.id).all()
+        latest = {}
+        for row in rows:
+            for item in json.loads(row.records_json or '[]'):
+                latest[(str(item.get('resource_id')), str(item.get('source')))] = EvidenceRecord.model_validate(item)
+        return list(latest.values())
+    except OperationalError:
+        return []
+    finally:
+        session.close()
