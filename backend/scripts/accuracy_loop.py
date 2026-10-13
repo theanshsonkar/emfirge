@@ -227,7 +227,7 @@ def run_harness() -> dict[str, Any]:
                                 "The snapshot cannot determine whether removal disrupts service operation or affects stored data."
                             ),
                         }],
-                        "verdict": "warn",
+                        "verdict": "block",
                     }),
                 ]
                 records = []
