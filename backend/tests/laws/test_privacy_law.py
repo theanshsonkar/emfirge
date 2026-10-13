@@ -106,10 +106,12 @@ def test_L9_http_free_text_never_contains_planted_identifiers(
     monkeypatch.setitem(main.app.dependency_overrides, main.require_api_key, lambda: None)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     llm_inputs = []
+    llm_prompts = []
 
     class AdversarialMessages:
         def create(self, **kwargs):
             llm_inputs.append(kwargs)
+            llm_prompts.append(kwargs["messages"][0]["content"])
             return SimpleNamespace(content=[SimpleNamespace(text=repr(kwargs))])
 
     class AdversarialAnthropic:
@@ -157,6 +159,11 @@ def test_L9_http_free_text_never_contains_planted_identifiers(
             assert any(line.startswith("data:") for line in response.text.splitlines()), response.text
             _assert_safe(response, markers, account)
             assert llm_inputs
+            assert llm_prompts
+            prompt = llm_prompts[0]
+            assert not any(marker in prompt or account in prompt for marker in markers)
+            assert "[redacted]" not in prompt
+            assert "Nodes:" in prompt
             assert not any(marker in repr(llm_inputs[-1]) or account in repr(llm_inputs[-1]) for marker in markers)
             continue
         payload["expected_change_count"] = accepted
