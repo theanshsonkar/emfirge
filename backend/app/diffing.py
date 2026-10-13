@@ -10,6 +10,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.egraph import build_graph, get_internet_reachable_set
+from app.exposure import Exposure, compute_exposures
+from ipaddress import ip_network
 from app.rules import find_toxic_combos, run_all_checks
 from app.scoring import calculate_score
 
@@ -34,6 +36,8 @@ class DiffResult(BaseModel):
     score_delta: int = 0
     newly_internet_reachable: list[str] = Field(default_factory=list)
     no_longer_internet_reachable: list[str] = Field(default_factory=list)
+    newly_exposed: list[dict] = Field(default_factory=list)
+    no_longer_exposed: list[dict] = Field(default_factory=list)
     # True only when the complete canonical infrastructure snapshots match.
     # A false value may reflect modeled data not represented in graph deltas.
     modeled_state_unchanged: bool = False
@@ -191,8 +195,7 @@ def _deletion_impacts(base_graph: Any, branch_graph: Any) -> list[dict[str, Any]
             "surviving_related_resources": [
                 {
                     "id": str(node_id),
-                    "resource_type": str(_value(branch_nodes[node_id], "resource_type",
-                                                 _value(branch_nodes[node_id], "type", ""))),
+                    "resource_type": str(_value(branch_nodes[node_id], "resource_type", _value(branch_nodes[node_id], "type", ""))),
                     "relationships": sorted(related_relationships[node_id]),
                 }
                 for node_id in sorted(related_relationships)
@@ -203,6 +206,29 @@ def _deletion_impacts(base_graph: Any, branch_graph: Any) -> list[dict[str, Any]
             ),
         })
     return impacts
+
+
+def _exposure_covered(branch: Any, base: Any) -> bool:
+    if branch.resource_id != base.resource_id or branch.state != base.state:
+        return False
+    if base.protocol not in {branch.protocol, "-1"}:
+        return False
+    if base.from_port > branch.from_port or base.to_port < branch.to_port:
+        return False
+    try:
+        branch_source, base_source = ip_network(branch.source, strict=False), ip_network(base.source, strict=False)
+    except ValueError:
+        return False
+    return branch_source.version == base_source.version and branch_source.subnet_of(base_source)
+
+
+def _exposure_deltas(base_infra: Any, branch_infra: Any, base_graph: Any, branch_graph: Any) -> tuple[list[dict], list[dict]]:
+    base = compute_exposures(base_infra, base_graph)
+    branch = compute_exposures(branch_infra, branch_graph)
+    newly = [item.model_dump() for item in branch if not any(_exposure_covered(item, old) for old in base)]
+    lost = [item.model_dump() for item in base if not any(_exposure_covered(item, new) for new in branch)]
+    key = lambda item: tuple(str(item.get(field, "")) for field in ("resource_id", "resource_type", "protocol", "from_port", "to_port", "source", "via_sg", "state"))
+    return sorted(newly, key=key), sorted(lost, key=key)
 
 
 def _finding_field(finding: Any, name: str, default: str = "") -> str:
@@ -302,6 +328,7 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     branch_score = calculate_score(branch_findings, infrastructure=branch_infra)["overall_risk_score"]
     base_reachable = get_internet_reachable_set(base_graph)
     branch_reachable = get_internet_reachable_set(branch_graph)
+    newly_exposed, no_longer_exposed = _exposure_deltas(base_infra, branch_infra, base_graph, branch_graph)
 
     return DiffResult(
         **graph_diff,
@@ -317,5 +344,7 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
         score_delta=int(branch_score) - int(base_score),
         newly_internet_reachable=sorted(branch_reachable - base_reachable),
         no_longer_internet_reachable=sorted(base_reachable - branch_reachable),
+        newly_exposed=newly_exposed,
+        no_longer_exposed=no_longer_exposed,
         modeled_state_unchanged=modeled_state_unchanged(base_infra, branch_infra),
     )
