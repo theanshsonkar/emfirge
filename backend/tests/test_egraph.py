@@ -648,6 +648,18 @@ class TestOrphanedResources:
         orphan_ids = [o["id"] for o in orphans]
         assert "eipalloc-attached" not in orphan_ids
 
+    def test_in_use_ebs_volume_is_not_orphaned(self):
+        infra = AWSInfrastructure(
+            region="us-east-1",
+            ec2=EC2Data(ebs_volumes=[EBSVolume(
+                id="vol-in-use", size_gb=100, volume_type="gp2",
+                state="in-use", attached_to="i-001",
+            )]),
+        )
+        graph = build_graph(infra)
+        orphan_ids = [item["id"] for item in find_orphaned_resources(graph)]
+        assert "vol-in-use" not in orphan_ids
+
     def test_unattached_eip_is_orphaned(self):
         """Unattached Elastic IP should appear in orphans with cost = 3.65."""
         infra = AWSInfrastructure(

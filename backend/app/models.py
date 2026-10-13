@@ -15,6 +15,11 @@ class NetworkInterface(BaseModel):
 # ── INFRASTRUCTURE MODELS ─────────────────────────────────────────
 
 # Relationship tracking models
+class BlockDevice(BaseModel):
+    volume_id: str
+    device_name: Optional[str] = None
+    delete_on_termination: Optional[bool] = None
+
 class EC2Instance(BaseModel):
     id: str
     type: str
@@ -24,6 +29,7 @@ class EC2Instance(BaseModel):
     imdsv2_required: bool = False
     has_public_ip: Optional[bool] = None
     instance_profile_arn: Optional[str] = None
+    block_devices: List[BlockDevice] = []
 
 class SecurityGroup(BaseModel):
     id: str
@@ -63,6 +69,15 @@ class RDSInstance(BaseModel):
     subnet_id: Optional[str] = None
     publicly_accessible: bool = False
     encrypted: bool = False
+    engine: Optional[str] = None
+    backup_retention_days: Optional[int] = None
+    deletion_protection: Optional[bool] = None
+
+class RDSSnapshot(BaseModel):
+    id: str
+    db_instance_id: Optional[str] = None
+    snapshot_type: Optional[str] = None
+    status: Optional[str] = None
 
 class LambdaFunction(BaseModel):
     name: str
@@ -81,8 +96,15 @@ class EBSVolume(BaseModel):
     id: str
     size_gb: int
     volume_type: str
-    create_time: str
-    availability_zone: str
+    create_time: Optional[str] = None
+    availability_zone: Optional[str] = None
+    state: str = 'available'
+    attached_to: Optional[str] = None
+
+class EBSSnapshot(BaseModel):
+    id: str
+    volume_id: Optional[str] = None
+    state: Optional[str] = None
 
 class ElasticIP(BaseModel):
     allocation_id: str
@@ -156,6 +178,8 @@ class EC2Data(BaseModel):
     security_groups: List[SecurityGroup] = []
     load_balancers: List[LoadBalancer] = []
     ebs_volumes: List[EBSVolume] = []
+    ebs_snapshots: List[EBSSnapshot] = []
+    collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
     elastic_ips: List[ElasticIP] = []
     network_interfaces: Optional[List[NetworkInterface]] = None
     network_interfaces_status: str = 'error'
@@ -180,6 +204,8 @@ class RDSData(BaseModel):
     instances_without_log_exports: List[str] = []
     # Relationship tracking
     rds_instances: List[RDSInstance] = []
+    rds_snapshots: List[RDSSnapshot] = []
+    collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
 
 class IAMUser(BaseModel):
     username: str
@@ -202,6 +228,7 @@ class RolePolicy(BaseModel):
     accessible_resources: List[str] = []  # Resource ARNs from Allow statements
     has_admin: bool = False               # True if Action:* Resource:*
     access_statements: List[AccessStatement] = Field(default_factory=list)
+    last_used_at: Optional[str] = None
     policy_names: List[str] = []          # attached/inline policy names (for display)
     trusted_role_arns: List[str] = []     # role/user ARNs trusted by the role
     trusted_services: List[str] = []      # AWS services trusted by the role
@@ -218,6 +245,7 @@ class IAMData(BaseModel):
     iam_users: List[IAMUser] = []
     # Role policy data for graph can_access edges
     role_policies: List[RolePolicy] = []
+    collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
     # Instance profile ARN/name -> contained role identity for canonical graph IDs
     instance_profile_roles: Dict[str, Dict[str, str]] = Field(default_factory=dict)
 
