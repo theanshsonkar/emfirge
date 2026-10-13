@@ -8,7 +8,9 @@ import pytest
 from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 
-from app import branches, database, main
+from app import branches, database, in_use_evidence, main
+from app.delete_lens import analyze_deletions
+from app.mutations import Change, apply_change
 from app.evidence_models import EvidenceRecord, METRIC_SPECS
 from app.in_use_evidence import build_estimate, read_evidence
 from app.verdict import combined_verdict
@@ -158,7 +160,7 @@ def test_iam_role_uses_global_trail_region_and_shared_throttle():
         return trail
     read_evidence(CREDS, "eu-west-1", [resource("iam_role"), resource("s3_bucket")], ["cloudtrail_events"], now=NOW,
                   own_session_name="s", client_factory=factory, sleep=sleeps.append)
-    assert calls == [("cloudtrail", "us-east-1")] if len(calls) == 1 else calls[:2] == [("cloudtrail", "us-east-1"), ("cloudtrail", "eu-west-1")]
+    assert calls == [("cloudtrail", "us-east-1"), ("cloudtrail", "eu-west-1")]
     assert sleeps == [0.5]
 
 
@@ -226,3 +228,167 @@ def test_http_verdict_without_evidence_matches_explicit_none(evidence_client):
     assert response.status_code == 200
     branch = branches.get_branch(branch_id)
     assert response.json() == combined_verdict(branch.base, branches.rebuild_branch_state(branch), run_scanners=False, evidence=None).model_dump(mode="json") | {"branch_revision": branches.branch_revision(branch)}
+
+
+ROLE = "arn:aws:iam::111122223333:role/EmfirgeRole"
+PLANTED = ("PLANTED_USER", "203.0.113.9", "PLANTEDKEYID", "PLANTED_RAW_EVENT")
+LAMBDA = "dl-worker"
+
+
+def _iso(value):
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _seed(factory, analysis, account="111122223333"):
+    session = factory()
+    session.add(database.AnalysisLog(aws_account_id=account, findings_json=json.dumps({"analysis_id": analysis})))
+    session.commit()
+    session.close()
+
+
+def _branch_deleting(client, analysis, deletes):
+    branch_id = client.post("/branches", json={"base_analysis_id": analysis, "name": "ev"}).json()["branch_id"]
+    for typ, rid in deletes:
+        response = client.post(f"/branches/{branch_id}/changes", json={"op": "delete", "resource_type": typ, "resource_id": rid})
+        assert response.status_code == 200, response.text
+    return branch_id
+
+
+class Recorder:
+    def __init__(self):
+        self.sts, self.clients, self.account = [], [], "111122223333"
+
+    def assume(self, role_arn):
+        self.sts.append(role_arn)
+        return CREDS, self.account
+
+
+@pytest.fixture
+def wired(evidence_client, monkeypatch):
+    client, factory = evidence_client
+    rec = Recorder()
+    metric = FakeMetric({"Invocations": points("Sum", [3])})
+    trail = FakeTrail([{"Events": [{"ReadOnly": "false", "Username": PLANTED[0], "SourceIPAddress": PLANTED[1],
+                                    "AccessKeyId": PLANTED[2], "CloudTrailEvent": PLANTED[3],
+                                    "EventName": "UpdateFunctionCode", "EventTime": datetime.now(timezone.utc) - timedelta(days=2)}]}])
+
+    def make(service, region, creds):
+        rec.clients.append((service, region))
+        return metric if service == "cloudwatch" else trail
+
+    monkeypatch.setattr(main, "assume_role_credentials", rec.assume)
+    monkeypatch.setattr(in_use_evidence, "_default_client", make)
+    monkeypatch.setattr(in_use_evidence, "_sleep", lambda _: None)
+    return client, factory, rec
+
+
+def _accept(client, branch_id, role=ROLE):
+    estimate = client.get(f"/branches/{branch_id}/in-use-evidence/estimate").json()
+    return estimate, client.post(f"/branches/{branch_id}/in-use-evidence",
+                                 json={"role_arn": role, "sources": estimate["sources"], "accept_estimate_id": estimate["estimate_id"]})
+
+
+def test_http_accepted_estimate_reads_and_blocks(wired):
+    client, factory, rec = wired
+    _seed(factory, "an-ok")
+    branch_id = _branch_deleting(client, "an-ok", [("lambda_function", LAMBDA)])
+    before = client.get(f"/branches/{branch_id}/verdict").json()
+    estimate = client.get(f"/branches/{branch_id}/in-use-evidence/estimate").json()
+    assert rec.sts == [] and rec.clients == []
+    _, response = _accept(client, branch_id)
+    assert response.status_code == 200, response.text
+    assert rec.sts == [ROLE]
+    assert {r["source"] for r in response.json()["records"]} == {"cloudwatch_metrics", "cloudtrail_events"}
+    after = client.get(f"/branches/{branch_id}/verdict")
+    for text in (response.text, after.text, json.dumps(estimate)):
+        assert ROLE not in text
+        for planted in PLANTED:
+            assert planted not in text
+    after = after.json()
+    codes = {r["code"] for r in after["reasons"]}
+    assert after["verdict"] == "block" and "recently_used" in codes and "recent_activity" in codes
+    assert {r["code"] for r in before["reasons"]} <= codes
+    assert {"cloudwatch_metrics", "cloudtrail_events"} <= set(after["deletion"]["coverage"]["can_see"])
+
+
+@pytest.mark.parametrize("seed_account", ["444455556666", None])
+def test_http_account_mismatch_makes_no_aws_call(wired, seed_account):
+    client, factory, rec = wired
+    if seed_account:
+        _seed(factory, "an-mm", seed_account)
+    branch_id = _branch_deleting(client, "an-mm", [("lambda_function", LAMBDA)])
+    _, response = _accept(client, branch_id)
+    assert response.status_code == 409
+    assert rec.sts == [] and rec.clients == []
+
+
+def test_http_assumed_account_differs_reads_nothing(wired):
+    client, factory, rec = wired
+    rec.account = "999988887777"
+    _seed(factory, "an-assumed")
+    branch_id = _branch_deleting(client, "an-assumed", [("lambda_function", LAMBDA)])
+    _, response = _accept(client, branch_id)
+    assert response.status_code == 409
+    assert rec.sts == [ROLE] and rec.clients == []
+
+
+def test_http_stale_estimate_after_branch_change_makes_no_call(wired):
+    client, factory, rec = wired
+    _seed(factory, "an-stale")
+    branch_id = _branch_deleting(client, "an-stale", [("lambda_function", LAMBDA)])
+    estimate = client.get(f"/branches/{branch_id}/in-use-evidence/estimate").json()
+    second = ("ec2_instance", "i-dl-web")
+    assert client.post(f"/branches/{branch_id}/changes", json={"op": "delete", "resource_type": second[0], "resource_id": second[1]}).status_code == 200
+    response = client.post(f"/branches/{branch_id}/in-use-evidence",
+                           json={"role_arn": ROLE, "sources": estimate["sources"], "accept_estimate_id": estimate["estimate_id"]})
+    assert response.status_code == 409
+    assert response.json()["estimate"]["estimate_id"] != estimate["estimate_id"]
+    assert rec.sts == [] and rec.clients == []
+
+
+def test_http_too_many_resources_is_422_without_calls(wired, monkeypatch):
+    client, factory, rec = wired
+    monkeypatch.setattr(in_use_evidence, "MAX_EVIDENCE_RESOURCES", 0)
+    _seed(factory, "an-many")
+    branch_id = _branch_deleting(client, "an-many", [("lambda_function", LAMBDA)])
+    _, response = _accept(client, branch_id)
+    assert response.status_code == 422
+    assert rec.sts == [] and rec.clients == []
+
+
+@pytest.mark.parametrize("patch", [
+    {"role_arn": "arn:aws:iam::111122223333:user/CUSTOM_MARKER"},
+    {"sources": ["cloudwatch_metrics", "cloudwatch_metrics"]},
+    {"sources": ["CUSTOM_MARKER"]},
+    {"accept_estimate_id": "CUSTOM_MARKER"},
+    {"extra_field": "CUSTOM_MARKER"},
+])
+def test_http_invalid_post_is_422_without_echo_or_calls(wired, patch):
+    client, factory, rec = wired
+    _seed(factory, "an-bad")
+    branch_id = _branch_deleting(client, "an-bad", [("lambda_function", LAMBDA)])
+    body = {"role_arn": ROLE, "sources": ["cloudwatch_metrics"], "accept_estimate_id": "0" * 64, **patch}
+    response = client.post(f"/branches/{branch_id}/in-use-evidence", json=body)
+    assert response.status_code == 422
+    assert "CUSTOM_MARKER" not in response.text
+    assert rec.sts == [] and rec.clients == []
+
+
+@pytest.mark.parametrize("days, expected", [(89, True), (90, True), (91, False)])
+def test_recent_activity_window_uses_observed_at(days, expected):
+    base = load_synthetic_base("delete")
+    branch = apply_change(base, Change(op="delete", resource_type="lambda_function", resource_id=LAMBDA))
+    record = EvidenceRecord(resource_id=LAMBDA, resource_type="lambda_function", source="cloudtrail_events", status="ok",
+                            used=None, window_days=90, observed_at=_iso(NOW), last_event_at=_iso(NOW - timedelta(days=days)))
+    result = combined_verdict(base, branch, run_scanners=False, evidence=[record])
+    assert ("recent_activity" in {r["code"] for r in result.reasons}) is expected
+
+
+def test_s3_no_data_does_not_claim_cloudwatch_coverage():
+    base = load_synthetic_base("delete")
+    bucket = "dl-data-bucket"
+    branch = apply_change(base, Change(op="delete", resource_type="s3_bucket", resource_id=bucket))
+    record = EvidenceRecord(resource_id=bucket, resource_type="s3_bucket", source="cloudwatch_metrics", status="no_data",
+                            used=None, window_days=90, observed_at=_iso(NOW))
+    lens = analyze_deletions(base, branch, evidence=[record])
+    assert "cloudwatch_metrics" in lens.coverage.cannot_see and "cloudwatch_metrics" not in lens.coverage.can_see

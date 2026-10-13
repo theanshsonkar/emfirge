@@ -1,4 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request, Query, Depends
+from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware  # NEW
 from fastapi.responses import StreamingResponse, JSONResponse
 from botocore.exceptions import ClientError, NoCredentialsError
@@ -1467,9 +1469,35 @@ def in_use_evidence_estimate(branch_id: str, request: Request, sources: str = 'c
     return build_estimate(branch.base, branches.rebuild_branch_state(branch), branches.branch_revision(branch), requested)
 
 
+_EVIDENCE_FIELDS = {"role_arn", "sources", "accept_estimate_id"}
+
+
+def _evidence_validation_detail(exc: ValidationError) -> list[dict]:
+    """422 detail without submitted values: only known field names, list indexes and pydantic's error type."""
+    detail = []
+    for error in exc.errors():
+        loc = [part for part in error.get("loc", ()) if isinstance(part, int) or part in _EVIDENCE_FIELDS]
+        detail.append({"loc": ["body", *loc], "type": str(error.get("type", "value_error"))})
+    return detail
+
+
 @app.post('/branches/{branch_id}/in-use-evidence', dependencies=[Depends(require_api_key)])
-def collect_in_use_evidence(branch_id: str, payload: EvidenceRequest, request: Request):
+async def collect_in_use_evidence(branch_id: str, request: Request):
     _check_branch_rate_limit(_branch_request_ip(request))
+    try:
+        body = json.loads(await request.body())
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=422, detail='Request body must be a JSON object')
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail='Request body must be a JSON object')
+    try:
+        payload = EvidenceRequest.model_validate(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=_evidence_validation_detail(exc)) from None
+    return await run_in_threadpool(_collect_in_use_evidence, branch_id, payload)
+
+
+def _collect_in_use_evidence(branch_id: str, payload: EvidenceRequest):
     try:
         branch = branches.get_branch(branch_id)
     except branches.BranchNotFoundError as exc:
