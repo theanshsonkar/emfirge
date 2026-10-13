@@ -15,6 +15,7 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 
 from app import cost
 from app.database import BranchLog, PlanLog, SessionLocal
@@ -46,6 +47,8 @@ def list_plans(branch_id: str) -> list[dict]:
                  "rejected": json.loads(row.rejected_json or "[]"),
                  "unmodeled": json.loads(row.unmodeled_json or "[]"),
                  "unknown_fields": json.loads(row.unknown_fields_json or "[]")} for row in rows]
+    except OperationalError:
+        return []
     finally:
         session.close()
 from app.mutations import Change, apply_change, apply_changes
