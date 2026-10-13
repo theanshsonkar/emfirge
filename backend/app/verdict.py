@@ -204,7 +204,9 @@ def _has_recovery_point(resource: Any) -> bool:
     return False
 
 
-def _latent_resources(infra: Any, graph: Any = None) -> set[str]:
+def _latent_resources(infra: Any, graph: Any = None, base_infra: Any = None) -> set[str]:
+    if _value(infra, "collection", {}).get("network_interfaces") != "ok" or _value(infra, "network_interfaces", None) is None:
+        return set()
     groups = list(_value(_value(infra, "ec2", {}), "security_groups", []) or [])
     consumed = set()
     for collection_name in (("ec2", "instances"), ("rds", "rds_instances"), ("lambda_data", "functions"), ("elasticache", "clusters")):
@@ -216,7 +218,25 @@ def _latent_resources(infra: Any, graph: Any = None) -> set[str]:
         gid = str(_value(group, "id"))
         if any(gid in (_value(rule, field, []) or []) for other in groups if str(_value(other, "id")) != gid for rule in ((_value(other, "rules", []) or []) + (_value(other, "egress_rules", []) or [])) for field in ("source_sg_ids", "dest_sg_ids")):
             consumed.add(gid)
-    return ids - consumed
+    unused = ids - consumed
+    modeled = set()
+    for owner, field in (("ec2", "instances"), ("rds", "rds_instances"), ("lambda_data", "functions"), ("elasticache", "clusters")):
+        for item in (_value(_value(infra, owner, {}), field, []) or []):
+            value = _value(item, "id", _value(item, "name", None))
+            if value is not None:
+                modeled.add(str(value))
+    base_modeled = set()
+    if base_infra is not None:
+        for owner, field in (("ec2", "instances"), ("rds", "rds_instances"), ("lambda_data", "functions"), ("elasticache", "clusters")):
+            for item in (_value(_value(base_infra, owner, {}), field, []) or []):
+                value = _value(item, "id", _value(item, "name", None))
+                if value is not None:
+                    base_modeled.add(str(value))
+    for interface in (_value(infra, "network_interfaces", []) or []):
+        attached = _value(interface, "attached_resource", None)
+        if attached is None or str(attached) in modeled or str(attached) not in base_modeled:
+            unused -= set(_value(interface, "sg_ids", []) or [])
+    return unused
 
 
 _CONTAINMENT_RELATIONSHIPS = {"in_subnet", "belongs_to_vpc", "in_vpc", "contains_resource"}
@@ -352,7 +372,7 @@ def combined_verdict(
             )
 
     new_findings = native_added + scanner_added
-    latent_resources = _latent_resources(branch_infra)
+    latent_resources = _latent_resources(branch_infra, base_infra=base_infra)
     introduced_critical = [item for item in new_findings if item["severity"] == "critical" and _text(item.get("resource")) not in latent_resources]
     introduced_other = [item for item in new_findings if item not in introduced_critical]
     introduced_resource_ids = sorted({_text(item.get("resource")) for item in new_findings})

@@ -133,7 +133,12 @@ def test_demo_builder_graph_and_snapshot_are_deterministic():
             "rds_instance", "s3_bucket", "iam_role"} <= graph_types
     with open("app/demo_account.json", encoding="utf-8") as snapshot_file:
         snapshot = json.load(snapshot_file)
-    assert snapshot == first.model_dump(mode="json")
+    actual = first.model_dump(mode="json")
+    actual.pop("network_interfaces", None)
+    actual.pop("collection", None)
+    actual["ec2"].pop("network_interfaces", None)
+    actual["ec2"].pop("network_interfaces_status", None)
+    assert snapshot == actual
 
 
 def test_dangerous_change_is_reachable_and_safe_change_passes(demo_branch_db):

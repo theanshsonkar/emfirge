@@ -6,6 +6,12 @@ class AWSCredentials(BaseModel):
     role_arn: str
     region: str
 
+class NetworkInterface(BaseModel):
+    id: str
+    interface_type: str = 'interface'
+    sg_ids: List[str] = []
+    attached_resource: Optional[str] = None
+
 # ── INFRASTRUCTURE MODELS ─────────────────────────────────────────
 
 # Relationship tracking models
@@ -151,6 +157,8 @@ class EC2Data(BaseModel):
     load_balancers: List[LoadBalancer] = []
     ebs_volumes: List[EBSVolume] = []
     elastic_ips: List[ElasticIP] = []
+    network_interfaces: Optional[List[NetworkInterface]] = None
+    network_interfaces_status: str = 'error'
 
 class S3Data(BaseModel):
     total_buckets: int = 0
@@ -381,6 +389,8 @@ class AWSInfrastructure(BaseModel):
     cloudtrail: CloudTrailData = CloudTrailData()
     cost: CostData = CostData()
     cloudwatch: CloudWatchData = CloudWatchData()
+    network_interfaces: Optional[List[NetworkInterface]] = None
+    collection: Dict[str, str] = Field(default_factory=dict)
     guardduty: GuardDutyData = GuardDutyData()
     lambda_data: LambdaData = LambdaData()               # 'lambda' is a Python keyword, so we use lambda_data
     secrets_manager: SecretsManagerData = SecretsManagerData()

@@ -63,6 +63,32 @@ def _ports(rule: Any) -> tuple[int, int]:
     return int(_value(rule, "from_port")), int(_value(rule, "to_port"))
 
 
+def _modeled_resource_ids(infra: Any) -> set[str]:
+    ids = set()
+    for owner, field in (("ec2", "instances"), ("rds", "rds_instances"), ("lambda_data", "functions"), ("elasticache", "clusters")):
+        for item in (_value(_value(infra, owner, {}), field, []) or []):
+            value = _value(item, "id", _value(item, "name", None))
+            if value is not None:
+                ids.add(str(value))
+    return ids
+
+
+def _eni_proves_unused(sg_id: str, infra: Any, base_infra: Any = None) -> bool:
+    collection = _value(infra, "collection", {}) or {}
+    if collection.get("network_interfaces") != "ok":
+        return False
+    interfaces = _value(infra, "network_interfaces", None)
+    if interfaces is None:
+        return False
+    modeled = _modeled_resource_ids(infra)
+    base_modeled = _modeled_resource_ids(base_infra) if base_infra is not None else set()
+    return not any(sg_id in (_value(interface, "sg_ids", []) or []) and
+                   (_value(interface, "attached_resource", None) is None or
+                    str(_value(interface, "attached_resource")) in modeled or
+                    str(_value(interface, "attached_resource")) not in base_modeled)
+                   for interface in interfaces)
+
+
 def _sg_nodes(infra: Any, graph: Any) -> dict[str, Any]:
     return {str(_value(node, "id")): node for node in graph.find_nodes_by_type("security_group")}
 
@@ -124,15 +150,18 @@ def _rule_exposures(sg_id: str, sg: Any, resource_id: str, resource_type: str,
     return result
 
 
-def compute_exposures(infra: Any, graph: Any) -> list[Exposure]:
+def compute_exposures(infra: Any, graph: Any, base_infra: Any = None) -> list[Exposure]:
     """Compute active and latent external ingress exposures deterministically."""
     sg_nodes = _sg_nodes(infra, graph)
     reachable = get_internet_reachable_set(graph)
     exposures: list[Exposure] = []
     for sg_id, sg in sorted(sg_nodes.items()):
         consumers = _sg_consumers(sg_id, infra, graph)
-        if not consumers:
+        if not consumers and _eni_proves_unused(sg_id, infra, base_infra):
             exposures.extend(_rule_exposures(sg_id, sg, sg_id, "security_group", "latent", None, graph))
+            continue
+        if not consumers:
+            exposures.extend(_rule_exposures(sg_id, sg, sg_id, "security_group", "active", None, graph))
             continue
         for consumer in sorted(consumers, key=lambda node: str(_value(node, "id"))):
             resource_id = str(_value(consumer, "id"))

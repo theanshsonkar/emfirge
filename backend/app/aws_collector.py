@@ -15,7 +15,7 @@ from app.models import (
     ElastiCacheData, ElastiCacheCluster,
     SQSData, SQSQueue,
     DynamoDBData, DynamoDBTable,
-    EBSVolume, ElasticIP, Route, RouteTable, NACLEntry, NetworkACL,
+    EBSVolume, ElasticIP, Route, RouteTable, NACLEntry, NetworkACL, NetworkInterface,
     VPCPeeringConnection, TransitGatewayAttachment, VPNGateway, InterfaceEndpoint
 )
 from datetime import datetime, timezone
@@ -237,6 +237,8 @@ def collect_infrastructure(credentials: AWSCredentials) -> AWSInfrastructure:
         elasticache=results['elasticache'],
         sqs=results['sqs'],
         dynamodb=results['dynamodb'],
+        network_interfaces=results['ec2'].network_interfaces,
+        collection={'network_interfaces': results['ec2'].network_interfaces_status},
         region=region,
         warnings=warnings
     )
@@ -301,6 +303,8 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
     load_balancers = []
     ebs_volumes = []
     elastic_ips = []
+    network_interfaces = None
+    network_interfaces_status = 'error'
     sg_to_instances = {}  # Track which instances use which security groups
 
     FREE_TIER_TYPES = ['t2.micro', 't3.micro']
@@ -409,6 +413,33 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
         msg = f'EC2 scan skipped: unexpected error — {str(e)}'
         print(msg)
         warnings.append(msg)
+
+    try:
+        paginator = ec2.get_paginator('describe_network_interfaces')
+        network_interfaces = []
+        for page in paginator.paginate():
+            for item in page.get('NetworkInterfaces', []):
+                network_interfaces.append(NetworkInterface(
+                    id=item['NetworkInterfaceId'],
+                    interface_type=item.get('InterfaceType', 'interface'),
+                    sg_ids=[group['GroupId'] for group in item.get('Groups', [])],
+                    attached_resource=item.get('Attachment', {}).get('InstanceId'),
+                ))
+        network_interfaces_status = 'ok'
+    except ClientError as e:
+        code = get_error_code(e)
+        if code in ['AccessDenied', 'UnauthorizedOperation']:
+            network_interfaces_status = 'denied'
+            network_interfaces = None
+            warnings.append('Network interfaces scan skipped: insufficient permissions')
+        else:
+            network_interfaces_status = 'error'
+            network_interfaces = None
+            print(f'Network interfaces scan skipped: {code}')
+    except Exception as e:
+        network_interfaces_status = 'error'
+        network_interfaces = None
+        print(f'Network interfaces scan skipped: {e}')
 
     try:
         elb = boto3.client('elbv2', aws_access_key_id=key,
@@ -521,6 +552,8 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
         load_balancers=load_balancers,
         ebs_volumes=ebs_volumes,
         elastic_ips=elastic_ips,
+        network_interfaces=network_interfaces,
+        network_interfaces_status=network_interfaces_status,
     )
 
 # ── S3 COLLECTOR ──────────────────────────────────────────────────

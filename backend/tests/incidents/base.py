@@ -1,6 +1,6 @@
 from app.models import (
     AccessStatement, AWSInfrastructure, EC2Data, EC2Instance, IAMData,
-    InternetGatewayAttachment, LambdaData, LambdaFunction, RolePolicy, Route,
+    InternetGatewayAttachment, LambdaData, LambdaFunction, NetworkInterface, RolePolicy, Route,
     RouteTable, S3Bucket, S3Data, SecurityGroup, VPCData, VPCSubnet,
 )
 
@@ -24,6 +24,8 @@ def build_incident_base() -> AWSInfrastructure:
             instances=[EC2Instance(id=instance_id, type="t3.micro", state="running", sg_ids=[sg_web.id],
                                    subnet_id=subnet_id, has_public_ip=True, imdsv2_required=True)],
             security_groups=[sg_web, sg_latent]),
+        network_interfaces=[NetworkInterface(id="eni-inc-web", sg_ids=["sg-inc-web"], attached_resource="i-inc-web")],
+        collection={"network_interfaces": "ok"},
         s3=S3Data(total_buckets=2, buckets=[S3Bucket(name="inc-data-bucket", is_public=False, versioning_enabled=False),
                                             S3Bucket(name="inc-assets-bucket", is_public=False)]),
         iam=IAMData(role_policies=[RolePolicy(role_name="inc-lambda-role", role_arn=ROLE_ARN,
