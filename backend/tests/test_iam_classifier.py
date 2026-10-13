@@ -27,7 +27,7 @@ def test_offline_access_levels_and_escalation():
     assert iam_classifier.classify_action("*") == {
         "Permissions management", "Write", "Tagging", "List", "Read"
     }
-    assert iam_classifier.is_privilege_escalation("iam:PassRole") is True
+    assert iam_classifier.is_privilege_escalation("iam:CreatePolicyVersion") is True
 
 
 def test_graph_access_annotations_and_role_flag():
@@ -38,7 +38,7 @@ def test_graph_access_annotations_and_role_flag():
     write = _edge(build_graph(_infra("s3:PutObject")))
     assert write.attrs["access_level"] == "Write"
 
-    escalation_graph = build_graph(_infra(["s3:GetObject", "iam:PassRole"]))
+    escalation_graph = build_graph(_infra(["s3:GetObject", "iam:CreatePolicyVersion"]))
     escalation = _edge(escalation_graph)
     assert escalation.attrs["privilege_escalation"] is True
     assert escalation_graph.get_node("iam-role-Role").base["has_privilege_escalation"] is True

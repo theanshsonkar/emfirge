@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.models import AWSInfrastructure
 import app.iam_classifier as iam_classifier
+from app.iam_escalation import matching_paths
 
 
 _ACCESS_LEVEL_ORDER = {
@@ -1945,6 +1946,9 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             's3_bucket', 'rds_instance', 'lambda_function', 'secretsmanager_secret',
             'dynamodb_table', 'sqs_queue')]
         access_statements = role_policy.access_statements if not isinstance(role_policy, dict) else role_policy.get('access_statements', [])
+        escalation_paths = matching_paths(access_statements)
+        role_metadata['has_privilege_escalation'] = bool(escalation_paths)
+        role_metadata['privilege_escalation_paths'] = [path['id'] for path in escalation_paths]
         edge_count = 0
         access_edge_targets = set()
 

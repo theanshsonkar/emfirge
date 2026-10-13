@@ -309,3 +309,44 @@ test("off: attack_path / node_ids pass through unchanged", async () => {
   };
   assert.deepEqual(t.redactDeep(obj), obj);
 });
+
+
+test("strict: planted identifiers are redacted, aliases share a token, and vocabulary survives", async () => {
+  const t = await load("strict");
+  const roleArn = "arn:aws:iam::000000007731:role/ZqPlantedRole";
+  const planted = {
+    bucket_name: "zq-planted-bucket-7731",
+    role_arn: roleArn,
+    name: "ZqPlantedRole",
+    account_id: "000000007731",
+    security_group_id: "sg-0zqplanted01",
+    rule_id: "EMFIRGE-EC2-002",
+    framework: { id: "cis-aws-1.5" },
+    control: { id: "CC6.1" },
+    source: "native",
+    resource_type: "database",
+    visibility: "public",
+    summary: "zq-planted-bucket-7731 ZqPlantedRole native public database",
+  };
+  const out = t.redactDeep(planted) as any;
+  assertNoLeak(out, [
+    "zq-planted-bucket-7731",
+    "ZqPlantedRole",
+    "000000007731",
+    "sg-0zqplanted01",
+  ]);
+  assert.equal(out.role_arn, out.name);
+  assert.equal(out.rule_id, "EMFIRGE-EC2-002");
+  assert.equal(out.framework.id, "cis-aws-1.5");
+  assert.equal(out.control.id, "CC6.1");
+  assert.equal(out.source, "native");
+  assert.equal(out.resource_type, "database");
+  assert.equal(out.visibility, "public");
+  assert.match(out.summary, /native public database/);
+});
+
+test("strict: known names are replaced only as whole identifiers", async () => {
+  const t = await load("strict");
+  const out = t.redactDeep({ name: "native-service", note: "native native-service nativeish" }) as any;
+  assert.match(out.note, /^native NAME_\d{3} nativeish$/);
+});

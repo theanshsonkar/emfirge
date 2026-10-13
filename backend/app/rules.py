@@ -1,4 +1,6 @@
 from app.models import AWSInfrastructure, RiskFinding, ToxicCombo
+from app.iam_escalation import matching_paths
+
 from app.egraph import Graph, find_orphaned_resources, get_internet_reachable_set, get_attack_path_to, is_traversable_relationship
 from typing import List, Optional, Set
 from dataclasses import dataclass
@@ -887,13 +889,29 @@ def check_root_access_keys(infra: AWSInfrastructure) -> Optional[RiskFinding]:
             severity='Critical',
             confidence='HIGH',
             issue='Root account has active access keys',
-            recommendation='Delete root access keys immediately and use IAM users instead',
-            aws_service='IAM',
+            recommendation='Delete root access keys immediately and use IAM users instead',            aws_service='IAM',
             resource_id='root-account',
             resource_type='iam_root',
             region='global'
         )
     return None
+
+def check_iam_escalation_paths(infra: AWSInfrastructure, ctx: Optional['GraphContext'] = None) -> List[RiskFinding]:
+    findings = []
+    for role in infra.iam.role_policies:
+        statements = role.access_statements if not isinstance(role, dict) else role.get('access_statements', [])
+        paths = matching_paths(statements)
+        if not paths:
+            continue
+        labels = ', '.join(f"{path['id']} ({path['name']})" for path in paths)
+        references = ', '.join(f"pathfinding.cloud {path['id']}" for path in paths)
+        findings.append(RiskFinding(
+            rule_id='EMFIRGE-IAM-007', category='Security', severity='Critical', raw_severity='Critical', confidence='HIGH',
+            issue=f"IAM role can escalate privileges: {labels}; source/reference: {references}",
+            recommendation='Remove the permissions completing these known IAM escalation paths or scope them to the minimum required resources.',
+            aws_service='IAM', resource_id=role.role_name if not isinstance(role, dict) else role.get('role_name'),
+            resource_type='iam_role', region='global'))
+    return findings
 
 def check_iam_high_risk_users(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> List[RiskFinding]:
     # Combined rule: users with BOTH old access keys AND no MFA = highest risk
@@ -2148,6 +2166,7 @@ def run_all_checks(infrastructure: AWSInfrastructure, graph: Optional[Graph] = N
     list_checks_no_graph = [
         check_users_without_mfa,
         check_lambda_no_vpc,
+        check_iam_escalation_paths,
     ]
     
     # List-return rules with graph (List[RiskFinding])
@@ -2223,6 +2242,31 @@ def run_all_checks(infrastructure: AWSInfrastructure, graph: Optional[Graph] = N
     if graph:
         orphaned_findings = check_orphaned_resources(infrastructure, graph)
         cost_findings.extend(orphaned_findings)
+
+    # One graph-truth post-processing pass: findings without an explicit radius
+    # inherit the impact of the internet-reachable entry resources they describe.
+    all_findings = critical_risks + moderate_risks + low_risks + cost_findings
+    for finding in all_findings:
+        if finding.blast_radius:
+            continue
+        entry_ids = set()
+        for value in (finding.resource_id or '').split(','):
+            resource_id = value.strip()
+            if not resource_id:
+                continue
+            node = graph.get_node(resource_id) if graph else None
+            if node and node.get('type') == 'security_group':
+                attached = set(node.get('metadata', {}).get('attached_instances', []))
+                attached.update(
+                    candidate['id'] for candidate in (graph.nodes if graph else [])
+                    if resource_id in (candidate.get('metadata', {}).get('sg_ids', []) or [])
+                )
+                entry_ids.update(item for item in attached if item in ctx.reachable)
+            elif resource_id in ctx.reachable:
+                entry_ids.add(resource_id)
+        finding.blast_radius = len(entry_ids) + sum(
+            ctx.get_blast_radius(entry_id) for entry_id in entry_ids
+        ) if entry_ids else 0
 
     best_practices = detect_best_practices(infrastructure)
 
