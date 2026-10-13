@@ -39,6 +39,26 @@ def save_plan(plan_id: str, branch_id: str, input_sha256: str, raw_input: str,
     _with_session(operation)
 
 
+def get_plan(plan_id: str) -> dict | None:
+    """Return the immutable persisted plan receipt, or ``None`` if unknown."""
+    session = SessionLocal()
+    try:
+        row = session.query(PlanLog).filter(PlanLog.plan_id == plan_id).first()
+        if row is None:
+            return None
+        return {
+            "plan_id": row.plan_id,
+            "branch_id": row.branch_id,
+            "input_sha256": row.input_sha256,
+            "raw_input": row.raw_input,
+            "branch_revision_after": row.branch_revision_after,
+        }
+    except OperationalError:
+        return None
+    finally:
+        session.close()
+
+
 def list_plans(branch_id: str) -> list[dict]:
     session = SessionLocal()
     try:

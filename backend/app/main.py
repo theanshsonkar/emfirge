@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware  # NEW
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from botocore.exceptions import ClientError, NoCredentialsError
 from typing import Optional
 import boto3
@@ -1458,6 +1458,79 @@ def add_branch_change_endpoint(branch_id: str, change: Change, request: Request)
         'num_changes': len(branch.changes),
         'modeled_state_unchanged': branch.last_change_modeled_state_unchanged,
     }
+
+
+def _handback_verdict_id(input_sha256: str, base_analysis_id: str | None,
+                         branch_revision: str, verdict: str) -> str:
+    payload = {
+        "input_sha256": input_sha256,
+        "base_analysis_id": base_analysis_id,
+        "branch_revision": branch_revision,
+        "verdict": verdict,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _current_handback_state(branch_id: str):
+    branch = branches.get_branch(branch_id)
+    rebuilt = branches.rebuild_branch_state(branch)
+    result = combined_verdict(branch.base, rebuilt, run_scanners=False)
+    return branch, result, branches.branch_revision(branch)
+
+
+@app.get('/branches/{branch_id}/plans/{plan_id}/handback', dependencies=[Depends(require_api_key)])
+def plan_handback_endpoint(branch_id: str, plan_id: str, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    plan = branches.get_plan(plan_id)
+    if plan is None or plan['branch_id'] != branch_id:
+        raise HTTPException(status_code=404, detail='Not found')
+    try:
+        branch, result, revision = _current_handback_state(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='Not found') from exc
+    plan_text = plan['raw_input']
+    # A persisted receipt must remain bound to exactly the bytes represented by
+    # its recorded digest; never synthesize or regenerate a plan here.
+    assert hashlib.sha256(plan_text.encode('utf-8')).hexdigest() == plan['input_sha256']
+    verdict = result.verdict
+    verdict_id = _handback_verdict_id(
+        plan['input_sha256'], branch.base_analysis_id, revision, verdict,
+    )
+    return {
+        'plan_id': plan['plan_id'],
+        'input_sha256': plan['input_sha256'],
+        'base_analysis_id': branch.base_analysis_id,
+        'branch_revision': revision,
+        'verdict_id': verdict_id,
+        'verdict': verdict,
+        'plan_text': plan_text,
+    }
+
+
+@app.post('/handback/verify', dependencies=[Depends(require_api_key)])
+def verify_handback_endpoint(payload: dict, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail='Request body must be an object')
+    plan = branches.get_plan(payload.get('plan_id')) if isinstance(payload.get('plan_id'), str) else None
+    if plan is None:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'unknown_plan'})
+    plan_text = payload.get('plan_text')
+    if not isinstance(plan_text, str) or hashlib.sha256(plan_text.encode('utf-8')).hexdigest() != plan['input_sha256']:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'input_hash_mismatch'})
+    try:
+        branch, result, revision = _current_handback_state(plan['branch_id'])
+    except branches.BranchNotFoundError:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'unknown_plan'})
+    if revision != plan['branch_revision_after']:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'branch_revision_changed'})
+    expected_verdict_id = _handback_verdict_id(
+        plan['input_sha256'], branch.base_analysis_id, revision, result.verdict,
+    )
+    if payload.get('verdict_id') != expected_verdict_id:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'verdict_changed'})
+    return {'ok': True}
 
 
 @app.get('/branches/{branch_id}/diff', response_model=DiffResult, dependencies=[Depends(require_api_key)])
