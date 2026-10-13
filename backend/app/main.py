@@ -43,6 +43,7 @@ from app.auth import require_api_key
 from app.database import create_tables, save_analysis, get_recent_logs, get_log_by_id, get_scan_count_today, get_previous_scan_for_account, save_drift_events, get_drift_events, save_simulation_log, get_simulation_count_today, save_feedback, get_feedback, save_llm_usage, get_llm_usage_count_today, save_tf_index, get_tf_index, get_tf_index_status, create_ci_api_key, validate_ci_api_key, get_ci_api_keys
 from app.storage import save_report, get_report_url
 from app.egraph import build_graph, get_simulation_slice, validate_simulation_response, classify_query, format_graph_for_claude, bfs_from_internet, find_attack_path, Graph
+from app.exposure import compute_exposures
 from app.drift_service import compare_findings
 from app.compliance import evaluate_all_frameworks
 
@@ -418,13 +419,32 @@ def get_graph(analysis_id: str):
         )
         seen_paths = set()
         attack_paths = []
+        active_exposures = compute_exposures(infrastructure, graph)
+        exposures_by_entry = defaultdict(list)
+        for exposure in active_exposures:
+            exposures_by_entry[exposure.resource_id].append({
+                'protocol': exposure.protocol,
+                'from_port': exposure.from_port,
+                'to_port': exposure.to_port,
+                'source': exposure.source,
+            })
+        for entry, exposures in sorted(exposures_by_entry.items()):
+            lateral_path = find_attack_path(graph, entry)
+            attack_paths.append({
+                'finding_id': '',
+                'finding_title': 'Active internet exposure',
+                'severity': 'critical' if any(item['source'] in {'0.0.0.0/0', '::/0'} and item['from_port'] <= 22 <= item['to_port'] for item in exposures) else 'moderate',
+                'path': lateral_path or [entry],
+                'entry': entry,
+                'exposures': exposures,
+                'lateral_path': lateral_path,
+                'status': 'lateral_path_found' if lateral_path else 'entry_exposed_no_lateral_path',
+            })
         for f in all_findings:
             path = f.get('attack_path', [])
             blast = f.get('blast_radius', 0) or 0
-            # Skip findings with no path AND no blast radius
             if not path and blast == 0:
                 continue
-            # If no traversal path but blast_radius > 0, use resource_id as the path
             if not path and f.get('resource_id'):
                 path = [f['resource_id']]
             if not path:
@@ -804,6 +824,15 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
 
     blast_radius = _compute_blast_radius(slice_dict, graph)
 
+    # Exposure and native findings use the same graph as the simulation slice.
+    active_exposures = compute_exposures(infrastructure, graph)
+    reachable = {item.resource_id for item in active_exposures}
+    native_findings = run_all_checks(infrastructure, graph)
+    native_on_entries = [
+        finding for findings in native_findings.values() for finding in findings
+        if getattr(finding, 'resource_id', None) in reachable
+    ]
+
     # ── SMART DETERMINISTIC NARRATIVE (fallback that's actually good) ─
     def _build_deterministic_narrative(stages: list, blast: dict, query: str, graph_obj: Graph) -> dict:
         """Build a meaningful narrative from graph data alone — no LLM needed."""
@@ -920,6 +949,15 @@ Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical
         # Use smart deterministic fallback if Haiku failed
         if not haiku_data:
             haiku_data = _build_deterministic_narrative(attack_stages, blast_radius, request.query, graph)
+
+        severity_rank = {'low': 0, 'moderate': 1, 'critical': 2}
+        exposure_severities = [item.severity.lower() for item in active_exposures]
+        native_severities = [item.severity.lower() for item in native_on_entries]
+        count_severity = str(haiku_data.get('severity', 'low')).lower()
+        haiku_data['severity'] = max(
+            [count_severity, *exposure_severities, *native_severities],
+            key=lambda value: severity_rank.get(value, 0),
+        )
 
         # ── Send preview immediately ──────────────────────────────
         preview_data = {

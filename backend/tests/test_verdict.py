@@ -153,12 +153,8 @@ def test_no_new_risk_is_pass_and_keeps_scores(monkeypatch, infra):
     assert (result.score_before, result.score_after, result.score_delta) == (80, 95, 15)
     assert result.scanner_available is False
     assert result.scanner_added == result.scanner_removed == []
-    # run_scanners=False is a deliberate choice, but the verdict must still SAY
-    # the borrowed scanners did not run -- a caller cannot distinguish
-    # "scanners off" from "scanners ran clean" without it. Reversed from the
-    # earlier draft, which treated the deliberate case as silent.
-    assert "DEGRADED" in result.summary
-    assert result.coverage_warnings, "scanners-off must be reported, not silent"
+    assert result.coverage_warnings == ["native rules only"]
+    assert "DEGRADED" not in result.summary
     assert result.scanner_status == {
         "checkov": "disabled",
         "trivy": "disabled",

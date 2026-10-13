@@ -2224,6 +2224,31 @@ def run_all_checks(infrastructure: AWSInfrastructure, graph: Optional[Graph] = N
         orphaned_findings = check_orphaned_resources(infrastructure, graph)
         cost_findings.extend(orphaned_findings)
 
+    # One graph-truth post-processing pass: findings without an explicit radius
+    # inherit the impact of the internet-reachable entry resources they describe.
+    all_findings = critical_risks + moderate_risks + low_risks + cost_findings
+    for finding in all_findings:
+        if finding.blast_radius:
+            continue
+        entry_ids = set()
+        for value in (finding.resource_id or '').split(','):
+            resource_id = value.strip()
+            if not resource_id:
+                continue
+            node = graph.get_node(resource_id) if graph else None
+            if node and node.get('type') == 'security_group':
+                attached = set(node.get('metadata', {}).get('attached_instances', []))
+                attached.update(
+                    candidate['id'] for candidate in (graph.nodes if graph else [])
+                    if resource_id in (candidate.get('metadata', {}).get('sg_ids', []) or [])
+                )
+                entry_ids.update(item for item in attached if item in ctx.reachable)
+            elif resource_id in ctx.reachable:
+                entry_ids.add(resource_id)
+        finding.blast_radius = len(entry_ids) + sum(
+            ctx.get_blast_radius(entry_id) for entry_id in entry_ids
+        ) if entry_ids else 0
+
     best_practices = detect_best_practices(infrastructure)
 
     return {

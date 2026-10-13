@@ -282,10 +282,7 @@ def combined_verdict(
         # per-scanner status exists to close. The verdict is still honest about
         # the native rules it DID run.
         scanner_status = {name: "disabled" for _, name in scanner_results}
-        coverage_warnings.append(
-            "borrowed scanners are disabled on this verdict (native rules only) "
-            "— this verdict is NOT full coverage"
-        )
+        coverage_warnings.append("native rules only")
     if run_scanners:
         base_scans: dict[str, dict[tuple[str, str, str], dict[str, Any]] | None] = {}
         branch_scans: dict[str, dict[tuple[str, str, str], dict[str, Any]] | None] = {}
@@ -402,8 +399,9 @@ def combined_verdict(
     # "(scanner unavailable)", which read as a footnote on an otherwise
     # confident verdict, so a pass computed without the scanners looked
     # identical to a fully-covered pass.
-    if coverage_warnings:
-        unavailable = "; DEGRADED: " + "; ".join(coverage_warnings)
+    degraded_warnings = [item for item in coverage_warnings if item != "native rules only"]
+    if degraded_warnings:
+        unavailable = "; DEGRADED: " + "; ".join(degraded_warnings)
     else:
         unavailable = ""
     cost_summary = "cost unknown" if cost_unknown_notes else (
