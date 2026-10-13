@@ -368,6 +368,8 @@ def combined_verdict(
     no_recovery = [item for item in deleted_stores if not _has_recovery_point(item)]
     deletion_relationships = [impact for impact in diff.deletion_impacts if any(rel not in _CONTAINMENT_RELATIONSHIPS for related in impact.get("surviving_related_resources", []) for rel in related.get("relationships", []))]
     reasons: list[dict[str, str]] = []
+    if introduced_critical:
+        reasons.append(_reason("block", "introduced_critical_finding", f"Introduced Critical finding on resource_id={_text(introduced_critical[0].get('resource'))}"))
     if active_critical_exposure:
         reasons.append(_reason("block", "introduced_critical_exposure", f"Introduced Critical exposure on resource_id={_text(active_critical_exposure[0].get('resource_id'))}"))
     if introduces_privilege_escalation:

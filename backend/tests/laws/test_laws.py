@@ -193,3 +193,33 @@ def test_L7_same_snapshot_and_changes_are_deterministic(rules):
     right = apply_change(base, change)
     assert diff_infrastructure(base, left).model_dump() == diff_infrastructure(base, right).model_dump()
     assert combined_verdict(base, left, run_scanners=False).model_dump(exclude={"branch_revision"}) == combined_verdict(base, right, run_scanners=False).model_dump(exclude={"branch_revision"})
+
+
+@given(RULES, RULES, st.booleans(), st.booleans(), st.booleans())
+def test_L8_verdict_is_exactly_the_reason_policy(web_rules, latent_rules, public_bucket, delete_bucket, delete_instance):
+    """The verdict is a pure projection of reason levels, never score heuristics."""
+    base = build_incident_base()
+    branch = apply_change(base, _changes_for_rules("sg-inc-web", web_rules))
+    branch = apply_change(branch, _changes_for_rules("sg-inc-latent", latent_rules))
+    branch = apply_change(branch, Change(
+        op="modify", resource_type="s3_bucket", resource_id="inc-data-bucket",
+        fields={"is_public": public_bucket},
+    ))
+    if delete_bucket:
+        branch = apply_change(branch, Change(
+            op="delete", resource_type="s3_bucket", resource_id="inc-assets-bucket",
+        ))
+    if delete_instance:
+        branch = apply_change(branch, Change(
+            op="delete", resource_type="ec2_instance", resource_id="i-inc-web",
+        ))
+
+    result = combined_verdict(base, branch, run_scanners=False)
+    levels = {reason["level"] for reason in result.reasons}
+    if "block" in levels:
+        assert result.verdict == "block"
+    elif "warn" in levels:
+        assert result.verdict == "warn"
+    else:
+        assert result.reasons == []
+        assert result.verdict == "pass"
