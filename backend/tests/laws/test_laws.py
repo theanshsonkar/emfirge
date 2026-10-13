@@ -26,15 +26,28 @@ RULE = st.builds(
 RULES = st.lists(RULE, max_size=4, unique_by=lambda r: (r["from_port"], r["ip_ranges"][0]))
 
 
-def _score(infra):
+def _scan_total_resources(infra):
+    # Mirrors the scan path in app/main.py (~3074-3091). Phase 0 #4 should replace this with one shared function.
+    return (
+        infra.ec2.instance_count + len(infra.ec2.security_groups) + len(infra.ec2.ebs_volumes)
+        + len(infra.ec2.elastic_ips) + infra.s3.total_buckets + len(infra.rds.instances)
+        + len(infra.iam.iam_users) + (1 if infra.cloudtrail.is_enabled else 0)
+        + infra.lambda_data.function_count + infra.secrets_manager.total_secrets
+        + (1 if infra.guardduty.is_enabled else 0) + infra.vpc.total_vpcs + len(infra.vpc.subnets)
+        + infra.kms.total_cmks + infra.sns.total_topics + infra.ecs.total_task_definitions
+    )
+
+
+def _scan_score(infra):
     findings = run_all_checks(infra, build_graph(infra))
-    return calculate_score(findings, infrastructure=infra)["overall_risk_score"]
+    return calculate_score(findings, _scan_total_resources(infra), infra)["overall_risk_score"]
 
 
 def _changes_for_rules(sg_id, rules):
     return Change(op="modify", resource_type="security_group", resource_id=sg_id, fields={"rules": rules})
 
 
+@pytest.mark.xfail(strict=True, reason="Phase 0 #4: one score")
 @given(st.integers(min_value=0, max_value=15))
 def test_L1_empty_branch_score_matches_scan_with_variable_resource_count(extra_buckets):
     base = build_incident_base()
@@ -45,7 +58,7 @@ def test_L1_empty_branch_score_matches_scan_with_variable_resource_count(extra_b
         ))
     result = combined_verdict(base, copy.deepcopy(base), run_scanners=False)
     assert result.verdict == "pass"
-    assert result.score_before == _score(base)
+    assert result.score_before == _scan_score(base)
 
 
 @given(RULES)
@@ -142,7 +155,7 @@ def test_L4_only_introduced_critical_findings_block(sg_id, rules, public_bucket)
         assert result.verdict == "block"
 
 
-@pytest.mark.xfail(strict=True, reason="Phase 0 #4: score_after > score_before")
+@pytest.mark.xfail(strict=True, reason="Phase 0 #4: one score")
 @given(st.lists(st.sampled_from(["inc-data-bucket", "inc-assets-bucket", "i-inc-web", "sg-inc-latent", "inc-worker"]), min_size=1, max_size=3, unique=True))
 def test_L5_deletion_never_increases_score(resource_ids):
     base = build_incident_base()
@@ -155,7 +168,8 @@ def test_L5_deletion_never_increases_score(resource_ids):
         if resource_id == "sg-inc-latent":
             continue
         branch = apply_change(branch, Change(op="delete", resource_type=resource_types[resource_id], resource_id=resource_id))
-    assert _score(branch) <= _score(base)
+    diff = diff_infrastructure(base, branch)
+    assert diff.score_after <= diff.score_before
 
 
 @pytest.mark.xfail(strict=True, reason="Phase 0 #1: malformed changes")
