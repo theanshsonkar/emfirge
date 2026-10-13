@@ -1280,7 +1280,7 @@ def compare_branches_endpoint(payload: dict, request: Request):
     try:
         return branches.compare_branches(branch_ids)
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post('/branches', dependencies=[Depends(require_api_key)])
@@ -1292,7 +1292,7 @@ def create_branch_endpoint(payload: dict, request: Request):
     try:
         branch_id = branches.create_branch(base_infra, payload['name'], payload['base_analysis_id'])
     except branches.BranchLimitError as exc:
-        raise HTTPException(status_code=429, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     return {'branch_id': branch_id}
 
 
@@ -1318,7 +1318,7 @@ def get_branch_endpoint(branch_id: str, request: Request):
     try:
         return branches.read_branch(branch_id)
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post('/branches/{branch_id}/fork', dependencies=[Depends(require_api_key)])
@@ -1342,13 +1342,13 @@ def fork_branch_endpoint(branch_id: str, request: Request, payload: dict):
                 branch_id, payload['name'], expected_branch_revision=expected_revision,
             )
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except branches.BranchConflictError as exc:
-        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except branches.BranchLimitError as exc:
-        raise HTTPException(status_code=429, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {'branch_id': new_branch_id, 'num_changes': num_changes}
 
 
@@ -1363,12 +1363,12 @@ def add_branch_change_endpoint(branch_id: str, change: Change, request: Request)
         apply_change(rebuilt, change)
         branch = branches.apply_change_to_branch(branch_id, change)
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except branches.BranchConflictError as exc:
-        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         status_code = 409 if str(exc).startswith('Branch is not open:') else 422
-        raise HTTPException(status_code=status_code, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     return {
         'branch_id': branch.branch_id,
         'num_changes': len(branch.changes),
@@ -1382,7 +1382,7 @@ def branch_diff_endpoint(branch_id: str, request: Request):
     try:
         return branches.get_branch_diff(branch_id)
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get('/branches/{branch_id}/verdict', response_model=CombinedVerdict, dependencies=[Depends(require_api_key)])
@@ -1392,7 +1392,7 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
         branch = branches.get_branch(branch_id)
         rebuilt = branches.rebuild_branch_state(branch)
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     # Scanners are OFF by default on this endpoint. A verdict runs 6 scanner
     # subprocesses serially (checkov/trivy/cloudsplaining x base+branch); on the
     # 1 GB t2.micro checkov exhausts memory and the host OOM-killer takes uvicorn
@@ -1429,11 +1429,11 @@ def rollback_branch_endpoint(branch_id: str, request: Request, payload: Optional
                 expected_branch_revision=expected_revision,
             )
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except branches.BranchConflictError as exc:
-        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _branch_summary(branch)
 
 
@@ -1459,13 +1459,13 @@ def rollback_branch_to_count_endpoint(branch_id: str, request: Request, payload:
             branch_id, target_count, expected_branch_revision=expected_revision,
         )
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except branches.BranchConflictError as exc:
-        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except branches.InvalidRollbackTargetError as exc:
-        raise HTTPException(status_code=422, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _branch_summary(branch)
 
 
@@ -1496,9 +1496,9 @@ def discard_branch_endpoint(branch_id: str, request: Request, payload: Optional[
                 expected_branch_revision=expected_revision,
             )
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except branches.BranchConflictError as exc:
-        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {'branch_id': branch.branch_id, 'status': branch.status}
 
 
@@ -2197,7 +2197,7 @@ def create_github_pr(request: GitHubPRRequest, http_request: Request):
         result = create_fix_pr(gh, request.repo, request.finding, request.hcl, file_path, tf_match=tf_match)
         return GitHubPRResponse(**result)
     except Exception as e:
-        raise HTTPException(status_code=500, detail='Request could not be completed')
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post('/github/webhook', dependencies=[Depends(require_api_key)])
@@ -3285,7 +3285,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
 
     except ValueError as e:
         if session: session.end_session(end_state='Fail')
-        raise HTTPException(status_code=400, detail='Request could not be completed')
+        raise HTTPException(status_code=400, detail=str(e))
 
     except HTTPException:
         if session: session.end_session(end_state='Fail')

@@ -95,7 +95,7 @@ def test_get_branch_endpoint_returns_404_for_missing_id():
         response = client.get("/branches/missing")
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "Request could not be completed"
+    assert response.json()["detail"] == "Branch not found: missing"
 
 
 def test_fork_endpoint_returns_child_id_and_change_count():
@@ -195,7 +195,7 @@ def test_add_change_returns_conflict_for_stale_branch_revision():
         })
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "Request could not be completed"
+    assert response.json()["detail"] == "Branch revision is stale"
     assert append.call_args.args[1].branch_revision == "a" * 64
 
 
@@ -301,7 +301,7 @@ def test_invalid_change_returns_422_without_persistence():
             "op": "replace", "resource_type": "unsupported", "resource_id": "x", "fields": {}
         })
     assert response.status_code == 422
-    assert response.json()["detail"] == "Request could not be completed"
+    assert response.json()["detail"] == "Unsupported operation: replace"
     persist.assert_not_called()
 
 
@@ -315,7 +315,7 @@ def test_agent_cannot_persist_in_use_security_group_delete():
             "resource_id": "sg-demo-public", "fields": {},
         })
     assert response.status_code == 422
-    assert response.json()["detail"] == "Request could not be completed"
+    assert response.json()["detail"] == "Security group is still in use; model detaching or replacing it before deletion"
     persist.assert_not_called()
 
 
@@ -330,7 +330,7 @@ def test_stale_agent_append_returns_conflict():
             "fields": {}, "expected_change_count": 0,
         })
     assert response.status_code == 409
-    assert response.json()["detail"] == "Request could not be completed"
+    assert response.json()["detail"] == "Branch changed"
 
 
 def test_stale_agent_rollback_returns_conflict():
@@ -423,7 +423,7 @@ def test_invalid_change_target_returns_422_without_persistence():
             "op": "modify", "resource_type": "s3_bucket", "resource_id": "missing", "fields": {}
         })
     assert response.status_code == 422
-    assert response.json()["detail"] == "Request could not be completed"
+    assert response.json()["detail"] == "Target not found: s3_bucket"
     persist.assert_not_called()
 
 
@@ -487,7 +487,7 @@ def test_discard_maps_stale_change_count_to_conflict():
         response = client.post("/branches/b-1/discard", json={"expected_change_count": 1})
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "Request could not be completed"
+    assert response.json()["detail"] == "Branch changed: expected 1 change(s), found 2"
     discard.assert_called_once_with("b-1", expected_change_count=1)
 
 

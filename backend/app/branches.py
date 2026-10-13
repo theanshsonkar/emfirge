@@ -129,7 +129,7 @@ def branch_revision(branch: Branch) -> str:
 def _load_branch(session, branch_id: str) -> BranchLog:
     row = session.query(BranchLog).filter(BranchLog.branch_id == branch_id).first()
     if row is None:
-        raise BranchNotFoundError("Branch not found")
+        raise BranchNotFoundError(f"Branch not found: {branch_id}")
     return row
 
 

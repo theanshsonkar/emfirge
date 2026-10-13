@@ -112,7 +112,7 @@ def _validation_message(resource_type: str, field: str, error: dict[str, Any], a
         item_type = next((arg for arg in get_args(annotation) if hasattr(arg, "model_fields")), annotation)
         allowed = ", ".join(sorted(getattr(item_type, "model_fields", {}).keys()))
         prefix = path.rsplit(".", 1)[0] if loc else path
-        return f"{prefix}: unknown field (allowed fields: {allowed})"
+        return f"{prefix}: unknown field '{unknown}' (allowed: {allowed})"
     if error_type in {"value_error", "assertion_error"}:
         problem = str(error.get("msg", "validation failed"))
         if problem.lower().startswith("value error, "):
@@ -430,7 +430,7 @@ def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> N
     collection = _collection(infra, resource_type)
     index = next((i for i, item in enumerate(collection) if _identity(resource_type, item) == resource_id), None)
     if index is None:
-        raise ValueError(f"Target not found: {resource_type}/{resource_id}")
+        raise ValueError(f"Target not found: {resource_type}")
     if resource_type == "security_group":
         users = sorted({
             item.id for item in infra.ec2.instances if resource_id in item.sg_ids
@@ -450,8 +450,7 @@ def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> N
         })
         if users:
             raise ValueError(
-                f"Security group {resource_id} is still in use by {', '.join(users)}; "
-                "model detaching or replacing it before deletion"
+                "Security group is still in use; model detaching or replacing it before deletion"
             )
     target = collection[index]
     collection.pop(index)
@@ -525,7 +524,7 @@ def _replace_iam_role_policy_statements(
 
     matches = [policy for policy in infra.iam.role_policies if policy.role_arn == change.resource_id]
     if not matches:
-        raise ValueError(f"Target not found: iam_role_policy/{change.resource_id}")
+        raise ValueError("Target not found: iam_role_policy")
     if len(matches) != 1:
         raise ValueError("IAM role policy target is ambiguous; role ARN must identify exactly one collected role")
 
@@ -548,7 +547,7 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
         raise ValueError("routes must be a list replacing the complete normalized route set")
     matches = [table for table in infra.vpc.route_tables if table.id == change.resource_id]
     if not matches:
-        raise ValueError(f"Target not found: route_table/{change.resource_id}")
+        raise ValueError("Target not found: route_table")
     if len(matches) != 1:
         raise ValueError("Route table target is ambiguous; ID must identify exactly one collected route table")
     normalized = [Route.model_validate(route) for route in routes]
@@ -582,8 +581,8 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
         )
         if not same_vpc_attachment:
             raise ValueError(
-                f"Internet gateway target is not attached to route table VPC {matches[0].vpc_id}: "
-                f"{route.target_id}"
+                "Internet gateway target is not attached to the route table VPC; "
+                "verify the route table and gateway belong to the same VPC"
             )
     matches[0].routes = normalized
     _sync_route_table_public_subnets(infra)
@@ -653,7 +652,7 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         data = _resource_data(result, change)
         resource = model_type.model_validate(data)
         if any(_identity(resource_type, item) == _identity(resource_type, resource) for item in _collection(result, resource_type)):
-            raise ValueError(f"Target already exists: {resource_type}/{_identity(resource_type, resource)}")
+            raise ValueError(f"Target already exists: {resource_type}")
         _collection(result, resource_type).append(resource)
         _update_add_summaries(result, resource_type, resource)
     elif change.op == "modify":
@@ -667,7 +666,7 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
             None,
         )
         if index is None:
-            raise ValueError(f"Target not found: {resource_type}/{change.resource_id}")
+            raise ValueError(f"Target not found: {resource_type}")
         target = collection[index]
         updated_data = target.model_dump()
         updated_data.update(change.fields)
