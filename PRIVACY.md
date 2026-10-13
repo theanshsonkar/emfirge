@@ -161,3 +161,15 @@ For privacy questions, security / vulnerability reports, or anything
 else: **ansh@emfirge.cloud**
 
 For everything else, open a GitHub issue or discussion.
+
+
+## In-use evidence (opt-in)
+
+In-use evidence is read only and collected only after you accept a cost estimate,
+for resources the branch deletes. It uses `cloudtrail:LookupEvents` and
+`cloudwatch:GetMetricStatistics`. If the Emfirge role lacks either permission,
+the evidence is marked denied and the verdict is unchanged. Per-resource records
+store status, used/holds-data flags, metric peaks/latest values, the last event
+time, and AWS event name. CloudTrail user names, IP addresses, access keys, and
+raw events are never stored. Evidence follows the same retention period as
+branches.

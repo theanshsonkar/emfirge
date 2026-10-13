@@ -34,26 +34,12 @@ def collect_infrastructure(credentials: AWSCredentials) -> AWSInfrastructure:
     # Exchange the user's Role ARN for temporary credentials
     # These credentials expire after 1 hour automatically
     try:
-        sts = boto3.client('sts', config=BOTO_CONFIG)
-        assumed = sts.assume_role(
-            RoleArn=credentials.role_arn,
-            RoleSessionName='EmfirgeSecurityScan',
-            ExternalId='aws-risk-agent',
-            DurationSeconds=3600
-        )
-        key = assumed['Credentials']['AccessKeyId']
-        secret = assumed['Credentials']['SecretAccessKey']
-        token = assumed['Credentials']['SessionToken']
-    except ClientError as e:
-        code = e.response['Error']['Code']
-        if code == 'AccessDenied':
-            raise ValueError('Could not assume the IAM role. Make sure you deployed the Emfirge CloudFormation stack correctly.')
-        elif code == 'InvalidClientTokenId':
-            raise ValueError('Invalid Role ARN. Please check the ARN you copied from the CloudFormation stack output.')
-        else:
-            raise ValueError(f'Role assumption failed: {e.response["Error"]["Message"]}')
-    except Exception as e:
-        raise ValueError(f'Could not connect to AWS: {str(e)}')
+        assumed_credentials, _assumed_account = assume_role_credentials(credentials.role_arn)
+        key = assumed_credentials['AccessKeyId']
+        secret = assumed_credentials['SecretAccessKey']
+        token = assumed_credentials['SessionToken']
+    except ValueError:
+        raise
 
     # ── VALIDATE REGION ───────────────────────────────────────────
     # Fail fast if region is invalid before firing all 10 threads
@@ -3020,3 +3006,23 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
         tables_without_backup=tables_without_backup,
         tables=tables,
     )
+
+
+ROLE_SESSION_NAME = 'EmfirgeSecurityScan'
+
+def assume_role_credentials(role_arn: str):
+    sts = boto3.client('sts', config=BOTO_CONFIG)
+    try:
+        assumed = sts.assume_role(RoleArn=role_arn, RoleSessionName=ROLE_SESSION_NAME, ExternalId='aws-risk-agent', DurationSeconds=3600)
+        creds = assumed['Credentials']
+        account = str(assumed.get('AssumedRoleUser', {}).get('Arn', '')).split(':')[4] or None
+        return {'AccessKeyId': creds['AccessKeyId'], 'SecretAccessKey': creds['SecretAccessKey'], 'SessionToken': creds['SessionToken']}, account
+    except ClientError as e:
+        code = e.response['Error']['Code']
+        if code == 'AccessDenied':
+            raise ValueError('Could not assume the IAM role. Make sure you deployed the Emfirge CloudFormation stack correctly.')
+        if code == 'InvalidClientTokenId':
+            raise ValueError('Invalid Role ARN. Please check the ARN you copied from the CloudFormation stack output.')
+        raise ValueError('Role assumption failed')
+    except Exception:
+        raise ValueError('Could not connect to AWS')
