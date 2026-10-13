@@ -10,6 +10,7 @@ from app import cost, limits
 from app.diffing import diff_infrastructure
 from app.egraph import build_graph, get_internet_reachable_set
 from app.exposure import compute_exposures
+from app.iam_escalation import matching_paths
 from app.mutations import _MUTATION_CAPABILITIES
 from app.models import AWSInfrastructure
 from app.scanners import run_checkov, run_cloudsplaining, run_trivy
@@ -56,6 +57,7 @@ class CombinedVerdict(BaseModel):
     cost_delta_monthly_usd: float | None = None
     cost_unknown_notes: List[str] = Field(default_factory=list)
     introduces_privilege_escalation: bool = False
+    escalation_paths: list[dict[str, str]] = Field(default_factory=list)
     limits_introduced: List[dict] = Field(default_factory=list)
     limits_resolved: List[dict] = Field(default_factory=list)
     summary: str
@@ -262,6 +264,14 @@ def combined_verdict(
     ]
     cost_delta, cost_delta_monthly_usd, cost_unknown_notes = _cost_details(base_infra, branch_infra)
     introduced_escalating_roles, branch_reachable = _graph_escalation_details(base_infra, branch_infra)
+    escalation_paths = []
+    for role_policy in branch_infra.iam.role_policies:
+        statements = role_policy.access_statements if not isinstance(role_policy, Mapping) else role_policy.get("access_statements", [])
+        escalation_paths.extend(
+            {key: path[key] for key in ("id", "name", "category")}
+            for path in matching_paths(statements)
+        )
+    escalation_paths = sorted({path["id"]: path for path in escalation_paths}.values(), key=lambda path: path["id"])
     introduces_privilege_escalation = bool(introduced_escalating_roles)
     native_added = sorted((_native_finding(item) for item in diff.added_findings), key=_sort_finding)
     native_removed = sorted((_native_finding(item) for item in diff.removed_findings), key=_sort_finding)
@@ -459,6 +469,7 @@ def combined_verdict(
         cost_delta_monthly_usd=cost_delta_monthly_usd,
         cost_unknown_notes=cost_unknown_notes,
         introduces_privilege_escalation=introduces_privilege_escalation,
+        escalation_paths=escalation_paths,
         limits_introduced=limits_introduced,
         limits_resolved=limits_resolved,
         summary=summary,
