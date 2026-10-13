@@ -336,8 +336,15 @@ def combined_verdict(
     introduced_other = [item for item in new_findings if item not in introduced_critical]
     introduced_resource_ids = sorted({_text(item.get("resource")) for item in new_findings})
     newly_exposed = diff.newly_exposed
+    active_critical_exposure = [
+        item for item in newly_exposed
+        if item.get("state") == "active" and item.get("severity") == "Critical"
+    ]
+    warn_exposures = [
+        item for item in newly_exposed
+        if item.get("severity") in {"Critical", "Moderate"}
+    ]
     latent_exposure = [item for item in newly_exposed if item.get("state") == "latent"]
-    active_exposure = [item for item in newly_exposed if item.get("state") == "active"]
     resource_types = {}
     for owner, field, resource_type, identity_field in (("s3", "buckets", "s3_bucket", "name"), ("rds", "rds_instances", "rds_instance", "id")):
         for resource in _value(_value(base_infra, owner, {}), field, []) or []:
@@ -347,8 +354,8 @@ def combined_verdict(
     no_recovery = [item for item in deleted_stores if not _has_recovery_point(item)]
     deletion_relationships = [impact for impact in diff.deletion_impacts if any(rel not in _CONTAINMENT_RELATIONSHIPS for related in impact.get("surviving_related_resources", []) for rel in related.get("relationships", []))]
     reasons: list[dict[str, str]] = []
-    if introduced_critical:
-        reasons.append(_reason("block", "introduced_critical", f"Introduced Critical finding on resource_id={_text(introduced_critical[0].get('resource'))}"))
+    if active_critical_exposure:
+        reasons.append(_reason("block", "introduced_critical_exposure", f"Introduced Critical exposure on resource_id={_text(active_critical_exposure[0].get('resource_id'))}"))
     if introduces_privilege_escalation:
         reasons.append(_reason("block", "privilege_escalation", "Privilege escalation was introduced"))
     if no_recovery:
@@ -357,12 +364,12 @@ def combined_verdict(
         reasons.append(_reason("warn", "introduced_finding", f"Introduced finding on resource_id={introduced_resource_ids[0] if introduced_resource_ids else ''}"))
     if latent_exposure:
         reasons.append(_reason("warn", "latent_exposure", f"Latent exposure on resource_id={_text(latent_exposure[0].get('resource_id'))}"))
-    if active_exposure:
-        reasons.append(_reason("warn", "new_exposure", f"New exposure on resource_id={_text(active_exposure[0].get('resource_id'))}"))
+    if warn_exposures and not latent_exposure:
+        reasons.append(_reason("warn", "new_exposure", f"New exposure on resource_id={_text(warn_exposures[0].get('resource_id'))}"))
     if diff.newly_internet_reachable:
         reasons.append(_reason("warn", "newly_internet_reachable", f"Newly internet reachable resource_id={diff.newly_internet_reachable[0]}"))
-    if diff.no_longer_internet_reachable or diff.no_longer_exposed:
-        reasons.append(_reason("warn", "lost_ingress", f"Ingress lost for resource_id={diff.no_longer_internet_reachable[0] if diff.no_longer_internet_reachable else diff.no_longer_exposed[0].get('resource_id')}"))
+    if diff.no_longer_internet_reachable:
+        reasons.append(_reason("warn", "lost_ingress", f"Ingress lost for resource_id={diff.no_longer_internet_reachable[0]}"))
     if diff.lost_dependencies:
         reasons.append(_reason("warn", "lost_dependency", f"Lost dependency from resource_id={diff.lost_dependencies[0].get('from', '')}"))
     if diff.lost_connectivity:
@@ -371,7 +378,7 @@ def combined_verdict(
         reasons.append(_reason("warn", "deletion_impact", f"Deletion impact on resource_id={deletion_relationships[0].get('removed_resource', {}).get('id', '')}"))
     if introduced_capacity_breaches:
         reasons.append(_reason("warn", "capacity", f"Capacity breach in resource_id={introduced_capacity_breaches[0].get('scope', '')}"))
-    block = bool(introduced_critical or introduces_privilege_escalation or no_recovery)
+    block = bool(introduced_critical or active_critical_exposure or introduces_privilege_escalation or no_recovery)
     verdict = "block" if block else ("warn" if reasons else "pass")
 
     # State degradation loudly in every degraded case -- scanners that failed

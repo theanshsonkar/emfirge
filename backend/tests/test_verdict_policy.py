@@ -42,3 +42,57 @@ def test_data_store_delete_blocks_and_instance_delete_warns():
     assert any(reason["code"] == "data_store_deleted_no_recovery_point" for reason in result.reasons)
     instance = apply_change(base, Change(op="delete", resource_type="ec2_instance", resource_id="i-inc-web"))
     assert combined_verdict(base, instance, run_scanners=False).verdict == "warn"
+
+
+def test_adding_instance_to_existing_web_sg_blocks_with_critical_exposure():
+    base = build_incident_base()
+    branch = apply_change(base, Change(op="add", resource_type="ec2_instance", resource_id="i-inc-new", fields={
+        "type": "t3.micro", "state": "running", "sg_ids": ["sg-inc-web"],
+        "subnet_id": "subnet-inc-pub", "has_public_ip": True, "imdsv2_required": True,
+    }))
+    result = combined_verdict(base, branch, run_scanners=False)
+    assert result.verdict == "block"
+    assert any(reason["code"] == "introduced_critical_exposure" for reason in result.reasons)
+
+
+def test_adding_database_port_to_existing_open_sg_blocks():
+    base = build_incident_base()
+    sg = next(item for item in base.ec2.security_groups if item.id == "sg-inc-web")
+    branch = apply_change(base, _sg_change("sg-inc-web", sg.rules + [{
+        "protocol": "tcp", "from_port": 3306, "to_port": 3306, "ip_ranges": ["0.0.0.0/0"],
+    }]))
+    result = combined_verdict(base, branch, run_scanners=False)
+    assert result.verdict == "block"
+    assert any(reason["code"] == "introduced_critical_exposure" for reason in result.reasons)
+
+
+def test_adding_web_port_does_not_warn_for_new_exposure():
+    base = build_incident_base()
+    sg = next(item for item in base.ec2.security_groups if item.id == "sg-inc-web")
+    branch = apply_change(base, _sg_change("sg-inc-web", sg.rules + [{
+        "protocol": "tcp", "from_port": 443, "to_port": 443, "ip_ranges": ["0.0.0.0/0"],
+    }]))
+    result = combined_verdict(base, branch, run_scanners=False)
+    assert result.verdict != "block"
+    assert not any(reason["code"] == "new_exposure" for reason in result.reasons)
+
+
+def test_restricting_ssh_passes_without_warn_reasons():
+    base = build_incident_base()
+    sg = next(item for item in base.ec2.security_groups if item.id == "sg-inc-web")
+    branch = apply_change(base, _sg_change("sg-inc-web", [{
+        **rule, "ip_ranges": ["203.0.113.10/32"]} if rule["from_port"] == 22 else rule for rule in sg.rules]))
+    result = combined_verdict(base, branch, run_scanners=False)
+    assert result.verdict == "pass"
+    assert not result.reasons
+
+
+def test_latent_exposure_warns_with_latent_reason():
+    base = build_incident_base()
+    sg = next(item for item in base.ec2.security_groups if item.id == "sg-inc-latent")
+    branch = apply_change(base, _sg_change(sg.id, sg.rules + [{
+        "protocol": "tcp", "from_port": 22, "to_port": 22, "ip_ranges": ["0.0.0.0/0"],
+    }]))
+    result = combined_verdict(base, branch, run_scanners=False)
+    assert result.verdict == "warn"
+    assert any(reason["code"] == "latent_exposure" for reason in result.reasons)

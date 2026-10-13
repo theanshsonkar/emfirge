@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from pydantic import BaseModel, ConfigDict
 
 from app.egraph import get_internet_reachable_set, internet_ingress, nacl_allows_inbound, subnet_has_igw_route
+from app.rules import PORT_CLASSES
 
 
 class Exposure(BaseModel):
@@ -23,6 +24,7 @@ class Exposure(BaseModel):
     source: str
     via_sg: str
     state: str
+    severity: str
 
 
 _PRIVATE_NETWORKS = tuple(ip_network(value) for value in (
@@ -84,6 +86,19 @@ def _sg_consumers(sg_id: str, infra: Any, graph: Any) -> list[Any]:
             consumers.append(node)
     return consumers
 
+def _severity(protocol: str, from_port: int, to_port: int, source: str, state: str) -> str:
+    if state == "latent":
+        return "Moderate"
+    world_open = source in {"0.0.0.0/0", "::/0"}
+    if protocol == "-1" and world_open:
+        return "Critical"
+    classes = {PORT_CLASSES[port] for port in range(from_port, to_port + 1) if port in PORT_CLASSES}
+    if world_open and (22 >= from_port and 22 <= to_port or 3389 >= from_port and 3389 <= to_port or classes & {"ADMIN", "DATABASE", "INTERNAL"}):
+        return "Critical"
+    if classes & {"WEB"} and not (classes & {"ADMIN", "DATABASE", "INTERNAL"}):
+        return "Info"
+    return "Moderate"
+
 
 def _rule_exposures(sg_id: str, sg: Any, resource_id: str, resource_type: str,
                     state: str, subnet_id: str | None, graph: Any) -> list[Exposure]:
@@ -104,7 +119,8 @@ def _rule_exposures(sg_id: str, sg: Any, resource_id: str, resource_type: str,
         for source in sources:
             result.append(Exposure(resource_id=resource_id, resource_type=resource_type,
                                    protocol=protocol, from_port=from_port, to_port=to_port,
-                                   source=source, via_sg=sg_id, state=state))
+                                   source=source, via_sg=sg_id, state=state,
+                                   severity=_severity(protocol, from_port, to_port, source, state)))
     return result
 
 
