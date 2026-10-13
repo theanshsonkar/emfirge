@@ -1,6 +1,7 @@
 // HTTP client. Override base URL with EMFIRGE_BASE_URL.
 // X-MCP header tells the backend to skip its AI summary (host LLM does that).
 
+import { redactDeep } from "./tokenize.js";
 const BASE_URL = process.env.EMFIRGE_BASE_URL ?? "https://emfirge.cloud/api";
 
 export interface ClientOptions {
@@ -60,10 +61,11 @@ export async function backendCall<T = unknown>(
 
     return (await res.json()) as T;
   } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
     if (e instanceof Error && e.name === "AbortError") {
-      throw new Error(`${path} timed out after ${timeoutMs / 1000}s`);
+      throw new Error(String(redactDeep(`${path} timed out after ${timeoutMs / 1000}s`)));
     }
-    throw e;
+    throw new Error(String(redactDeep(message)));
   } finally {
     clearTimeout(timer);
   }
@@ -203,10 +205,11 @@ export async function backendCallSSE<T = unknown>(
     }
     return lastComplete;
   } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
     if (e instanceof Error && e.name === "AbortError") {
-      throw new Error(`${path} timed out after ${timeoutMs / 1000}s`);
+      throw new Error(String(redactDeep(`${path} timed out after ${timeoutMs / 1000}s`)));
     }
-    throw e;
+    throw new Error(String(redactDeep(message)));
   } finally {
     clearTimeout(timer);
   }

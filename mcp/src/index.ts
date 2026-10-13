@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 
 import { getBaseUrl } from "./client.js";
-import { privacyMode } from "./tokenize.js";
+import { privacyMode, redactDeep } from "./tokenize.js";
 
 import { setupSchema, setupZodObject, setupHandler } from "./tools/setup.js";
 import { scanSchema, scanZodObject, scanHandler } from "./tools/scan.js";
@@ -394,18 +394,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  const tool = tools.find((t) => t.name === req.params.name);
-  if (!tool) {
-    throw new Error(`Unknown tool: ${req.params.name}`);
-  }
-
   try {
+    const tool = tools.find((t) => t.name === req.params.name);
+    if (!tool) {
+      throw new Error(`Unknown tool: ${req.params.name}`);
+    }
+
     const args = tool.zodObject.parse(req.params.arguments ?? {});
     return await tool.handler(args);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return {
-      content: [{ type: "text" as const, text: `Error: ${message}` }],
+      content: [{ type: "text" as const, text: `Error: ${String(redactDeep(message))}` }],
       isError: true,
     };
   }
