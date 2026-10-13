@@ -1691,11 +1691,10 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                     })
 
     # ── EBS VOLUME NODES ──────────────────────────────────────────
-    # Unattached volumes (state=available) — no edges, isolated for orphan detection
+    # All collected volumes are concrete graph resources; unattached volumes
+    # remain isolated while attached volumes are linked from their consumers.
     for vol in infrastructure.ec2.ebs_volumes:
         state = vol['state'] if isinstance(vol, dict) else vol.state
-        if state != 'available':
-            continue
         vol_id = vol['id'] if isinstance(vol, dict) else vol.id
         size_gb = vol['size_gb'] if isinstance(vol, dict) else vol.size_gb
         volume_type = vol['volume_type'] if isinstance(vol, dict) else vol.volume_type
@@ -1705,6 +1704,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             'type': 'ebs_volume',
             'label': f"EBS: {size_gb}GB",
             'metadata': {
+                'state': state,
                 'size_gb': size_gb,
                 'volume_type': volume_type,
                 'availability_zone': az,
@@ -1726,6 +1726,12 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'is_attached': is_attached,
             }
         })
+
+    for vol in infrastructure.ec2.ebs_volumes:
+        attached_to = vol['attached_to'] if isinstance(vol, dict) else vol.attached_to
+        vol_id = vol['id'] if isinstance(vol, dict) else vol.id
+        if attached_to and any(node['id'] == attached_to for node in nodes):
+            edges.append({'from': vol_id, 'to': attached_to, 'relationship': 'attached_to_instance'})
 
     # ── API GATEWAY NODES ─────────────────────────────────────────
     for api in infrastructure.api_gateway.apis:
@@ -2664,6 +2670,8 @@ def find_orphaned_resources(graph: Graph) -> List[Dict[str, Any]]:
     for node in graph.nodes:
         node_id = node['id']
         node_type = node['type']
+        if node_type == 'ebs_volume' and node.get('metadata', {}).get('state') != 'available':
+            continue
         
         # Get inbound and outbound connections
         inbound = graph.get_inbound(node_id)

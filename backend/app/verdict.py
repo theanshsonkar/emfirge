@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from app import cost, limits
 from app.diffing import diff_infrastructure
-from app.delete_lens import DeletionLens, analyze_deletions, deleted_base_reachable, recently_used_deleted
+from app.delete_lens import DeletionLens, analyze_deletions, deleted_base_reachable, deleted_role_usage_unknown, recently_used_deleted
 from app.egraph import build_graph, get_internet_reachable_set
 from app.exposure import compute_exposures
 from app.iam_escalation import matching_paths
@@ -402,6 +402,8 @@ def combined_verdict(
         reasons.append(_reason("block", "introduced_critical_exposure", "Introduced Critical exposure"))
     if introduces_privilege_escalation:
         reasons.append(_reason("block", "privilege_escalation", "Privilege escalation was introduced"))
+    if deleted_role_usage_unknown(base_infra, branch_infra):
+        reasons.append(_reason("block", "usage_unknown", "Deleted IAM role usage could not be verified"))
     if recently_used_deleted(base_infra, branch_infra):
         reasons.append(_reason("block", "recently_used", "Deleted IAM role was recently used"))
     if no_recovery:
@@ -448,7 +450,7 @@ def combined_verdict(
         reasons.append(_reason("warn", "deletion_impact", "A deletion has downstream impact"))
     if introduced_capacity_breaches:
         reasons.append(_reason("warn", "capacity", f"Capacity breach in resource_id={introduced_capacity_breaches[0].get('scope', '')}"))
-    block = bool(introduced_critical or active_critical_exposure or introduces_privilege_escalation or no_recovery or recently_used_deleted(base_infra, branch_infra))
+    block = bool(introduced_critical or active_critical_exposure or introduces_privilege_escalation or no_recovery or deleted_role_usage_unknown(base_infra, branch_infra) or recently_used_deleted(base_infra, branch_infra))
     verdict = "block" if block else ("warn" if reasons else "pass")
 
     # State degradation loudly in every degraded case -- scanners that failed

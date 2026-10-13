@@ -88,8 +88,8 @@ def analyze_deletions(base: Any, branch: Any) -> DeletionLens:
                 recovery.append(RecoveryPoint(resource_id=rid, kind="empty_bucket", source_id=rid))
         elif typ == "rds_instance":
             final_id = options.get("final_db_snapshot_identifier")
-            snap = next((s for s in snapshots_rds if str(_v(s, "id")) == str(final_id)), None) if final_id else None
-            snap = snap or next((s for s in snapshots_rds if str(_v(s, "db_instance_id")) == rid), None)
+            snap = next((s for s in snapshots_rds if str(_v(s, "id")) == str(final_id) and _v(s, "status") == "available"), None) if final_id else None
+            snap = snap or next((s for s in snapshots_rds if str(_v(s, "db_instance_id")) == rid and _v(s, "status") == "available"), None)
             retained = options.get("delete_automated_backups") is False and int(before.get("backup_retention_days") or 0) > 0
             recovered = bool(snap or retained)
             if snap:
@@ -97,7 +97,7 @@ def analyze_deletions(base: Any, branch: Any) -> DeletionLens:
             elif retained:
                 recovery.append(RecoveryPoint(resource_id=rid, kind="automated_backup", source_id=rid))
         elif typ == "ebs_volume":
-            snap = next((s for s in snapshots_ebs if str(_v(s, "volume_id")) == rid), None)
+            snap = next((s for s in snapshots_ebs if str(_v(s, "volume_id")) == rid and _v(s, "state") == "completed"), None)
             recovered = bool(snap)
             if snap:
                 recovery.append(RecoveryPoint(resource_id=rid, kind="ebs_snapshot", source_id=str(_v(snap, "id"))))
@@ -110,7 +110,7 @@ def analyze_deletions(base: Any, branch: Any) -> DeletionLens:
     for item in ledger:
         if item.get("implicit") and str(item["resource_id"]) in final_ids:
             continue
-        if item.get("implicit"):
+        if item.get("implicit") and str(item["resource_id"]) in base_nodes and str(item["resource_id"]) not in {entry.resource_id for entry in lost}:
             impacts.append(DeletionImpact(resource_id=str(item["resource_id"]), resource_type=str(item["resource_type"]), relation=f"deleted_with:{item.get('via')}", depth=1, via=str(item.get("via") or "")))
     while queue:
         source, depth, via = queue.popleft()
@@ -140,11 +140,42 @@ def deleted_ids(lens: DeletionLens, branch: Any) -> set[str]:
     return {str(x.get("resource_id")) for x in deletion_ledger(branch)}
 
 
+def _deleted_role_usage_codes(base: Any, branch: Any) -> set[str]:
+    collection = _v(base, "collection", {}) or {}
+    status_ok = collection.get("iam_role_last_used") == "ok"
+    roles = {
+        str(_v(role, "role_arn", "")): role
+        for role in (_v(_v(base, "iam", {}), "role_policies", []) or [])
+    }
+    codes: set[str] = set()
+    for item in deletion_ledger(branch):
+        if item.get("resource_type") != "iam_role":
+            continue
+        role = roles.get(str(item.get("resource_id")))
+        if not status_ok or role is None:
+            codes.add("usage_unknown")
+            continue
+        value = _v(role, "last_used_at", None)
+        if isinstance(value, str) and value and _parse_time(value) is None:
+            codes.add("usage_unknown")
+        elif value is not None and _parse_time(value) is None:
+            codes.add("usage_unknown")
+        elif value is not None:
+            stamp = _parse_time(_v(base, "collected_at", None)) or datetime.now(timezone.utc)
+            cutoff = stamp - timedelta(days=RECENT_USE_DAYS)
+            if _parse_time(value) >= cutoff:
+                codes.add("recently_used")
+    return codes
+
+
 def recently_used_deleted(base: Any, branch: Any) -> bool:
-    stamp = _parse_time(_v(base, "collected_at", None)) or datetime.now(timezone.utc)
-    cutoff = stamp - timedelta(days=RECENT_USE_DAYS)
-    deleted = {str(x.get("resource_id")) for x in deletion_ledger(branch) if x.get("resource_type") == "iam_role"}
-    return any(str(_v(role, "role_arn", "")) in deleted and (_parse_time(_v(role, "last_used_at", None)) or datetime.min.replace(tzinfo=timezone.utc)) >= cutoff for role in _v(_v(base, "iam", {}), "role_policies", []) or [])
+    """Return whether a deleted role was used within the recent-use window."""
+    return "recently_used" in _deleted_role_usage_codes(base, branch)
+
+
+def deleted_role_usage_unknown(base: Any, branch: Any) -> bool:
+    """Return whether deleted-role last-used evidence is unavailable."""
+    return "usage_unknown" in _deleted_role_usage_codes(base, branch)
 
 
 def deleted_base_reachable(base: Any, branch: Any) -> bool:
