@@ -1,0 +1,865 @@
+{
+  "source": "https://github.com/DataDog/pathfinding.cloud",
+  "commit": "ecc3d092e7e409497474c8d39eb92f61810d815f",
+  "license": "Apache-2.0",
+  "schema_version": 1,
+  "paths": [
+    {
+      "id": "apprunner-001",
+      "name": "iam:PassRole + apprunner:CreateService",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "apprunner:CreateService"
+      ]
+    },
+    {
+      "id": "apprunner-002",
+      "name": "apprunner:UpdateService",
+      "category": "existing-passrole",
+      "required": [
+        "apprunner:UpdateService"
+      ]
+    },
+    {
+      "id": "batch-001",
+      "name": "iam:PassRole + batch:RegisterJobDefinition + batch:SubmitJob",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "batch:RegisterJobDefinition",
+        "batch:SubmitJob"
+      ]
+    },
+    {
+      "id": "batch-002",
+      "name": "batch:SubmitJob",
+      "category": "existing-passrole",
+      "required": [
+        "batch:SubmitJob"
+      ]
+    },
+    {
+      "id": "batch-003",
+      "name": "iam:PassRole + batch:CreateComputeEnvironment + batch:CreateJobQueue + batch:RegisterJobDefinition + batch:SubmitJob",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "batch:CreateComputeEnvironment",
+        "batch:CreateJobQueue",
+        "batch:RegisterJobDefinition",
+        "batch:SubmitJob"
+      ]
+    },
+    {
+      "id": "bedrock-001",
+      "name": "iam:PassRole + bedrock-agentcore:CreateCodeInterpreter + bedrock-agentcore:StartCodeInterpreterSession + bedrock-agentcore:InvokeCodeInterpreter",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "bedrock-agentcore:CreateCodeInterpreter",
+        "bedrock-agentcore:StartCodeInterpreterSession",
+        "bedrock-agentcore:InvokeCodeInterpreter"
+      ]
+    },
+    {
+      "id": "bedrock-002",
+      "name": "bedrock-agentcore:StartCodeInterpreterSession + bedrock-agentcore:InvokeCodeInterpreter",
+      "category": "existing-passrole",
+      "required": [
+        "bedrock-agentcore:StartCodeInterpreterSession",
+        "bedrock-agentcore:InvokeCodeInterpreter"
+      ]
+    },
+    {
+      "id": "bedrock-003",
+      "name": "iam:PassRole + bedrock-agentcore:CreateAgentRuntime + bedrock-agentcore:CreateAgentRuntimeEndpoint + bedrock-agentcore:CreateWorkloadIdentity + bedrock-agentcore:InvokeAgentRuntimeCommand",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "bedrock-agentcore:CreateAgentRuntime",
+        "bedrock-agentcore:CreateAgentRuntimeEndpoint",
+        "bedrock-agentcore:CreateWorkloadIdentity",
+        "bedrock-agentcore:InvokeAgentRuntimeCommand"
+      ]
+    },
+    {
+      "id": "bedrock-004",
+      "name": "bedrock-agentcore:InvokeAgentRuntimeCommand",
+      "category": "existing-passrole",
+      "required": [
+        "bedrock-agentcore:InvokeAgentRuntimeCommand"
+      ]
+    },
+    {
+      "id": "bedrock-005",
+      "name": "iam:PassRole + bedrock-agentcore:CreateHarness + bedrock-agentcore:CreateAgentRuntime + bedrock-agentcore:CreateAgentRuntimeEndpoint + bedrock-agentcore:CreateWorkloadIdentity + bedrock-agentcore:GetAgentRuntime + bedrock-agentcore:GetHarness + bedrock-agentcore:InvokeAgentRuntimeCommand",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "bedrock-agentcore:CreateHarness",
+        "bedrock-agentcore:CreateAgentRuntime",
+        "bedrock-agentcore:CreateAgentRuntimeEndpoint",
+        "bedrock-agentcore:CreateWorkloadIdentity",
+        "bedrock-agentcore:GetAgentRuntime",
+        "bedrock-agentcore:GetHarness",
+        "bedrock-agentcore:InvokeAgentRuntimeCommand"
+      ]
+    },
+    {
+      "id": "bedrock-006",
+      "name": "iam:PassRole + bedrock-agentcore:CreateBrowser + bedrock-agentcore:StartBrowserSession + bedrock-agentcore:ConnectBrowserAutomationStream",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "bedrock-agentcore:CreateBrowser",
+        "bedrock-agentcore:StartBrowserSession",
+        "bedrock-agentcore:ConnectBrowserAutomationStream"
+      ]
+    },
+    {
+      "id": "bedrock-007",
+      "name": "bedrock-agentcore:StartBrowserSession + bedrock-agentcore:ConnectBrowserAutomationStream",
+      "category": "existing-passrole",
+      "required": [
+        "bedrock-agentcore:StartBrowserSession",
+        "bedrock-agentcore:ConnectBrowserAutomationStream"
+      ]
+    },
+    {
+      "id": "braket-001",
+      "name": "iam:PassRole + braket:CreateJob",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "braket:CreateJob"
+      ]
+    },
+    {
+      "id": "cloudformation-001",
+      "name": "iam:PassRole + cloudformation:CreateStack",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "cloudformation:CreateStack"
+      ]
+    },
+    {
+      "id": "cloudformation-002",
+      "name": "cloudformation:UpdateStack",
+      "category": "existing-passrole",
+      "required": [
+        "cloudformation:UpdateStack"
+      ]
+    },
+    {
+      "id": "cloudformation-003",
+      "name": "iam:PassRole + cloudformation:CreateStackSet + cloudformation:CreateStackInstances",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "cloudformation:CreateStackSet",
+        "cloudformation:CreateStackInstances"
+      ]
+    },
+    {
+      "id": "cloudformation-004",
+      "name": "iam:PassRole + cloudformation:UpdateStackSet",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "cloudformation:UpdateStackSet"
+      ]
+    },
+    {
+      "id": "cloudformation-005",
+      "name": "cloudformation:CreateChangeSet + cloudformation:ExecuteChangeSet",
+      "category": "new-passrole",
+      "required": [
+        "cloudformation:CreateChangeSet",
+        "cloudformation:ExecuteChangeSet"
+      ]
+    },
+    {
+      "id": "codebuild-001",
+      "name": "iam:PassRole + codebuild:CreateProject + codebuild:StartBuild",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "codebuild:CreateProject",
+        "codebuild:StartBuild"
+      ]
+    },
+    {
+      "id": "codebuild-002",
+      "name": "codebuild:StartBuild",
+      "category": "existing-passrole",
+      "required": [
+        "codebuild:StartBuild"
+      ]
+    },
+    {
+      "id": "codebuild-003",
+      "name": "codebuild:StartBuildBatch",
+      "category": "existing-passrole",
+      "required": [
+        "codebuild:StartBuildBatch"
+      ]
+    },
+    {
+      "id": "codebuild-004",
+      "name": "iam:PassRole + codebuild:CreateProject + codebuild:StartBuildBatch",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "codebuild:CreateProject",
+        "codebuild:StartBuildBatch"
+      ]
+    },
+    {
+      "id": "codedeploy-001",
+      "name": "codedeploy:CreateDeployment",
+      "category": "existing-passrole",
+      "required": [
+        "codedeploy:CreateDeployment",
+        "codedeploy:RegisterApplicationRevision",
+        "codedeploy:GetDeploymentConfig"
+      ]
+    },
+    {
+      "id": "cognitoidentity-001",
+      "name": "iam:PassRole + cognito-identity:SetIdentityPoolRoles",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "cognito-identity:SetIdentityPoolRoles"
+      ]
+    },
+    {
+      "id": "datapipeline-001",
+      "name": "iam:PassRole + datapipeline:CreatePipeline + datapipeline:PutPipelineDefinition + datapipeline:ActivatePipeline",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "datapipeline:CreatePipeline",
+        "datapipeline:PutPipelineDefinition",
+        "datapipeline:ActivatePipeline"
+      ]
+    },
+    {
+      "id": "ec2-001",
+      "name": "iam:PassRole + ec2:RunInstances",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "ec2:RunInstances"
+      ]
+    },
+    {
+      "id": "ec2-002",
+      "name": "ec2:ModifyInstanceAttribute + ec2:StopInstances + ec2:StartInstances",
+      "category": "existing-passrole",
+      "required": [
+        "ec2:ModifyInstanceAttribute",
+        "ec2:StopInstances",
+        "ec2:StartInstances"
+      ]
+    },
+    {
+      "id": "ec2-003",
+      "name": "iam:PassRole + ec2:RequestSpotInstances",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "ec2:RequestSpotInstances"
+      ]
+    },
+    {
+      "id": "ec2-004",
+      "name": "ec2:CreateLaunchTemplateVersion + ec2:ModifyLaunchTemplate",
+      "category": "existing-passrole",
+      "required": [
+        "ec2:CreateLaunchTemplateVersion",
+        "ec2:ModifyLaunchTemplate"
+      ]
+    },
+    {
+      "id": "ec2-005",
+      "name": "ec2:CreateLaunchTemplateVersion + ec2:ModifyLaunchTemplate",
+      "category": "existing-passrole",
+      "required": [
+        "ec2:CreateLaunchTemplateVersion",
+        "ec2:ModifyLaunchTemplate"
+      ]
+    },
+    {
+      "id": "ec2instanceconnect-003",
+      "name": "ec2-instance-connect:SendSSHPublicKey",
+      "category": "existing-passrole",
+      "required": [
+        "ec2-instance-connect:SendSSHPublicKey",
+        "ec2:DescribeInstances"
+      ]
+    },
+    {
+      "id": "ecs-001",
+      "name": "iam:PassRole + ecs:CreateCluster + ecs:RegisterTaskDefinition + ecs:CreateService",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "ecs:CreateCluster",
+        "ecs:RegisterTaskDefinition",
+        "ecs:CreateService"
+      ]
+    },
+    {
+      "id": "ecs-002",
+      "name": "iam:PassRole + ecs:CreateCluster + ecs:RegisterTaskDefinition + ecs:RunTask",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "ecs:CreateCluster",
+        "ecs:RegisterTaskDefinition",
+        "ecs:RunTask"
+      ]
+    },
+    {
+      "id": "ecs-003",
+      "name": "iam:PassRole + ecs:RegisterTaskDefinition + ecs:CreateService",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "ecs:RegisterTaskDefinition",
+        "ecs:CreateService"
+      ]
+    },
+    {
+      "id": "ecs-004",
+      "name": "iam:PassRole + ecs:RegisterTaskDefinition + ecs:RunTask",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "ecs:RegisterTaskDefinition",
+        "ecs:RunTask"
+      ]
+    },
+    {
+      "id": "ecs-005",
+      "name": "iam:PassRole + ecs:RegisterTaskDefinition + ecs:StartTask",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "ecs:RegisterTaskDefinition",
+        "ecs:StartTask"
+      ]
+    },
+    {
+      "id": "ecs-006",
+      "name": "ecs:ExecuteCommand + ecs:DescribeTasks",
+      "category": "existing-passrole",
+      "required": [
+        "ecs:ExecuteCommand",
+        "ecs:DescribeTasks"
+      ]
+    },
+    {
+      "id": "ecs-007",
+      "name": "iam:PassRole + ecs:StartTask + ecs:RegisterContainerInstance",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "ecs:RegisterContainerInstance",
+        "ecs:StartTask"
+      ]
+    },
+    {
+      "id": "ecs-008",
+      "name": "iam:PassRole + ecs:RunTask",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "ecs:RunTask"
+      ]
+    },
+    {
+      "id": "ecs-009",
+      "name": "iam:PassRole + ecs:StartTask",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "ecs:StartTask"
+      ]
+    },
+    {
+      "id": "emr-001",
+      "name": "iam:PassRole + elasticmapreduce:RunJobFlow",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "elasticmapreduce:RunJobFlow"
+      ]
+    },
+    {
+      "id": "emrserverless-001",
+      "name": "iam:PassRole + emr-serverless:CreateApplication + emr-serverless:StartJobRun",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "emr-serverless:CreateApplication",
+        "emr-serverless:StartJobRun"
+      ]
+    },
+    {
+      "id": "gamelift-001",
+      "name": "iam:PassRole + gamelift:CreateBuild + gamelift:CreateFleet",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "gamelift:CreateBuild",
+        "gamelift:CreateFleet",
+        "gamelift:RequestUploadCredentials"
+      ]
+    },
+    {
+      "id": "glue-001",
+      "name": "iam:PassRole + glue:CreateDevEndpoint",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "glue:CreateDevEndpoint"
+      ]
+    },
+    {
+      "id": "glue-002",
+      "name": "glue:UpdateDevEndpoint",
+      "category": "existing-passrole",
+      "required": [
+        "glue:UpdateDevEndpoint"
+      ]
+    },
+    {
+      "id": "glue-003",
+      "name": "iam:PassRole + glue:CreateJob + glue:StartJobRun",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "glue:CreateJob",
+        "glue:StartJobRun"
+      ]
+    },
+    {
+      "id": "glue-004",
+      "name": "iam:PassRole + glue:CreateJob + glue:CreateTrigger",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "glue:CreateJob",
+        "glue:CreateTrigger"
+      ]
+    },
+    {
+      "id": "glue-005",
+      "name": "iam:PassRole + glue:UpdateJob + glue:StartJobRun",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "glue:UpdateJob",
+        "glue:StartJobRun"
+      ]
+    },
+    {
+      "id": "glue-006",
+      "name": "iam:PassRole + glue:UpdateJob + glue:CreateTrigger",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "glue:UpdateJob",
+        "glue:CreateTrigger"
+      ]
+    },
+    {
+      "id": "glue-007",
+      "name": "iam:PassRole + glue:CreateSession + glue:RunStatement",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "glue:CreateSession",
+        "glue:RunStatement"
+      ]
+    },
+    {
+      "id": "iam-001",
+      "name": "iam:CreatePolicyVersion",
+      "category": "self-escalation",
+      "required": [
+        "iam:CreatePolicyVersion"
+      ]
+    },
+    {
+      "id": "iam-002",
+      "name": "iam:CreateAccessKey",
+      "category": "principal-access",
+      "required": [
+        "iam:CreateAccessKey"
+      ]
+    },
+    {
+      "id": "iam-003",
+      "name": "iam:CreateAccessKey + iam:DeleteAccessKey",
+      "category": "principal-access",
+      "required": [
+        "iam:CreateAccessKey",
+        "iam:DeleteAccessKey"
+      ]
+    },
+    {
+      "id": "iam-004",
+      "name": "iam:CreateLoginProfile",
+      "category": "principal-access",
+      "required": [
+        "iam:CreateLoginProfile"
+      ]
+    },
+    {
+      "id": "iam-005",
+      "name": "iam:PutRolePolicy",
+      "category": "self-escalation",
+      "required": [
+        "iam:PutRolePolicy"
+      ]
+    },
+    {
+      "id": "iam-006",
+      "name": "iam:UpdateLoginProfile",
+      "category": "principal-access",
+      "required": [
+        "iam:UpdateLoginProfile"
+      ]
+    },
+    {
+      "id": "iam-007",
+      "name": "iam:PutUserPolicy",
+      "category": "self-escalation",
+      "required": [
+        "iam:PutUserPolicy"
+      ]
+    },
+    {
+      "id": "iam-008",
+      "name": "iam:AttachUserPolicy",
+      "category": "self-escalation",
+      "required": [
+        "iam:AttachUserPolicy"
+      ]
+    },
+    {
+      "id": "iam-009",
+      "name": "iam:AttachRolePolicy",
+      "category": "self-escalation",
+      "required": [
+        "iam:AttachRolePolicy"
+      ]
+    },
+    {
+      "id": "iam-010",
+      "name": "iam:AttachGroupPolicy",
+      "category": "self-escalation",
+      "required": [
+        "iam:AttachGroupPolicy"
+      ]
+    },
+    {
+      "id": "iam-011",
+      "name": "iam:PutGroupPolicy",
+      "category": "self-escalation",
+      "required": [
+        "iam:PutGroupPolicy"
+      ]
+    },
+    {
+      "id": "iam-012",
+      "name": "iam:UpdateAssumeRolePolicy",
+      "category": "principal-access",
+      "required": [
+        "iam:UpdateAssumeRolePolicy"
+      ]
+    },
+    {
+      "id": "iam-013",
+      "name": "iam:AddUserToGroup",
+      "category": "self-escalation",
+      "required": [
+        "iam:AddUserToGroup"
+      ]
+    },
+    {
+      "id": "iam-014",
+      "name": "iam:AttachRolePolicy + sts:AssumeRole",
+      "category": "principal-access",
+      "required": [
+        "iam:AttachRolePolicy",
+        "sts:AssumeRole"
+      ]
+    },
+    {
+      "id": "iam-015",
+      "name": "iam:AttachUserPolicy + iam:CreateAccessKey",
+      "category": "principal-access",
+      "required": [
+        "iam:AttachUserPolicy",
+        "iam:CreateAccessKey"
+      ]
+    },
+    {
+      "id": "iam-016",
+      "name": "iam:CreatePolicyVersion + sts:AssumeRole",
+      "category": "principal-access",
+      "required": [
+        "iam:CreatePolicyVersion",
+        "sts:AssumeRole"
+      ]
+    },
+    {
+      "id": "iam-017",
+      "name": "iam:PutRolePolicy + sts:AssumeRole",
+      "category": "principal-access",
+      "required": [
+        "iam:PutRolePolicy",
+        "sts:AssumeRole"
+      ]
+    },
+    {
+      "id": "iam-018",
+      "name": "iam:PutUserPolicy + iam:CreateAccessKey",
+      "category": "principal-access",
+      "required": [
+        "iam:PutUserPolicy",
+        "iam:CreateAccessKey"
+      ]
+    },
+    {
+      "id": "iam-019",
+      "name": "iam:AttachRolePolicy + iam:UpdateAssumeRolePolicy",
+      "category": "principal-access",
+      "required": [
+        "iam:AttachRolePolicy",
+        "iam:UpdateAssumeRolePolicy"
+      ]
+    },
+    {
+      "id": "iam-020",
+      "name": "iam:CreatePolicyVersion + iam:UpdateAssumeRolePolicy",
+      "category": "principal-access",
+      "required": [
+        "iam:CreatePolicyVersion",
+        "iam:UpdateAssumeRolePolicy"
+      ]
+    },
+    {
+      "id": "iam-021",
+      "name": "iam:PutRolePolicy + iam:UpdateAssumeRolePolicy",
+      "category": "principal-access",
+      "required": [
+        "iam:PutRolePolicy",
+        "iam:UpdateAssumeRolePolicy"
+      ]
+    },
+    {
+      "id": "imagebuilder-001",
+      "name": "iam:PassRole + imagebuilder:CreateComponent + imagebuilder:CreateImageRecipe + imagebuilder:CreateInfrastructureConfiguration + imagebuilder:CreateImage",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "imagebuilder:CreateComponent",
+        "imagebuilder:CreateImageRecipe",
+        "imagebuilder:CreateInfrastructureConfiguration",
+        "imagebuilder:CreateImage"
+      ]
+    },
+    {
+      "id": "kinesisanalytics-001",
+      "name": "iam:PassRole + kinesisanalytics:CreateApplication + kinesisanalytics:StartApplication",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "kinesisanalytics:CreateApplication",
+        "kinesisanalytics:StartApplication"
+      ]
+    },
+    {
+      "id": "lambda-001",
+      "name": "iam:PassRole + lambda:CreateFunction + lambda:InvokeFunction",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "lambda:CreateFunction",
+        "lambda:InvokeFunction"
+      ]
+    },
+    {
+      "id": "lambda-002",
+      "name": "iam:PassRole + lambda:CreateFunction + lambda:CreateEventSourceMapping",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "lambda:CreateFunction",
+        "lambda:CreateEventSourceMapping"
+      ]
+    },
+    {
+      "id": "lambda-003",
+      "name": "lambda:UpdateFunctionCode",
+      "category": "existing-passrole",
+      "required": [
+        "lambda:UpdateFunctionCode"
+      ]
+    },
+    {
+      "id": "lambda-004",
+      "name": "lambda:UpdateFunctionCode + lambda:InvokeFunction",
+      "category": "existing-passrole",
+      "required": [
+        "lambda:UpdateFunctionCode",
+        "lambda:InvokeFunction"
+      ]
+    },
+    {
+      "id": "lambda-005",
+      "name": "lambda:UpdateFunctionCode + lambda:AddPermission",
+      "category": "existing-passrole",
+      "required": [
+        "lambda:UpdateFunctionCode",
+        "lambda:AddPermission"
+      ]
+    },
+    {
+      "id": "lambda-006",
+      "name": "iam:PassRole + lambda:CreateFunction + lambda:AddPermission",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "lambda:CreateFunction",
+        "lambda:AddPermission"
+      ]
+    },
+    {
+      "id": "omics-001",
+      "name": "iam:PassRole + omics:CreateWorkflow + omics:StartRun",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "omics:CreateWorkflow",
+        "omics:StartRun",
+        "s3:GetObject"
+      ]
+    },
+    {
+      "id": "sagemaker-001",
+      "name": "iam:PassRole + sagemaker:CreateNotebookInstance",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "sagemaker:CreateNotebookInstance"
+      ]
+    },
+    {
+      "id": "sagemaker-002",
+      "name": "iam:PassRole + sagemaker:CreateTrainingJob",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "sagemaker:CreateTrainingJob"
+      ]
+    },
+    {
+      "id": "sagemaker-003",
+      "name": "iam:PassRole + sagemaker:CreateProcessingJob",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "sagemaker:CreateProcessingJob"
+      ]
+    },
+    {
+      "id": "sagemaker-004",
+      "name": "sagemaker:CreatePresignedNotebookInstanceUrl",
+      "category": "existing-passrole",
+      "required": [
+        "sagemaker:CreatePresignedNotebookInstanceUrl"
+      ]
+    },
+    {
+      "id": "sagemaker-005",
+      "name": "sagemaker:CreateNotebookInstanceLifecycleConfig + sagemaker:StopNotebookInstance + sagemaker:UpdateNotebookInstance + sagemaker:StartNotebookInstance",
+      "category": "existing-passrole",
+      "required": [
+        "sagemaker:CreateNotebookInstanceLifecycleConfig",
+        "sagemaker:StopNotebookInstance",
+        "sagemaker:UpdateNotebookInstance",
+        "sagemaker:StartNotebookInstance"
+      ]
+    },
+    {
+      "id": "scheduler-001",
+      "name": "iam:PassRole + scheduler:CreateSchedule",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "scheduler:CreateSchedule"
+      ]
+    },
+    {
+      "id": "ssm-001",
+      "name": "ssm:StartSession",
+      "category": "existing-passrole",
+      "required": [
+        "ssm:StartSession"
+      ]
+    },
+    {
+      "id": "ssm-002",
+      "name": "ssm:SendCommand",
+      "category": "existing-passrole",
+      "required": [
+        "ssm:SendCommand"
+      ]
+    },
+    {
+      "id": "ssm-003",
+      "name": "iam:PassRole + ssm:CreateDocument + ssm:StartAutomationExecution",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "ssm:CreateDocument",
+        "ssm:StartAutomationExecution"
+      ]
+    },
+    {
+      "id": "stepfunctions-001",
+      "name": "iam:PassRole + states:CreateStateMachine + states:StartExecution",
+      "category": "new-passrole",
+      "required": [
+        "iam:PassRole",
+        "states:CreateStateMachine",
+        "states:StartExecution"
+      ]
+    },
+    {
+      "id": "stepfunctions-002",
+      "name": "states:UpdateStateMachine + states:StartExecution",
+      "category": "existing-passrole",
+      "required": [
+        "states:UpdateStateMachine",
+        "states:StartExecution"
+      ]
+    },
+    {
+      "id": "sts-001",
+      "name": "sts:AssumeRole",
+      "category": "principal-access",
+      "required": [
+        "sts:AssumeRole"
+      ]
+    }
+  ]
+}
