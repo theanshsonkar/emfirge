@@ -5,9 +5,10 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from typing import Any, Dict, Iterable, Type
+from typing import Any, Dict, Iterable, Literal, Type, get_args
+from ipaddress import ip_network
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
 
 from app.models import (
     AccessStatement,
@@ -20,6 +21,136 @@ from app.models import (
     S3Bucket,
     SecurityGroup,
 )
+
+
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class SecurityGroupRuleChange(_StrictModel):
+    from_port: int | None = None
+    to_port: int | None = None
+    protocol: str
+    ip_ranges: list[str] = Field(default_factory=list)
+    source_sg_ids: list[str] = Field(default_factory=list)
+    dest_sg_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("protocol")
+    @classmethod
+    def valid_protocol(cls, value: str) -> str:
+        if value not in {"-1", "tcp", "udp", "icmp", "icmpv6"}:
+            try:
+                if not 0 <= int(value) <= 255:
+                    raise ValueError
+            except (TypeError, ValueError) as exc:
+                raise ValueError("must be an AWS protocol name or numeric protocol") from exc
+        return value
+
+    @field_validator("from_port", "to_port")
+    @classmethod
+    def valid_ports(cls, value: int | None) -> int | None:
+        if value is not None and not -1 <= value <= 65535:
+            raise ValueError("must be between -1 and 65535")
+        return value
+
+    @field_validator("ip_ranges", mode="after")
+    @classmethod
+    def valid_cidrs(cls, values: list[str]) -> list[str]:
+        for value in values:
+            try:
+                ip_network(value, strict=False)
+            except ValueError as exc:
+                raise ValueError("must contain valid CIDR strings") from exc
+        return values
+
+
+class AccessStatementChange(_StrictModel):
+    effect: Literal["allow", "deny"]
+    actions: list[str] = Field(default_factory=list)
+    resources: list[str] = Field(default_factory=list)
+    is_not_action: bool = False
+    is_not_resource: bool = False
+    has_condition: bool = False
+
+
+class RouteChange(_StrictModel):
+    destination_cidr: str
+    target_type: str
+    target_id: str
+
+    @field_validator("destination_cidr")
+    @classmethod
+    def valid_destination_cidr(cls, value: str) -> str:
+        try:
+            ip_network(value, strict=False)
+        except ValueError as exc:
+            raise ValueError("must be a valid CIDR string") from exc
+        return value
+
+
+_MUTATION_NESTED_TYPES = {
+    ("security_group", "rules"): list[SecurityGroupRuleChange],
+    ("security_group", "egress_rules"): list[SecurityGroupRuleChange],
+    ("iam_role_policy", "access_statements"): list[AccessStatementChange],
+    ("route_table", "routes"): list[RouteChange],
+}
+
+
+def _loc_text(loc: tuple[Any, ...]) -> str:
+    result = ""
+    for part in loc:
+        result += f"[{part}]" if isinstance(part, int) else ("." if result else "") + str(part)
+    return result
+
+
+def _validation_message(resource_type: str, field: str, error: dict[str, Any], annotation: Any) -> str:
+    loc = tuple(error.get("loc", ()))
+    path = f"{resource_type}.{field}{_loc_text(loc[1:] if loc and loc[0] == field else loc)}"
+    error_type = error.get("type", "")
+    if error_type == "extra_forbidden":
+        unknown = str(loc[-1]) if loc else field
+        item_type = next((arg for arg in get_args(annotation) if hasattr(arg, "model_fields")), annotation)
+        allowed = ", ".join(sorted(getattr(item_type, "model_fields", {}).keys()))
+        prefix = path.rsplit(".", 1)[0] if loc else path
+        return f"{prefix}: unknown field '{unknown}' (allowed: {allowed})"
+    if error_type in {"value_error", "assertion_error"}:
+        problem = str(error.get("msg", "validation failed"))
+        if problem.lower().startswith("value error, "):
+            problem = problem[13:]
+        return f"{path}: {problem}"
+    expected = {
+        "int_type": "an integer", "str_type": "a string", "bool_type": "a boolean",
+        "list_type": "a list", "dict_type": "an object", "none_required": "null",
+    }.get(error_type, "the expected type")
+    return f"{path}: expected {expected}"
+
+
+def _strict_validate_field(resource_type: str, field: str, value: Any, annotation: Any) -> None:
+    try:
+        TypeAdapter(annotation).validate_json(json.dumps(value), strict=True)
+    except (ValidationError, TypeError, ValueError) as exc:
+        if isinstance(exc, ValidationError) and exc.errors():
+            raise ValueError(_validation_message(resource_type, field, exc.errors()[0], annotation)) from exc
+        raise ValueError(f"{resource_type}.{field}: expected the field's declared JSON type") from exc
+
+
+def _validate_change_fields(change: Change) -> None:
+    if change.op not in {"add", "modify"}:
+        return
+    if change.resource_type in {"iam_role_policy", "route_table"}:
+        annotations = {field: type_ for (resource, field), type_ in _MUTATION_NESTED_TYPES.items() if resource == change.resource_type}
+    else:
+        model_type = _MUTATION_CAPABILITIES[change.resource_type]["model"]
+        annotations = {field: info.annotation for field, info in model_type.model_fields.items()}
+        annotations.update({field: type_ for (resource, field), type_ in _MUTATION_NESTED_TYPES.items() if resource == change.resource_type})
+    for field, value in change.fields.items():
+        if field in annotations:
+            # The special complete-replacement handlers provide the established
+            # field-level message for a non-list replacement; nested contents
+            # are still validated strictly here whenever the outer value is a list.
+            if (change.resource_type, field) in _MUTATION_NESTED_TYPES and not isinstance(value, list):
+                continue
+            _strict_validate_field(change.resource_type, field, value, annotations[field])
 
 
 _CRUD_OPERATIONS = frozenset({"add", "modify", "delete"})
@@ -133,6 +264,7 @@ def _validate_change(change: Change) -> None:
         raise ValueError(f"{change.resource_type} supports {', '.join(sorted(capability['operations']))} only")
     if not isinstance(change.fields, dict):
         raise ValueError("Change fields must be a dictionary")
+    _validate_change_fields(change)
     for constraint in capability["constraints"]:
         if constraint["kind"] == "derived_field" and change.op in constraint["operations"]:
             if set(change.fields).intersection(constraint["fields"]):
