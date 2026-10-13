@@ -2,6 +2,14 @@
 // X-MCP header tells the backend to skip its AI summary (host LLM does that).
 
 import { redactDeep } from "./tokenize.js";
+
+export class BackendHttpError extends Error {
+  constructor(public readonly status: number, public readonly body: unknown, path: string) {
+    super(`Backend ${status} on ${path}`);
+    this.name = "BackendHttpError";
+  }
+}
+
 const BASE_URL = process.env.EMFIRGE_BASE_URL ?? "https://emfirge.cloud/api";
 
 export interface ClientOptions {
@@ -38,6 +46,12 @@ export async function backendCall<T = unknown>(
     if (!res.ok) {
       const text = await res.text();
 
+      if (res.status === 409) {
+        let body: unknown = text;
+        try { body = JSON.parse(text); } catch { /* preserve raw body */ }
+        throw new BackendHttpError(res.status, body, path);
+      }
+
       if (res.status === 429) {
         throw new Error(
           extractDetail(text) ??
@@ -61,6 +75,7 @@ export async function backendCall<T = unknown>(
 
     return (await res.json()) as T;
   } catch (e) {
+    if (e instanceof BackendHttpError) throw e;
     const message = e instanceof Error ? e.message : String(e);
     if (e instanceof Error && e.name === "AbortError") {
       throw new Error(String(redactDeep(`${path} timed out after ${timeoutMs / 1000}s`)));
@@ -205,6 +220,7 @@ export async function backendCallSSE<T = unknown>(
     }
     return lastComplete;
   } catch (e) {
+    if (e instanceof BackendHttpError) throw e;
     const message = e instanceof Error ? e.message : String(e);
     if (e instanceof Error && e.name === "AbortError") {
       throw new Error(String(redactDeep(`${path} timed out after ${timeoutMs / 1000}s`)));

@@ -37,6 +37,7 @@ import {
   complianceHandler,
 } from "./tools/compliance.js";
 import { simulateSchema, simulateZodObject, simulateHandler } from "./tools/simulate.js";
+import { inUseEvidenceSchema, inUseEvidenceZodObject, inUseEvidenceHandler } from "./tools/evidence.js";
 import {
   applyChangeSchema,
   applyChangeZodObject,
@@ -320,12 +321,12 @@ const tools: ToolRegistration[] = [
     handler: listBranchesHandler,
   },
   {
-    name: "emfirge_compare_branches",
+    name: "emfirge_in_use_evidence",
     description:
-      "Compare one or more isolated infrastructure branches to understand their modeled changes and security outcomes.",
-    schema: compareBranchesSchema as Record<string, z.ZodTypeAny>,
-    zodObject: compareBranchesZodObject as z.ZodObject<z.ZodRawShape>,
-    handler: compareBranchesHandler,
+      "Read-only: reads CloudTrail event history (free) and CloudWatch metrics (billed API requests beyond the free tier) only for resources the branch deletes; can only make a verdict stricter, never looser. role_arn is required only when accepting an estimate and must be the same role used by emfirge_scan. Never call with accept_estimate_id unless the user agreed to the shown estimate.",
+    schema: inUseEvidenceSchema as Record<string, z.ZodTypeAny>,
+    zodObject: inUseEvidenceZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: inUseEvidenceHandler,
   },
 ];
 
