@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from app import cost
 from app.egraph import build_graph, get_internet_reachable_set
 from app.rules import find_toxic_combos, run_all_checks
 from app.scoring import calculate_score
@@ -32,6 +33,8 @@ class DiffResult(BaseModel):
     score_before: int = 0
     score_after: int = 0
     score_delta: int = 0
+    cost_delta: dict[str, Any] = Field(default_factory=dict)
+    cost_delta_monthly_usd: float | None = None
     newly_internet_reachable: list[str] = Field(default_factory=list)
     no_longer_internet_reachable: list[str] = Field(default_factory=list)
     # True only when the complete canonical infrastructure snapshots match.
@@ -305,6 +308,8 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
 
     return DiffResult(
         **graph_diff,
+        cost_delta=(delta := cost.cost_delta(base_infra, branch_infra)).model_dump(mode="json"),
+        cost_delta_monthly_usd=delta.value,
         lost_dependencies=lost_dependencies,
         lost_connectivity=lost_connectivity,
         deletion_impacts=deletion_impacts,

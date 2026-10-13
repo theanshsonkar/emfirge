@@ -333,6 +333,7 @@ def test_priced_ec2_cost_increase_does_not_change_pass(monkeypatch, infra):
     result = combined_verdict(infra, infra, run_scanners=False)
     assert result.verdict == "pass"
     assert result.cost_delta_monthly_usd == 7.59
+    assert result.cost_delta["value"] == 7.59
     assert "cost_delta=7.59" in result.summary
 
 
@@ -341,8 +342,11 @@ def test_s3_cost_delta_is_zero_but_reports_unknown_notes(monkeypatch, infra):
     patch_cost_and_graph(monkeypatch, notes=("branch: s3_bucket/data: usage unknown",))
     result = combined_verdict(infra, infra, run_scanners=False)
     assert result.verdict == "pass"
-    assert result.cost_delta_monthly_usd == 0.0
-    assert result.cost_unknown_notes == ["branch: s3_bucket/data: usage unknown"]
+    assert result.cost_delta_monthly_usd is None
+    assert result.cost_delta["status"] == "unknown"
+    assert result.cost_delta["unknown_count"] == 1
+    assert len(result.cost_unknown_notes) == 1
+    assert "s3_bucket/data" not in result.cost_unknown_notes[0]
     assert "cost unknown" in result.summary
 
 
