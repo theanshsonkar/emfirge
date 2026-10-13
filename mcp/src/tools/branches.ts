@@ -1,5 +1,14 @@
 // Git branch tools: create and inspect safe, isolated infrastructure changes.
 
+export type CostDelta = {
+  value: number | null;
+  status: "estimated" | "unknown" | "n/a";
+  reason: string;
+  unknown_count: number;
+  known_provisioned_delta: number | null;
+  currency: "USD";
+};
+
 import { z } from "zod";
 import { backendCall } from "../client.js";
 import { redactDeep, expandTokens } from "../tokenize.js";

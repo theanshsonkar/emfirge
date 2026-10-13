@@ -47,7 +47,6 @@ def _changes_for_rules(sg_id, rules):
     return Change(op="modify", resource_type="security_group", resource_id=sg_id, fields={"rules": rules})
 
 
-@pytest.mark.xfail(strict=True, reason="Phase 0 #4: one score")
 @given(st.integers(min_value=0, max_value=15))
 def test_L1_empty_branch_score_matches_scan_with_variable_resource_count(extra_buckets):
     base = build_incident_base()
@@ -157,7 +156,6 @@ def test_L4_only_introduced_critical_findings_block(sg_id, rules, public_bucket)
             assert result.verdict == "block"
 
 
-@pytest.mark.xfail(strict=True, reason="Phase 0 #4: one score")
 @given(st.lists(st.sampled_from(["inc-data-bucket", "inc-assets-bucket", "i-inc-web", "sg-inc-latent", "inc-worker"]), min_size=1, max_size=3, unique=True))
 def test_L5_deletion_never_increases_score(resource_ids):
     base = build_incident_base()

@@ -588,6 +588,8 @@ def test_compare_summary_has_exact_values_and_safer_first_ranking(branch_db):
         "lost_connectivity": 0,
         "deletion_impacts": 0,
         "has_privilege_escalation": False,
+        "cost_delta": {"value": 7.59, "status": "estimated", "reason": "embedded AWS us-east-1 on-demand/list-price snapshot", "unknown_count": 0, "known_provisioned_delta": 7.59, "currency": "USD"},
+        "cost_delta_monthly_usd": 7.59,
     }
     assert result.branches[1].model_dump() == {
         "branch_id": safer,
@@ -605,6 +607,8 @@ def test_compare_summary_has_exact_values_and_safer_first_ranking(branch_db):
         "lost_connectivity": 0,
         "deletion_impacts": 0,
         "has_privilege_escalation": False,
+        "cost_delta": {"value": 7.59, "status": "estimated", "reason": "embedded AWS us-east-1 on-demand/list-price snapshot", "unknown_count": 0, "known_provisioned_delta": 7.59, "currency": "USD"},
+        "cost_delta_monthly_usd": 7.59,
     }
     assert result.ranking == [safer, riskier]
 
