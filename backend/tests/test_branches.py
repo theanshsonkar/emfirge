@@ -381,7 +381,7 @@ def test_wrong_vpc_igw_route_rejection_does_not_persist_a_branch_change(branch_d
     ))
     branch_id = branches.create_branch(base, "reject-invented-igw")
 
-    with pytest.raises(ValueError, match="not attached to route table VPC vpc-branch-guard"):
+    with pytest.raises(ValueError, match="not attached to the route table VPC"):
         branches.apply_change_to_branch(branch_id, Change(
             op="modify", resource_type="route_table", resource_id="rtb-branch-guard",
             fields={"routes": [{

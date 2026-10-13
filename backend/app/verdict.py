@@ -366,29 +366,29 @@ def combined_verdict(
     deletion_relationships = [impact for impact in diff.deletion_impacts if any(rel not in _CONTAINMENT_RELATIONSHIPS for related in impact.get("surviving_related_resources", []) for rel in related.get("relationships", []))]
     reasons: list[dict[str, str]] = []
     if introduced_critical:
-        reasons.append(_reason("block", "introduced_critical_finding", f"Introduced Critical finding on resource_id={_text(introduced_critical[0].get('resource'))}"))
+        reasons.append(_reason("block", "introduced_critical_finding", "Introduced Critical finding"))
     if active_critical_exposure:
-        reasons.append(_reason("block", "introduced_critical_exposure", f"Introduced Critical exposure on resource_id={_text(active_critical_exposure[0].get('resource_id'))}"))
+        reasons.append(_reason("block", "introduced_critical_exposure", "Introduced Critical exposure"))
     if introduces_privilege_escalation:
         reasons.append(_reason("block", "privilege_escalation", "Privilege escalation was introduced"))
     if no_recovery:
-        reasons.append(_reason("block", "data_store_deleted_no_recovery_point", f"Deleted data store resource_id={_text(no_recovery[0])} has no recovery point"))
+        reasons.append(_reason("block", "data_store_deleted_no_recovery_point", "Deleted data store has no recovery point"))
     if introduced_other:
-        reasons.append(_reason("warn", "introduced_finding", f"Introduced finding on resource_id={introduced_resource_ids[0] if introduced_resource_ids else ''}"))
+        reasons.append(_reason("warn", "introduced_finding", "Introduced finding"))
     if latent_exposure:
-        reasons.append(_reason("warn", "latent_exposure", f"Latent exposure on resource_id={_text(latent_exposure[0].get('resource_id'))}"))
+        reasons.append(_reason("warn", "latent_exposure", "Latent exposure"))
     if warn_exposures and not latent_exposure:
-        reasons.append(_reason("warn", "new_exposure", f"New exposure on resource_id={_text(warn_exposures[0].get('resource_id'))}"))
+        reasons.append(_reason("warn", "new_exposure", "New exposure"))
     if diff.newly_internet_reachable:
-        reasons.append(_reason("warn", "newly_internet_reachable", f"Newly internet reachable resource_id={diff.newly_internet_reachable[0]}"))
+        reasons.append(_reason("warn", "newly_internet_reachable", "A resource is newly internet reachable"))
     if diff.no_longer_internet_reachable:
-        reasons.append(_reason("warn", "lost_ingress", f"Ingress lost for resource_id={diff.no_longer_internet_reachable[0]}"))
+        reasons.append(_reason("warn", "lost_ingress", "Internet ingress is no longer reachable"))
     if diff.lost_dependencies:
-        reasons.append(_reason("warn", "lost_dependency", f"Lost dependency from resource_id={diff.lost_dependencies[0].get('from', '')}"))
+        reasons.append(_reason("warn", "lost_dependency", "A dependency was removed"))
     if diff.lost_connectivity:
-        reasons.append(_reason("warn", "lost_connectivity", f"Lost connectivity from resource_id={diff.lost_connectivity[0].get('from', '')}"))
+        reasons.append(_reason("warn", "lost_connectivity", "Connectivity was removed"))
     if deletion_relationships:
-        reasons.append(_reason("warn", "deletion_impact", f"Deletion impact on resource_id={deletion_relationships[0].get('removed_resource', {}).get('id', '')}"))
+        reasons.append(_reason("warn", "deletion_impact", "A deletion has downstream impact"))
     if introduced_capacity_breaches:
         reasons.append(_reason("warn", "capacity", f"Capacity breach in resource_id={introduced_capacity_breaches[0].get('scope', '')}"))
     block = bool(introduced_critical or active_critical_exposure or introduces_privilege_escalation or no_recovery)

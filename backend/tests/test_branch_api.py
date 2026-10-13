@@ -301,7 +301,7 @@ def test_invalid_change_returns_422_without_persistence():
             "op": "replace", "resource_type": "unsupported", "resource_id": "x", "fields": {}
         })
     assert response.status_code == 422
-    assert "Unsupported operation" in response.json()["detail"]
+    assert response.json()["detail"] == "Unsupported operation: replace"
     persist.assert_not_called()
 
 
@@ -315,7 +315,7 @@ def test_agent_cannot_persist_in_use_security_group_delete():
             "resource_id": "sg-demo-public", "fields": {},
         })
     assert response.status_code == 422
-    assert "still in use by i-demo-web-001" in response.json()["detail"]
+    assert response.json()["detail"] == "Security group is still in use; model detaching or replacing it before deletion"
     persist.assert_not_called()
 
 
@@ -423,7 +423,7 @@ def test_invalid_change_target_returns_422_without_persistence():
             "op": "modify", "resource_type": "s3_bucket", "resource_id": "missing", "fields": {}
         })
     assert response.status_code == 422
-    assert "Target not found" in response.json()["detail"]
+    assert response.json()["detail"] == "Target not found: s3_bucket"
     persist.assert_not_called()
 
 

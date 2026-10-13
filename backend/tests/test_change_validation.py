@@ -35,7 +35,7 @@ def test_http_rejects_cidrs_and_preserves_security_group_change_count(
     })
     assert response.status_code == 422
     detail = response.json()["detail"]
-    assert "cidrs" in detail
+    assert "security_group.rules[0]: unknown field 'cidrs'" in detail
     assert "sg-demo-public" not in detail
     assert client.get(f"/branches/{branch_id}").json()["num_changes"] == before
 
