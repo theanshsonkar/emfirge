@@ -1,0 +1,1 @@
+{"id":"L01","why":"open SSH on an unused SG; the network interface list was read and nothing uses it","base":"delete","changes":[{"op":"modify","resource_type":"security_group","resource_id":"sg-dl-unused","fields":{"rules":[{"protocol":"tcp","from_port":22,"to_port":22,"ip_ranges":["0.0.0.0/0"]}]}}],"expect":{"verdict":"warn","reasons_include":["latent_exposure"]}}

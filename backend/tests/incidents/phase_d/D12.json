@@ -1,0 +1,1 @@
+{"id":"D12","why":"turn off automated backups on the prod database","base":"delete","changes":[{"op":"modify","resource_type":"rds_instance","resource_id":"db-dl-prod","fields":{"backup_retention_days":0}}],"expect":{"verdict":"warn","reasons_include":["recovery_point_removed"],"reasons_exclude":["data_store_deleted_no_recovery_point"]}}
