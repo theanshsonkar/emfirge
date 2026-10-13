@@ -23,6 +23,7 @@ MITRE_MAPPING: dict[str, tuple[str, str]] = {
     'EMFIRGE-IAM-004':    ('T1098.001', 'Account Manipulation: Additional Cloud Credentials'),
     'EMFIRGE-IAM-005':    ('T1078.004', 'Valid Accounts: Cloud Accounts'),
     'EMFIRGE-IAM-006':    ('T1078.004', 'Valid Accounts: Cloud Accounts'),
+    'EMFIRGE-IAM-007':    ('T1098',     'Account Manipulation'),
     'EMFIRGE-CT-001':     ('T1562.008', 'Impair Defenses: Disable Cloud Logs'),
     'EMFIRGE-CT-002':     ('T1562.008', 'Impair Defenses: Disable Cloud Logs'),
     'EMFIRGE-CW-001':     ('T1562.006', 'Impair Defenses: Indicator Blocking'),
