@@ -56,10 +56,31 @@ function nextToken(prefix: string): string {
   return `${prefix}_${String(store.counters[prefix]).padStart(3, "0")}`;
 }
 
+function canonicalize(real: string): string {
+  let match: RegExpMatchArray | null;
+  match = real.match(/^arn:aws:iam::\d+:(?:role|user|policy)\/(.+)$/);
+  if (match) return match[1];
+  match = real.match(/^arn:aws:s3:::(.+)$/);
+  if (match) return match[1].split("/")[0];
+  match = real.match(/^arn:aws:lambda:[\w-]+:\d+:function:([^:]+)/);
+  if (match) return match[1];
+  match = real.match(/^arn:aws:ec2:[\w-]+:\d+:(?:instance|security-group|subnet|vpc)\/(.+)$/);
+  if (match) return match[1];
+  return real;
+}
+
 function tokenize(real: string, prefix: string): string {
   const existing = store.realToToken[real];
   if (existing) return existing;
+  const canonical = canonicalize(real);
+  const canonicalExisting = store.realToToken[canonical];
+  if (canonicalExisting) {
+    store.realToToken[real] = canonicalExisting;
+    save();
+    return canonicalExisting;
+  }
   const token = nextToken(prefix);
+  store.realToToken[canonical] = token;
   store.realToToken[real] = token;
   store.tokenToReal[token] = real;
   save();
@@ -270,7 +291,7 @@ function redactEmbedded(s: string): string {
   // names match first (avoids "emfirge" matching inside "emfirge-reports").
   const knownNames = Object.keys(store.realToToken)
     .filter((name) => {
-      if (name.length < 4) return false;
+      if (name.length < 2 || isNeverSensitive(name)) return false;
       // Skip values that are themselves AWS-pattern matches; those are
       // already handled by EMBEDDED_PATTERNS above.
       for (const [re] of PATTERNS) {
@@ -281,10 +302,11 @@ function redactEmbedded(s: string): string {
     .sort((a, b) => b.length - a.length);
 
   for (const real of knownNames) {
-    if (!out.includes(real)) continue;
+    if (!out.includes(real) || isNeverSensitive(real)) continue;
     const token = store.realToToken[real];
     const escaped = real.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
-    out = out.replace(new RegExp(escaped, "g"), token);
+    // Do not redact substrings of ordinary words or longer identifiers.
+    out = out.replace(new RegExp(`(?<![A-Za-z0-9_-])${escaped}(?![A-Za-z0-9_-])`, "g"), token);
   }
 
   // Backend label convention "<Type>: <name>" inside narrative captions
@@ -305,6 +327,25 @@ function redactEmbedded(s: string): string {
 
 // keys whose values we tokenize even if the value isn't a known ID pattern
 // (bucket names, role names - arbitrary strings that still leak intent)
+const NEVER_SENSITIVE_PATTERNS = [
+  /^EMFIRGE-[A-Z0-9]+-\d{3}$/i,
+  /^(?:cis-aws-1\.5|soc2)$/i,
+  /^(?:\d+\.\d+|CC\d+\.\d+)$/i,
+  /^T\d{4}(?:\.\d{3})?$/i,
+  /^(?:critical|high|medium|low|info|informational|warning)$/i,
+  /^(?:native|public|database)$/i,
+  /^(?:ec2|s3|iam|rds|lambda|vpc|sg|sqs|sns|kms|cloudtrail|cloudwatch|guardduty|waf|ecs|elb|alb|api-gateway|secretsmanager|config)$/i,
+  /^(?:instance|security[-_ ]?group|subnet|vpc|bucket|role|user|policy|function|database|volume|network[-_ ]?interface|route[-_ ]?table)$/i,
+  /^(?:\d{1,5})$/,
+  /^(?:\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/,
+];
+
+function isNeverSensitive(value: string, key = ""): boolean {
+  if (NEVER_SENSITIVE_PATTERNS.some((re) => re.test(value))) return true;
+  return /^(?:framework|control|section|compliance)/i.test(key) &&
+    /^(?:[a-z][a-z0-9-]*|\d+(?:\.\d+)+|CC\d+(?:\.\d+)+)$/i.test(value);
+}
+
 const SENSITIVE_KEYS = new Set([
   "resource_id",
   "id",
@@ -418,7 +459,7 @@ function collectNames(obj: unknown, parentKey = ""): void {
       return;
     }
     if (!SENSITIVE_KEYS.has(parentKey)) return;
-    if (obj.length < 4) return;
+    if (isNeverSensitive(obj, parentKey) || obj.length < 2) return;
     tokenize(obj, "NAME");
     return;
   }
@@ -486,6 +527,7 @@ function redactDeepInner(obj: unknown, parentKey = ""): unknown {
     //    Bound to a typed local rather than reassigning `obj`, which is
     //    declared `unknown` and would lose its narrowing.
     const text: string = scrubPresignedUrls(obj);
+    if (isNeverSensitive(text, parentKey)) return text;
     // 1. Whole-string AWS id (hex OR friendly-prefix) under ANY key — single
     //    typed token (honors balanced/off/generic). Catches vpc_id, allocation_id,
     //    flow_logs[] entries, etc., not just fields we enumerate.
@@ -502,7 +544,7 @@ function redactDeepInner(obj: unknown, parentKey = ""): unknown {
     }
     // 4. Sensitive key — tokenize the whole value as a name.
     if (SENSITIVE_KEYS.has(parentKey)) {
-      return tokenize(text, "NAME");
+      return isNeverSensitive(text, parentKey) ? text : tokenize(text, "NAME");
     }
     // 5. Free-text — scan for embedded AWS IDs + known names (narrative captions)
     return redactEmbedded(text);
