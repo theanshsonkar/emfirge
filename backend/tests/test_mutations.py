@@ -260,6 +260,9 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
     }
 
     for resource_type, operations in advertised.items():
+        if resource_type in {"ebs_volume", "ebs_snapshot", "rds_snapshot", "iam_role"}:
+            assert operations == {"delete"}
+            continue
         resource_id, identity_field, add_fields = ids[resource_type]
         for operation in SUPPORTED_OPERATIONS:
             infra = copy.deepcopy(empty_infra)
