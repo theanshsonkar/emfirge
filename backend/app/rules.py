@@ -351,7 +351,7 @@ def check_dangerous_open_ports(infra: AWSInfrastructure, graph: Optional[Graph] 
                         severity=severity,
                         raw_severity='Critical',
                         confidence='HIGH' if not sg_not_reachable else 'MEDIUM',
-                        issue=f'All ports (0–65535) open to the internet on security group {sg_id}{suffix}',
+                        issue=f'All ports (0–65535) open to the internet on this security group{suffix}',
                         recommendation='Restrict inbound rules to only the specific ports your application requires',
                         aws_service='EC2',
                         resource_id=sg_id,
@@ -377,7 +377,7 @@ def check_dangerous_open_ports(infra: AWSInfrastructure, graph: Optional[Graph] 
                         severity=severity,
                         raw_severity='Critical',
                         confidence='HIGH' if not sg_not_reachable else 'MEDIUM',
-                        issue=f'Wide port range {from_port}–{to_port} open to the internet on security group {sg_id}{suffix}',
+                        issue=f'Wide port range {from_port}–{to_port} open to the internet on this security group{suffix}',
                         recommendation='Restrict inbound rules to only the specific ports your application requires',
                         aws_service='EC2',
                         resource_id=sg_id,
@@ -410,7 +410,7 @@ def check_dangerous_open_ports(infra: AWSInfrastructure, graph: Optional[Graph] 
                         severity=severity,
                         raw_severity='Critical',
                         confidence='HIGH' if not sg_not_reachable else 'MEDIUM',
-                        issue=f'Admin port {port} open to the internet on security group {sg_id}{suffix}',
+                        issue=f'Admin port {port} open to the internet on this security group{suffix}',
                         recommendation=f'Restrict port {port} to specific trusted IPs only. Admin protocols should never be exposed to the public internet.',
                         aws_service='EC2',
                         resource_id=sg_id,
@@ -426,7 +426,7 @@ def check_dangerous_open_ports(infra: AWSInfrastructure, graph: Optional[Graph] 
                         severity=severity,
                         raw_severity='Critical',
                         confidence='HIGH' if not sg_not_reachable else 'MEDIUM',
-                        issue=f'Database port {port} open to the internet on security group {sg_id} — direct DB exposure{suffix}',
+                        issue=f'Database port {port} open to the internet on this security group — direct DB exposure{suffix}',
                         recommendation=f'Remove public access to port {port} immediately. Databases must never be directly reachable from the internet. Use a bastion host or VPN.',
                         aws_service='EC2',
                         resource_id=sg_id,
@@ -442,7 +442,7 @@ def check_dangerous_open_ports(infra: AWSInfrastructure, graph: Optional[Graph] 
                         severity=severity,
                         raw_severity='Critical',
                         confidence='MEDIUM',
-                        issue=f'Internal service port {port} open to the internet on security group {sg_id}{suffix}',
+                        issue=f'Internal service port {port} open to the internet on this security group{suffix}',
                         recommendation=f'Restrict port {port} to internal VPC CIDR ranges only. Internal services should not be publicly reachable.',
                         aws_service='EC2',
                         resource_id=sg_id,
@@ -459,7 +459,7 @@ def check_dangerous_open_ports(infra: AWSInfrastructure, graph: Optional[Graph] 
                         severity=severity,
                         raw_severity='Moderate',
                         confidence='MEDIUM',
-                        issue=f'Unusual port {port} open to the internet on security group {sg_id}{suffix}',
+                        issue=f'Unusual port {port} open to the internet on this security group{suffix}',
                         recommendation=f'Review whether port {port} needs to be publicly accessible. If not, restrict to specific IP ranges.',
                         aws_service='EC2',
                         resource_id=sg_id,
@@ -549,7 +549,7 @@ def check_imdsv1_enabled(infra: AWSInfrastructure, graph: Optional[Graph] = None
                 severity=severity,
                 raw_severity='Moderate',
                 confidence=confidence,
-                issue=f'EC2 instance {instance.id} has IMDSv1 enabled — vulnerable to SSRF credential theft' + issue_suffix,
+                issue='EC2 instance has IMDSv1 enabled — vulnerable to SSRF credential theft' + issue_suffix,
                 recommendation="Set HttpTokens to 'required' on instance metadata options to enforce IMDSv2",
                 aws_service='EC2',
                 resource_id=instance.id,
@@ -628,7 +628,7 @@ def check_public_s3_context_aware(infra: AWSInfrastructure, graph: Optional[Grap
             category='Security',
             severity=severity,
             confidence=confidence,
-            issue=f'Public S3 bucket detected: {bucket}{issue_suffix}',
+            issue=f'Public S3 bucket detected{issue_suffix}',
             recommendation='Make bucket private immediately and use presigned URLs for sharing' if severity == 'Critical' 
                           else ('Add CloudFront distribution for better security and caching' if severity == 'Moderate' and 'CloudFront' in issue_suffix
                           else 'Review if public access is necessary. Consider making private and using presigned URLs.'),
@@ -666,7 +666,7 @@ def check_s3_encryption(infra: AWSInfrastructure, graph: Optional[Graph] = None,
             category='Security',
             severity=severity,
             raw_severity='Moderate',
-            issue=f'S3 buckets without encryption: {", ".join(infra.s3.unencrypted_buckets)}',
+            issue='S3 buckets without encryption',
             recommendation='Enable default encryption (SSE-S3) on all S3 buckets',
             aws_service='S3',
             resource_id=', '.join(infra.s3.unencrypted_buckets),
@@ -684,7 +684,7 @@ def check_s3_versioning(infra: AWSInfrastructure) -> Optional[RiskFinding]:
             rule_id='EMFIRGE-S3-003',
             category='Disaster Recovery',
             severity='Low',
-            issue=f'S3 buckets without versioning: {", ".join(infra.s3.buckets_without_versioning)}',
+            issue='S3 buckets without versioning',
             recommendation='Enable versioning on S3 buckets that store important data to protect against accidental deletion. Log or temporary buckets can be ignored.',
             aws_service='S3',
             resource_id=', '.join(infra.s3.buckets_without_versioning),
@@ -702,7 +702,7 @@ def check_s3_no_logging(infra: AWSInfrastructure) -> Optional[RiskFinding]:
             category='Security',
             severity='Moderate',
             confidence='HIGH',
-            issue=f'S3 buckets without access logging enabled: {", ".join(infra.s3.buckets_without_logging)}',
+            issue='S3 buckets without access logging enabled',
             recommendation='Enable S3 server access logging to track requests made to your buckets. This is critical for security auditing, incident response, and compliance.',
             aws_service='S3',
             resource_id=', '.join(infra.s3.buckets_without_logging),
@@ -780,7 +780,7 @@ def check_rds_public(infra: AWSInfrastructure, graph: Optional[Graph] = None, ct
             category='Security',
             severity=severity,
             confidence=confidence,
-            issue=f'RDS instances publicly accessible: {", ".join(infra.rds.publicly_accessible)}' +
+            issue='RDS instances publicly accessible' +
                   (' — protected by security groups but public flag enabled' if severity == 'Moderate' else ''),
             recommendation='Disable public accessibility and use VPC private subnets for RDS' +
                           (' — also review security group rules to ensure they are restrictive' if severity == 'Moderate' else ''),
@@ -817,7 +817,7 @@ def check_rds_encryption(infra: AWSInfrastructure, graph: Optional[Graph] = None
             category='Security',
             severity=severity,
             raw_severity='Moderate',
-            issue=f'RDS instances without encryption: {", ".join(infra.rds.unencrypted_instances)}',
+            issue='RDS instances without encryption',
             recommendation='RDS encryption cannot be enabled on a running instance. To fix: take a snapshot of the instance, copy the snapshot with encryption enabled, then restore a new instance from the encrypted snapshot.',
             aws_service='RDS',
             resource_id=', '.join(infra.rds.unencrypted_instances),
@@ -850,7 +850,7 @@ def check_rds_deletion_protection(infra: AWSInfrastructure, graph: Optional[Grap
             severity=severity,
             raw_severity='Critical',
             confidence=confidence,
-            issue=f'RDS instances without deletion protection enabled: {", ".join(infra.rds.instances_without_deletion_protection)}',
+            issue='RDS instances without deletion protection enabled',
             recommendation='Enable deletion protection on each RDS instance. Go to RDS > Databases > select instance > Modify > Enable deletion protection. This prevents accidental or malicious permanent deletion of your database.',
             aws_service='RDS',
             resource_id=', '.join(infra.rds.instances_without_deletion_protection),
@@ -867,7 +867,7 @@ def check_rds_log_exports(infra: AWSInfrastructure) -> Optional[RiskFinding]:
             category='Security',
             severity='Moderate',
             confidence='MEDIUM',
-            issue=f'RDS instances without CloudWatch log exports enabled: {", ".join(infra.rds.instances_without_log_exports)}',
+            issue='RDS instances without CloudWatch log exports enabled',
             recommendation='Enable CloudWatch log exports for each RDS instance. Go to RDS > Databases > select instance > Modify > Log exports > enable error, slowquery, and audit logs. This provides visibility into database activity and aids incident response.',
             aws_service='RDS',
             resource_id=', '.join(infra.rds.instances_without_log_exports),
@@ -925,7 +925,7 @@ def check_iam_high_risk_users(infra: AWSInfrastructure, graph: Optional[Graph] =
                 category='Security',
                 severity='Critical',
                 confidence='HIGH',
-                issue=f'IAM user {username} has old access keys ({age_info}) AND no MFA enabled',
+                issue='IAM user has old access keys and no MFA enabled',
                 recommendation='Enable MFA immediately and rotate access keys. This user is at highest risk of account compromise.',
                 aws_service='IAM',
                 resource_id=username,
@@ -973,7 +973,7 @@ def check_users_without_mfa(infra: AWSInfrastructure, ctx: Optional['GraphContex
                 category='Security',
                 severity=severity,
                 confidence=confidence,
-                issue=f'IAM user {username} has no MFA enabled{issue_suffix}',
+                issue=f'IAM user has no MFA enabled{issue_suffix}',
                 recommendation='Enable MFA for this IAM user if they have console access. Programmatic-only service accounts have lower MFA priority.',
                 aws_service='IAM',
                 resource_id=username,
@@ -1031,7 +1031,7 @@ def check_iam_wildcard_policy(infra: AWSInfrastructure, graph: Optional[Graph] =
             severity='Critical',
             raw_severity='Critical',
             confidence='HIGH',
-            issue=f'IAM user {username} has full admin access (Action:* Resource:*)',
+            issue='IAM user has full admin access (Action:* Resource:*)',
             recommendation='Replace AdministratorAccess with least-privilege policies scoped to required services only',
             aws_service='IAM',
             resource_id=username,
@@ -1568,10 +1568,10 @@ def check_orphaned_resources(infra: AWSInfrastructure, graph: Optional[Graph] = 
         
         # Build issue message based on cost
         if estimated_cost > 0:
-            issue = f"Orphaned {resource_type}: {resource_id} — no connections to other resources (Est. ${estimated_cost:.2f}/month {cost_unit})"
+            issue = f"Orphaned {resource_type} — no connections to other resources (Est. ${estimated_cost:.2f}/month {cost_unit})"
             recommendation = f"Review if this resource is still needed. If unused, delete it to save ~${estimated_cost:.2f}/month. Orphaned resources have no relationships with other infrastructure."
         else:
-            issue = f"Orphaned {resource_type}: {resource_id} — no connections to other resources ({cost_unit})"
+            issue = f"Orphaned {resource_type} — no connections to other resources ({cost_unit})"
             recommendation = f"Review if this resource is still needed. If unused, delete it for better infrastructure hygiene. Orphaned resources have no relationships with other infrastructure."
         
         findings.append(RiskFinding(

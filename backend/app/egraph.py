@@ -1043,7 +1043,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         nodes.append({
             'id': instance_id,
             'type': 'ec2_instance',
-            'label': f"EC2: {instance_id}",
+            'label': 'EC2 instance',
             'metadata': {
                 'instance_type': instance_type,
                 'state': instance_state,
@@ -1088,7 +1088,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 nodes.append({
                     'id': role_id,
                     'type': 'iam_role',
-                    'label': f"IAM Role: {actual_role_name}",
+                    'label': 'IAM role',
                     'metadata': {'arn': actual_role_arn, 'source': 'instance_profile'}
                 })
             edges.append({
@@ -1116,7 +1116,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         nodes.append({
             'id': sg_id,
             'type': 'security_group',
-            'label': f"SG: {sg_name}",
+            'label': 'Security group',
             'metadata': {
                 'name': sg_name,
                 'rules_count': len(rules),
@@ -1144,13 +1144,13 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
     for subnet in infrastructure.vpc.subnets:
         subnet_id = _value(subnet, 'id')
         if subnet_id not in known_ids:
-            snapshot_nodes.append({'id': subnet_id, 'type': 'vpc_subnet', 'label': f'Subnet: {subnet_id}', 'metadata': {}})
+            snapshot_nodes.append({'id': subnet_id, 'type': 'vpc_subnet', 'label': 'Subnet', 'metadata': {}})
             known_ids.add(subnet_id)
     for route_table in infrastructure.vpc.route_tables:
         route_table_id = _value(route_table, 'id')
         routes = [_value(route, 'model_dump', lambda: route)() if hasattr(route, 'model_dump') else route for route in (_value(route_table, 'routes', []) or [])]
         if route_table_id not in known_ids:
-            snapshot_nodes.append({'id': route_table_id, 'type': 'route_table', 'label': f'Route Table: {route_table_id}', 'base': {'routes': routes}})
+            snapshot_nodes.append({'id': route_table_id, 'type': 'route_table', 'label': 'Route table', 'base': {'routes': routes}})
             known_ids.add(route_table_id)
         for subnet_id in effective_snapshot_associations.get(route_table_id, []):
             snapshot_edges.append({'from': subnet_id, 'to': route_table_id, 'relationship': 'associated_with'})
@@ -1158,7 +1158,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         nacl_id = _value(nacl, 'id')
         entries = [_value(entry, 'model_dump', lambda: entry)() if hasattr(entry, 'model_dump') else entry for entry in (_value(nacl, 'entries', []) or [])]
         if nacl_id not in known_ids:
-            snapshot_nodes.append({'id': nacl_id, 'type': 'network_acl', 'label': f'Network ACL: {nacl_id}', 'base': {'entries': entries}})
+            snapshot_nodes.append({'id': nacl_id, 'type': 'network_acl', 'label': 'Network ACL', 'base': {'entries': entries}})
             known_ids.add(nacl_id)
         for subnet_id in _value(nacl, 'associated_subnet_ids', []) or []:
             snapshot_edges.append({'from': subnet_id, 'to': nacl_id, 'relationship': 'protected_by'})
@@ -1207,7 +1207,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         nodes.append({
             'id': lb_arn,
             'type': 'load_balancer',
-            'label': f"LB: {lb_id}",
+            'label': 'Load balancer',
             'metadata': {
                 'type': lb_type,
                 'target_count': len(target_instances)
@@ -1241,7 +1241,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         nodes.append({
             'id': bucket_name,
             'type': 's3_bucket',
-            'label': f"S3: {bucket_name}",
+            'label': 'S3 bucket',
             'metadata': {
                 'is_public': is_public,
                 'has_cloudfront': has_cloudfront,
@@ -1257,7 +1257,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             nodes.append({
                 'id': cf_id,
                 'type': 'cloudfront_distribution',
-                'label': f"CloudFront: {bucket_name}",
+                'label': 'CloudFront distribution',
                 'metadata': {
                     'origin_bucket': bucket_name
                 }
@@ -1287,7 +1287,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         nodes.append({
             'id': rds_id,
             'type': 'rds_instance',
-            'label': f"RDS: {rds_id}",
+            'label': 'RDS instance',
             'metadata': {
                 'publicly_accessible': publicly_accessible,
                 'encrypted': encrypted,
@@ -1323,7 +1323,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         nodes.append({
             'id': func_name,
             'type': 'lambda_function',
-            'label': f"Lambda: {func_name}",
+            'label': 'Lambda function',
 
             'metadata': {
                 'role_arn': role_arn,
@@ -1344,7 +1344,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 nodes.append({
                     'id': role_id,
                     'type': 'iam_role',
-                    'label': f"IAM Role: {role_name}",
+                    'label': 'IAM role',
                     'metadata': {
                         'arn': role_arn
                     }
@@ -1386,7 +1386,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 nodes.append({
                     'id': secret_id,
                     'type': 'secretsmanager_secret',
-                    'label': f"Secret: {secret_id}",
+                    'label': 'Secret',
                     'metadata': {'source': 'lambda_env'}
                 })
             edges.append({
@@ -1410,7 +1410,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 nodes.append({
                     'id': role_id,
                     'type': 'iam_role',
-                    'label': f"IAM Role: {role_name}",
+                    'label': 'IAM role',
                     'metadata': {'arn': role_arn, 'source': 'ecs_task'}
                 })
             edges.append({
@@ -1436,7 +1436,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         nodes.append({
             'id': subnet_id,
             'type': 'vpc_subnet',
-            'label': f"Subnet: {subnet_id}",
+            'label': 'Subnet',
             'metadata': {
                 'vpc_id': vpc_id,
                 'cidr': cidr,
@@ -1478,7 +1478,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'id': route_table_id,
                 'type': 'route_table',
                 'category': 'network',
-                'label': f"Route Table: {route_table_id}",
+                'label': 'Route table',
                 'base': {
                     'routes': [
                         route.model_dump() if hasattr(route, 'model_dump') else route
@@ -1496,7 +1496,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'id': gateway_id,
                 'type': 'internet_gateway',
                 'category': 'network_boundary',
-                'label': f"Internet Gateway: {gateway_id}",
+                'label': 'Internet gateway',
             })
             node_ids.add(gateway_id)
     for gateway_id in infrastructure.vpc.nat_gateways:
@@ -1505,7 +1505,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'id': gateway_id,
                 'type': 'nat_gateway',
                 'category': 'network',
-                'label': f"NAT Gateway: {gateway_id}",
+                'label': 'NAT gateway',
             })
             node_ids.add(gateway_id)
 
@@ -1569,7 +1569,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         nodes.append({
             'id': vpc_id,
             'type': 'vpc',
-            'label': f"VPC: {vpc_id}",
+            'label': 'VPC',
             'metadata': {
                 'is_default': vpc_id == infrastructure.vpc.default_vpc_id,
                 'subnet_count': subnet_count,
@@ -1614,7 +1614,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                     'id': vpc_id,
                     'type': 'vpc',
                     'category': 'network',
-                    'label': f"VPC: {vpc_id}",
+                    'label': 'VPC',
                     'base': {'collected': False},
                 })
                 node_ids.add(vpc_id)
@@ -1906,7 +1906,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             nodes.append({
                 'id': role_id,
                 'type': 'iam_role',
-                'label': f"IAM Role: {role_name}",
+                'label': 'IAM role',
                 'metadata': {
                     'arn': role_arn,
                     'has_admin': has_admin,

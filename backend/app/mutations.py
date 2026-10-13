@@ -112,7 +112,7 @@ def _validation_message(resource_type: str, field: str, error: dict[str, Any], a
         item_type = next((arg for arg in get_args(annotation) if hasattr(arg, "model_fields")), annotation)
         allowed = ", ".join(sorted(getattr(item_type, "model_fields", {}).keys()))
         prefix = path.rsplit(".", 1)[0] if loc else path
-        return f"{prefix}: unknown field '{unknown}' (allowed: {allowed})"
+        return f"{prefix}: unknown field (allowed fields: {allowed})"
     if error_type in {"value_error", "assertion_error"}:
         problem = str(error.get("msg", "validation failed"))
         if problem.lower().startswith("value error, "):

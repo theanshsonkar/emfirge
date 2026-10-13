@@ -346,7 +346,7 @@ def get_log_by_uuid(analysis_id: str, account_id: str = None):
             AnalysisLog.findings_json.like(f'%"analysis_id": "{analysis_id}"%')
         ).order_by(AnalysisLog.timestamp.desc()).first()
         if not target:
-            raise HTTPException(status_code=404, detail=f'Analysis {analysis_id} not found')
+            raise HTTPException(status_code=404, detail='Analysis not found')
         log = get_log_by_id(target.id, account_id=account_id)
         if not log:
             raise HTTPException(status_code=404, detail='Log not found')
@@ -383,7 +383,7 @@ def get_graph(analysis_id: str):
         ).order_by(AnalysisLog.timestamp.desc()).first()
 
         if not target_log:
-            raise HTTPException(status_code=404, detail=f'Analysis {analysis_id} not found')
+            raise HTTPException(status_code=404, detail='Analysis not found')
         
         # Parse the stored findings_json
         findings_data = json.loads(target_log.findings_json)
@@ -490,7 +490,7 @@ def get_graph(analysis_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Error retrieving graph data: {str(e)}')
+        raise HTTPException(status_code=500, detail='Unable to retrieve graph data')
     finally:
         session.close()
 
@@ -520,7 +520,7 @@ def get_compliance(analysis_id: str):
         ).order_by(AnalysisLog.timestamp.desc()).first()
 
         if not target_log:
-            raise HTTPException(status_code=404, detail=f'Analysis {analysis_id} not found')
+            raise HTTPException(status_code=404, detail='Analysis not found')
 
         # Parse findings_json
         findings_data = json.loads(target_log.findings_json)
@@ -550,7 +550,7 @@ def get_compliance(analysis_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Error evaluating compliance: {str(e)}')
+        raise HTTPException(status_code=500, detail='Unable to evaluate compliance')
     finally:
         session.close()
 
@@ -684,35 +684,35 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
             source_label = source_node.get('label', edge['from']) if source_node else edge['from']
 
             if rel == 'REACHES' and target_type == 'security_group':
-                return f"Internet reaches {target_label} — open inbound rules"
+                return "Internet reaches this security group — open inbound rules"
             if rel == 'REACHES' and target_type == 'api_gateway':
-                return f"Internet reaches API Gateway {target_label}"
+                return "Internet reaches this API Gateway"
             if rel == 'REACHES_VIA_SG':
-                return f"Attacker lands on {target_label} via open security group"
+                return "Attacker lands on this resource via an open security group"
             if rel == 'REACHES':
-                return f"Internet directly reaches {target_label}"
+                return "Internet directly reaches this resource"
             if rel == 'attached_to_instance':
-                return f"Security group exposes {target_label} to network"
+                return "Security group exposes this resource to the network"
             if rel == 'uses_iam_role':
-                return f"{source_label} assumes {target_label} — credential theft possible"
+                return "A workload assumes an IAM role — credential theft possible"
             if rel == 'can_access':
-                return f"IAM role accesses {target_label} — data exfiltration risk"
+                return "An IAM role accesses this resource — data exfiltration risk"
             if rel == 'uses_security_group':
-                return f"{source_label} shares network access via {target_label}"
+                return "A workload shares network access via a security group"
             if rel == 'in_subnet':
-                return f"{source_label} is in {target_label} — lateral movement"
+                return "A workload is in a subnet — lateral movement"
             if rel == 'targets_instance':
-                return f"Load balancer routes traffic to {target_label}"
+                return "Load balancer routes traffic to this resource"
             if rel == 'contains_resource':
-                return f"Subnet contains {target_label}"
+                return "Subnet contains this resource"
             if rel == 'belongs_to_vpc':
-                return f"Network path reaches VPC {target_label}"
+                return "Network path reaches this VPC"
             if rel == 'REFERENCES_SECRET':
-                return f"{source_label} can read secret {target_label}"
+                return "A workload can read this secret"
             if rel == 'serves_from_bucket':
-                return f"CloudFront serves from {target_label}"
+                return "CloudFront serves from this bucket"
             # Fallback
-            return f"Reaches {target_label}"
+            return "Reaches this resource"
 
         # Group nodes by BFS depth, skip INTERNET (depth 0)
         depth_groups: dict = {}
@@ -750,7 +750,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
             if edge:
                 caption = _caption_for_edge(edge, best_node)
             else:
-                caption = f"Reaches {best_node.get('label', best_id)}"
+                caption = "Reaches this resource"
 
             # Include up to 3 node_ids for graph highlighting
             highlight_ids = [s[1] for s in scored[:3]]
@@ -1280,7 +1280,7 @@ def compare_branches_endpoint(payload: dict, request: Request):
     try:
         return branches.compare_branches(branch_ids)
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
 
 
 @app.post('/branches', dependencies=[Depends(require_api_key)])
@@ -1292,7 +1292,7 @@ def create_branch_endpoint(payload: dict, request: Request):
     try:
         branch_id = branches.create_branch(base_infra, payload['name'], payload['base_analysis_id'])
     except branches.BranchLimitError as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
+        raise HTTPException(status_code=429, detail='Request could not be completed') from exc
     return {'branch_id': branch_id}
 
 
@@ -1318,7 +1318,7 @@ def get_branch_endpoint(branch_id: str, request: Request):
     try:
         return branches.read_branch(branch_id)
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
 
 
 @app.post('/branches/{branch_id}/fork', dependencies=[Depends(require_api_key)])
@@ -1342,13 +1342,13 @@ def fork_branch_endpoint(branch_id: str, request: Request, payload: dict):
                 branch_id, payload['name'], expected_branch_revision=expected_revision,
             )
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
     except branches.BranchConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
     except branches.BranchLimitError as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
+        raise HTTPException(status_code=429, detail='Request could not be completed') from exc
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
     return {'branch_id': new_branch_id, 'num_changes': num_changes}
 
 
@@ -1363,12 +1363,12 @@ def add_branch_change_endpoint(branch_id: str, change: Change, request: Request)
         apply_change(rebuilt, change)
         branch = branches.apply_change_to_branch(branch_id, change)
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
     except branches.BranchConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
     except ValueError as exc:
         status_code = 409 if str(exc).startswith('Branch is not open:') else 422
-        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=status_code, detail='Request could not be completed') from exc
     return {
         'branch_id': branch.branch_id,
         'num_changes': len(branch.changes),
@@ -1382,7 +1382,7 @@ def branch_diff_endpoint(branch_id: str, request: Request):
     try:
         return branches.get_branch_diff(branch_id)
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
 
 
 @app.get('/branches/{branch_id}/verdict', response_model=CombinedVerdict, dependencies=[Depends(require_api_key)])
@@ -1392,7 +1392,7 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
         branch = branches.get_branch(branch_id)
         rebuilt = branches.rebuild_branch_state(branch)
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
     # Scanners are OFF by default on this endpoint. A verdict runs 6 scanner
     # subprocesses serially (checkov/trivy/cloudsplaining x base+branch); on the
     # 1 GB t2.micro checkov exhausts memory and the host OOM-killer takes uvicorn
@@ -1429,11 +1429,11 @@ def rollback_branch_endpoint(branch_id: str, request: Request, payload: Optional
                 expected_branch_revision=expected_revision,
             )
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
     except branches.BranchConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
     return _branch_summary(branch)
 
 
@@ -1459,13 +1459,13 @@ def rollback_branch_to_count_endpoint(branch_id: str, request: Request, payload:
             branch_id, target_count, expected_branch_revision=expected_revision,
         )
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
     except branches.BranchConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
     except branches.InvalidRollbackTargetError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail='Request could not be completed') from exc
     except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
     return _branch_summary(branch)
 
 
@@ -1496,9 +1496,9 @@ def discard_branch_endpoint(branch_id: str, request: Request, payload: Optional[
                 expected_branch_revision=expected_revision,
             )
     except branches.BranchNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail='Request could not be completed') from exc
     except branches.BranchConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail='Request could not be completed') from exc
     return {'branch_id': branch.branch_id, 'status': branch.status}
 
 
@@ -2197,7 +2197,7 @@ def create_github_pr(request: GitHubPRRequest, http_request: Request):
         result = create_fix_pr(gh, request.repo, request.finding, request.hcl, file_path, tf_match=tf_match)
         return GitHubPRResponse(**result)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='Request could not be completed')
 
 
 @app.post('/github/webhook', dependencies=[Depends(require_api_key)])
@@ -2531,7 +2531,7 @@ def index_tf_repo(request: TFIndexRequest):
         return TFIndexResponse(
             status="error",
             repo=request.repo,
-            message=str(e)
+            message='Request could not be completed'
         )
 
 
@@ -3285,7 +3285,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
 
     except ValueError as e:
         if session: session.end_session(end_state='Fail')
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail='Request could not be completed')
 
     except HTTPException:
         if session: session.end_session(end_state='Fail')
@@ -3304,11 +3304,11 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
         if error_code == 'AccessDenied':
             raise HTTPException(status_code=400, detail='Could not assume the IAM role. Make sure you deployed the Emfirge CloudFormation stack correctly.')
         else:
-            raise HTTPException(status_code=400, detail=f'AWS error: {e.response["Error"]["Message"]}')
+            raise HTTPException(status_code=400, detail='AWS request failed')
 
     except Exception as e:
         if session: session.end_session(end_state='Fail')
-        raise HTTPException(status_code=500, detail=f'Server error: {str(e)}')
+        raise HTTPException(status_code=500, detail='Internal server error')
 
 
 # ── SSE STREAMING ANALYZE ENDPOINT ────────────────────────────────
@@ -3404,10 +3404,10 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
                         yield _emit("error", {"message": "Could not assume the IAM role. Make sure you deployed the Emfirge CloudFormation stack correctly."})
                         return
                     else:
-                        yield _emit("error", {"message": f"Role assumption failed: {e.response['Error']['Message']}"})
+                        yield _emit("error", {"message": "Role assumption failed"})
                         return
                 except Exception as e:
-                    yield _emit("error", {"message": f"Could not connect to AWS: {str(e)}"})
+                    yield _emit("error", {"message": "Could not connect to AWS"})
                     return
 
                 yield _emit("progress", {"step": "collecting", "service": "sts", "status": "done", "detail": "Role assumed successfully"})
@@ -3749,7 +3749,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
 
         except Exception as e:
             logger.error(f"analyze/stream error: {e}")
-            yield _emit("error", {"message": str(e)})
+            yield _emit("error", {"message": "Request could not be completed"})
 
     return StreamingResponse(
         scan_stream(),
@@ -4172,9 +4172,9 @@ def purge_user_data(payload: PurgeRequest, request: Request):
         )
     except ClientError as e:
         code = e.response.get('Error', {}).get('Code', 'Unknown')
-        raise HTTPException(status_code=403, detail=f'Cannot assume role ({code}). Stack may be missing or trust policy wrong.')
+        raise HTTPException(status_code=403, detail='Unable to assume the requested role')
     except Exception as e:
-        raise HTTPException(status_code=403, detail=f'Role verification failed: {str(e)[:200]}')
+        raise HTTPException(status_code=403, detail='Role verification failed')
 
     # Collect analysis UUIDs first (needed for S3 cleanup), then delete DB rows
     from app.database import SessionLocal, AnalysisLog, DriftEvent, SimulationLog
@@ -4198,7 +4198,7 @@ def purge_user_data(payload: PurgeRequest, request: Request):
         session.commit()
     except Exception as e:
         session.rollback()
-        raise HTTPException(status_code=500, detail=f'DB purge failed: {str(e)[:200]}')
+        raise HTTPException(status_code=500, detail='Database purge failed')
     finally:
         session.close()
 
