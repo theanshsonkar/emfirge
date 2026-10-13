@@ -1,4 +1,5 @@
 import json
+import json
 import xml.etree.ElementTree as ET
 
 from scripts import scorecard
@@ -50,10 +51,27 @@ def test_scorecard_statuses_grouping_and_precedence(tmp_path):
     assert output["categories"]["laws"]["items"] == [{"id": "L1", "status": "fail"}]
     assert output["categories"]["laws"]["unlabelled"] == [{"id": "test_data_lost_requires_block", "status": "pass"}]
     assert output["categories"]["scanners"]["status"] == "not_run"
+    assert output["headline"] == "4 locked scenarios, 2 escalation paths (+1 one-action-removed negatives), 1 laws: 1 pass, 3 known gaps, 3 fail, 1 skipped"
     assert "known gaps" in output["headline"]
+    assert "## Locked scenarios" in (tmp_path / "scorecard.md").read_text()
+
+
+def test_headline_omits_skipped_when_zero(tmp_path):
+    cases = [
+        ({"classname": "tests.incidents.test_incidents", "name": "test_incident_scenario[R01]"}, None),
+        ({"classname": "tests.imported.test_pathfinding_paths", "name": "test_pathfinding_path_is_blocked[P01]"}, None),
+        ({"classname": "tests.imported.test_pathfinding_paths", "name": "test_pathfinding_requires_every_action[P01-without-x]"}, None),
+        ({"classname": "tests.laws.test_laws", "name": "test_L1_rule[a]"}, None),
+    ]
+    _, output = run(tmp_path, cases)
+    assert output["headline"] == "1 locked scenarios, 1 escalation paths (+1 one-action-removed negatives), 1 laws: 4 pass, 0 known gaps, 0 fail"
+    assert "skipped" not in output["headline"]
 
 
 def test_empty_category_is_nonzero(tmp_path):
-    cases = [({"classname": "tests.incidents.test_incidents", "name": "test_incident_scenario[R01]"}, None)]
+    cases = [
+        ({"classname": "tests.incidents.test_incidents", "name": "test_incident_scenario[R01]"}, None),
+        ({"classname": "tests.imported.test_pathfinding_paths", "name": "test_pathfinding_path_is_blocked[P01]"}, None),
+    ]
     result, _ = run(tmp_path, cases)
     assert result != 0

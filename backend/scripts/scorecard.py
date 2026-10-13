@@ -78,13 +78,18 @@ def classify(root):
     negative_counts = counts(negatives)
     incident_counts = counts(incident_items)
     law_counts = counts(law_items)
+    counted_groups = (incident_counts, must_counts, negative_counts, law_counts)
+    totals = {
+        status: sum(group[status] for group in counted_groups)
+        for status in ("pass", "known_gap", "fail", "skipped")
+    }
     headline = (
-        f"{incident_counts['total']} real agent incidents, "
-        f"{must_counts['total']} escalation paths, {law_counts['total']} laws: "
-        f"{incident_counts['pass'] + must_counts['pass'] + law_counts['pass']} pass, "
-        f"{incident_counts['known_gap'] + must_counts['known_gap'] + law_counts['known_gap']} known gaps, "
-        f"{incident_counts['fail'] + must_counts['fail'] + law_counts['fail']} fail"
+        f"{incident_counts['total']} locked scenarios, "
+        f"{must_counts['total']} escalation paths (+{negative_counts['total']} one-action-removed negatives), "
+        f"{law_counts['total']} laws: {totals['pass']} pass, {totals['known_gap']} known gaps, {totals['fail']} fail"
     )
+    if totals["skipped"] > 0:
+        headline += f", {totals['skipped']} skipped"
     categories = {
         "incidents": {**incident_counts, "items": incident_items},
         "escalation_paths": {
@@ -98,7 +103,7 @@ def classify(root):
 
 
 def markdown(headline, categories):
-    lines = [f"# {headline}", "", "## Incidents", "", "| ID | Status |", "|---|---|"]
+    lines = [f"# {headline}", "", "## Locked scenarios", "", "| ID | Status |", "|---|---|"]
     lines += [f"| {item['id']} | {item['status']} |" for item in categories["incidents"]["items"]]
     lines += ["", "## Escalation paths", "", "| Group | Total | Pass | Known gaps | Fail | Skipped |", "|---|---:|---:|---:|---:|---:|"]
     for key, label in (("must_block", "Must block"), ("negatives", "Negatives")):
@@ -125,7 +130,9 @@ def main(argv=None):
         handle.write("\n")
     with open(args.md_path, "w") as handle:
         handle.write(markdown(headline, categories))
-    if any(not categories[key]["items"] for key in ("incidents", "laws")) or not categories["escalation_paths"]["must_block"]["items"]:
+    if any(not categories[key]["items"] for key in ("incidents", "laws")) or any(
+        not categories["escalation_paths"][key]["items"] for key in ("must_block", "negatives")
+    ):
         return 1
     return 0
 
