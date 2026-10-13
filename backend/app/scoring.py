@@ -1,5 +1,7 @@
 import math
 
+from app.rules import run_all_checks
+
 # ── MATURITY CHECK CONSTANTS ──────────────────────────────────────
 MATURITY_CHECKS = [
     ("cloudtrail_multiregion",    10),
@@ -273,4 +275,130 @@ def calculate_score(findings_dict: dict, total_resources: int = 10, infrastructu
         'maturity_score':            maturity_score,
         'maturity_bonus':            maturity_bonus,
         'maturity_checks_passed':    maturity_checks_passed,
+    }
+
+
+def count_scored_resources(infra) -> int:
+    """Count resources using the same denominator as the scan path."""
+    return (
+        infra.ec2.instance_count +
+        len(infra.ec2.security_groups) +
+        len(infra.ec2.ebs_volumes) +
+        len(infra.ec2.elastic_ips) +
+        infra.s3.total_buckets +
+        len(infra.rds.instances) +
+        len(infra.iam.iam_users) +
+        (1 if infra.cloudtrail.is_enabled else 0) +
+        infra.lambda_data.function_count +
+        infra.secrets_manager.total_secrets +
+        (1 if infra.guardduty.is_enabled else 0) +
+        infra.vpc.total_vpcs +
+        len(infra.vpc.subnets) +
+        infra.kms.total_cmks +
+        infra.sns.total_topics +
+        infra.ecs.total_task_definitions
+    )
+
+
+def score_snapshot(infra, graph=None, findings=None) -> dict:
+    """Score one infrastructure snapshot with its scan denominator."""
+    if graph is None:
+        from app.egraph import build_graph
+        graph = build_graph(infra)
+    if findings is None:
+        findings = run_all_checks(infra, graph)
+    return calculate_score(findings, count_scored_resources(infra), infra)
+
+
+def _finding_value(finding, name, default=None):
+    if isinstance(finding, dict):
+        return finding.get(name, default)
+    return getattr(finding, name, default)
+
+
+def _finding_key(finding):
+    return (_finding_value(finding, 'rule_id'), _finding_value(finding, 'resource_id'))
+
+
+def _finding_buckets(findings):
+    return ('critical_risks', 'moderate_risks', 'low_risks', 'cost_findings')
+
+
+def score_branch(base, branch, base_findings, branch_findings) -> dict:
+    """Score a branch without rewarding deletion of resources or findings."""
+    from app.diffing import _deletion_impacts
+    from app.egraph import build_graph
+
+    base_graph = build_graph(base)
+    branch_graph = build_graph(branch)
+    score_before = score_snapshot(base)
+    base_by_key = {
+        _finding_key(finding): finding
+        for bucket in _finding_buckets(base_findings)
+        for finding in base_findings.get(bucket, [])
+    }
+    branch_by_key = {
+        _finding_key(finding): finding
+        for bucket in _finding_buckets(branch_findings)
+        for finding in branch_findings.get(bucket, [])
+    }
+    branch_resource_ids = {_finding_value(node, 'id', '') for node in branch_graph.nodes}
+    impacts = _deletion_impacts(base_graph, branch_graph)
+    deleted_ids = {
+        impact['removed_resource']['id'] for impact in impacts
+    }
+    related_ids = {
+        related['id']
+        for impact in impacts
+        for related in impact['surviving_related_resources']
+    }
+    carried = []
+    deleted_carried = 0
+    related_carried = 0
+    for key, finding in base_by_key.items():
+        resource_id = _finding_value(finding, 'resource_id')
+        if resource_id in deleted_ids:
+            carried.append(finding)
+            deleted_carried += 1
+        elif key not in branch_by_key and resource_id in related_ids:
+            carried.append(finding)
+            related_carried += 1
+
+    scored_findings = {bucket: list(branch_findings.get(bucket, [])) for bucket in _finding_buckets(branch_findings)}
+    for finding in carried:
+        severity = _finding_value(finding, 'severity')
+        bucket = {
+            'Critical': 'critical_risks',
+            'Moderate': 'moderate_risks',
+            'Low': 'low_risks',
+        }.get(severity)
+        if bucket and _finding_key(finding) not in {
+            _finding_key(item) for item in scored_findings[bucket]
+        }:
+            scored_findings[bucket].append(finding)
+
+    after = calculate_score(scored_findings, count_scored_resources(base), branch)
+    if deleted_ids:
+        base_denominator_after = calculate_score(scored_findings, count_scored_resources(base), base)
+        for key in ('overall_risk_score', 'security_score', 'availability_score',
+                    'disaster_recovery_score', 'cost_score'):
+            after[key] = min(after[key], base_denominator_after[key], score_before[key])
+
+    introduced = set(branch_by_key) - set(base_by_key)
+    if any(_finding_value(branch_by_key[key], 'severity') == 'Critical' for key in introduced):
+        for key in ('overall_risk_score', 'security_score', 'availability_score',
+                    'disaster_recovery_score', 'cost_score'):
+            after[key] = min(after[key], score_before[key])
+
+    notes = []
+    if deleted_carried:
+        notes.append(f'{deleted_carried} findings on deleted resources still counted')
+    if related_carried:
+        notes.append(f'{related_carried} findings on related resources still counted')
+    if any(_finding_value(branch_by_key[key], 'severity') == 'Critical' for key in introduced):
+        notes.append('capped: new Critical finding')
+    return {
+        'score_before': score_before,
+        'score_after': after,
+        'score_notes': notes,
     }

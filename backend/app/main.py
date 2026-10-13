@@ -37,7 +37,7 @@ from app.verdict import CombinedVerdict, combined_verdict
 from app import branches
 from app.aws_collector import collect_infrastructure
 from app.rules import run_all_checks, find_toxic_combos
-from app.scoring import calculate_score
+from app.scoring import calculate_score, count_scored_resources, score_snapshot
 from app.llm import generate_explanation
 from app.auth import require_api_key
 from app.database import create_tables, save_analysis, get_recent_logs, get_log_by_id, get_scan_count_today, get_previous_scan_for_account, save_drift_events, get_drift_events, save_simulation_log, get_simulation_count_today, save_feedback, get_feedback, save_llm_usage, get_llm_usage_count_today, save_tf_index, get_tf_index, get_tf_index_status, create_ci_api_key, validate_ci_api_key, get_ci_api_keys
@@ -3071,26 +3071,8 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
                 finding.mitre_technique_name = technique_name
 
         # STEP 3 — Calculate weighted scores
-        # total_resources must be computed here so it can be passed to calculate_score
-        total_resources = (
-            infrastructure.ec2.instance_count +
-            len(infrastructure.ec2.security_groups) +
-            len(infrastructure.ec2.ebs_volumes) +
-            len(infrastructure.ec2.elastic_ips) +
-            infrastructure.s3.total_buckets +
-            len(infrastructure.rds.instances) +
-            len(infrastructure.iam.iam_users) +
-            (1 if infrastructure.cloudtrail.is_enabled else 0) +
-            infrastructure.lambda_data.function_count +
-            infrastructure.secrets_manager.total_secrets +
-            (1 if infrastructure.guardduty.is_enabled else 0) +
-            infrastructure.vpc.total_vpcs +
-            len(infrastructure.vpc.subnets) +
-            infrastructure.kms.total_cmks +
-            infrastructure.sns.total_topics +
-            infrastructure.ecs.total_task_definitions
-        )
-        scores = calculate_score(findings, total_resources, infrastructure)
+        total_resources = count_scored_resources(infrastructure)
+        scores = score_snapshot(infrastructure, graph=graph, findings=findings)
 
         # Build local warnings list — starts with collector warnings (skipped services),
         # backend failures (Gemini, S3, DB) are appended below
@@ -3569,25 +3551,8 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
 
             # ── STEP 3: Calculate scores ──────────────────────────
             yield _emit("progress", {"step": "analyzing", "detail": "Calculating risk scores..."})
-            total_resources = (
-                infrastructure.ec2.instance_count +
-                len(infrastructure.ec2.security_groups) +
-                len(infrastructure.ec2.ebs_volumes) +
-                len(infrastructure.ec2.elastic_ips) +
-                infrastructure.s3.total_buckets +
-                len(infrastructure.rds.instances) +
-                len(infrastructure.iam.iam_users) +
-                (1 if infrastructure.cloudtrail.is_enabled else 0) +
-                infrastructure.lambda_data.function_count +
-                infrastructure.secrets_manager.total_secrets +
-                (1 if infrastructure.guardduty.is_enabled else 0) +
-                infrastructure.vpc.total_vpcs +
-                len(infrastructure.vpc.subnets) +
-                infrastructure.kms.total_cmks +
-                infrastructure.sns.total_topics +
-                infrastructure.ecs.total_task_definitions
-            )
-            scores = calculate_score(findings, total_resources, infrastructure)
+            total_resources = count_scored_resources(infrastructure)
+            scores = score_snapshot(infrastructure, graph=graph, findings=findings)
 
             local_warnings = list(infrastructure.warnings)
 
