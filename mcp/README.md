@@ -2,13 +2,13 @@
 
 # 🛡️ Emfirge MCP
 
-**Privacy-first AWS security inside your AI.**
+**The harness between your AI agent and your AWS cloud: branch, diff, verdict — with privacy-first masking.**
 
 Version **0.2.3** · Apache-2.0
 
 </div>
 
-The Emfirge MCP server connects an AI client to read-only AWS security analysis. It exposes graph analysis and isolated branch modeling over stdio. Modeled branch changes do not mutate AWS; results compute a security delta and never guarantee safe deployment.
+The Emfirge MCP server is read-only: scans, branches, and verdicts never change your cloud. It exposes graph analysis and isolated branch modeling over stdio. Modeled branch changes do not mutate AWS; results compute a security delta and never guarantee safe deployment.
 
 ## Install
 
@@ -36,7 +36,7 @@ Ask your assistant to scan with a read-only role. This is an example placeholder
 Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 ```
 
-## Tools (15)
+## Tools (18)
 
 ### Analyze
 
