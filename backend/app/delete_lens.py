@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field
 from app.egraph import DEPENDENCY_EDGES, build_graph, get_internet_reachable_set
 from app.mutations import deletion_ledger
 
-RECENT_USE_DAYS = 30
+# matches the default unused-access tracking period of AWS IAM Access Analyzer.
+RECENT_USE_DAYS = 90
 _FIXED_CANNOT_SEE = {"app_code_references", "dns_records", "other_accounts", "data_contents", "cloudtrail_events", "cloudwatch_metrics"}
 _COLLECTION_KEYS = {"network_interfaces", "ebs_volumes", "ebs_snapshots", "rds_snapshots", "iam_role_last_used"}
 

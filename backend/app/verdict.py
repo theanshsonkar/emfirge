@@ -10,11 +10,12 @@ from app import cost, limits
 from app.diffing import diff_infrastructure
 from app.delete_lens import DeletionLens, analyze_deletions, deleted_base_reachable, deleted_role_usage_unknown, recently_used_deleted
 from app.egraph import build_graph, get_internet_reachable_set
-from app.exposure import compute_exposures
 from app.iam_escalation import matching_paths
 from app.mutations import _MUTATION_CAPABILITIES, deletion_ledger
 from app.models import AWSInfrastructure
+from app.plan_ingest import is_aws_provider
 from app.scanners import run_checkov, run_cloudsplaining, run_trivy
+from app.exposure import compute_exposures
 
 
 Severity = Literal["critical", "high", "medium", "low"]
@@ -268,14 +269,28 @@ def _plan_reasons(plans: list[Mapping[str, Any]] | None) -> list[dict[str, str]]
     for plan in plans or []:
         for item in plan.get("unmodeled", []) or []:
             actions = item.get("actions", []) if isinstance(item, Mapping) else []
-            is_delete = "delete" in actions and "create" not in actions
+            provider_name = item.get("provider_name") if isinstance(item, Mapping) else None
+            if not is_aws_provider(provider_name):
+                reasons.append(_reason(
+                    "warn", "outside_view",
+                    "Terraform plan changes resources outside what Emfirge can see",
+                ))
+            elif "delete" in actions:
+                reasons.append(_reason(
+                    "block", "unmodeled_delete",
+                    "Terraform plan deletes or replaces an AWS resource type Emfirge does not model",
+                ))
+            else:
+                reasons.append(_reason(
+                    "warn", "unmodeled_change", "Terraform plan contains unmodeled resources",
+                ))
+        rejected = plan.get("rejected") or []
+        if any(not isinstance(item, Mapping) or "op" not in item or item.get("op") == "delete" for item in rejected):
             reasons.append(_reason(
-                "block" if is_delete else "warn",
-                "unmodeled_delete" if is_delete else "unmodeled_change",
-                "Terraform plan contains an unmodeled resource deletion" if is_delete
-                else "Terraform plan contains unmodeled resources",
+                "block", "plan_delete_rejected",
+                "A Terraform plan deletion could not be applied to the branch, so its impact was not evaluated",
             ))
-        if plan.get("rejected"):
+        elif any(item.get("op") != "delete" for item in rejected if isinstance(item, Mapping)):
             reasons.append(_reason("warn", "plan_change_rejected", "Terraform plan changes were rejected"))
         if plan.get("unknown_fields"):
             reasons.append(_reason("warn", "unknown_plan_values", "Terraform plan contains unknown or unsupported values"))

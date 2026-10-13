@@ -119,3 +119,81 @@ def test_db_identifier_is_resource_id(plan_client):
         _item("aws_db_instance.db", "aws_db_instance", ["create"], None, {"identifier": "db-by-identifier"})]})
     assert response.status_code == 200
     assert "aws_db_instance.db" in response.json()["applied"]
+
+
+def test_non_aws_unmodeled_resources_are_outside_view_and_warn(plan_client):
+    for typ, actions in (("random_password", ["delete"]), ("null_resource", ["create"]),
+                         ("local_file", ["update"]), ("tls_private_key", ["delete", "create"])):
+        branch_id, _, response = _post(plan_client, {"format_version": "1.0", "resource_changes": [
+            {**_item(f"{typ}.x", typ, actions, {}, {}),
+             "provider_name": f"registry.terraform.io/hashicorp/{typ.split('_')[0]}"}
+        ]})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["applied"] == []
+        assert body["unmodeled"][0]["outside_view"] is True
+        verdict_body = plan_client.get(f"/branches/{branch_id}/verdict").json()
+        assert verdict_body["verdict"] == "warn"
+        assert {reason["code"] for reason in verdict_body["reasons"]} == {"outside_view"}
+
+
+@pytest.mark.parametrize("actions", [["create", "delete"], ["delete", "create"]])
+def test_unmodeled_aws_replace_blocks(plan_client, actions):
+    branch_id, _, response = _post(plan_client, {"format_version": "1.0", "resource_changes": [
+        {**_item("aws_dynamodb_table.x", "aws_dynamodb_table", actions, {}, {}),
+         "provider_name": "registry.terraform.io/hashicorp/aws"}
+    ]})
+    assert response.status_code == 200
+    result = plan_client.get(f"/branches/{branch_id}/verdict").json()
+    assert result["verdict"] == "block"
+    assert {reason["code"] for reason in result["reasons"]} == {"unmodeled_delete"}
+
+
+def test_unmodeled_missing_provider_is_aws_and_blocks(plan_client):
+    branch_id, _, response = _post(plan_client, {"format_version": "1.0", "resource_changes": [
+        _item("aws_dynamodb_table.x", "aws_dynamodb_table", ["delete"], {}, {})
+    ]})
+    assert response.status_code == 200
+    assert plan_client.get(f"/branches/{branch_id}/verdict").json()["verdict"] == "block"
+
+
+def test_modeled_type_under_non_aws_provider_is_outside_view(plan_client):
+    branch_id, _, response = _post(plan_client, {"format_version": "1.0", "resource_changes": [
+        {**_item("aws_instance.x", "aws_instance", ["delete"], {"id": "i-x"}, {}),
+         "provider_name": "registry.terraform.io/acme/foo"}
+    ]})
+    assert response.status_code == 200
+    assert response.json()["applied"] == []
+    result = plan_client.get(f"/branches/{branch_id}/verdict").json()
+    assert result["verdict"] == "warn"
+    assert {reason["code"] for reason in result["reasons"]} == {"outside_view"}
+
+
+def test_plan_reasons_are_fail_closed_for_rejected_deletes_and_old_receipts():
+    assert {r["code"] for r in verdict._plan_reasons([{"rejected": [{"op": "add"}]}])} == {"plan_change_rejected"}
+    assert {r["code"] for r in verdict._plan_reasons([{"rejected": [{"address": "x", "reason_code": "mutation_rejected"}]}])} == {"plan_delete_rejected"}
+    reasons = verdict._plan_reasons([{"unmodeled": [{"type": "aws_x", "actions": ["delete"]}]}])
+    assert {r["code"] for r in reasons} == {"unmodeled_delete"}
+
+
+def test_awscc_unmodeled_delete_blocks(plan_client):
+    branch_id, _, response = _post(plan_client, {"format_version": "1.0", "resource_changes": [
+        {**_item("awscc_rds_db_cluster.x", "awscc_rds_db_cluster", ["delete"], {}, {}),
+         "provider_name": "registry.terraform.io/hashicorp/awscc"}
+    ]})
+    assert response.status_code == 200
+    result = plan_client.get(f"/branches/{branch_id}/verdict").json()
+    assert result["verdict"] == "block"
+    assert {reason["code"] for reason in result["reasons"]} == {"unmodeled_delete"}
+
+
+def test_rejected_modeled_delete_records_op_and_blocks(plan_client):
+    branch_id, _, response = _post(plan_client, {"format_version": "1.0", "resource_changes": [
+        _item("aws_security_group.web", "aws_security_group", ["delete"], {"id": "sg-dl-web"}, {})
+    ]})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rejected"] and body["rejected"][0]["op"] == "delete"
+    result = plan_client.get(f"/branches/{branch_id}/verdict").json()
+    assert result["verdict"] == "block"
+    assert "plan_delete_rejected" in {reason["code"] for reason in result["reasons"]}
