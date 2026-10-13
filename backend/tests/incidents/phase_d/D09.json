@@ -1,0 +1,1 @@
+{"id":"D09","why":"delete a security group nothing uses","base":"delete","changes":[{"op":"delete","resource_type":"security_group","resource_id":"sg-dl-unused","fields":{}}],"expect":{"verdict":"pass","coverage_cannot_see_includes":["app_code_references","dns_records","other_accounts","data_contents"]}}
