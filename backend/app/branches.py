@@ -16,6 +16,7 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
+from app import cost
 from app.database import BranchLog, SessionLocal
 from app.diffing import DiffResult, diff_infrastructure, modeled_state_unchanged
 from app.egraph import build_graph
@@ -89,6 +90,8 @@ class BranchSummary(BaseModel):
     lost_connectivity: int = 0
     deletion_impacts: int = 0
     has_privilege_escalation: bool
+    cost_delta: dict[str, Any] = Field(default_factory=dict)
+    cost_delta_monthly_usd: float | None = None
 
 
 class ComparisonResult(BaseModel):
@@ -523,6 +526,7 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
         )
         base_analysis_ids.append(branch.base_analysis_id)
         base_snapshots.append(json.dumps(_model_dump(branch.base), sort_keys=True, separators=(",", ":")))
+        cost_result = cost.cost_delta(branch.base, rebuilt)
         summaries.append(BranchSummary(
             branch_id=branch.branch_id,
             name=branch.name,
@@ -539,12 +543,16 @@ def compare_branches(branch_ids: List[str]) -> ComparisonResult:
             lost_connectivity=len(diff.lost_connectivity),
             deletion_impacts=len(diff.deletion_impacts),
             has_privilege_escalation=has_privilege_escalation,
+            cost_delta=cost_result.model_dump(mode="json"),
+            cost_delta_monthly_usd=cost_result.value,
         ))
 
     mixed_bases = len(set(base_analysis_ids)) > 1 or len(set(base_snapshots)) > 1
     ranked = sorted(
         summaries,
         key=lambda summary: (
+            # Unknown cost is never treated as zero; known estimates rank first.
+            summary.cost_delta_monthly_usd is None,
             bool(summary.lost_dependencies),
             bool(summary.lost_connectivity),
             bool(summary.deletion_impacts),

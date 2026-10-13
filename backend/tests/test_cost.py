@@ -86,21 +86,21 @@ def test_ec2_add_delete_delta_reports_stable_records():
     base = _infra(ec2=EC2Data(instances=[EC2Instance(id="i-old", type="t3.micro", state="running")]))
     branch = _infra(ec2=EC2Data(instances=[EC2Instance(id="i-new", type="t3.small", state="running")]))
     delta = cost_delta(base, branch)
-    assert delta.monthly_delta_usd == round(
+    assert delta.value == round(
         (EC2_HOURLY_USD["t3.small"] - EC2_HOURLY_USD["t3.micro"]) * HOURS_PER_MONTH, 2
     )
-    assert [(item.resource_type, item.resource_id) for item in delta.added_cost] == [("ec2_instance", "i-new")]
-    assert [(item.resource_type, item.resource_id) for item in delta.removed_cost] == [("ec2_instance", "i-old")]
+    assert delta.status == "estimated"
+    assert delta.unknown_count == 0
 
 
 def test_s3_only_delta_is_zero_but_explicitly_incomplete():
     base = _infra(s3=S3Data(buckets=[S3Bucket(name="bucket")]))
     delta = cost_delta(base, _infra())
-    assert delta.monthly_delta_usd == 0
-    assert delta.base_total == delta.branch_total == 0
-    assert delta.added_cost == []
-    assert [(item.resource_type, item.resource_id) for item in delta.removed_cost] == [("s3_bucket", "bucket")]
-    assert any("base: s3_bucket/bucket" in note and "incomplete/unknown" in note for note in delta.unknown_notes)
+    assert delta.value is None
+    assert delta.status == "unknown"
+    assert delta.unknown_count == 1
+    assert "s3_bucket" not in delta.reason
+    assert "bucket" not in delta.reason
 
 
 def test_estimate_is_deterministic_and_does_not_mutate_input():
@@ -135,4 +135,6 @@ def test_unsupported_elastic_ip_is_counted_and_reported_in_delta():
     ]
 
     delta = cost_delta(base, branch)
-    assert any("branch: elastic_ip/eipalloc-1" in note for note in delta.unknown_notes)
+    assert delta.status == "unknown"
+    assert delta.unknown_count == 1
+    assert "eipalloc-1" not in delta.reason
