@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from app import cost
 from app.egraph import build_graph, get_internet_reachable_set
 from app.rules import find_toxic_combos, run_all_checks
-from app.scoring import calculate_score
+from app.scoring import score_branch
 
 
 class DiffResult(BaseModel):
@@ -33,6 +33,15 @@ class DiffResult(BaseModel):
     score_before: int = 0
     score_after: int = 0
     score_delta: int = 0
+    security_score_before: int = 0
+    security_score_after: int = 0
+    availability_score_before: int = 0
+    availability_score_after: int = 0
+    disaster_recovery_score_before: int = 0
+    disaster_recovery_score_after: int = 0
+    cost_score_before: int = 0
+    cost_score_after: int = 0
+    score_notes: list[str] = Field(default_factory=list)
     cost_delta: dict[str, Any] = Field(default_factory=dict)
     cost_delta_monthly_usd: float | None = None
     newly_internet_reachable: list[str] = Field(default_factory=list)
@@ -301,8 +310,11 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     added_findings = sorted((after[key] for key in added_keys), key=_finding_sort)
     removed_findings = sorted((before[key] for key in removed_keys), key=_finding_sort)
 
-    base_score = calculate_score(base_findings, infrastructure=base_infra)["overall_risk_score"]
-    branch_score = calculate_score(branch_findings, infrastructure=branch_infra)["overall_risk_score"]
+    branch_scores = score_branch(base_infra, branch_infra, base_findings, branch_findings)
+    before_scores = branch_scores["score_before"]
+    after_scores = branch_scores["score_after"]
+    base_score = before_scores["overall_risk_score"]
+    branch_score = after_scores["overall_risk_score"]
     base_reachable = get_internet_reachable_set(base_graph)
     branch_reachable = get_internet_reachable_set(branch_graph)
 
@@ -320,6 +332,15 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
         score_before=int(base_score),
         score_after=int(branch_score),
         score_delta=int(branch_score) - int(base_score),
+        security_score_before=int(before_scores["security_score"]),
+        security_score_after=int(after_scores["security_score"]),
+        availability_score_before=int(before_scores["availability_score"]),
+        availability_score_after=int(after_scores["availability_score"]),
+        disaster_recovery_score_before=int(before_scores["disaster_recovery_score"]),
+        disaster_recovery_score_after=int(after_scores["disaster_recovery_score"]),
+        cost_score_before=int(before_scores["cost_score"]),
+        cost_score_after=int(after_scores["cost_score"]),
+        score_notes=branch_scores["score_notes"],
         newly_internet_reachable=sorted(branch_reachable - base_reachable),
         no_longer_internet_reachable=sorted(base_reachable - branch_reachable),
         modeled_state_unchanged=modeled_state_unchanged(base_infra, branch_infra),
