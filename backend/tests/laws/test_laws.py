@@ -172,7 +172,6 @@ def test_L5_deletion_never_increases_score(resource_ids):
     assert diff.score_after <= diff.score_before
 
 
-@pytest.mark.xfail(strict=True, reason="Phase 0 #1: malformed changes")
 def test_L6_invalid_fields_and_types_rejected():
     base = build_incident_base()
     invalid = [
