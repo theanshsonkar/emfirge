@@ -48,7 +48,8 @@ class CombinedVerdict(BaseModel):
     # a complete answer.
     coverage_warnings: List[str] = Field(default_factory=list)
     collection_warnings: List[str] = Field(default_factory=list)
-    cost_delta_monthly_usd: float = 0.0
+    cost_delta: dict[str, Any] = Field(default_factory=dict)
+    cost_delta_monthly_usd: float | None = None
     cost_unknown_notes: List[str] = Field(default_factory=list)
     introduces_privilege_escalation: bool = False
     limits_introduced: List[dict] = Field(default_factory=list)
@@ -89,14 +90,27 @@ def _role_ids_with_privilege_escalation(graph: Any) -> set[str]:
     return escalating
 
 
-def _cost_details(base_infra: AWSInfrastructure, branch_infra: AWSInfrastructure) -> tuple[float, List[str]]:
+def _cost_details(base_infra: AWSInfrastructure, branch_infra: AWSInfrastructure) -> tuple[dict[str, Any], float | None, List[str]]:
     try:
         delta = cost.cost_delta(base_infra, branch_infra)
-        monthly = _value(delta, "monthly_delta_usd", 0.0)
-        notes = _value(delta, "unknown_notes", []) or []
-        return float(monthly), [str(note) for note in notes]
+        if hasattr(delta, "model_dump"):
+            details = delta.model_dump(mode="json")
+        else:
+            # Keep lightweight legacy test doubles usable while the wire shape is typed.
+            monthly = _value(delta, "monthly_delta_usd", None)
+            notes = _value(delta, "unknown_notes", []) or []
+            unknown = bool(notes)
+            details = {"value": None if unknown else monthly, "status": "unknown" if unknown else "estimated",
+                       "reason": ("unknown cost" if unknown else "legacy price estimate"),
+                       "unknown_count": len(notes), "known_provisioned_delta": monthly,
+                       "currency": "USD"}
+        value = details.get("value")
+        notes = ([details["reason"]] if details.get("status") == "unknown" else [])
+        return details, value, notes
     except Exception:
-        return 0.0, []
+        details = {"value": None, "status": "unknown", "reason": "cost unavailable",
+                   "unknown_count": 0, "known_provisioned_delta": None, "currency": "USD"}
+        return details, None, [details["reason"]]
 
 
 def _graph_escalation_details(base_infra: AWSInfrastructure, branch_infra: AWSInfrastructure) -> tuple[set[str], set[str]]:
@@ -226,7 +240,7 @@ def combined_verdict(
     introduced_capacity_breaches = [
         item for item in limits_introduced if item.get("status") == "exceeded"
     ]
-    cost_delta_monthly_usd, cost_unknown_notes = _cost_details(base_infra, branch_infra)
+    cost_delta, cost_delta_monthly_usd, cost_unknown_notes = _cost_details(base_infra, branch_infra)
     introduced_escalating_roles, branch_reachable = _graph_escalation_details(base_infra, branch_infra)
     introduces_privilege_escalation = bool(introduced_escalating_roles)
     native_added = sorted((_native_finding(item) for item in diff.added_findings), key=_sort_finding)
@@ -338,7 +352,9 @@ def combined_verdict(
         unavailable = "; DEGRADED: " + "; ".join(coverage_warnings)
     else:
         unavailable = ""
-    cost_summary = "cost unknown" if cost_unknown_notes else f"cost_delta={cost_delta_monthly_usd:.2f}"
+    cost_summary = "cost unknown" if cost_unknown_notes else (
+        "cost n/a" if cost_delta.get("status") == "n/a" else f"cost_delta={cost_delta_monthly_usd:.2f}"
+    )
     privilege_summary = "; privilege escalation introduced" if introduces_privilege_escalation else ""
     dependency_summary = f"; modeled_dependencies_lost={len(diff.lost_dependencies)}" if diff.lost_dependencies else ""
     connectivity_summary = f"; modeled_internal_paths_lost={len(diff.lost_connectivity)}" if diff.lost_connectivity else ""
@@ -374,6 +390,7 @@ def combined_verdict(
         score_before=diff.score_before,
         score_after=diff.score_after,
         score_delta=diff.score_delta,
+        cost_delta=cost_delta,
         newly_internet_reachable=sorted(diff.newly_internet_reachable),
         no_longer_internet_reachable=sorted(diff.no_longer_internet_reachable),
         possible_service_impacts=possible_service_impacts,
