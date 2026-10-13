@@ -1426,7 +1426,7 @@ async def terraform_plan_endpoint(branch_id: str, request: Request):
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except Exception as exc:
             reason = 'dependency_violation' if 'depend' in str(exc).lower() or 'in use' in str(exc).lower() else 'mutation_rejected'
-            rejected.append({'address': address, 'reason_code': reason})
+            rejected.append({'address': address, 'reason_code': reason, 'op': change.op})
     final_branch = branches.get_branch(branch_id)
     plan_id = str(uuid.uuid4())
     branches.save_plan(plan_id, branch_id, digest, raw.decode('utf-8', errors='replace'),

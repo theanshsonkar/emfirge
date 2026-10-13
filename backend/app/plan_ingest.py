@@ -5,6 +5,18 @@ from typing import Any
 
 from app.mutations import Change
 
+_AWS_PROVIDER_TYPES = {"aws", "awscc"}
+
+
+def is_aws_provider(provider_name: Any) -> bool:
+    """AWS = provider type (last path segment of provider_name) is aws or awscc.
+    A missing/blank/non-string provider_name counts as AWS (fail closed).
+    """
+    if not isinstance(provider_name, str) or not provider_name.strip():
+        return True
+    return provider_name.strip().rstrip("/").rsplit("/", 1)[-1].lower() in _AWS_PROVIDER_TYPES
+
+
 _RESOURCE_MAP = {
     "aws_instance": ("ec2_instance", "id"),
     "aws_db_instance": ("rds_instance", "identifier"),
@@ -88,8 +100,14 @@ def _translate_item(item: dict, unknown_fields: list[dict]) -> tuple[list[Change
     actions = item.get("change", {}).get("actions", [])
     if actions in (["no-op"], ["read"]):
         return [], None
+    provider_name = item.get("provider_name")
+    if not is_aws_provider(provider_name):
+        return [], {"address": address, "type": typ, "actions": actions,
+                     "provider_name": provider_name, "outside_view": True}
     if typ not in _RESOURCE_MAP:
-        return [], {"address": address, "type": typ, "actions": actions}
+        return [], {"address": address, "type": typ, "actions": actions,
+                     "provider_name": provider_name if isinstance(provider_name, str) else None,
+                     "outside_view": False}
     resource, id_key = _RESOURCE_MAP[typ]
     change = item.get("change") or {}
     before, after = change.get("before") or {}, change.get("after") or {}
@@ -138,6 +156,11 @@ def translate_plan(plan: Any) -> dict[str, Any]:
     for item in plan["resource_changes"]:
         if not isinstance(item, dict):
             raise ValueError("Terraform plan resource_changes entries must be objects")
+        change = item.get("change")
+        actions = change.get("actions") if isinstance(change, dict) else None
+        if (not isinstance(change, dict) or not isinstance(actions, list)
+                or not actions or not all(isinstance(action, str) for action in actions)):
+            raise ValueError("Terraform plan change actions must be a non-empty list of strings")
         changes, unsupported = _translate_item(item, unknown_fields)
         if unsupported:
             unmodeled.append(unsupported)
