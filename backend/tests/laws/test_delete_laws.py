@@ -72,11 +72,15 @@ def _apply(base, resource_type, resource_id, fields=None):
 
 def _run(base, sequence):
     branch = base
+    applied_count = 0
     for index, (resource_type, resource_id) in enumerate(sequence):
         next_branch = _apply(branch, resource_type, resource_id,
                              _delete_options(resource_type, resource_id, index))
         if next_branch is not None:
             branch = next_branch
+            applied_count += 1
+    hypothesis.event(f"applied mutations: {applied_count}")
+    hypothesis.assume(applied_count > 0)
     return branch
 
 

@@ -175,6 +175,28 @@ def test_L9_http_free_text_never_contains_planted_identifiers(
             assert response.status_code == 200, response.text
             accepted += 1
 
+    plan = {"format_version": "1.0", "resource_changes": [
+        {"address": f"aws_security_group.{sg_id}", "type": "aws_security_group", "change": {
+            "actions": ["delete"], "before": {"id": sg_id}, "after": None}},
+        {"address": f"aws_dynamodb_table.{lambda_marker}", "type": "aws_dynamodb_table", "change": {
+            "actions": ["delete"], "before": {"name": lambda_marker}, "after": None}},
+    ]}
+    plan_raw = json.dumps(plan, separators=(",", ":")).encode()
+    plan_response = client.post(f"/branches/{branch_id}/plans/terraform", content=plan_raw)
+    _assert_safe(plan_response, markers, account)
+    assert plan_response.status_code == 200, plan_response.text
+    plan_id = plan_response.json()["plan_id"]
+    handback = client.get(f"/branches/{branch_id}/plans/{plan_id}/handback")
+    _assert_safe(handback, markers, account)
+    assert handback.status_code == 200, handback.text
+    handback_payload = handback.json()
+    verified = client.post("/handback/verify", json={
+        "plan_id": plan_id, "verdict_id": handback_payload["verdict_id"],
+        "plan_text": handback_payload["plan_text"],
+    })
+    _assert_safe(verified, markers, account)
+    assert verified.status_code == 200, verified.text
+
     final_responses = (
         client.get(f"/branches/{branch_id}/verdict"), client.get(f"/branches/{branch_id}/diff"),
         client.get(f"/branches/{branch_id}"), client.post("/branches/compare", json={"branch_ids": [branch_id]}),
