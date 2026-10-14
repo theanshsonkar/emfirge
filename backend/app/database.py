@@ -1,7 +1,7 @@
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime, date
+from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
 import os
@@ -330,6 +330,10 @@ def get_log_by_uuid(analysis_id: str, account_ids: set[str] | None = None) -> di
     finally:
         session.close()
 
+def _utc_midnight() -> datetime:
+    return datetime.combine(datetime.utcnow().date(), datetime.min.time())
+
+
 def get_scan_count_today(account_id: str) -> int:
     # Returns how many successful scans this AWS account has done today
     # Used for rate limiting — max 5 scans per account per day
@@ -337,10 +341,9 @@ def get_scan_count_today(account_id: str) -> int:
     # Better to let a scan through than to block a legitimate user due to a DB error
     session = SessionLocal()
     try:
-        today = date.today()
         count = session.query(AnalysisLog).filter(
             AnalysisLog.aws_account_id == account_id,
-            AnalysisLog.timestamp >= datetime.combine(today, datetime.min.time())
+            AnalysisLog.timestamp >= _utc_midnight()
         ).count()
         return count
     except Exception as e:
@@ -423,10 +426,9 @@ def save_simulation_log(aws_account_id: str, analysis_id: str, query: str) -> No
 def get_simulation_count_today(aws_account_id: str) -> int:
     session = SessionLocal()
     try:
-        today = date.today()
         count = session.query(SimulationLog).filter(
             SimulationLog.aws_account_id == aws_account_id,
-            SimulationLog.timestamp >= datetime.combine(today, datetime.min.time())
+            SimulationLog.timestamp >= _utc_midnight()
         ).count()
         return count
     except Exception as e:
@@ -484,11 +486,10 @@ def get_llm_usage_count_today(aws_account_id: str, endpoint_type: str) -> int:
     """Count how many LLM requests this account has made today for the given endpoint type."""
     session = SessionLocal()
     try:
-        today = date.today()
         count = session.query(LLMUsage).filter(
             LLMUsage.aws_account_id == aws_account_id,
             LLMUsage.endpoint_type == endpoint_type,
-            LLMUsage.timestamp >= datetime.combine(today, datetime.min.time())
+            LLMUsage.timestamp >= _utc_midnight()
         ).count()
         return count
     except Exception as e:
