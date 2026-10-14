@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 from app.aws_cli_ingest import parse_cli_commands
@@ -5,6 +7,26 @@ from app.aws_cli_ingest import parse_cli_commands
 
 def _parse(command):
     return parse_cli_commands({"format": "aws-cli/1", "commands": [command]})
+
+
+@pytest.mark.parametrize("command, option", [
+    ("aws ec2 create-tags --resources i-1 --tags 'Key=a,Value=b'", "--tags"),
+    ("aws ec2 authorize-security-group-ingress --group-id sg-1 --ip-permissions 'IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=0.0.0.0/0}]'", "--ip-permissions"),
+    ("aws lambda update-function-configuration --function-name f --environment 'Variables={A=b}'", "--environment"),
+])
+def test_structured_options_refuse_aws_shorthand(command, option):
+    expected = f"Command 1: {option} uses AWS shorthand syntax. Emfirge does not support shorthand and will not guess what it means; pass the value as JSON."
+    with pytest.raises(ValueError, match=rf"^{re.escape(expected)}$"):
+        _parse(command)
+
+
+def test_structured_option_invalid_json_is_not_called_shorthand():
+    with pytest.raises(ValueError, match=r"^Command 1: invalid JSON for --ip-permissions\.$"):
+        _parse("aws ec2 authorize-security-group-ingress --group-id sg-1 --ip-permissions '[{bad'")
+
+
+def test_scalar_string_keeps_equals_and_commas():
+    assert _parse("aws rds delete-db-instance --db-instance-identifier 'a=b,c'")["calls"][0]["parameters"]["DBInstanceIdentifier"] == "a=b,c"
 
 
 def test_parse_terminate_command():
