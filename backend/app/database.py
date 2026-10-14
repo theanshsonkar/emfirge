@@ -123,6 +123,14 @@ class BranchLog(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class BranchOwner(Base):
+    """Hosted tenant ownership for branches created without an analysis base."""
+    __tablename__ = 'branch_owners'
+    branch_id = Column(String(36), primary_key=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class PlanLog(Base):
     """Raw Terraform plan receipt and ingest outcome for one branch."""
     __tablename__ = 'plan_logs'
@@ -229,11 +237,16 @@ def save_analysis(data: dict) -> int:
     finally:
         session.close()
 
-def get_recent_logs(limit: int = 20, account_id: str = None) -> list:
+def get_recent_logs(limit: int = 20, account_id: str = None,
+                    account_ids: set[str] | None = None) -> list:
     session = SessionLocal()
     try:
         q = session.query(AnalysisLog)
-        if account_id:
+        if account_ids is not None:
+            if not account_ids:
+                return []
+            q = q.filter(AnalysisLog.aws_account_id.in_(account_ids))
+        elif account_id:
             q = q.filter(AnalysisLog.aws_account_id == account_id)
         logs = q.order_by(
             AnalysisLog.timestamp.desc()
@@ -261,13 +274,18 @@ def get_recent_logs(limit: int = 20, account_id: str = None) -> list:
     finally:
         session.close()
 
-def get_log_by_id(log_id: int, account_id: str = None) -> dict:
+def get_log_by_id(log_id: int, account_id: str = None,
+                  account_ids: set[str] | None = None) -> dict:
     session = SessionLocal()
     try:
         q = session.query(AnalysisLog).filter(
             AnalysisLog.id == log_id
         )
-        if account_id:
+        if account_ids is not None:
+            if not account_ids:
+                return {}
+            q = q.filter(AnalysisLog.aws_account_id.in_(account_ids))
+        elif account_id:
             q = q.filter(AnalysisLog.aws_account_id == account_id)
         log = q.first()
         if not log:
@@ -292,6 +310,23 @@ def get_log_by_id(log_id: int, account_id: str = None) -> dict:
     except Exception as e:
         print(f'Error fetching log: {e}')
         return {}
+    finally:
+        session.close()
+
+def get_log_by_uuid(analysis_id: str, account_ids: set[str] | None = None) -> dict:
+    session = SessionLocal()
+    try:
+        if account_ids is not None and not account_ids:
+            return {}
+        q = session.query(AnalysisLog).filter(
+            AnalysisLog.findings_json.like(f'%"analysis_id": "{analysis_id}"%')
+        )
+        if account_ids is not None:
+            q = q.filter(AnalysisLog.aws_account_id.in_(account_ids))
+        log = q.order_by(AnalysisLog.timestamp.desc()).first()
+        if not log:
+            return {}
+        return get_log_by_id(log.id, account_ids=account_ids)
     finally:
         session.close()
 
@@ -342,11 +377,16 @@ def save_drift_events(events: list) -> None:
     finally:
         session.close()
 
-def get_drift_events(account_id: str = None, limit: int = 20) -> list:
+def get_drift_events(account_id: str = None, limit: int = 20,
+                     account_ids: set[str] | None = None) -> list:
     session = SessionLocal()
     try:
         q = session.query(DriftEvent)
-        if account_id:
+        if account_ids is not None:
+            if not account_ids:
+                return []
+            q = q.filter(DriftEvent.aws_account_id.in_(account_ids))
+        elif account_id:
             q = q.filter(DriftEvent.aws_account_id == account_id)
         rows = q.order_by(DriftEvent.detected_at.desc()).limit(limit).all()
         return [{
