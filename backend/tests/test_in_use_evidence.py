@@ -258,7 +258,7 @@ class Recorder:
     def __init__(self):
         self.sts, self.clients, self.account = [], [], "111122223333"
 
-    def assume(self, role_arn):
+    def assume(self, role_arn, _caller, _db):
         self.sts.append(role_arn)
         return CREDS, self.account
 

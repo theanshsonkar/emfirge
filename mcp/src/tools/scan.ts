@@ -13,7 +13,7 @@ export const roleArnSchema = z
   .string()
   .regex(/^arn:aws:iam::\d{12}:role\/.+$/, "Must be a valid IAM role ARN")
   .describe(
-    "AWS IAM role ARN to assume. Must trust Emfirge's account with ExternalId 'aws-risk-agent'. " +
+    "AWS IAM role ARN to assume. Must trust Emfirge's account with your project ExternalId from emfirge_setup. " +
       "If the user doesn't have one, call emfirge_setup_help first.",
   );
 

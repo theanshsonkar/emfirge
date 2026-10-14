@@ -145,6 +145,14 @@ def analyze_deletions(base: Any, branch: Any, evidence=None) -> DeletionLens:
     can = sorted(k for k, v in statuses.items() if v == "ok" and k in _COLLECTION_KEYS)
     cannot = sorted(_FIXED_CANNOT_SEE | {k for k, v in statuses.items() if v != "ok" and k in _COLLECTION_KEYS})
     deleted_resource_ids = {str(x.get("resource_id")) for x in ledger}
+    for item in scoped:
+        status = _v(item, "status")
+        if status in {"denied", "error"} and _v(item, "used") is None:
+            resource_id = str(_v(item, "resource_id"))
+            reason = "access denied" if status == "denied" else "read error"
+            entry = f"recent use of {resource_id}: could not check ({reason})"
+            if entry not in cannot:
+                cannot.append(entry)
     for source in ("cloudtrail_events", "cloudwatch_metrics"):
         in_scope = deleted_resource_ids if source == "cloudtrail_events" else {
             str(x.get("resource_id")) for x in ledger if str(x.get("resource_type")) in METRIC_SPECS
@@ -165,6 +173,7 @@ def analyze_deletions(base: Any, branch: Any, evidence=None) -> DeletionLens:
             if source not in can:
                 can.append(source)
     can = sorted(can)
+    cannot = sorted(cannot)
     return DeletionLens(data_lost=lost, recovery_points=sorted(recovery, key=lambda x: (x.resource_id, x.kind)), impacts=impacts, max_depth=max((x.depth for x in impacts), default=0), coverage=DeletionCoverage(can_see=can, cannot_see=cannot), in_use_evidence=scoped)
 
 

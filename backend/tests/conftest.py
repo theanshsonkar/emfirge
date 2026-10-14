@@ -1,12 +1,16 @@
 import os
 
 os.environ.setdefault("WHITELISTED_ACCOUNTS", "000000000000")
+os.environ.setdefault("DATABASE_URL", "sqlite:////tmp/emfirge-test.sqlite")
 
 """
 Shared fixtures for Emfirge test suite.
 All fixtures build synthetic AWSInfrastructure objects — zero real AWS calls.
 """
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from app.models import (
     AWSInfrastructure, EC2Data, S3Data, RDSData, IAMData, IAMUser,
     CloudTrailData, CostData, CloudWatchData, GuardDutyData,
@@ -18,6 +22,36 @@ from app.models import (
     DynamoDBData, DynamoDBTable,
     EC2Instance, SecurityGroup, S3Bucket, RDSInstance, LoadBalancer,
 )
+
+
+@pytest.fixture
+def shared_test_db(monkeypatch):
+    """Use one thread-safe in-memory database for each targeted test."""
+    from app import auth, branches, database
+    from app.main import app
+
+    engine = create_engine(
+        'sqlite://',
+        connect_args={'check_same_thread': False},
+        poolclass=StaticPool,
+    )
+    factory = sessionmaker(bind=engine)
+    database.Base.metadata.create_all(engine)
+    monkeypatch.setattr(database, 'engine', engine)
+    monkeypatch.setattr(database, 'SessionLocal', factory)
+    monkeypatch.setattr(auth, 'SessionLocal', factory)
+    monkeypatch.setattr(branches, 'SessionLocal', factory)
+
+    def override_get_db():
+        session = factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[database.get_db] = override_get_db
+    yield factory
+    app.dependency_overrides.pop(database.get_db, None)
 
 
 # ── HELPERS ───────────────────────────────────────────────────────
@@ -240,3 +274,57 @@ def partial_permissions_infra():
         guardduty=GuardDutyData(is_enabled=False),
         warnings=["EC2 scan skipped: insufficient permissions", "RDS scan skipped: insufficient permissions"],
     )
+
+
+@pytest.fixture(autouse=True)
+def self_host_role_access(monkeypatch):
+    """Legacy API tests exercise self-host mode without contacting AWS."""
+    monkeypatch.setenv('EMFIRGE_EXTERNAL_ID', 'test-external-id-0123456789abcdefghij')
+
+    class FakeSTS:
+        def assume_role(self, **kwargs):
+            return {'Credentials': {
+                'AccessKeyId': 'test-access-key',
+                'SecretAccessKey': 'test-secret-key',
+                'SessionToken': 'test-session-token',
+            }}
+
+    from app import role_access
+    from app.database import Base, engine
+    Base.metadata.create_all(bind=engine)
+    monkeypatch.setattr(role_access, '_sts_client', lambda: FakeSTS())
+
+
+@pytest.fixture(autouse=True)
+def ci_sqlite_db(monkeypatch):
+    """Keep CI's in-memory SQLite database shared across app threads."""
+    if os.getenv('DATABASE_URL') != 'sqlite:///:memory:':
+        yield
+        return
+
+    from app import auth, branches, database
+    from app.main import app
+
+    engine = create_engine(
+        'sqlite://',
+        connect_args={'check_same_thread': False},
+        poolclass=StaticPool,
+    )
+    factory = sessionmaker(bind=engine)
+    database.Base.metadata.create_all(engine)
+    monkeypatch.setattr(database, 'engine', engine)
+    monkeypatch.setattr(database, 'SessionLocal', factory)
+    monkeypatch.setattr(auth, 'SessionLocal', factory)
+    monkeypatch.setattr(branches, 'SessionLocal', factory)
+    monkeypatch.setattr(branches, 'SessionLocal', factory)
+
+    def override_get_db():
+        session = factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    app.dependency_overrides[database.get_db] = override_get_db
+    yield
+    app.dependency_overrides.pop(database.get_db, None)

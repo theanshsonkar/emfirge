@@ -40,12 +40,14 @@ from app.plan_ingest import translate_plan
 from app.verdict import CombinedVerdict, combined_verdict
 from app import branches, identifiers
 from app.in_use_evidence import EvidenceRequest, EvidenceEstimate, build_estimate, read_evidence, SOURCES, WINDOW_DAYS
-from app.aws_collector import collect_infrastructure, assume_role_credentials, ROLE_SESSION_NAME
+from app.aws_collector import collect_infrastructure, ROLE_SESSION_NAME
 from app.rules import run_all_checks, find_toxic_combos
 from app.scoring import calculate_score, count_scored_resources, score_snapshot
 from app.llm import generate_explanation
-from app.auth import require_api_key
-from app.database import create_tables, save_analysis, get_recent_logs, get_log_by_id, get_scan_count_today, get_previous_scan_for_account, save_drift_events, get_drift_events, save_simulation_log, get_simulation_count_today, save_feedback, get_feedback, save_llm_usage, get_llm_usage_count_today, save_tf_index, get_tf_index, get_tf_index_status, create_ci_api_key, validate_ci_api_key, get_ci_api_keys
+from app.auth import require_api_key, get_caller, Caller
+from app.role_access import assume_customer_role
+from app.database import get_db
+from app.database import create_tables, save_analysis, get_recent_logs, get_log_by_id, get_scan_count_today, get_previous_scan_for_account, save_drift_events, get_drift_events, save_simulation_log, get_simulation_count_today, save_feedback, get_feedback, save_llm_usage, get_llm_usage_count_today, save_tf_index, get_tf_index, get_tf_index_status, create_ci_api_key, validate_ci_api_key, get_ci_api_keys, AccountBinding, AccountBindingEvent
 from app.storage import save_report, get_report_url
 from app.egraph import build_graph, get_simulation_slice, validate_simulation_response, classify_query, format_graph_for_claude, bfs_from_internet, find_attack_path, Graph
 from app.exposure import compute_exposures
@@ -123,9 +125,17 @@ def _check_pr_rate_limit(ip: str) -> None:
     _pr_request_log[ip].append(now)
 
 
+# Compatibility seam for evidence tests and older integrations; actual STS
+# operation remains exclusively in app.role_access.
+def assume_role_credentials(role_arn: str, caller: Caller, db):
+    credentials = assume_customer_role(role_arn, caller, db)
+    return credentials, role_arn.split(':')[4]
+
+
 # ── IN-MEMORY RATE LIMITER FOR BRANCH ROUTES ─────────────────────
 # Branches are persisted state and therefore use the same per-route IP
 # limiter pattern as the existing sensitive/cost-bearing endpoints. This is
+
 # not authentication; without global auth middleware these routes remain
 # publicly callable, subject to this process-local limiter.
 _branch_request_log: dict = defaultdict(list)
@@ -293,6 +303,7 @@ def health():
         from app.database import SessionLocal
         from sqlalchemy import text
         session = SessionLocal()
+
         session.execute(text('SELECT 1'))
         session.close()
     except Exception:
@@ -307,7 +318,6 @@ def logs(account_id: str = None):
 @app.get('/history')
 def history(limit: int = 10, account_id: str = None):
     logs = get_recent_logs(limit=limit, account_id=account_id)
-    # Calculate score delta vs previous scan
     enriched = []
     for i, log in enumerate(logs):
         delta = None
@@ -319,6 +329,34 @@ def history(limit: int = 10, account_id: str = None):
             'trend': 'improved' if delta and delta < 0 else 'regressed' if delta and delta > 0 else 'unchanged'
         })
     return {'scans': enriched, 'count': len(enriched)}
+
+
+@app.get('/project')
+def project_info(caller: Caller = Depends(get_caller)):
+    if caller.mode == 'hosted':
+        return {'mode': 'hosted', 'project': caller.project_name, 'external_id': caller.external_id}
+    return {'mode': 'self-host', 'external_id': caller.external_id}
+
+
+@app.delete('/admin/account-bindings/{aws_account_id}')
+def unbind_account(aws_account_id: str, request: Request, db=Depends(get_db)):
+    import hmac
+    admin_key = os.environ.get('EMFIRGE_ADMIN_KEY')
+    if not admin_key:
+        raise HTTPException(status_code=404, detail='Not found')
+    supplied = request.headers.get('X-Admin-Key', '')
+    if not hmac.compare_digest(supplied, admin_key):
+        raise HTTPException(status_code=403, detail='Forbidden')
+    binding = db.query(AccountBinding).filter_by(aws_account_id=aws_account_id).first()
+    unbound = binding is not None
+    project_id = binding.project_id if binding else None
+    if binding:
+        db.delete(binding)
+    db.add(AccountBindingEvent(aws_account_id=aws_account_id, project_id=project_id,
+                               action='unbind', actor='admin'))
+    db.commit()
+    logger.warning('Admin unbound AWS account %s', aws_account_id)
+    return {'unbound': unbound}
 
 @app.get('/drift/events')
 def drift_events_endpoint(account_id: str = None, limit: int = 20):
@@ -1482,7 +1520,7 @@ def _evidence_validation_detail(exc: ValidationError) -> list[dict]:
 
 
 @app.post('/branches/{branch_id}/in-use-evidence', dependencies=[Depends(require_api_key)])
-async def collect_in_use_evidence(branch_id: str, request: Request):
+async def collect_in_use_evidence(branch_id: str, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     _check_branch_rate_limit(_branch_request_ip(request))
     try:
         body = json.loads(await request.body())
@@ -1494,10 +1532,10 @@ async def collect_in_use_evidence(branch_id: str, request: Request):
         payload = EvidenceRequest.model_validate(body)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=_evidence_validation_detail(exc)) from None
-    return await run_in_threadpool(_collect_in_use_evidence, branch_id, payload)
+    return await run_in_threadpool(_collect_in_use_evidence, branch_id, payload, caller, db)
 
 
-def _collect_in_use_evidence(branch_id: str, payload: EvidenceRequest):
+def _collect_in_use_evidence(branch_id: str, payload: EvidenceRequest, caller: Caller, db):
     try:
         branch = branches.get_branch(branch_id)
     except branches.BranchNotFoundError as exc:
@@ -1513,7 +1551,7 @@ def _collect_in_use_evidence(branch_id: str, payload: EvidenceRequest):
     if not account_id or not scanned or account_id != scanned:
         raise HTTPException(status_code=409, detail='Role account does not match the scanned account')
     try:
-        creds, assumed_account = assume_role_credentials(payload.role_arn)
+        creds, assumed_account = assume_role_credentials(payload.role_arn, caller, db)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail='Could not assume the Emfirge role') from exc
     if assumed_account != scanned:
@@ -3232,7 +3270,8 @@ def list_feedback(limit: int = 50, key: str = None):
 
 
 @app.post('/analyze', dependencies=[Depends(require_api_key)])
-def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
+def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    assumed_credentials = assume_customer_role(credentials.role_arn, caller, db)
     start_time = time.time()
 
     # AGENTOPS SESSION START
@@ -3268,7 +3307,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
         if is_demo_arn(credentials.role_arn):
             infrastructure = get_demo_infrastructure(credentials.role_arn)
         else:
-            infrastructure = collect_infrastructure(credentials)
+            infrastructure = collect_infrastructure(credentials, assumed_credentials)
 
         # STEP 1.5 — Build infrastructure graph for relationship-aware rules
         graph = build_graph(infrastructure)
@@ -3574,7 +3613,9 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
 # Same logic as /analyze but wrapped in an SSE generator.
 
 @app.post('/analyze/stream', dependencies=[Depends(require_api_key)])
-async def analyze_stream(credentials: AWSCredentials, request: Request, raw: bool = False):
+async def analyze_stream(credentials: AWSCredentials, request: Request, raw: bool = False, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    # Authorize before constructing the streaming response so failures are HTTP errors.
+    assumed_credentials = assume_customer_role(credentials.role_arn, caller, db)
     """
     SSE streaming version of /analyze. Sends progress events as each collector
     completes, then emits the full AnalysisResponse as the final event.
@@ -3644,29 +3685,9 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
                     SNSData, ECSData, WAFData
                 )
 
-                # Assume role
-                try:
-                    sts = boto3.client('sts', config=BOTO_CONFIG)
-                    assumed = sts.assume_role(
-                        RoleArn=credentials.role_arn,
-                        RoleSessionName='EmfirgeSecurityScan',
-                        ExternalId='aws-risk-agent',
-                        DurationSeconds=3600
-                    )
-                    key = assumed['Credentials']['AccessKeyId']
-                    secret = assumed['Credentials']['SecretAccessKey']
-                    token = assumed['Credentials']['SessionToken']
-                except _ClientError as e:
-                    code = e.response['Error']['Code']
-                    if code == 'AccessDenied':
-                        yield _emit("error", {"message": "Could not assume the IAM role. Make sure you deployed the Emfirge CloudFormation stack correctly."})
-                        return
-                    else:
-                        yield _emit("error", {"message": "Role assumption failed"})
-                        return
-                except Exception as e:
-                    yield _emit("error", {"message": "Could not connect to AWS"})
-                    return
+                key = assumed_credentials['AccessKeyId']
+                secret = assumed_credentials['SecretAccessKey']
+                token = assumed_credentials['SessionToken']
 
                 yield _emit("progress", {"step": "collecting", "service": "sts", "status": "done", "detail": "Role assumed successfully"})
 
@@ -4405,34 +4426,14 @@ class PurgeRequest(_PurgeBase):
     region: str = 'us-east-1'
 
 @app.post('/privacy/purge')
-def purge_user_data(payload: PurgeRequest, request: Request):
+def purge_user_data(payload: PurgeRequest, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     """
     Delete all stored data for the AWS account that owns this role.
     Re-assumes the role to verify caller controls the account.
     Deletes from analysis_logs, drift_events, simulation_logs + S3 reports.
     """
-    import re as _re
-    # Validate role ARN format and extract account ID
-    match = _re.match(r'^arn:aws:iam::(\d{12}):role/[\w+=,.@\-/]+$', payload.role_arn or '')
-    if not match:
-        raise HTTPException(status_code=400, detail='Invalid role ARN format')
-    account_id = match.group(1)
-
-    # Re-assume the role: caller must control this AWS account.
-    # If they can't assume, they can't purge.
-    try:
-        sts = boto3.client('sts')
-        sts.assume_role(
-            RoleArn=payload.role_arn,
-            RoleSessionName='emfirge-purge',
-            ExternalId='aws-risk-agent',
-            DurationSeconds=900,
-        )
-    except ClientError as e:
-        code = e.response.get('Error', {}).get('Code', 'Unknown')
-        raise HTTPException(status_code=403, detail='Unable to assume the requested role')
-    except Exception as e:
-        raise HTTPException(status_code=403, detail='Role verification failed')
+    assume_customer_role(payload.role_arn, caller, db)
+    account_id = payload.role_arn.split(':')[4]
 
     # Collect analysis UUIDs first (needed for S3 cleanup), then delete DB rows
     from app.database import SessionLocal, AnalysisLog, DriftEvent, SimulationLog

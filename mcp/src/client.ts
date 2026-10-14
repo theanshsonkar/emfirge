@@ -60,7 +60,7 @@ export async function backendCall<T = unknown>(
       }
       if (res.status === 403) {
         throw new Error(
-          "Access denied. Check the role's trust policy and ExternalId 'aws-risk-agent'. " +
+          "Access denied. Check the role's trust policy and your project ExternalId from emfirge_setup. " +
             "If you don't have a role yet, call emfirge_setup_help.",
         );
       }

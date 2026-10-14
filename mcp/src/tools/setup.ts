@@ -2,6 +2,7 @@
 // First-time users don't have a role ARN yet, and chat doesn't have buttons.
 
 import { z } from "zod";
+import { backendCall } from "../client.js";
 
 export const setupSchema = {} as const;
 
@@ -10,14 +11,34 @@ const TEMPLATE_URL =
   "https://emfirge-reports.s3.ap-south-1.amazonaws.com/cloudformation/iam-role.yaml";
 
 const TRUSTED_ACCOUNT = process.env.EMFIRGE_TRUSTED_ACCOUNT_ID ?? "000000000000";
-const EXTERNAL_ID = process.env.EMFIRGE_EXTERNAL_ID ?? "aws-risk-agent";
+const NO_EXTERNAL_ID =
+  "No ExternalId. Hosted: set EMFIRGE_API_KEY. Self-host: set EMFIRGE_EXTERNAL_ID on the server and here.";
+
+type ProjectResponse = {
+  mode?: "hosted" | "self-host";
+  project?: string;
+  external_id?: string | null;
+};
+
+async function getExternalId(): Promise<string> {
+  let project: ProjectResponse | undefined;
+  try {
+    project = await backendCall<ProjectResponse>("GET", "/project");
+  } catch {
+    // Self-host deployments may not expose the hosted project endpoint.
+  }
+  const externalId = project?.external_id || process.env.EMFIRGE_EXTERNAL_ID;
+  if (!externalId) throw new Error(NO_EXTERNAL_ID);
+  return externalId;
+}
 
 export async function setupHandler(_args: Record<string, never>) {
+  const externalId = await getExternalId();
   const cfUrl =
     `https://console.aws.amazon.com/cloudformation/home#/stacks/quickcreate?` +
     `templateURL=${encodeURIComponent(TEMPLATE_URL)}` +
     `&stackName=EmfirgeReadOnlyStack` +
-    `&param_ExternalId=${EXTERNAL_ID}`;
+    `&param_ExternalId=${encodeURIComponent(externalId)}`;
 
   // IMPORTANT: This text is engineered for cross-client rendering.
   // - URL on the first line so the LLM can't summarize past it.
@@ -27,6 +48,7 @@ export async function setupHandler(_args: Record<string, never>) {
   //   the LLM has to relay it verbatim or the user sees nothing actionable.
   const text = [
     `Deploy URL: ${cfUrl}`,
+    `Your ExternalId: ${externalId}`,
     "",
     "(Note to assistant: paste the URL above verbatim in your reply. " +
       "Users on CLI clients — Claude Code, Codex, Kiro CLI — do not see tool output by default.)",
@@ -38,7 +60,8 @@ export async function setupHandler(_args: Record<string, never>) {
     "4. Paste the RoleArn back here and the scan will run.",
     "",
     "Background (relay only if asked):",
-    `- Trusts AWS account ${TRUSTED_ACCOUNT}, ExternalId "${EXTERNAL_ID}".`,
+    `- Trusts AWS account ${TRUSTED_ACCOUNT}, ExternalId "${externalId}".`,
+    "- Roles made with the old shared ExternalId must be redeployed with your project ExternalId.",
     "- Read-only: AWS-managed SecurityAudit policy + a handful of extra read perms. No write access of any kind.",
     "- Instantly revocable — deleting the CloudFormation stack removes the role.",
     "- Details: https://emfirge.cloud/security.html",

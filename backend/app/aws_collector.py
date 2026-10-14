@@ -26,20 +26,16 @@ from datetime import datetime, timezone
 # max_attempts=2: one initial call + one retry. Faster failure (11s max vs 25s with 5 retries).
 BOTO_CONFIG = Config(connect_timeout=5, read_timeout=10, retries={'max_attempts': 2, 'mode': 'standard'})
 
-def collect_infrastructure(credentials: AWSCredentials) -> AWSInfrastructure:
+def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dict | None = None) -> AWSInfrastructure:
     region = credentials.region
     warnings = []
 
-    # ── ASSUME ROLE ───────────────────────────────────────────────
-    # Exchange the user's Role ARN for temporary credentials
-    # These credentials expire after 1 hour automatically
-    try:
-        assumed_credentials, _assumed_account = assume_role_credentials(credentials.role_arn)
-        key = assumed_credentials['AccessKeyId']
-        secret = assumed_credentials['SecretAccessKey']
-        token = assumed_credentials['SessionToken']
-    except ValueError:
-        raise
+    # Credentials are authorized by app.role_access before collection starts.
+    if assumed_credentials is None:
+        raise ValueError('Role credentials were not authorized')
+    key = assumed_credentials['AccessKeyId']
+    secret = assumed_credentials['SecretAccessKey']
+    token = assumed_credentials['SessionToken']
 
     # ── VALIDATE REGION ───────────────────────────────────────────
     # Fail fast if region is invalid before firing all 10 threads
@@ -3009,20 +3005,3 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
 
 
 ROLE_SESSION_NAME = 'EmfirgeSecurityScan'
-
-def assume_role_credentials(role_arn: str):
-    sts = boto3.client('sts', config=BOTO_CONFIG)
-    try:
-        assumed = sts.assume_role(RoleArn=role_arn, RoleSessionName=ROLE_SESSION_NAME, ExternalId='aws-risk-agent', DurationSeconds=3600)
-        creds = assumed['Credentials']
-        account = str(assumed.get('AssumedRoleUser', {}).get('Arn', '')).split(':')[4] or None
-        return {'AccessKeyId': creds['AccessKeyId'], 'SecretAccessKey': creds['SecretAccessKey'], 'SessionToken': creds['SessionToken']}, account
-    except ClientError as e:
-        code = e.response['Error']['Code']
-        if code == 'AccessDenied':
-            raise ValueError('Could not assume the IAM role. Make sure you deployed the Emfirge CloudFormation stack correctly.')
-        if code == 'InvalidClientTokenId':
-            raise ValueError('Invalid Role ARN. Please check the ARN you copied from the CloudFormation stack output.')
-        raise ValueError('Role assumption failed')
-    except Exception:
-        raise ValueError('Could not connect to AWS')

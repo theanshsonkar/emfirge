@@ -5,9 +5,10 @@ import os
 import secrets
 from datetime import datetime
 
+from dataclasses import dataclass
 from fastapi import HTTPException, Request
 
-from app.database import APIKey, SessionLocal
+from app.database import APIKey, Project, SessionLocal
 
 
 AUTH_ENABLED = os.getenv('EMFIRGE_REQUIRE_AUTH', '').lower() in {'1', 'true', 'yes'}
@@ -39,6 +40,53 @@ def create_api_key(project_name: str) -> str:
     except Exception:
         session.rollback()
         raise
+    finally:
+        session.close()
+
+
+@dataclass
+class Caller:
+    mode: str
+    project_id: int | None
+    project_name: str | None
+    external_id: str | None
+
+
+def _request_key(request: Request) -> str:
+    authorization = request.headers.get('authorization')
+    if authorization is not None:
+        scheme, separator, token = authorization.partition(' ')
+        return token.strip() if separator and scheme.lower() == 'bearer' else ''
+    return request.headers.get('x-api-key', '').strip()
+
+
+def _get_or_create_project(session, project_name: str) -> Project:
+    project = session.query(Project).filter(Project.name == project_name).first()
+    if project:
+        return project
+    project = Project(name=project_name, external_id=secrets.token_urlsafe(32))
+    session.add(project)
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        project = session.query(Project).filter(Project.name == project_name).first()
+        if project is None:
+            raise
+    return project
+
+
+async def get_caller(request: Request) -> Caller:
+    if not AUTH_ENABLED:
+        return Caller('self-host', None, None, os.environ.get('EMFIRGE_EXTERNAL_ID') or None)
+    raw = _request_key(request)
+    key = verify_api_key(raw)
+    if key is None:
+        raise HTTPException(status_code=401, detail='Unauthorized')
+    session = SessionLocal()
+    try:
+        project = _get_or_create_project(session, key.project_name)
+        return Caller('hosted', project.id, project.name, project.external_id)
     finally:
         session.close()
 
