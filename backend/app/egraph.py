@@ -7,6 +7,7 @@ with nodes (resources) and edges (relationships between resources).
 
 import copy
 import fnmatch
+import ipaddress
 import re
 from collections.abc import Mapping as MappingABC
 from enum import Enum
@@ -15,6 +16,7 @@ from typing import ClassVar, Dict, List, Any, Optional, Set, Mapping
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.cidr import INTERNET_CIDRS, is_internet_cidr
 from app.models import AWSInfrastructure
 import app.iam_classifier as iam_classifier
 from app.iam_escalation import matching_paths
@@ -670,7 +672,7 @@ def subnet_has_igw_route(subnet_id, graph) -> Optional[bool]:
             continue
         saw_data = True
         for route in routes:
-            if (_value(route, "destination_cidr") == "0.0.0.0/0" and
+            if (is_internet_cidr(_value(route, "destination_cidr")) and
                     str(_value(route, "target_type", "")).lower() == "internet_gateway"):
                 return True
     return False if saw_data else None
@@ -712,7 +714,7 @@ def nacl_allows_inbound(subnet_id, port_from, port_to, protocol, graph) -> tuple
     for _, entry in entries:
         if _value(entry, "egress", None) is not False:
             continue
-        if _value(entry, "cidr_block") != "0.0.0.0/0":
+        if not is_internet_cidr(_value(entry, "cidr_block")):
             continue
         entry_protocol = str(_value(entry, "protocol", "-1")).lower()
         if entry_protocol not in {"-1", "all", wanted_protocol}:
@@ -751,7 +753,7 @@ def internet_ingress(resource_node, subnet_id, sg_list, graph) -> list[dict]:
             rules = _value(_value(sg, "metadata", {}) or {}, "rules")
         for rule in rules if isinstance(rules, (list, tuple)) else []:
             ranges = _value(rule, "ip_ranges", []) or []
-            public = next((str(cidr) for cidr in ranges if str(cidr) in {"0.0.0.0/0", "::/0"}), None)
+            public = next((str(cidr) for cidr in ranges if is_internet_cidr(cidr)), None)
             if public is None:
                 continue
             from_port, to_port = _value(rule, "from_port"), _value(rule, "to_port")
@@ -931,15 +933,12 @@ def _nacl_subnets(subnet_id, graph):
 def _cidr_covers(cidr, opposite_cidr):
     if not cidr or not opposite_cidr:
         return False
-    if cidr == "0.0.0.0/0":
-        return True
     try:
-        import ipaddress
-        return ipaddress.ip_network(opposite_cidr, strict=False).subnet_of(
-            ipaddress.ip_network(cidr, strict=False)
-        )
-    except ValueError:
-        return cidr == opposite_cidr
+        network = ipaddress.ip_network(cidr, strict=False)
+        opposite = ipaddress.ip_network(opposite_cidr, strict=False)
+        return opposite.subnet_of(network)
+    except (ValueError, TypeError):
+        return False
 
 
 def _nacl_denies(entries, opposite_cidr, port_range, egress):

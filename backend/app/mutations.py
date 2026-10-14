@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, Literal, Type, get_args
 from ipaddress import ip_network
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError, field_validator
+from app.cidr import is_internet_cidr
 
 from app.models import (
     AccessStatement,
@@ -423,7 +424,7 @@ def _sync_route_table_public_subnets(infra: AWSInfrastructure) -> None:
         get = (lambda key, default=None: getattr(table, key, default)) if isinstance(table, RouteTable) else table.get
         routes = get("routes", []) or []
         if any(
-            str(route.destination_cidr if isinstance(route, Route) else route.get("destination_cidr", "")) == "0.0.0.0/0"
+            is_internet_cidr(str(route.destination_cidr if isinstance(route, Route) else route.get("destination_cidr", "")))
             and str(route.target_type if isinstance(route, Route) else route.get("target_type", "")).lower() == "internet_gateway"
             for route in routes
         ):
@@ -698,7 +699,7 @@ def recompute_derived_state(
             continue
         for rule in group.rules:
             cidrs = rule.get("ip_ranges") or []
-            if not {"0.0.0.0/0", "::/0"}.intersection(cidrs):
+            if not any(is_internet_cidr(cidr) for cidr in cidrs):
                 continue
             if covers_port(rule, 22):
                 ssh_matches.append(group.id)

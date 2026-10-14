@@ -8,6 +8,8 @@ Each function receives (infra_dict, resource_id) and mutates infra_dict in-place
 Returns True if mutation was applied, False if resource not found.
 """
 
+from app.cidr import is_internet_cidr
+
 
 def _fix_ssh_open(infra_dict: dict, resource_id: str) -> bool:
     """EMFIRGE-EC2-002: Remove SSH (port 22) open to 0.0.0.0/0 from the security group."""
@@ -17,7 +19,7 @@ def _fix_ssh_open(infra_dict: dict, resource_id: str) -> bool:
                 r for r in sg.get('rules', [])
                 if not (
                     r.get('from_port') == 22 and
-                    '0.0.0.0/0' in r.get('ip_ranges', [])
+                    any(is_internet_cidr(cidr) for cidr in r.get('ip_ranges', []))
                 )
             ]
             # Also update the ssh_open_to_internet flag
@@ -35,7 +37,7 @@ def _fix_rdp_open(infra_dict: dict, resource_id: str) -> bool:
                 r for r in sg.get('rules', [])
                 if not (
                     r.get('from_port') == 3389 and
-                    '0.0.0.0/0' in r.get('ip_ranges', [])
+                    any(is_internet_cidr(cidr) for cidr in r.get('ip_ranges', []))
                 )
             ]
             infra_dict['ec2']['rdp_open_to_internet'] = False
