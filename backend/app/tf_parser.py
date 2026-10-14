@@ -10,6 +10,8 @@ import re
 from typing import Optional
 from dataclasses import dataclass, field
 
+from app.cidr import is_internet_cidr
+
 
 @dataclass
 class TFChange:
@@ -282,7 +284,7 @@ def _map_sg_attrs(attrs: dict) -> dict:
     # Ingress rules would need deeper parsing of ingress blocks
     # For now, flag if cidr_blocks contains 0.0.0.0/0
     for key, val in attrs.items():
-        if "cidr" in key and "0.0.0.0/0" in val:
+        if "cidr" in key and any(is_internet_cidr(item) for item in (val if isinstance(val, (list, tuple, set)) else [val])):
             config["open_to_internet"] = True
         if "from_port" in key:
             config["from_port"] = int(val) if val.isdigit() else 0

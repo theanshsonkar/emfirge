@@ -36,6 +36,7 @@ from app.models import (
     CIAnalyzeRequest, CIAnalyzeResponse, CIAPIKeyRequest, CIAPIKeyResponse,
 )
 from app.diffing import DiffResult
+from app.cidr import is_internet_cidr
 from app.mutations import Change, MutationCapabilities, apply_change, mutation_capabilities
 from app.plan_ingest import translate_plan
 from app.aws_api_ingest import translate_api_calls
@@ -530,7 +531,7 @@ def get_graph(analysis_id: str, caller: Caller = Depends(get_caller), db=Depends
             attack_paths.append({
                 'finding_id': '',
                 'finding_title': 'Active internet exposure',
-                'severity': 'critical' if any(item['source'] in {'0.0.0.0/0', '::/0'} and item['from_port'] <= 22 <= item['to_port'] for item in exposures) else 'moderate',
+                'severity': 'critical' if any(is_internet_cidr(item['source']) and item['from_port'] <= 22 <= item['to_port'] for item in exposures) else 'moderate',
                 'path': lateral_path or [entry],
                 'entry': entry,
                 'exposures': exposures,

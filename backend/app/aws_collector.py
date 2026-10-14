@@ -6,6 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointResolutionError
 from botocore.config import Config
+from app.cidr import is_internet_cidr
 from app.models import (
     AWSCredentials, AWSInfrastructure,
     EC2Data, S3Data, RDSData, IAMData, IAMUser,
@@ -378,21 +379,20 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
             egress_rules = []
             
             for rule in sg['IpPermissions']:
-                rules.append(build_security_group_rule(rule))
+                rules.append(build_security_group_rule(rule, include_ipv6=True))
                 
-                for ip in rule.get('IpRanges', []):
-                    if ip.get('CidrIp') == '0.0.0.0/0':
-                        open_security_groups.append(sg_name)
-                        port = rule.get('FromPort', 0)
-                        if port == 22:
-                            ssh_open = True
-                            ssh_security_group_id = sg_id
-                        if port == 3389:
-                            rdp_open = True
-                            rdp_security_group_id = sg_id
+                if any(is_internet_cidr(ip.get('CidrIp')) for ip in rule.get('IpRanges', [])) or any(is_internet_cidr(ip.get('CidrIpv6')) for ip in rule.get('Ipv6Ranges', [])):
+                    open_security_groups.append(sg_name)
+                    port = rule.get('FromPort', 0)
+                    if port == 22:
+                        ssh_open = True
+                        ssh_security_group_id = sg_id
+                    if port == 3389:
+                        rdp_open = True
+                        rdp_security_group_id = sg_id
 
             for rule in sg.get('IpPermissionsEgress', []):
-                egress_rules.append(build_security_group_rule(rule, egress=True))
+                egress_rules.append(build_security_group_rule(rule, egress=True, include_ipv6=True))
             
             # Add to relationship tracking
             security_groups.append({
@@ -1854,7 +1854,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
                 ]
                 routes = []
                 for route in rt.get('Routes', []):
-                    destination_cidr = route.get('DestinationCidrBlock')
+                    destination_cidr = route.get('DestinationCidrBlock') or route.get('DestinationIpv6CidrBlock')
                     if not destination_cidr:
                         continue
                     gateway_id = route.get('GatewayId')
@@ -1890,9 +1890,9 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
                 ))
 
                 has_igw_route = any(
-                    r.get('GatewayId', '').startswith('igw-')
+                    r.get('GatewayId', '').startswith('igw-') and
+                    (is_internet_cidr(r.get('DestinationCidrBlock')) or is_internet_cidr(r.get('DestinationIpv6CidrBlock')))
                     for r in rt.get('Routes', [])
-                    if r.get('DestinationCidrBlock') == '0.0.0.0/0'
                 )
 
                 is_main_rt = False

@@ -218,3 +218,25 @@ def test_L8_verdict_is_exactly_the_reason_policy(web_rules, latent_rules, public
     else:
         assert result.reasons == []
         assert result.verdict == "pass"
+
+
+@given(st.lists(st.sampled_from([22, 80, 443, 3306, 5432, 6379]), min_size=1, max_size=4, unique=True))
+def test_L17_ipv6_any_is_internet_like_ipv4_any(ports):
+    base = build_incident_base()
+    web = next(sg for sg in base.ec2.security_groups if sg.id == "sg-inc-web")
+    web.rules = [{"protocol": "tcp", "from_port": port, "to_port": port, "ip_ranges": ["0.0.0.0/0"]} for port in ports]
+    twin = copy.deepcopy(base)
+    twin_web = next(sg for sg in twin.ec2.security_groups if sg.id == "sg-inc-web")
+    for rule in twin_web.rules:
+        rule["ip_ranges"] = ["::/0" if cidr == "0.0.0.0/0" else cidr for cidr in rule["ip_ranges"]]
+    original_findings = run_all_checks(base, build_graph(base))
+    twin_findings = run_all_checks(twin, build_graph(twin))
+    categories = ("critical_risks", "moderate_risks", "low_risks", "cost_findings")
+    original = [item for category in categories for item in original_findings[category]]
+    ipv6 = [item for category in categories for item in twin_findings[category]]
+    key = lambda item: (getattr(item, "rule_id", None), getattr(item, "resource_id", None), getattr(item, "severity", None))
+    assert {key(item) for item in original} == {key(item) for item in ipv6}
+    assert get_internet_reachable_set(build_graph(base)) == get_internet_reachable_set(build_graph(twin))
+    left = combined_verdict(base, apply_change(base, _changes_for_rules("sg-inc-web", web.rules)), run_scanners=False)
+    right = combined_verdict(twin, apply_change(twin, _changes_for_rules("sg-inc-web", twin_web.rules)), run_scanners=False)
+    assert (left.verdict, {reason["code"] for reason in left.reasons}) == (right.verdict, {reason["code"] for reason in right.reasons})

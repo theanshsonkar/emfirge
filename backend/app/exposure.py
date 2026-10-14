@@ -1,6 +1,7 @@
 """Per-port public exposure evidence for infrastructure snapshots."""
-
 from __future__ import annotations
+
+from app.cidr import is_internet_cidr
 
 from ipaddress import ip_network
 from typing import Any, Mapping
@@ -115,7 +116,7 @@ def _sg_consumers(sg_id: str, infra: Any, graph: Any) -> list[Any]:
 def _severity(protocol: str, from_port: int, to_port: int, source: str, state: str) -> str:
     if state == "latent":
         return "Moderate"
-    world_open = source in {"0.0.0.0/0", "::/0"}
+    world_open = is_internet_cidr(source)
     if protocol == "-1" and world_open:
         return "Critical"
     classes = {PORT_CLASSES[port] for port in range(from_port, to_port + 1) if port in PORT_CLASSES}

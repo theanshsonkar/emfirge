@@ -1,4 +1,5 @@
 from app.models import AWSInfrastructure, RiskFinding, ToxicCombo
+from app.cidr import is_internet_cidr
 from app.iam_escalation import matching_paths
 
 from app.egraph import Graph, find_orphaned_resources, get_internet_reachable_set, get_attack_path_to, is_traversable_relationship
@@ -334,7 +335,7 @@ def check_dangerous_open_ports(infra: AWSInfrastructure, graph: Optional[Graph] 
         for rule in sg.rules:
             ip_ranges = rule.get('ip_ranges', [])
             # Only care about rules open to the entire internet
-            if '0.0.0.0/0' not in ip_ranges and '::/0' not in ip_ranges:
+            if not any(is_internet_cidr(cidr) for cidr in ip_ranges):
                 continue
 
             from_port = rule.get('from_port')
@@ -486,7 +487,7 @@ def check_default_sg_open(infra: AWSInfrastructure, graph: Optional[Graph] = Non
             continue
         for rule in sg.rules:
             ip_ranges = rule.get('ip_ranges', [])
-            if '0.0.0.0/0' in ip_ranges or '::/0' in ip_ranges:
+            if any(is_internet_cidr(cidr) for cidr in ip_ranges):
                 severity = 'Critical'
                 confidence = 'HIGH'
                 issue_suffix = ''
@@ -766,7 +767,7 @@ def check_rds_public(infra: AWSInfrastructure, graph: Optional[Graph] = None, ct
                                 # Check if any rule allows 0.0.0.0/0
                                 for rule in rules:
                                     ip_ranges = rule.get('ip_ranges', [])
-                                    if '0.0.0.0/0' not in ip_ranges:
+                                    if not any(is_internet_cidr(cidr) for cidr in ip_ranges):
                                         has_restrictive_sg = True
                                         break
                         
