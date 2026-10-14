@@ -2,6 +2,7 @@ import copy
 import json
 import os
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from hypothesis import given, strategies as st
@@ -240,40 +241,121 @@ def _normalized_attack_paths(infra):
     return paths
 
 
-@given(st.lists(st.sampled_from([22, 80, 443, 3306, 5432, 6379]), min_size=1, max_size=4, unique=True))
-def test_L17_ipv6_any_is_internet_like_ipv4_any(ports):
-    base = build_incident_base()
-    web = next(sg for sg in base.ec2.security_groups if sg.id == "sg-inc-web")
-    web.rules = [{"protocol": "tcp", "from_port": port, "to_port": port, "ip_ranges": ["0.0.0.0/0"]} for port in ports]
-    twin = copy.deepcopy(base)
-    twin_web = next(sg for sg in twin.ec2.security_groups if sg.id == "sg-inc-web")
-    for rule in twin_web.rules:
-        rule["ip_ranges"] = ["::/0" if cidr == "0.0.0.0/0" else cidr for cidr in rule["ip_ranges"]]
-    original_findings = run_all_checks(base, build_graph(base))
-    twin_findings = run_all_checks(twin, build_graph(twin))
+
+
+CIDRS = [
+    {"CidrIp": "0.0.0.0/0"},
+    {"CidrIp": "10.0.0.0/8"},
+    {"CidrIp": "192.168.1.0/24"},
+]
+PORT_CHOICES = st.one_of(
+    st.sampled_from([22, 3389, 3306, 5432, 6379, 80, 443]),
+    st.integers(min_value=1, max_value=65535),
+)
+
+
+@st.composite
+def _raw_permission(draw, *, require_ipv4_any=False):
+    protocol = draw(st.sampled_from(["tcp", "udp", "-1"]))
+    if protocol == "-1":
+        ports = {}
+    else:
+        start = draw(PORT_CHOICES)
+        ports = {"FromPort": start, "ToPort": start + draw(st.integers(min_value=0, max_value=65535 - start))}
+    ranges = draw(st.lists(st.sampled_from(CIDRS), unique_by=lambda item: item["CidrIp"], max_size=3))
+    if require_ipv4_any and not any(item["CidrIp"] == "0.0.0.0/0" for item in ranges):
+        ranges = [{"CidrIp": "0.0.0.0/0"}] + ranges
+    return {
+        "IpProtocol": protocol,
+        **ports,
+        "IpRanges": ranges,
+        "Ipv6Ranges": [],
+        "UserIdGroupPairs": draw(st.lists(st.fixed_dictionaries({"GroupId": st.just("sg-peer")}), max_size=1)),
+    }
+
+
+@st.composite
+def _raw_permissions(draw):
+    required = draw(_raw_permission(require_ipv4_any=True))
+    rest = draw(st.lists(_raw_permission(), min_size=0, max_size=3))
+    return [required, *rest]
+
+
+def _collect_raw_web_sg(permissions):
+    sg = {
+        "GroupId": "sg-inc-web", "GroupName": "incident-web",
+        "IpPermissions": permissions, "IpPermissionsEgress": [],
+    }
+    ec2 = MagicMock()
+    ec2.describe_instances.return_value = {"Reservations": []}
+    ec2.describe_security_groups.return_value = {"SecurityGroups": [sg]}
+    ec2.describe_addresses.return_value = {"Addresses": []}
+    ec2.describe_route_tables.return_value = {"RouteTables": []}
+    ec2.get_paginator.return_value = MagicMock(paginate=lambda: [{}])
+    elb, asg = MagicMock(), MagicMock()
+    elb.describe_load_balancers.return_value = {"LoadBalancers": []}
+    asg.describe_auto_scaling_groups.return_value = {"AutoScalingGroups": []}
+    from app.aws_collector import collect_ec2
+    with patch(
+        "app.aws_collector.boto3.client",
+        lambda service, **_: {"ec2": ec2, "elbv2": elb, "autoscaling": asg}[service],
+    ):
+        return collect_ec2("key", "secret", "token", "ap-south-1", [])
+
+
+def _incident_with_collected_web(base, collected):
+    web = next(sg for sg in collected.security_groups if sg.id == "sg-inc-web")
+    target = next(sg for sg in base.ec2.security_groups if sg.id == "sg-inc-web")
+    target.rules = web.rules
+    target.egress_rules = web.egress_rules
+    base.ec2.ssh_open_to_internet = collected.ssh_open_to_internet
+    base.ec2.rdp_open_to_internet = collected.rdp_open_to_internet
+    base.ec2.ssh_security_group_id = collected.ssh_security_group_id
+    base.ec2.rdp_security_group_id = collected.rdp_security_group_id
+    base.ec2.open_security_groups = collected.open_security_groups
+    return base
+
+
+def _finding_keys(infra):
+    findings = run_all_checks(infra, build_graph(infra))
     categories = ("critical_risks", "moderate_risks", "low_risks", "cost_findings")
-    original = [item for category in categories for item in original_findings[category]]
-    ipv6 = [item for category in categories for item in twin_findings[category]]
-    key = lambda item: (getattr(item, "rule_id", None), getattr(item, "resource_id", None), getattr(item, "severity", None))
-    assert {key(item) for item in original} == {key(item) for item in ipv6}
+    return {
+        (getattr(item, "rule_id", None), getattr(item, "resource_id", None), getattr(item, "severity", None))
+        for category in categories for item in findings[category]
+    }
+
+
+@given(_raw_permissions())
+def test_L17_ipv6_any_is_internet_like_ipv4_any(permissions):
+    base = _incident_with_collected_web(build_incident_base(), _collect_raw_web_sg(permissions))
+    twin_permissions = copy.deepcopy(permissions)
+    for original_permission, permission in zip(permissions, twin_permissions):
+        ipv4_any = {"CidrIp": "0.0.0.0/0"}
+        had_ipv4_any = ipv4_any in original_permission["IpRanges"]
+        permission["IpRanges"] = [item for item in permission["IpRanges"] if item != ipv4_any]
+        if had_ipv4_any:
+            permission["Ipv6Ranges"].append({"CidrIpv6": "::/0"})
+    twin = _incident_with_collected_web(build_incident_base(), _collect_raw_web_sg(twin_permissions))
+
+    original_web = next(sg for sg in base.ec2.security_groups if sg.id == "sg-inc-web")
+    twin_web = next(sg for sg in twin.ec2.security_groups if sg.id == "sg-inc-web")
+    assert (base.ec2.ssh_open_to_internet, base.ec2.rdp_open_to_internet) == (twin.ec2.ssh_open_to_internet, twin.ec2.rdp_open_to_internet)
+    assert _finding_keys(base) == _finding_keys(twin)
     assert get_internet_reachable_set(build_graph(base)) == get_internet_reachable_set(build_graph(twin))
-    left = combined_verdict(base, apply_change(base, _changes_for_rules("sg-inc-web", web.rules)), run_scanners=False)
+    assert _normalized_attack_paths(base) == _normalized_attack_paths(twin)
+    left = combined_verdict(base, apply_change(base, _changes_for_rules("sg-inc-web", original_web.rules)), run_scanners=False)
     right = combined_verdict(twin, apply_change(twin, _changes_for_rules("sg-inc-web", twin_web.rules)), run_scanners=False)
     assert (left.verdict, {reason["code"] for reason in left.reasons}) == (right.verdict, {reason["code"] for reason in right.reasons})
-    original_paths = _normalized_attack_paths(base)
-    ipv6_paths = _normalized_attack_paths(twin)
-    assert original_paths
-    assert original_paths == ipv6_paths
 
 
 def test_L17_sanity_paths_nonempty():
-    base = build_incident_base()
-    web = next(sg for sg in base.ec2.security_groups if sg.id == "sg-inc-web")
-    web.rules = [{"protocol": "tcp", "from_port": 22, "to_port": 22, "ip_ranges": ["0.0.0.0/0"]}]
-    twin = copy.deepcopy(base)
-    twin_web = next(sg for sg in twin.ec2.security_groups if sg.id == "sg-inc-web")
-    twin_web.rules[0]["ip_ranges"] = ["::/0"]
-    original_paths = _normalized_attack_paths(base)
-    ipv6_paths = _normalized_attack_paths(twin)
-    assert original_paths
-    assert original_paths == ipv6_paths
+    permissions = [{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+                    "IpRanges": [{"CidrIp": "0.0.0.0/0"}], "Ipv6Ranges": [],
+                    "UserIdGroupPairs": []}]
+    base = _incident_with_collected_web(build_incident_base(), _collect_raw_web_sg(permissions))
+    twin_permissions = copy.deepcopy(permissions)
+    twin_permissions[0]["IpRanges"] = []
+    twin_permissions[0]["Ipv6Ranges"] = [{"CidrIpv6": "::/0"}]
+    twin = _incident_with_collected_web(build_incident_base(), _collect_raw_web_sg(twin_permissions))
+    assert _normalized_attack_paths(base)
+    assert _normalized_attack_paths(base) == _normalized_attack_paths(twin)
