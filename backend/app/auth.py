@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime
 
 from dataclasses import dataclass
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Depends
 
 from app.database import APIKey, Project, SessionLocal
 
@@ -85,7 +85,7 @@ async def get_caller(request: Request) -> Caller:
         raise HTTPException(status_code=401, detail='Unauthorized')
     session = SessionLocal()
     try:
-        project = _get_or_create_project(session, key.project_name)
+        project = _get_or_create_project(session, getattr(key, 'project_name', 'default'))
         return Caller('hosted', project.id, project.name, project.external_id)
     finally:
         session.close()
@@ -112,22 +112,16 @@ def verify_api_key(raw: str):
         session.close()
 
 
-async def require_api_key(request: Request):
-    """Require a valid API key when EMFIRGE_REQUIRE_AUTH is enabled.
+async def legacy_ci_enabled():
+    """Disable legacy CI and GitHub webhook integrations in hosted mode."""
+    if AUTH_ENABLED:
+        raise HTTPException(status_code=404, detail='Not Found')
 
-    Authorization: Bearer takes precedence over X-API-Key when both headers
-    are present. All authentication failures use the same generic response.
+
+async def require_api_key(request: Request, caller: Caller = Depends(get_caller)):
+    """Require a valid caller; retained name for compatibility with existing routes.
+
+    The caller dependency supplies the same authentication behavior and makes
+    tenant identity available to routes that have not yet migrated signatures.
     """
-    if not AUTH_ENABLED:
-        return None
-
-    authorization = request.headers.get('authorization')
-    if authorization is not None:
-        scheme, separator, token = authorization.partition(' ')
-        raw = token.strip() if separator and scheme.lower() == 'bearer' else ''
-    else:
-        raw = request.headers.get('x-api-key', '').strip()
-
-    if not raw or verify_api_key(raw) is None:
-        raise HTTPException(status_code=401, detail='Unauthorized')
     return None
