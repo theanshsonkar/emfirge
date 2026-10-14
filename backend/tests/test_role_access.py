@@ -1,20 +1,14 @@
 import pytest
 from botocore.exceptions import ClientError
 from fastapi import HTTPException
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 from app import role_access
 from app.database import AccountBinding, AccountBindingEvent, Project
 from app.auth import Caller
 
 
 @pytest.fixture
-def db_session():
-    engine = create_engine('sqlite:///:memory:')
-    from app.database import Base
-    Base.metadata.create_all(engine)
-    session = sessionmaker(bind=engine)()
+def db_session(shared_test_db):
+    session = shared_test_db()
     try:
         yield session
     finally:

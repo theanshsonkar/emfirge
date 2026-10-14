@@ -4,15 +4,12 @@ import pytest
 from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 
-from app import auth, role_access
+from app import auth, database, role_access
 from app.database import (
     APIKey,
     AccountBinding,
     AccountBindingEvent,
-    Base,
     Project,
-    SessionLocal,
-    engine,
 )
 from app.main import app
 from app.models import AWSInfrastructure
@@ -40,8 +37,8 @@ class FakeSTS:
 
 
 @pytest.fixture
-def client(monkeypatch):
-    Base.metadata.create_all(bind=engine)
+def client(shared_test_db, monkeypatch):
+    database.Base.metadata.create_all(bind=database.engine)
     monkeypatch.setattr(auth, "AUTH_ENABLED", True)
     monkeypatch.setenv("EMFIRGE_REQUIRE_AUTH", "1")
     return TestClient(app)
@@ -65,7 +62,7 @@ def project_info(client, key):
 
 
 def project_id(project_name):
-    db = SessionLocal()
+    db = database.SessionLocal()
     try:
         return db.query(Project).filter_by(name=project_name).one().id
     finally:
@@ -73,7 +70,7 @@ def project_id(project_name):
 
 
 def bind(account_id, project_name):
-    db = SessionLocal()
+    db = database.SessionLocal()
     try:
         db.add(AccountBinding(aws_account_id=account_id, project_id=project_id(project_name)))
         db.commit()
@@ -82,7 +79,7 @@ def bind(account_id, project_name):
 
 
 def binding_exists(account_id):
-    db = SessionLocal()
+    db = database.SessionLocal()
     try:
         return db.query(AccountBinding).filter_by(aws_account_id=account_id).first() is not None
     finally:
@@ -90,7 +87,7 @@ def binding_exists(account_id):
 
 
 def event_exists(account_id, action):
-    db = SessionLocal()
+    db = database.SessionLocal()
     try:
         return db.query(AccountBindingEvent).filter_by(
             aws_account_id=account_id, action=action
@@ -100,7 +97,7 @@ def event_exists(account_id, action):
 
 
 def remove_binding(account_id):
-    db = SessionLocal()
+    db = database.SessionLocal()
     try:
         db.query(AccountBindingEvent).filter_by(aws_account_id=account_id).delete()
         db.query(AccountBinding).filter_by(aws_account_id=account_id).delete()
@@ -210,7 +207,7 @@ def test_replacement_key_keeps_external_id_and_access(client, sts, monkeypatch):
     enable_scan(monkeypatch)
     assert analyze(client, key_a, account=account).status_code == 200
 
-    db = SessionLocal()
+    db = database.SessionLocal()
     try:
         replacement = auth.generate_api_key()
         db.add(APIKey(key_hash=auth.hash_key(replacement), project_name=name_a, active=True))
