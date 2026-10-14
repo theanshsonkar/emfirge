@@ -283,6 +283,12 @@ def _plan_reasons(plans: list[Mapping[str, Any]] | None) -> list[dict[str, str]]
                     "block", "unmodeled_delete",
                     f"{source_label} deletes or replaces an AWS resource type Emfirge does not model",
                 ))
+            elif item.get("risk") == "risky" and source_label == "AWS API call":
+                operation = item.get("type", "AWS API call").split(".", 1)[-1]
+                reasons.append(_reason(
+                    "block", "unmodeled_risky_change",
+                    f"Unmodeled AWS API call {operation} can remove access or protections; blocked until Emfirge models it.",
+                ))
             else:
                 reasons.append(_reason(
                     "warn", "unmodeled_change", f"{source_label} contains unmodeled resources",
