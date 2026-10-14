@@ -1,5 +1,6 @@
 from tests.incidents.synthetic_base import load_synthetic_base
 import json
+import uuid
 import shlex
 
 import botocore.session
@@ -356,3 +357,82 @@ def test_L18_sanity(plan_client):
     assert plan_client.post(f"/branches/{cli_branch}/plans/aws-cli", json={"format": "aws-cli/1", "commands": [_l18_render_call(call)]}).status_code == 200
     assert plan_client.get(f"/branches/{api_branch}/verdict").json()["verdict"] != "pass"
     assert plan_client.get(f"/branches/{cli_branch}/verdict").json()["verdict"] != "pass"
+
+
+# L19 uses the same modeled AWS API surface as L18, rendered independently into
+# CloudFormation describe-change-set records rather than through the CLI parser.
+_L19_CALLS = st.sampled_from([
+    {"service": "ec2", "operation": "TerminateInstances", "parameters": {"InstanceIds": ["i-dl-web"]}},
+    {"service": "ec2", "operation": "DeleteVolume", "parameters": {"VolumeId": "vol-dl-data"}},
+    {"service": "ec2", "operation": "DeleteSecurityGroup", "parameters": {"GroupId": "sg-dl-web"}},
+    {"service": "rds", "operation": "DeleteDBInstance", "parameters": {"DBInstanceIdentifier": "db-dl-prod", "SkipFinalSnapshot": True}},
+    {"service": "s3", "operation": "DeleteBucket", "parameters": {"Bucket": "dl-artifacts"}},
+    {"service": "lambda", "operation": "DeleteFunction", "parameters": {"FunctionName": "dl-worker"}},
+    {"service": "iam", "operation": "DeleteRole", "parameters": {"RoleName": "DlAppRole"}},
+    {"service": "rds", "operation": "ModifyDBInstance", "parameters": {"DBInstanceIdentifier": "db-dl-prod", "DeletionProtection": False}},
+    {"service": "ec2", "operation": "AuthorizeSecurityGroupIngress", "parameters": {"GroupId": "sg-dl-web", "IpPermissions": [{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}]}},
+])
+
+
+def _l19_item(call):
+    p = call["parameters"]
+    service, operation = call["service"], call["operation"]
+    if (service, operation) == ("ec2", "TerminateInstances"):
+        typ, physical = "AWS::EC2::Instance", "i-dl-web"
+    elif (service, operation) == ("ec2", "DeleteVolume"):
+        typ, physical = "AWS::EC2::Volume", p["VolumeId"]
+    elif (service, operation) == ("ec2", "DeleteSecurityGroup"):
+        typ, physical = "AWS::EC2::SecurityGroup", p["GroupId"]
+    elif (service, operation) == ("rds", "DeleteDBInstance"):
+        typ, physical = "AWS::RDS::DBInstance", p["DBInstanceIdentifier"]
+    elif (service, operation) == ("s3", "DeleteBucket"):
+        typ, physical = "AWS::S3::Bucket", p["Bucket"]
+    elif (service, operation) == ("lambda", "DeleteFunction"):
+        typ, physical = "AWS::Lambda::Function", p["FunctionName"]
+    elif (service, operation) == ("iam", "DeleteRole"):
+        typ, physical = "AWS::IAM::Role", p["RoleName"]
+    else:
+        typ = physical = None
+    if typ is not None:
+        rc = {"Action": "Remove", "LogicalResourceId": "L19", "PhysicalResourceId": physical, "ResourceType": typ, "Replacement": "False"}
+        if operation == "DeleteDBInstance":
+            rc["PolicyAction"] = "Delete"
+        return {"Type": "Resource", "ResourceChange": rc}
+    if operation == "ModifyDBInstance":
+        before = {"Properties": {"DeletionProtection": True}}
+        after = {"Properties": {"DeletionProtection": p["DeletionProtection"]}}
+        return {"Type": "Resource", "ResourceChange": {"Action": "Modify", "LogicalResourceId": "L19", "PhysicalResourceId": p["DBInstanceIdentifier"], "ResourceType": "AWS::RDS::DBInstance", "Replacement": "False", "BeforeContext": json.dumps(before), "AfterContext": json.dumps(after)}}
+    permission = p["IpPermissions"][0]
+    before = {"Properties": {"SecurityGroupIngress": []}}
+    after = {"Properties": {"SecurityGroupIngress": [{"IpProtocol": permission["IpProtocol"], "FromPort": permission["FromPort"], "ToPort": permission["ToPort"], "CidrIp": permission["IpRanges"][0]["CidrIp"]}]}}
+    return {"Type": "Resource", "ResourceChange": {"Action": "Modify", "LogicalResourceId": "L19", "PhysicalResourceId": p["GroupId"], "ResourceType": "AWS::EC2::SecurityGroup", "Replacement": "False", "BeforeContext": json.dumps(before), "AfterContext": json.dumps(after)}}
+
+
+@settings(max_examples=20, deadline=None,
+          suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow])
+@given(calls=st.lists(_L19_CALLS, min_size=1, max_size=3))
+def test_L19_cloudformation_and_aws_api_are_equivalent(plan_client, calls):
+    base_analysis_id = f"delete-l19-{uuid.uuid4()}"
+    api_branch = plan_client.post("/branches", json={"base_analysis_id": base_analysis_id, "name": "l19-api"}).json()["branch_id"]
+    cfn_branch = plan_client.post("/branches", json={"base_analysis_id": base_analysis_id, "name": "l19-cfn"}).json()["branch_id"]
+    api = plan_client.post(f"/branches/{api_branch}/plans/aws-api", json={"format": "aws-api-calls/1", "calls": calls})
+    cfn = plan_client.post(f"/branches/{cfn_branch}/plans/cloudformation", json={"Changes": [_l19_item(call) for call in calls]})
+    assert api.status_code == cfn.status_code == 200, (api.text, cfn.text)
+    api_body, cfn_body = api.json(), cfn.json()
+    assert len(api_body["rejected"]) == len(cfn_body["rejected"])
+    assert len(api_body["unmodeled"]) == len(cfn_body["unmodeled"])
+    api_verdict = plan_client.get(f"/branches/{api_branch}/verdict").json()
+    cfn_verdict = plan_client.get(f"/branches/{cfn_branch}/verdict").json()
+    assert api_verdict["verdict"] == cfn_verdict["verdict"]
+    assert {(r["code"], r["level"]) for r in api_verdict["reasons"]} == {(r["code"], r["level"]) for r in cfn_verdict["reasons"]}
+    assert plan_client.get(f"/branches/{api_branch}/diff").json()["modeled_state_unchanged"] == plan_client.get(f"/branches/{cfn_branch}/diff").json()["modeled_state_unchanged"]
+
+
+def test_L19_sanity(plan_client):
+    call = {"service": "ec2", "operation": "TerminateInstances", "parameters": {"InstanceIds": ["i-dl-web"]}}
+    api = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "l19-sanity-api"}).json()["branch_id"]
+    cfn = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "l19-sanity-cfn"}).json()["branch_id"]
+    assert plan_client.post(f"/branches/{api}/plans/aws-api", json={"format": "aws-api-calls/1", "calls": [call]}).status_code == 200
+    assert plan_client.post(f"/branches/{cfn}/plans/cloudformation", json={"Changes": [_l19_item(call)]}).status_code == 200
+    assert plan_client.get(f"/branches/{api}/verdict").json()["verdict"] != "pass"
+    assert plan_client.get(f"/branches/{cfn}/verdict").json()["verdict"] != "pass"

@@ -41,6 +41,7 @@ from app.mutations import Change, MutationCapabilities, apply_change, mutation_c
 from app.plan_ingest import translate_plan
 from app.aws_api_ingest import translate_api_calls
 from app.aws_cli_ingest import parse_cli_commands
+from app.cfn_ingest import convert_change_set
 from app.verdict import CombinedVerdict, combined_verdict
 from app import branches, identifiers
 from app.in_use_evidence import EvidenceRequest, EvidenceEstimate, build_estimate, read_evidence, SOURCES, WINDOW_DAYS
@@ -1533,7 +1534,7 @@ async def _ingest_plan_endpoint(
     try:
         plan = json.loads(raw)
         translated = translate(plan)
-    except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, RecursionError):
         raise HTTPException(status_code=422, detail=invalid_detail)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc) if preserve_value_errors else invalid_detail)
@@ -1591,6 +1592,24 @@ def _aws_translator(branch_id: str, document, cli: bool = False):
     if cli:
         document = parse_cli_commands(document)
     return translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get)
+
+
+def _cfn_translator(branch_id: str, document):
+    api_document, extras = convert_change_set(document)
+    if api_document["calls"]:
+        translated = _aws_translator(branch_id, api_document)
+    else:
+        translated = {"changes": [], "addresses": [], "unmodeled": [], "unknown_fields": []}
+    translated["unmodeled"].extend(extras)
+    return translated
+
+
+@app.post('/branches/{branch_id}/plans/cloudformation', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+async def cloudformation_plan_endpoint(branch_id: str, request: Request):
+    return await _ingest_plan_endpoint(
+        branch_id, request, lambda document: _cfn_translator(branch_id, document),
+        'Invalid CloudFormation change set document', preserve_value_errors=True,
+    )
 
 
 @app.post('/branches/{branch_id}/plans/aws-api', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
