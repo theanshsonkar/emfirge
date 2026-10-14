@@ -40,6 +40,7 @@ from app.cidr import is_internet_cidr
 from app.mutations import Change, MutationCapabilities, apply_change, mutation_capabilities
 from app.plan_ingest import translate_plan
 from app.aws_api_ingest import translate_api_calls
+from app.aws_cli_ingest import parse_cli_commands
 from app.verdict import CombinedVerdict, combined_verdict
 from app import branches, identifiers
 from app.in_use_evidence import EvidenceRequest, EvidenceEstimate, build_estimate, read_evidence, SOURCES, WINDOW_DAYS
@@ -1524,6 +1525,7 @@ async def _ingest_plan_endpoint(
     request: Request,
     translate,
     invalid_detail: str,
+    preserve_value_errors: bool = False,
 ):
     _check_branch_rate_limit(_branch_request_ip(request))
     raw = await request.body()
@@ -1531,8 +1533,10 @@ async def _ingest_plan_endpoint(
     try:
         plan = json.loads(raw)
         translated = translate(plan)
-    except (json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError):
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
         raise HTTPException(status_code=422, detail=invalid_detail)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc) if preserve_value_errors else invalid_detail)
     try:
         branches.get_branch(branch_id)
     except branches.BranchNotFoundError as exc:
@@ -1570,26 +1574,37 @@ async def terraform_plan_endpoint(branch_id: str, request: Request):
     )
 
 
+def _aws_translator(branch_id: str, document, cli: bool = False):
+    try:
+        branch = branches.get_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    state = branches.rebuild_branch_state(branch)
+    role_arns = {
+        role.role_arn.rsplit('/', 1)[-1]: role.role_arn
+        for role in state.iam.role_policies
+    }
+    sg_rule_map = {
+        group.id: copy.deepcopy(group.rules)
+        for group in state.ec2.security_groups
+    }
+    if cli:
+        document = parse_cli_commands(document)
+    return translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get)
+
+
 @app.post('/branches/{branch_id}/plans/aws-api', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 async def aws_api_plan_endpoint(branch_id: str, request: Request):
-    def translate(document):
-        try:
-            branch = branches.get_branch(branch_id)
-        except branches.BranchNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        state = branches.rebuild_branch_state(branch)
-        role_arns = {
-            role.role_arn.rsplit('/', 1)[-1]: role.role_arn
-            for role in state.iam.role_policies
-        }
-        sg_rule_map = {
-            group.id: copy.deepcopy(group.rules)
-            for group in state.ec2.security_groups
-        }
-        return translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get)
-
     return await _ingest_plan_endpoint(
-        branch_id, request, translate, 'Invalid AWS API calls document',
+        branch_id, request, lambda document: _aws_translator(branch_id, document), 'Invalid AWS API calls document',
+    )
+
+
+@app.post('/branches/{branch_id}/plans/aws-cli', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+async def aws_cli_plan_endpoint(branch_id: str, request: Request):
+    return await _ingest_plan_endpoint(
+        branch_id, request, lambda document: _aws_translator(branch_id, document, cli=True), 'Invalid AWS CLI commands document',
+        preserve_value_errors=True,
     )
 
 

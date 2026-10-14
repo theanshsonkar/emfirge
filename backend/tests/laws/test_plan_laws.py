@@ -1,4 +1,9 @@
 from tests.incidents.synthetic_base import load_synthetic_base
+import json
+import shlex
+
+import botocore.session
+from botocore import xform_name
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from app import plan_ingest
@@ -208,3 +213,146 @@ def test_L16_unmapped_aws_call_block_rule(plan_client, monkeypatch, prefix, suff
     expected_level = "block" if delete or risky else "warn"
     assert any(reason["code"] == expected and reason["level"] == expected_level for reason in reasons)
     assert "pass" not in {reason["code"] for reason in reasons}
+
+
+def _l18_model(service, operation):
+    return botocore.session.get_session().get_service_model(service).operation_model(operation)
+
+
+def _l18_render_call(call):
+    service = "s3api" if call["service"] == "s3" else call["service"]
+    operation = call["operation"]
+    model = _l18_model(call["service"], operation)
+    members = model.input_shape.members if model.input_shape else {}
+    command = f"aws {service} {xform_name(operation, '-')} "
+    for name, value in call.get("parameters", {}).items():
+        member = members[name]
+        option = f"--{xform_name(name, '-')}"
+        if member.type_name == "boolean":
+            command += option if value else f"--no-{xform_name(name, '-')}"
+        elif member.type_name == "list" and member.member.type_name not in {"structure", "map"}:
+            command += option + " " + " ".join(shlex.quote(str(item)) for item in value)
+        elif member.type_name in {"structure", "map"} or (member.type_name == "list" and member.member.type_name in {"structure", "map"}):
+            command += option + " " + shlex.quote(json.dumps(value))
+        else:
+            command += option + " " + shlex.quote(str(value))
+        command += " "
+    return command.rstrip()
+
+
+def _l18_sg_permission(data):
+    ports = data.draw(st.one_of(st.sampled_from([22, 3389, 443]), st.integers(1, 65535)))
+    ipv4 = data.draw(st.lists(st.sampled_from(["0.0.0.0/0", "10.0.0.0/8"]), min_size=0, max_size=2, unique=True))
+    ipv6 = data.draw(st.lists(st.just("::/0"), min_size=0, max_size=1, unique=True))
+    if not ipv4 and not ipv6:
+        ipv4 = ["0.0.0.0/0"]
+    permission = {"IpProtocol": "tcp", "FromPort": ports, "ToPort": ports}
+    if ipv4:
+        permission["IpRanges"] = [{"CidrIp": value} for value in ipv4]
+    if ipv6:
+        permission["Ipv6Ranges"] = [{"CidrIpv6": value} for value in ipv6]
+    return permission
+
+
+def _l18_call(data, ids):
+    instance_id, volume_id, snapshot_id, group_id, db_id, bucket, function, role = ids
+    kind = data.draw(st.sampled_from([
+        "TerminateInstances", "DeleteVolume", "DeleteSnapshot", "DeleteSecurityGroup",
+        "DeleteDBInstance", "ModifyDBInstance", "AuthorizeSecurityGroupIngress",
+        "RevokeSecurityGroupIngress", "DeleteBucket", "DeleteFunction", "DeleteRole", "unmapped",
+    ]))
+    if kind == "TerminateInstances":
+        return {"service": "ec2", "operation": kind, "parameters": {"InstanceIds": [instance_id]}}
+    if kind == "DeleteVolume":
+        return {"service": "ec2", "operation": kind, "parameters": {"VolumeId": volume_id}}
+    if kind == "DeleteSnapshot":
+        return {"service": "ec2", "operation": kind, "parameters": {"SnapshotId": snapshot_id}}
+    if kind == "DeleteSecurityGroup":
+        return {"service": "ec2", "operation": kind, "parameters": {"GroupId": group_id}}
+    if kind == "DeleteDBInstance":
+        return {"service": "rds", "operation": kind, "parameters": {
+            "DBInstanceIdentifier": db_id,
+            "SkipFinalSnapshot": data.draw(st.booleans()),
+            "DeleteAutomatedBackups": data.draw(st.booleans()),
+        }}
+    if kind == "ModifyDBInstance":
+        return {"service": "rds", "operation": kind, "parameters": {
+            "DBInstanceIdentifier": db_id,
+            "DeletionProtection": data.draw(st.booleans()),
+            "BackupRetentionPeriod": data.draw(st.integers(0, 35)),
+            "PubliclyAccessible": data.draw(st.booleans()),
+        }}
+    if kind in {"AuthorizeSecurityGroupIngress", "RevokeSecurityGroupIngress"}:
+        return {"service": "ec2", "operation": kind, "parameters": {
+            "GroupId": group_id, "IpPermissions": [_l18_sg_permission(data)],
+        }}
+    if kind == "DeleteBucket":
+        return {"service": "s3", "operation": kind, "parameters": {"Bucket": bucket}}
+    if kind == "DeleteFunction":
+        return {"service": "lambda", "operation": kind, "parameters": {"FunctionName": function}}
+    if kind == "DeleteRole":
+        return {"service": "iam", "operation": kind, "parameters": {"RoleName": role}}
+    operation = data.draw(st.sampled_from(_L18_UNMAPPED_EC2_OPERATIONS))
+    return {"service": "ec2", "operation": operation, "parameters": {}}
+
+
+_L18_MAPPED_EC2_OPERATIONS = {
+    "TerminateInstances", "DeleteVolume", "DeleteSnapshot", "DeleteSecurityGroup",
+    "AuthorizeSecurityGroupIngress", "RevokeSecurityGroupIngress",
+}
+_L18_EC2_OPERATIONS = botocore.session.get_session().get_service_model("ec2").operation_names
+_L18_UNMAPPED_EC2_OPERATIONS = tuple(sorted(
+    operation for operation in _L18_EC2_OPERATIONS
+    if not operation.startswith(("Describe", "Get", "List"))
+    and operation not in _L18_MAPPED_EC2_OPERATIONS
+))
+
+
+def _l18_ids():
+    base = load_synthetic_base("delete")
+    return (
+        base.ec2.instances[0].id, base.ec2.ebs_volumes[0].id, base.ec2.ebs_snapshots[0].id,
+        base.ec2.security_groups[0].id, base.rds.rds_instances[0].id, base.s3.buckets[0].name,
+        base.lambda_data.functions[0].name, base.iam.role_policies[0].role_name,
+    )
+
+
+@settings(max_examples=60, deadline=None,
+          suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow])
+@given(data=st.data())
+def test_L18_aws_cli_and_aws_api_are_equivalent(plan_client, monkeypatch, data):
+    from app import branches
+    monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 10000)
+    calls = [_l18_call(data, _l18_ids()) for _ in range(data.draw(st.integers(1, 3)))]
+    api_branch = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "l18-api"}).json()["branch_id"]
+    cli_branch = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "l18-cli"}).json()["branch_id"]
+    api_response = plan_client.post(f"/branches/{api_branch}/plans/aws-api", json={
+        "format": "aws-api-calls/1", "calls": calls,
+    })
+    cli_response = plan_client.post(f"/branches/{cli_branch}/plans/aws-cli", json={
+        "format": "aws-cli/1", "commands": [_l18_render_call(call) for call in calls],
+    })
+    assert api_response.status_code == 200, api_response.text
+    assert cli_response.status_code == 200, cli_response.text
+    api_body, cli_body = api_response.json(), cli_response.json()
+    assert api_body["rejected"] == cli_body["rejected"]
+    assert len(api_body["unmodeled"]) == len(cli_body["unmodeled"])
+    api_verdict = plan_client.get(f"/branches/{api_branch}/verdict").json()
+    cli_verdict = plan_client.get(f"/branches/{cli_branch}/verdict").json()
+    assert api_verdict["verdict"] == cli_verdict["verdict"]
+    assert {reason["code"] for reason in api_verdict["reasons"]} == {reason["code"] for reason in cli_verdict["reasons"]}
+    assert len(api_body["rejected"]) == len(cli_body["rejected"])
+    assert len(api_body["unmodeled"]) == len(cli_body["unmodeled"])
+    api_diff = plan_client.get(f"/branches/{api_branch}/diff").json()
+    cli_diff = plan_client.get(f"/branches/{cli_branch}/diff").json()
+    assert api_diff["modeled_state_unchanged"] == cli_diff["modeled_state_unchanged"]
+
+
+def test_L18_sanity(plan_client):
+    call = {"service": "ec2", "operation": "TerminateInstances", "parameters": {"InstanceIds": ["i-dl-web"]}}
+    api_branch = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "l18-sanity-api"}).json()["branch_id"]
+    cli_branch = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "l18-sanity-cli"}).json()["branch_id"]
+    assert plan_client.post(f"/branches/{api_branch}/plans/aws-api", json={"format": "aws-api-calls/1", "calls": [call]}).status_code == 200
+    assert plan_client.post(f"/branches/{cli_branch}/plans/aws-cli", json={"format": "aws-cli/1", "commands": [_l18_render_call(call)]}).status_code == 200
+    assert plan_client.get(f"/branches/{api_branch}/verdict").json()["verdict"] != "pass"
+    assert plan_client.get(f"/branches/{cli_branch}/verdict").json()["verdict"] != "pass"
