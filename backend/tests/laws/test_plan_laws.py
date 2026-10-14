@@ -109,3 +109,35 @@ def test_L11_non_aws_provider_warns_never_blocks_never_passes(plan_client, monke
     result = plan_client.get(f"/branches/{branch_id}/verdict").json()
     assert result["verdict"] == "warn"
     assert {reason["code"] for reason in result["reasons"]} == {"outside_view"}
+
+
+def test_L15_terraform_and_aws_api_deletions_are_equivalent(plan_client):
+    def compare(terraform_item, api_call):
+        tf_branch, _, tf_response = _post(plan_client, {"format_version": "1.0", "resource_changes": [terraform_item]})
+        assert tf_response.status_code == 200, tf_response.text
+        tf_body = tf_response.json()
+        assert tf_body["applied"]
+        assert tf_body["rejected"] == []
+        api_branch = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "aws-api-law"}).json()["branch_id"]
+        api_response = plan_client.post(f"/branches/{api_branch}/plans/aws-api", json={"format": "aws-api-calls/1", "calls": [api_call]})
+        assert api_response.status_code == 200, api_response.text
+        api_body = api_response.json()
+        assert api_body["applied"]
+        assert api_body["rejected"] == []
+        tf_verdict = plan_client.get(f"/branches/{tf_branch}/verdict").json()
+        api_verdict = plan_client.get(f"/branches/{api_branch}/verdict").json()
+        tf_reasons = {(item["code"], item["level"]) for item in tf_verdict["reasons"]}
+        assert tf_reasons
+        assert tf_reasons == {(item["code"], item["level"]) for item in api_verdict["reasons"]}
+        assert tf_verdict["verdict"] == api_verdict["verdict"]
+
+    compare(
+        {"address": "aws_db_instance.db", "mode": "managed", "type": "aws_db_instance",
+         "change": {"actions": ["delete"], "before": {"identifier": "db-dl-prod", "skip_final_snapshot": True, "delete_automated_backups": True}, "after": None}},
+        {"service": "rds", "operation": "DeleteDBInstance", "parameters": {"DBInstanceIdentifier": "db-dl-prod", "SkipFinalSnapshot": True, "DeleteAutomatedBackups": True}},
+    )
+    compare(
+        {"address": "aws_instance.instance", "mode": "managed", "type": "aws_instance",
+         "change": {"actions": ["delete"], "before": {"id": "i-dl-web"}, "after": None}},
+        {"service": "ec2", "operation": "TerminateInstances", "parameters": {"InstanceIds": ["i-dl-web"]}},
+    )

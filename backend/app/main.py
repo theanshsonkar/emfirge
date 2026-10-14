@@ -37,6 +37,7 @@ from app.models import (
 from app.diffing import DiffResult
 from app.mutations import Change, MutationCapabilities, apply_change, mutation_capabilities
 from app.plan_ingest import translate_plan
+from app.aws_api_ingest import translate_api_calls
 from app.verdict import CombinedVerdict, combined_verdict
 from app import branches, identifiers
 from app.in_use_evidence import EvidenceRequest, EvidenceEstimate, build_estimate, read_evidence, SOURCES, WINDOW_DAYS
@@ -1516,16 +1517,20 @@ def fork_branch_endpoint(branch_id: str, request: Request, payload: dict, caller
     return {'branch_id': new_branch_id, 'num_changes': num_changes}
 
 
-@app.post('/branches/{branch_id}/plans/terraform', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-async def terraform_plan_endpoint(branch_id: str, request: Request):
+async def _ingest_plan_endpoint(
+    branch_id: str,
+    request: Request,
+    translate,
+    invalid_detail: str,
+):
     _check_branch_rate_limit(_branch_request_ip(request))
     raw = await request.body()
     digest = hashlib.sha256(raw).hexdigest()
     try:
         plan = json.loads(raw)
-        translated = translate_plan(plan)
-    except (json.JSONDecodeError, ValueError, TypeError):
-        raise HTTPException(status_code=422, detail='Invalid Terraform plan JSON schema')
+        translated = translate(plan)
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError):
+        raise HTTPException(status_code=422, detail=invalid_detail)
     try:
         branches.get_branch(branch_id)
     except branches.BranchNotFoundError as exc:
@@ -1554,6 +1559,32 @@ async def terraform_plan_endpoint(branch_id: str, request: Request):
     return {'plan_id': plan_id, 'input_sha256': digest, 'branch_revision': revision,
             'applied': applied, 'rejected': rejected,
             'unmodeled': translated['unmodeled'], 'unknown_fields': translated['unknown_fields']}
+
+
+@app.post('/branches/{branch_id}/plans/terraform', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+async def terraform_plan_endpoint(branch_id: str, request: Request):
+    return await _ingest_plan_endpoint(
+        branch_id, request, translate_plan, 'Invalid Terraform plan JSON schema',
+    )
+
+
+@app.post('/branches/{branch_id}/plans/aws-api', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+async def aws_api_plan_endpoint(branch_id: str, request: Request):
+    def translate(document):
+        try:
+            branch = branches.get_branch(branch_id)
+        except branches.BranchNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        state = branches.rebuild_branch_state(branch)
+        role_arns = {
+            role.role_arn.rsplit('/', 1)[-1]: role.role_arn
+            for role in state.iam.role_policies
+        }
+        return translate_api_calls(document, resolve_role_arn=role_arns.get)
+
+    return await _ingest_plan_endpoint(
+        branch_id, request, translate, 'Invalid AWS API calls document',
+    )
 
 
 def _scanned_account_id(analysis_id: str) -> str | None:

@@ -272,19 +272,20 @@ def _plan_reasons(plans: list[Mapping[str, Any]] | None) -> list[dict[str, str]]
         for item in plan.get("unmodeled", []) or []:
             actions = item.get("actions", []) if isinstance(item, Mapping) else []
             provider_name = item.get("provider_name") if isinstance(item, Mapping) else None
+            source_label = "AWS API call" if isinstance(item, Mapping) and item.get("source") == "aws_api" else "Terraform plan"
             if not is_aws_provider(provider_name):
                 reasons.append(_reason(
                     "warn", "outside_view",
-                    "Terraform plan changes resources outside what Emfirge can see",
+                    f"{source_label} changes resources outside what Emfirge can see",
                 ))
             elif "delete" in actions:
                 reasons.append(_reason(
                     "block", "unmodeled_delete",
-                    "Terraform plan deletes or replaces an AWS resource type Emfirge does not model",
+                    f"{source_label} deletes or replaces an AWS resource type Emfirge does not model",
                 ))
             else:
                 reasons.append(_reason(
-                    "warn", "unmodeled_change", "Terraform plan contains unmodeled resources",
+                    "warn", "unmodeled_change", f"{source_label} contains unmodeled resources",
                 ))
         rejected = plan.get("rejected") or []
         if any(not isinstance(item, Mapping) or "op" not in item or item.get("op") == "delete" for item in rejected):
