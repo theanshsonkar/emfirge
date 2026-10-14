@@ -14,6 +14,7 @@ import re
 import subprocess
 import tempfile
 import hashlib
+import copy
 import logging
 from datetime import datetime, date, timezone
 from collections import defaultdict
@@ -1580,7 +1581,11 @@ async def aws_api_plan_endpoint(branch_id: str, request: Request):
             role.role_arn.rsplit('/', 1)[-1]: role.role_arn
             for role in state.iam.role_policies
         }
-        return translate_api_calls(document, resolve_role_arn=role_arns.get)
+        sg_rule_map = {
+            group.id: copy.deepcopy(group.rules)
+            for group in state.ec2.security_groups
+        }
+        return translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get)
 
     return await _ingest_plan_endpoint(
         branch_id, request, translate, 'Invalid AWS API calls document',

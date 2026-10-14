@@ -114,3 +114,62 @@ def test_aws_api_plan_is_tenant_isolated(tenant_client):
     ]}
     _assert_hidden(client, key_b, branch_id, "/branches/A_BRANCH/plans/aws-api", method="post", json_body=body)
     assert client.get(f"/branches/{branch_id}", headers={"X-API-Key": key_a}).status_code == 200
+
+
+_PUBLIC_SSH = {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "CidrIp": "0.0.0.0/0"}
+
+
+def _api_post(client, calls):
+    branch_id = client.post("/branches", json={"base_analysis_id": "delete", "name": "api-sg"}).json()["branch_id"]
+    response = client.post(f"/branches/{branch_id}/plans/aws-api", json={
+        "format": "aws-api-calls/1", "calls": calls})
+    assert response.status_code == 200, response.text
+    return branch_id, response.json()
+
+
+def _branch_rules(branch_id, sg_id):
+    from app import branches
+    branch = branches.get_branch(branch_id)
+    state = branch.base.model_copy(deep=True)
+    from app.mutations import apply_changes
+    state = apply_changes(state, branch.changes)
+    return next(sg.rules for sg in state.ec2.security_groups if sg.id == sg_id)
+
+
+def test_authorize_public_ssh_applies_and_exposes_specific_reason(plan_client):
+    branch_id, body = _api_post(plan_client, [{"service": "ec2", "operation": "AuthorizeSecurityGroupIngress",
+        "parameters": {"GroupId": "sg-dl-web", **_PUBLIC_SSH}}])
+    assert body["applied"] and body["rejected"] == []
+    verdict = plan_client.get(f"/branches/{branch_id}/verdict").json()
+    assert verdict["verdict"] != "pass"
+    # introduced_critical_exposure means the branch adds a Critical internet exposure.
+    assert any(reason["code"] == "introduced_critical_exposure" for reason in verdict["reasons"])
+
+
+def test_authorize_then_revoke_same_document_restores_base_rules(plan_client):
+    branch_id, body = _api_post(plan_client, [
+        {"service": "ec2", "operation": "AuthorizeSecurityGroupIngress",
+         "parameters": {"GroupId": "sg-dl-web", **_PUBLIC_SSH}},
+        {"service": "ec2", "operation": "RevokeSecurityGroupIngress",
+         "parameters": {"GroupId": "sg-dl-web", **_PUBLIC_SSH}},
+    ])
+    assert len(body["applied"]) == 2 and body["rejected"] == []
+    base = load_synthetic_base("delete")
+    expected = next(sg.rules for sg in base.ec2.security_groups if sg.id == "sg-dl-web")
+    assert _branch_rules(branch_id, "sg-dl-web") == expected
+
+
+def test_revoke_without_match_warns_unknown_plan_values(plan_client):
+    branch_id, body = _api_post(plan_client, [{"service": "ec2", "operation": "RevokeSecurityGroupIngress",
+        "parameters": {"GroupId": "sg-dl-web", **_PUBLIC_SSH}}])
+    assert body["applied"] == []
+    verdict = plan_client.get(f"/branches/{branch_id}/verdict").json()
+    assert any(reason["code"] == "unknown_plan_values" and reason["level"] == "warn"
+               for reason in verdict["reasons"])
+
+
+def test_modify_rds_deletion_protection_and_backup_retention_applies(plan_client):
+    _, body = _api_post(plan_client, [{"service": "rds", "operation": "ModifyDBInstance",
+        "parameters": {"DBInstanceIdentifier": "db-dl-prod", "DeletionProtection": False,
+                        "BackupRetentionPeriod": 0}}])
+    assert body["applied"] and body["rejected"] == []
