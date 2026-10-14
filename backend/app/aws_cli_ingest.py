@@ -31,33 +31,62 @@ def _operations(name: str) -> dict[str, str]:
     return {xform_name(operation, '-') : operation for operation in model.operation_names}
 
 
-def _has_unquoted_operator(command: str) -> bool:
-    quote = None
-    escaped = False
+def _check_shell_safety(command: str, command_no: int) -> None:
+    for char in command:
+        if (ord(char) < 32 and char not in {"\t", "\n"}) or ord(char) == 127:
+            raise ValueError(
+                f"Command {command_no}: unquoted shell character {char!r} is not supported; "
+                "quote the value or send one aws command per entry."
+            )
+    state = "UNQUOTED"
     i = 0
     while i < len(command):
         char = command[i]
-        if escaped:
-            escaped = False
+        if state == "SINGLE":
+            if char == "'":
+                state = "UNQUOTED"
             i += 1
             continue
-        if char == "\\" and quote != "'":
-            escaped = True
+        if state == "DOUBLE":
+            if char == "\\":
+                i += 2
+                continue
+            if char in {"$", "`"}:
+                raise ValueError(
+                    f"Command {command_no}: unquoted shell character {char!r} is not supported; "
+                    "quote the value or send one aws command per entry."
+                )
+            if char == '"':
+                state = "UNQUOTED"
             i += 1
             continue
-        if quote:
-            if char == quote:
-                quote = None
-            i += 1
+        if char == "\\":
+            i += 2
             continue
-        if char in {"'", '"'}:
-            quote = char
-            i += 1
-            continue
+        if char == "\n" or char == "\r":
+            raise ValueError(
+                f"Command {command_no}: unquoted shell character {char!r} is not supported; "
+                "quote the value or send one aws command per entry."
+            )
         if char in "|&;><()":
-            return True
+            raise ValueError(f"Command {command_no}: shell operators are not supported; send one aws command per entry.")
+        if char in "$`*?[{":
+            raise ValueError(
+                f"Command {command_no}: unquoted shell character {char!r} is not supported; "
+                "quote the value or send one aws command per entry."
+            )
+        if char in "#~" and (i == 0 or command[i - 1] in " \t"):
+            raise ValueError(
+                f"Command {command_no}: unquoted shell character {char!r} is not supported; "
+                "quote the value or send one aws command per entry."
+            )
+        if char == "'":
+            state = "SINGLE"
+        elif char == '"':
+            state = "DOUBLE"
         i += 1
-    return False
+    if state != "UNQUOTED":
+        raise ValueError(f"Command {command_no}: invalid shell quoting.")
 
 
 def _file_value(value: Any) -> bool:
@@ -153,12 +182,9 @@ def _convert_scalar(command_no: int, option: str, value: str, shape: Any) -> Any
 
 def _parse_command(command: str, command_no: int) -> list[dict[str, Any]]:
     command = re.sub(r"\\\r?\n", "", command)
-    if "$(" in command or "`" in command:
-        raise ValueError(f"Command {command_no}: shell operators are not supported; send one aws command per entry.")
-    if _has_unquoted_operator(command):
-        raise ValueError(f"Command {command_no}: shell operators are not supported; send one aws command per entry.")
+    _check_shell_safety(command, command_no)
     try:
-        tokens = shlex.split(command, posix=True)
+        tokens = shlex.split(command, comments=False, posix=True)
     except ValueError as exc:
         if "shell operators" in str(exc): raise
         raise ValueError(f"Command {command_no}: invalid shell quoting.") from exc

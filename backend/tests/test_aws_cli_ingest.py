@@ -173,6 +173,55 @@ def test_parse_backslash_newline_continuation():
     }
 
 
+@pytest.mark.parametrize("command", [
+    "aws ec2 terminate-instances --instance-ids i-1\naws ec2 delete-volume --volume-id vol-9",
+    "aws ec2 terminate-instances --instance-ids i-1\r\naws ec2 delete-volume --volume-id vol-9",
+    "aws ec2 terminate-instances --instance-ids i-1\raws ec2 delete-volume --volume-id vol-9",
+    "aws ec2 terminate-instances --instance-ids $TARGET",
+    "aws ec2 terminate-instances --instance-ids ${TARGET}",
+    "aws ec2 terminate-instances --instance-ids $'i-1'",
+    'aws ec2 terminate-instances --instance-ids "$TARGET"',
+    'aws ec2 terminate-instances --instance-ids "`id`"',
+    "aws ec2 terminate-instances --instance-ids i-*",
+    "aws ec2 terminate-instances --instance-ids i-?",
+    "aws ec2 terminate-instances --instance-ids i-[12]",
+    "aws ec2 terminate-instances --instance-ids {i-1,i-2}",
+    "aws ec2 terminate-instances --instance-ids ~/x",
+    "aws ec2 terminate-instances --instance-ids i-1 # trailing",
+    "aws ec2 terminate-instances --instance-ids i-1\x00",
+    "aws ec2 terminate-instances --instance-ids i-1\x1b",
+])
+def test_rejects_shell_ambiguity(command):
+    with pytest.raises(ValueError, match=r"Command 1"):
+        _parse(command)
+
+
+@pytest.mark.parametrize("command, expected", [
+    (
+        "aws ec2 authorize-security-group-ingress --group-id sg-1 --ip-permissions '[{\n  \"IpProtocol\": \"-1\"\n}]'",
+        {"GroupId": "sg-1", "IpPermissions": [{"IpProtocol": "-1"}]},
+    ),
+    (
+        "aws ec2 create-security-group --group-name g --description 'cost $5 * [x] {y} #z ~w'",
+        {"GroupName": "g", "Description": "cost $5 * [x] {y} #z ~w"},
+    ),
+    (
+        "aws ec2 terminate-instances --instance-ids i-1 \\\n--dry-run",
+        {"InstanceIds": ["i-1"], "DryRun": True},
+    ),
+    (
+        "aws ec2 terminate-instances\t--instance-ids\ti-1",
+        {"InstanceIds": ["i-1"]},
+    ),
+    (
+        "aws ec2 terminate-instances --instance-ids a#b",
+        {"InstanceIds": ["a#b"]},
+    ),
+])
+def test_quoted_shell_chars_are_literal(command, expected):
+    assert _parse(command)["calls"][0]["parameters"] == expected
+
+
 def test_parse_cli_input_json_explicit_flag_wins():
     assert _parse(
         "aws ec2 terminate-instances "
