@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime, date
@@ -13,6 +13,13 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 engine = create_engine(DATABASE_URL)
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
+
+def get_db():
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
 
 class AnalysisLog(Base):
     __tablename__ = 'analysis_logs'
@@ -166,6 +173,30 @@ class APIKey(Base):
 def create_tables():
     Base.metadata.create_all(engine)
     print('Database tables created successfully')
+
+class Project(Base):
+    __tablename__ = 'projects'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), unique=True, nullable=False)
+    external_id = Column(String(200), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AccountBinding(Base):
+    __tablename__ = 'account_bindings'
+    aws_account_id = Column(String(12), primary_key=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    bound_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AccountBindingEvent(Base):
+    __tablename__ = 'account_binding_events'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    aws_account_id = Column(String(12), nullable=False)
+    project_id = Column(Integer, nullable=True)
+    action = Column(String(20), nullable=False)
+    actor = Column(String(200), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 def save_analysis(data: dict) -> int:
     session = SessionLocal()

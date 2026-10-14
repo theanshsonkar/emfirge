@@ -13,8 +13,9 @@ Parameters:
 
   ExternalId:
     Type: String
-    Default: aws-risk-agent
-    Description: External ID for additional security when assuming this role
+    MinLength: 32
+    AllowedPattern: '[A-Za-z0-9_-]+'
+    Description: Your project ExternalId from emfirge_setup (unique to you)
 
 Resources:
   EmfirgeReadOnlyRole:
@@ -30,7 +31,7 @@ Resources:
             Action: sts:AssumeRole
             Condition:
               StringEquals:
-                sts:ExternalId: aws-risk-agent
+                sts:ExternalId: !Ref ExternalId
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/SecurityAudit
       Policies:
@@ -38,6 +39,12 @@ Resources:
           PolicyDocument:
             Version: '2012-10-17'
             Statement:
+              - Effect: Allow
+                Sid: InUseEvidenceRead
+                Action:
+                  - cloudwatch:GetMetricStatistics
+                  - cloudwatch:GetMetricData
+                Resource: '*'
               - Effect: Allow
                 Action:
                   - budgets:DescribeBudgets

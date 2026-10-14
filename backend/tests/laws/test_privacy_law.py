@@ -218,7 +218,7 @@ def test_L9_evidence_endpoints_do_not_echo_cloudtrail_customer_markers(incident_
     monkeypatch.setattr(main, "get_infrastructure_for_analysis", lambda _: base)
     monkeypatch.setattr(main, "_check_branch_rate_limit", lambda _: None)
     monkeypatch.setattr(main, "_scanned_account_id", lambda _: "111122223333")
-    monkeypatch.setattr(main, "assume_role_credentials", lambda _: ({"AccessKeyId": "x", "SecretAccessKey": "y"}, "111122223333"))
+    monkeypatch.setattr(main, "assume_role_credentials", lambda _role_arn, _caller, _db: ({"AccessKeyId": "x", "SecretAccessKey": "y"}, "111122223333"))
     monkeypatch.setattr(main, "read_evidence", lambda *args, **kwargs: [EvidenceRecord(
         resource_id="none", resource_type="rds_instance", source="cloudtrail_events", status="ok", used=None,
         window_days=90, observed_at=datetime.now(timezone.utc).isoformat(), event_name="DeleteDB")])

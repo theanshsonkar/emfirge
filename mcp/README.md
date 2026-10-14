@@ -4,7 +4,7 @@
 
 **The harness between your AI agent and your AWS cloud: branch, diff, verdict — with privacy-first masking.**
 
-Version **0.2.4** · Apache-2.0
+Version **0.2.5** · Apache-2.0
 
 </div>
 

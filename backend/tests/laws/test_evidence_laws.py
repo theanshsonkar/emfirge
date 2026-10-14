@@ -137,7 +137,7 @@ def test_L13_usage_metrics_block_exactly(data):
 def test_L14_cost_is_shown_before_any_read(evidence_client, monkeypatch, data):
     client, factory = evidence_client
     calls = []
-    monkeypatch.setattr(main, "assume_role_credentials", lambda arn: calls.append(("sts", arn)) or (CREDS, "111122223333"))
+    monkeypatch.setattr(main, "assume_role_credentials", lambda arn, _caller, _db: calls.append(("sts", arn)) or (CREDS, "111122223333"))
     monkeypatch.setattr(in_use_evidence, "_default_client", lambda *args: calls.append(("client", args[0])))
     analysis = f"an-{uuid.uuid4()}"
     session = factory()
