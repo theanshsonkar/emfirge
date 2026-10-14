@@ -30,7 +30,7 @@ def _context(resource: dict[str, Any], key: str) -> dict[str, Any] | None:
         raise _invalid()
     try:
         parsed = json.loads(value)
-    except (TypeError, json.JSONDecodeError) as exc:
+    except (TypeError, json.JSONDecodeError, RecursionError) as exc:
         raise _invalid() from exc
     if not isinstance(parsed, dict):
         raise _invalid()
@@ -103,6 +103,42 @@ def _rule_key(rule: dict[str, Any]) -> str:
     return json.dumps(_normalize_rule(rule), sort_keys=True, separators=(",", ":"))
 
 
+def _removal(resource: dict[str, Any], address: str, policy_action: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    typ = resource["ResourceType"]
+    service, suffix = _parts(typ)
+    physical = resource.get("PhysicalResourceId")
+    if policy_action in {"Retain", "ReplaceAndRetain"}:
+        return [], [_extra(address, typ, "RetainResource")]
+    if typ == "AWS::EC2::SecurityGroupIngress":
+        before = _context(resource, "BeforeContext")
+        rule = _properties(before) if before else None
+        if isinstance(rule, dict):
+            return [{"service": "ec2", "operation": "RevokeSecurityGroupIngress",
+                     "parameters": {"GroupId": rule.get("GroupId") or physical,
+                                    "IpPermissions": [_normalize_rule(rule)]}}], []
+        return [], [_extra(address, typ, "Delete" + suffix)]
+    if typ == "AWS::RDS::DBInstance":
+        if not isinstance(physical, str) or not physical:
+            return [], [_extra(address, typ, "DeleteDBInstance")]
+        snapshot = policy_action in {"Snapshot", "ReplaceAndSnapshot"}
+        params = {"DBInstanceIdentifier": physical, "SkipFinalSnapshot": not snapshot}
+        if snapshot:
+            params["FinalDBSnapshotIdentifier"] = f"{physical}-final"
+        return [{"service": "rds", "operation": "DeleteDBInstance", "parameters": params}], []
+    operations = {("ec2", "Instance"): ("ec2", "TerminateInstances", "InstanceIds", True),
+                  ("ec2", "Volume"): ("ec2", "DeleteVolume", "VolumeId", False),
+                  ("ec2", "SecurityGroup"): ("ec2", "DeleteSecurityGroup", "GroupId", False),
+                  ("s3", "Bucket"): ("s3", "DeleteBucket", "Bucket", False),
+                  ("lambda", "Function"): ("lambda", "DeleteFunction", "FunctionName", False),
+                  ("iam", "Role"): ("iam", "DeleteRole", "RoleName", False)}
+    mapped = operations.get((service, suffix))
+    if mapped and isinstance(physical, str) and physical:
+        svc, operation, key, many = mapped
+        value = [physical] if many else physical
+        return [{"service": svc, "operation": operation, "parameters": {key: value}}], []
+    return [], [_extra(address, typ, "Delete" + suffix)]
+
+
 def convert_change_set(doc: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if not isinstance(doc, dict) or not isinstance(doc.get("Changes"), list) or len(doc["Changes"]) > _MAX_CHANGES:
         raise _invalid()
@@ -121,39 +157,21 @@ def convert_change_set(doc: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         physical = resource.get("PhysicalResourceId")
         policy = resource.get("PolicyAction")
         if action == "Remove":
-            if policy == "Retain":
-                extras.append(_extra(address, typ, "RetainResource"))
-            elif typ == "AWS::RDS::DBInstance":
-                params = {"DBInstanceIdentifier": physical, "SkipFinalSnapshot": policy != "Snapshot"}
-                if policy == "Snapshot":
-                    params["SkipFinalSnapshot"] = False
-                    params["FinalDBSnapshotIdentifier"] = f"{physical}-final"
-                if isinstance(physical, str) and physical:
-                    calls.append({"service": "rds", "operation": "DeleteDBInstance", "parameters": params})
-                else:
-                    extras.append(_extra(address, typ, "DeleteDBInstance"))
-            else:
-                if typ == "AWS::EC2::SecurityGroupIngress":
-                    before = _context(resource, "BeforeContext")
-                    rule = _properties(before) if before else None
-                    if isinstance(rule, dict):
-                        calls.append({"service": "ec2", "operation": "RevokeSecurityGroupIngress", "parameters": {"GroupId": rule.get("GroupId") or physical, "IpPermissions": [_normalize_rule(rule)]}})
-                    else:
-                        extras.append(_extra(address, typ, "Delete" + suffix))
-                    continue
-                operations = {("ec2", "Instance"): ("ec2", "TerminateInstances", "InstanceIds", True),
-                              ("ec2", "Volume"): ("ec2", "DeleteVolume", "VolumeId", False),
-                              ("ec2", "SecurityGroup"): ("ec2", "DeleteSecurityGroup", "GroupId", False),
-                              ("s3", "Bucket"): ("s3", "DeleteBucket", "Bucket", False),
-                              ("lambda", "Function"): ("lambda", "DeleteFunction", "FunctionName", False),
-                              ("iam", "Role"): ("iam", "DeleteRole", "RoleName", False)}
-                mapped = operations.get((service, suffix))
-                if mapped and isinstance(physical, str) and physical:
-                    svc, op, key, many = mapped
-                    calls.append({"service": svc, "operation": op, "parameters": {key: [physical] if many else physical}})
-                else:
-                    extras.append(_extra(address, typ, "Delete" + suffix))
+            removal_calls, removal_extras = _removal(resource, address, policy)
+            calls.extend(removal_calls)
+            extras.extend(removal_extras)
         elif action == "Modify":
+            replacement = resource.get("Replacement")
+            if replacement in {"True", "Conditional"}:
+                if policy == "ReplaceAndRetain":
+                    removal_calls, removal_extras = [], [_extra(address, typ, "RetainResource")]
+                else:
+                    removal_calls, removal_extras = _removal(resource, address, policy)
+                calls.extend(removal_calls)
+                extras.extend(removal_extras)
+                if replacement == "Conditional":
+                    extras.append(_extra(address, typ, "ConditionalReplacement"))
+                continue
             before, after = _context(resource, "BeforeContext"), _context(resource, "AfterContext")
             if typ == "AWS::EC2::SecurityGroup":
                 if before is None or after is None:
@@ -161,17 +179,6 @@ def convert_change_set(doc: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
                 else:
                     calls.extend(_sg_calls(resource, before, after, address))
             elif typ == "AWS::RDS::DBInstance":
-                if resource.get("Replacement") == "True":
-                    if policy not in {"ReplaceAndRetain", "Retain"}:
-                        params = {"DBInstanceIdentifier": physical, "SkipFinalSnapshot": policy != "ReplaceAndSnapshot"}
-                        if policy == "ReplaceAndSnapshot":
-                            params["FinalDBSnapshotIdentifier"] = f"{physical}-final"
-                        calls.append({"service": "rds", "operation": "DeleteDBInstance", "parameters": params})
-                    continue
-                if resource.get("Replacement") == "Conditional":
-                    extras.append(_extra(address, typ, "ConditionalReplacement"))
-                    calls.append({"service": "rds", "operation": "DeleteDBInstance", "parameters": {"DBInstanceIdentifier": physical, "SkipFinalSnapshot": True}})
-                    continue
                 if before is None or after is None or _properties(before) is None or _properties(after) is None:
                     extras.append(_extra(address, typ, "MissingPropertyValues"))
                 else:

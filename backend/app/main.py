@@ -1534,7 +1534,7 @@ async def _ingest_plan_endpoint(
     try:
         plan = json.loads(raw)
         translated = translate(plan)
-    except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, RecursionError):
         raise HTTPException(status_code=422, detail=invalid_detail)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc) if preserve_value_errors else invalid_detail)
@@ -1601,12 +1601,6 @@ def _cfn_translator(branch_id: str, document):
     else:
         translated = {"changes": [], "addresses": [], "unmodeled": [], "unknown_fields": []}
     translated["unmodeled"].extend(extras)
-    if any(isinstance(item, dict) and item.get("Type") == "Resource" and isinstance(item.get("ResourceChange"), dict)
-           and item["ResourceChange"].get("Action") == "Modify"
-           and item["ResourceChange"].get("ResourceType") == "AWS::RDS::DBInstance"
-           and item["ResourceChange"].get("Replacement") == "True" for item in document.get("Changes", [])):
-        translated["changes"].append(Change(op="delete", resource_type="rds_instance", resource_id="__cfn_replacement_guard__", fields={"skip_final_snapshot": True, "delete_automated_backups": True}))
-        translated["addresses"].append("CloudFormation replacement")
     return translated
 
 

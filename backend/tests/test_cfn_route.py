@@ -43,11 +43,33 @@ def test_cloudformation_sg_public_ssh_modify_has_same_exposure_reason(plan_clien
 
 
 def test_cloudformation_rds_replacement_behaves_as_delete(plan_client):
-    branch, _, response = post_cfn(plan_client, [resource("Modify", "AWS::RDS::DBInstance", physical="db-dl-prod", replacement="True")])
-    assert response.status_code == 200, response.text
-    result = verdict(plan_client, branch)
-    assert result["verdict"] == "block"
-    assert any(r["code"] == "plan_delete_rejected" for r in result["reasons"])
+    base_analysis_id = "rds-replacement-equivalence"
+    cfn_branch = plan_client.post("/branches", json={"base_analysis_id": base_analysis_id, "name": "rds-cfn"}).json()["branch_id"]
+    api_branch = plan_client.post("/branches", json={"base_analysis_id": base_analysis_id, "name": "rds-api"}).json()["branch_id"]
+
+    cfn = plan_client.post(
+        f"/branches/{cfn_branch}/plans/cloudformation",
+        json={"Changes": [resource("Modify", "AWS::RDS::DBInstance", physical="db-dl-prod", replacement="True")]},
+    )
+    assert cfn.status_code == 200, cfn.text
+    api = plan_client.post(
+        f"/branches/{api_branch}/plans/aws-api",
+        json={"format": "aws-api-calls/1", "calls": [{
+            "service": "rds",
+            "operation": "DeleteDBInstance",
+            "parameters": {"DBInstanceIdentifier": "db-dl-prod", "SkipFinalSnapshot": True},
+        }]},
+    )
+    assert api.status_code == 200, api.text
+
+    cfn_result = verdict(plan_client, cfn_branch)
+    api_result = verdict(plan_client, api_branch)
+    if cfn_result["verdict"] != api_result["verdict"]:
+        pytest.fail(f"verdicts differ: cfn={cfn_result!r}; aws_api={api_result!r}")
+    assert {r["code"] for r in cfn_result["reasons"]} == {r["code"] for r in api_result["reasons"]}
+    assert cfn_result["verdict"] != "pass"
+    assert "db-dl-prod" in plan_client.get(f"/branches/{cfn_branch}/diff").json()["removed_nodes"]
+    assert "db-dl-prod" in plan_client.get(f"/branches/{api_branch}/diff").json()["removed_nodes"]
 
 
 def test_cloudformation_conditional_replacement_has_warn_unmodeled_change(plan_client):
@@ -67,6 +89,21 @@ def test_cloudformation_exact_handback_and_one_character_rejection(plan_client):
     changed = handback["plan_text"][:-1] + ("0" if handback["plan_text"][-1] != "0" else "1")
     rejected = plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": changed})
     assert rejected.status_code == 409 and rejected.json() == {"ok": False, "reason_code": "input_hash_mismatch"}
+
+
+def test_cloudformation_rds_replace_and_retain_keeps_database(plan_client):
+    branch, _, response = post_cfn(plan_client, [resource("Modify", "AWS::RDS::DBInstance", physical="db-dl-prod", replacement="True", PolicyAction="ReplaceAndRetain")])
+    assert response.status_code == 200, response.text
+    result = verdict(plan_client, branch)
+    assert not any(r.get("code") == "unmodeled_delete" or r.get("code") == "plan_delete_rejected" for r in result["reasons"])
+    assert plan_client.get(f"/branches/{branch}/diff").json()["removed_nodes"] == []
+
+
+def test_cloudformation_deeply_nested_json_is_422(plan_client):
+    branch = _branch(plan_client)
+    raw = (b"[" * 2000) + (b"]" * 2000)
+    response = plan_client.post(f"/branches/{branch}/plans/cloudformation", content=raw)
+    assert response.status_code == 422
 
 
 def test_cloudformation_bad_document_is_422(plan_client):

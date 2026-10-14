@@ -1,5 +1,6 @@
 from tests.incidents.synthetic_base import load_synthetic_base
 import json
+import uuid
 import shlex
 
 import botocore.session
@@ -376,15 +377,23 @@ _L19_CALLS = st.sampled_from([
 def _l19_item(call):
     p = call["parameters"]
     service, operation = call["service"], call["operation"]
-    deletes = {("ec2", "TerminateInstances"): ("AWS::EC2::Instance", "i-dl-web"),
-               ("ec2", "DeleteVolume"): ("AWS::EC2::Volume", p["VolumeId"]),
-               ("ec2", "DeleteSecurityGroup"): ("AWS::EC2::SecurityGroup", p["GroupId"]),
-               ("rds", "DeleteDBInstance"): ("AWS::RDS::DBInstance", p["DBInstanceIdentifier"]),
-               ("s3", "DeleteBucket"): ("AWS::S3::Bucket", p["Bucket"]),
-               ("lambda", "DeleteFunction"): ("AWS::Lambda::Function", p["FunctionName"]),
-               ("iam", "DeleteRole"): ("AWS::IAM::Role", p["RoleName"])}
-    if (service, operation) in deletes:
-        typ, physical = deletes[(service, operation)]
+    if (service, operation) == ("ec2", "TerminateInstances"):
+        typ, physical = "AWS::EC2::Instance", "i-dl-web"
+    elif (service, operation) == ("ec2", "DeleteVolume"):
+        typ, physical = "AWS::EC2::Volume", p["VolumeId"]
+    elif (service, operation) == ("ec2", "DeleteSecurityGroup"):
+        typ, physical = "AWS::EC2::SecurityGroup", p["GroupId"]
+    elif (service, operation) == ("rds", "DeleteDBInstance"):
+        typ, physical = "AWS::RDS::DBInstance", p["DBInstanceIdentifier"]
+    elif (service, operation) == ("s3", "DeleteBucket"):
+        typ, physical = "AWS::S3::Bucket", p["Bucket"]
+    elif (service, operation) == ("lambda", "DeleteFunction"):
+        typ, physical = "AWS::Lambda::Function", p["FunctionName"]
+    elif (service, operation) == ("iam", "DeleteRole"):
+        typ, physical = "AWS::IAM::Role", p["RoleName"]
+    else:
+        typ = physical = None
+    if typ is not None:
         rc = {"Action": "Remove", "LogicalResourceId": "L19", "PhysicalResourceId": physical, "ResourceType": typ, "Replacement": "False"}
         if operation == "DeleteDBInstance":
             rc["PolicyAction"] = "Delete"
@@ -403,8 +412,9 @@ def _l19_item(call):
           suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow])
 @given(calls=st.lists(_L19_CALLS, min_size=1, max_size=3))
 def test_L19_cloudformation_and_aws_api_are_equivalent(plan_client, calls):
-    api_branch = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "l19-api"}).json()["branch_id"]
-    cfn_branch = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "l19-cfn"}).json()["branch_id"]
+    base_analysis_id = f"delete-l19-{uuid.uuid4()}"
+    api_branch = plan_client.post("/branches", json={"base_analysis_id": base_analysis_id, "name": "l19-api"}).json()["branch_id"]
+    cfn_branch = plan_client.post("/branches", json={"base_analysis_id": base_analysis_id, "name": "l19-cfn"}).json()["branch_id"]
     api = plan_client.post(f"/branches/{api_branch}/plans/aws-api", json={"format": "aws-api-calls/1", "calls": calls})
     cfn = plan_client.post(f"/branches/{cfn_branch}/plans/cloudformation", json={"Changes": [_l19_item(call) for call in calls]})
     assert api.status_code == cfn.status_code == 200, (api.text, cfn.text)

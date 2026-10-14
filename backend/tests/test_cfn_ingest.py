@@ -121,3 +121,36 @@ def test_nested_stack_modify_is_warn_unmodeled():
 def test_invalid_change_set_documents_raise_value_error(doc):
     with pytest.raises(ValueError):
         convert_change_set(doc)
+
+
+@pytest.mark.parametrize("typ,service,operation,parameters", [
+    ("AWS::EC2::Instance", "ec2", "TerminateInstances", {"InstanceIds": ["id-1"]}),
+    ("AWS::EC2::Volume", "ec2", "DeleteVolume", {"VolumeId": "id-1"}),
+    ("AWS::S3::Bucket", "s3", "DeleteBucket", {"Bucket": "id-1"}),
+    ("AWS::Lambda::Function", "lambda", "DeleteFunction", {"FunctionName": "id-1"}),
+    ("AWS::IAM::Role", "iam", "DeleteRole", {"RoleName": "id-1"}),
+    ("AWS::EC2::SecurityGroup", "ec2", "DeleteSecurityGroup", {"GroupId": "id-1"}),
+])
+def test_true_replacement_removes_old_mapped_resource(typ, service, operation, parameters):
+    api, extras = convert_change_set({"Changes": [rc("Modify", typ, replacement="True")]})
+    assert api["calls"] == [call(service, operation, parameters)]
+    assert extras == []
+
+
+def test_true_replacement_unmapped_resource_blocks_delete():
+    api, extras = convert_change_set({"Changes": [rc("Modify", "AWS::DynamoDB::Table", replacement="True")]})
+    assert api["calls"] == []
+    assert extras[0]["type"] == "dynamodb.DeleteTable" and extras[0]["actions"] == ["delete"]
+
+
+def test_conditional_replacement_removes_and_warns():
+    api, extras = convert_change_set({"Changes": [rc("Modify", "AWS::EC2::Instance", replacement="Conditional")]})
+    assert api["calls"] == [call("ec2", "TerminateInstances", {"InstanceIds": ["id-1"]})]
+    assert any(x["type"] == "cloudformation.ConditionalReplacement" for x in extras)
+
+
+@pytest.mark.parametrize("typ", ["AWS::RDS::DBInstance", "AWS::EC2::Instance"])
+def test_replace_and_retain_does_not_remove_and_warns(typ):
+    api, extras = convert_change_set({"Changes": [rc("Modify", typ, replacement="True", PolicyAction="ReplaceAndRetain")]})
+    assert api["calls"] == []
+    assert extras[0]["type"] == "cloudformation.RetainResource" and extras[0]["actions"] == ["update"]
