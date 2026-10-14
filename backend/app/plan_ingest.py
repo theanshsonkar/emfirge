@@ -17,6 +17,15 @@ def is_aws_provider(provider_name: Any) -> bool:
     return provider_name.strip().rstrip("/").rsplit("/", 1)[-1].lower() in _AWS_PROVIDER_TYPES
 
 
+_UNSEEN_TERRAFORM_TYPES = frozenset({
+    "aws_network_acl", "aws_network_acl_rule", "aws_network_acl_association",
+    "aws_default_network_acl", "aws_default_security_group",
+})
+_TERRAFORM_RULE_TYPES = frozenset({
+    "aws_vpc_security_group_ingress_rule", "aws_vpc_security_group_egress_rule",
+    "aws_security_group_rule",
+})
+
 _RESOURCE_MAP = {
     "aws_instance": ("ec2_instance", "id"),
     "aws_db_instance": ("rds_instance", "identifier"),
@@ -57,6 +66,103 @@ def _rules(value: Any) -> list[dict]:
     return result
 
 
+def _rules(value: Any) -> list[dict]:
+    result = []
+    for item in value or []:
+        if not isinstance(item, dict):
+            continue
+        ranges = item.get("cidr_blocks", item.get("ip_ranges", [])) or []
+        ranges = list(ranges) + list(item.get("ipv6_cidr_blocks", []) or [])
+        result.append({
+            "from_port": item.get("from_port"), "to_port": item.get("to_port"),
+            "protocol": str(item.get("protocol", "-1")),
+            "ip_ranges": ranges,
+            "source_sg_ids": item.get("security_groups", item.get("source_sg_ids", [])) or [],
+            "dest_sg_ids": item.get("dest_sg_ids", []) or [],
+        })
+    return result
+
+
+def _terraform_rule(typ: str, value: dict, parent_id: str) -> tuple[str, dict]:
+    ingress = typ.endswith("ingress_rule") or value.get("type", "ingress") == "ingress"
+    ranges = []
+    groups = []
+    if typ == "aws_security_group_rule":
+        ranges = list(value.get("cidr_blocks", []) or []) + list(value.get("ipv6_cidr_blocks", []) or [])
+        groups = list(value.get("security_groups", []) or [])
+        if value.get("source_security_group_id"):
+            groups.append(value["source_security_group_id"])
+        if value.get("self"):
+            groups.append(parent_id)
+        protocol = value.get("protocol", "-1")
+    else:
+        if value.get("cidr_ipv4"):
+            ranges.append(value["cidr_ipv4"])
+        if value.get("cidr_ipv6"):
+            ranges.append(value["cidr_ipv6"])
+        if value.get("referenced_security_group_id"):
+            groups.append(value["referenced_security_group_id"])
+        protocol = value.get("ip_protocol", "-1")
+    rule = {"from_port": value.get("from_port"), "to_port": value.get("to_port"),
+            "protocol": str(protocol), "ip_ranges": ranges,
+            "source_sg_ids": groups if ingress else [],
+            "dest_sg_ids": groups if not ingress else []}
+    return ("rules" if ingress else "egress_rules"), rule
+
+
+def _rule_parent(item: dict, config_resources: dict[str, dict], created_ids: dict[str, str]) -> str | None:
+    change = item.get("change") or {}
+    before, after = change.get("before") or {}, change.get("after") or {}
+    value = before if change.get("actions") == ["delete"] else after
+    parent = value.get("security_group_id")
+    if parent and "security_group_id" not in (change.get("after_unknown") or {}):
+        return str(parent)
+    expression = (config_resources.get(item.get("address"), {}).get("expressions") or {}).get("security_group_id", {})
+    for reference in expression.get("references", []) or []:
+        if reference in created_ids:
+            return created_ids[reference]
+        if reference.split(".")[0:2] == reference.split(".")[:2] and reference in created_ids:
+            return created_ids[reference]
+    return None
+
+
+def _rule_change(item: dict, sg_rules: dict[str, list[dict]], config_resources: dict[str, dict], created_ids: dict[str, str], unknown_fields: list[dict]) -> tuple[list[Change], dict | None]:
+    typ = item.get("type", "")
+    parent = _rule_parent(item, config_resources, created_ids)
+    actions = (item.get("change") or {}).get("actions", [])
+    if not parent or parent not in sg_rules and parent not in created_ids.values():
+        return [], {"address": item.get("address", ""), "type": typ, "actions": actions,
+                     "provider_name": item.get("provider_name") if isinstance(item.get("provider_name"), str) else None,
+                     "outside_view": False, "unseen": True, "unresolvable_parent": not bool(parent)}
+    before, after = (item.get("change") or {}).get("before") or {}, (item.get("change") or {}).get("after") or {}
+    field, after_rule = _terraform_rule(typ, after, parent)
+    _, before_rule = _terraform_rule(typ, before, parent)
+    current = {"rules": list(sg_rules.get(parent, [])), "egress_rules": []}
+    if parent in sg_rules:
+        current["egress_rules"] = []
+    # Existing branch egress rules are supplied under a tagged mapping.
+    existing = sg_rules.get(parent, [])
+    if isinstance(existing, dict):
+        current = {"rules": list(existing.get("rules", [])), "egress_rules": list(existing.get("egress_rules", []))}
+    if field not in current:
+        current[field] = []
+    if actions == ["delete"]:
+        target = before_rule
+        current[field] = [rule for rule in current[field] if rule != target]
+    elif actions == ["update"] or set(actions) == {"delete", "create"}:
+        current[field] = [rule for rule in current[field] if rule != before_rule]
+        current[field].append(after_rule)
+    elif actions == ["create"]:
+        if after_rule not in current[field]:
+            current[field].append(after_rule)
+    else:
+        return [], None
+    if current[field] == (existing.get(field, []) if isinstance(existing, dict) else existing) and actions == ["delete"]:
+        return [], None
+    sg_rules[parent] = current
+    return [Change(op="modify", resource_type="security_group", resource_id=parent, fields=current)], None
+
+
 def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, update: bool = False) -> dict:
     after = change.get("after") or {}
     fields: dict[str, Any] = {}
@@ -92,7 +198,7 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
     return fields
 
 
-def _translate_item(item: dict, unknown_fields: list[dict]) -> tuple[list[Change], dict | None]:
+def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[str, Any] | None = None, config_resources: dict[str, dict] | None = None, created_ids: dict[str, str] | None = None) -> tuple[list[Change], dict | None]:
     if item.get("mode", "managed") != "managed":
         return [], None
     address = item.get("address", "")
@@ -104,6 +210,12 @@ def _translate_item(item: dict, unknown_fields: list[dict]) -> tuple[list[Change
     if not is_aws_provider(provider_name):
         return [], {"address": address, "type": typ, "actions": actions,
                      "provider_name": provider_name, "outside_view": True}
+    if typ in _UNSEEN_TERRAFORM_TYPES:
+        return [], {"address": address, "type": typ, "actions": actions,
+                     "provider_name": provider_name if isinstance(provider_name, str) else None,
+                     "outside_view": False, "unseen": True}
+    if typ in _TERRAFORM_RULE_TYPES:
+        return _rule_change(item, sg_rules or {}, config_resources or {}, created_ids or {}, unknown_fields)
     if typ not in _RESOURCE_MAP:
         return [], {"address": address, "type": typ, "actions": actions,
                      "provider_name": provider_name if isinstance(provider_name, str) else None,
@@ -141,7 +253,7 @@ def _translate_item(item: dict, unknown_fields: list[dict]) -> tuple[list[Change
     return result, None
 
 
-def translate_plan(plan: Any) -> dict[str, Any]:
+def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None) -> dict[str, Any]:
     if not isinstance(plan, dict):
         raise ValueError("Terraform plan must be a JSON object")
     if not isinstance(plan.get("format_version"), str) or not plan["format_version"].startswith("1."):
@@ -150,6 +262,18 @@ def translate_plan(plan: Any) -> dict[str, Any]:
         raise ValueError("Terraform plan resource_changes must be a list")
     unknown_fields: list[dict] = []
     unmodeled: list[dict] = []
+    sg_rules = sg_rules if sg_rules is not None else {}
+    config_resources = {
+        resource.get("address"): resource for resource in ((plan.get("configuration") or {}).get("root_module") or {}).get("resources", [])
+        if isinstance(resource, dict) and isinstance(resource.get("address"), str)
+    }
+    created_ids = {}
+    for resource in plan["resource_changes"]:
+        if isinstance(resource, dict) and resource.get("type") == "aws_security_group":
+            after = (resource.get("change") or {}).get("after") or {}
+            if after.get("id"):
+                created_ids[resource.get("address")] = str(after["id"])
+                created_ids[resource.get("address") + ".id"] = str(after["id"])
     deletes: list[tuple[Change, str, dict]] = []
     modifies: list[tuple[Change, str, dict]] = []
     adds: list[tuple[Change, str, dict]] = []
@@ -161,7 +285,8 @@ def translate_plan(plan: Any) -> dict[str, Any]:
         if (not isinstance(change, dict) or not isinstance(actions, list)
                 or not actions or not all(isinstance(action, str) for action in actions)):
             raise ValueError("Terraform plan change actions must be a non-empty list of strings")
-        changes, unsupported = _translate_item(item, unknown_fields)
+        changes, unsupported = _translate_item(item, unknown_fields, sg_rules=sg_rules,
+                                                 config_resources=config_resources, created_ids=created_ids)
         if unsupported:
             unmodeled.append(unsupported)
         for change in changes:
@@ -181,6 +306,10 @@ def translate_plan(plan: Any) -> dict[str, Any]:
     deletes = [x for x in deletes if x[0].resource_type != "security_group"]
     deletes.sort(key=lambda x: (_DELETE_ORDER.index(x[0].resource_type), x[1]))
     deletes.extend(ordered_sg)
-    ordered = deletes + modifies + adds
+    ordered = deletes + sorted(
+        modifies + adds,
+        key=lambda item: (0 if item[0].op == "add" and item[0].resource_type == "security_group" else 1,
+                          0 if item[0].op == "modify" else 1, item[1]),
+    )
     return {"changes": [c for c, _, _ in ordered], "addresses": [a for _, a, _ in ordered],
             "unmodeled": unmodeled, "unknown_fields": unknown_fields}

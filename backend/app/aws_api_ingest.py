@@ -48,6 +48,12 @@ def _validate_identifier(operation: str, parameters: dict[str, Any], identifier:
         raise _invalid()
 
 
+_UNSEEN_EC2_OPERATIONS = frozenset({
+    "CreateNetworkAcl", "DeleteNetworkAcl", "CreateNetworkAclEntry",
+    "ReplaceNetworkAclEntry", "DeleteNetworkAclEntry", "ReplaceNetworkAclAssociation",
+})
+
+
 def _unmodeled(address: str, service: str, operation: str) -> dict[str, Any]:
     if operation.startswith(_DELETE_PREFIXES):
         actions = ["delete"]
@@ -60,6 +66,8 @@ def _unmodeled(address: str, service: str, operation: str) -> dict[str, Any]:
         risk = None
     result = {"address": address, "type": f"{service}.{operation}", "actions": actions,
               "provider_name": "aws", "outside_view": False, "source": "aws_api"}
+    if operation in _UNSEEN_EC2_OPERATIONS:
+        result["unseen"] = True
     if risk is not None:
         result["risk"] = risk
     return result
