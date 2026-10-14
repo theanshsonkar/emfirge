@@ -32,7 +32,7 @@ def test_valid_terminate_and_rds_delete(plan_client):
 
 
 def test_unmodeled_aws_api_reasons(plan_client):
-    for operation, expected_code, expected_level in (("DeleteVpc", "unmodeled_delete", "block"), ("PutBucketPolicy", "unmodeled_change", "warn")):
+    for operation, expected_code, expected_level in (("DeleteVpc", "unmodeled_delete", "block"), ("PutBucketPolicy", "unmodeled_risky_change", "block")):
         branch_id, _, response = _post(plan_client, {"format": "aws-api-calls/1", "calls": [
             {"service": "ec2" if operation == "DeleteVpc" else "s3", "operation": operation, "parameters": {}}
         ]})
@@ -173,3 +173,16 @@ def test_modify_rds_deletion_protection_and_backup_retention_applies(plan_client
         "parameters": {"DBInstanceIdentifier": "db-dl-prod", "DeletionProtection": False,
                         "BackupRetentionPeriod": 0}}])
     assert body["applied"] and body["rejected"] == []
+
+
+
+def test_unmodeled_risky_aws_api_calls_block_and_put_object_warns(plan_client):
+    branch_id, _, response = _post(plan_client, {"format": "aws-api-calls/1", "calls": [
+        {"service": "ec2", "operation": "StopInstances", "parameters": {}},
+        {"service": "s3", "operation": "PutBucketPolicy", "parameters": {}},
+        {"service": "s3", "operation": "PutObject", "parameters": {}},
+    ]})
+    assert response.status_code == 200, response.text
+    reasons = plan_client.get(f"/branches/{branch_id}/verdict").json()["reasons"]
+    assert sum(reason["code"] == "unmodeled_risky_change" and reason["level"] == "block" for reason in reasons) == 2
+    assert sum(reason["code"] == "unmodeled_change" and reason["level"] == "warn" for reason in reasons) == 1

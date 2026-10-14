@@ -174,3 +174,37 @@ def test_L16_terraform_and_aws_api_public_ssh_are_equivalent(plan_client):
     assert tf_verdict["verdict"] == api_verdict["verdict"]
     assert {(r["code"], r["level"]) for r in tf_verdict["reasons"]}
     assert {(r["code"], r["level"]) for r in tf_verdict["reasons"]} == {(r["code"], r["level"]) for r in api_verdict["reasons"]}
+
+
+@settings(max_examples=30, deadline=None,
+          suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow])
+@given(prefix=st.one_of(
+    st.sampled_from(["Delete", "Terminate", "Purge", "Deregister", "Release", "Remove",
+                     "Detach", "Disassociate", "Revoke", "Stop", "Disable", "Create",
+                     "Put", "Tag", "Start", "Modify", "Update", "Attach", "Associate",
+                     "Enable", "Run"]),
+    st.builds(lambda suffix: "Put" + suffix + "Policy",
+              st.from_regex(r"[A-Z][a-z]{2,8}", fullmatch=True)),
+    st.builds(lambda suffix: "Put" + suffix + "Acl",
+              st.from_regex(r"[A-Z][a-z]{2,8}", fullmatch=True)),
+), suffix=st.from_regex(r"[A-Z][a-z]{2,8}", fullmatch=True))
+def test_L16_unmapped_aws_call_block_rule(plan_client, monkeypatch, prefix, suffix):
+    from app import branches
+    from app.aws_api_ingest import _DELETE_PREFIXES, _MAPPED
+    import re
+
+    monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 10000)
+    operation = prefix + suffix
+    assert not any((service, operation) in _MAPPED for service in ("custom", "ec2", "s3", "iam", "rds", "lambda"))
+    risky = operation.startswith(("Detach", "Disassociate", "Revoke", "Stop", "Disable")) or bool(re.fullmatch(r"Put[A-Za-z0-9]*(Policy|Acl)", operation))
+    delete = operation.startswith(_DELETE_PREFIXES)
+    branch_id = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "aws-api-law"}).json()["branch_id"]
+    response = plan_client.post(f"/branches/{branch_id}/plans/aws-api", json={"format": "aws-api-calls/1", "calls": [
+        {"service": "custom", "operation": operation, "parameters": {}}
+    ]})
+    assert response.status_code == 200, response.text
+    reasons = plan_client.get(f"/branches/{branch_id}/verdict").json()["reasons"]
+    expected = "unmodeled_delete" if delete else "unmodeled_risky_change" if risky else "unmodeled_change"
+    expected_level = "block" if delete or risky else "warn"
+    assert any(reason["code"] == expected and reason["level"] == expected_level for reason in reasons)
+    assert "pass" not in {reason["code"] for reason in reasons}
