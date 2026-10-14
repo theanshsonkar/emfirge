@@ -38,6 +38,7 @@ import {
 } from "./tools/compliance.js";
 import { simulateSchema, simulateZodObject, simulateHandler } from "./tools/simulate.js";
 import { inUseEvidenceSchema, inUseEvidenceZodObject, inUseEvidenceHandler } from "./tools/evidence.js";
+import { planVerdictSchema, planVerdictZodObject, planVerdictHandler } from "./tools/plan-verdict.js";
 import {
   applyChangeSchema,
   applyChangeZodObject,
@@ -286,6 +287,14 @@ const tools: ToolRegistration[] = [
     schema: branchIdSchema as Record<string, z.ZodTypeAny>,
     zodObject: branchVerdictZodObject as z.ZodObject<z.ZodRawShape>,
     handler: branchVerdictHandler,
+  },
+  {
+    name: "emfirge_plan_verdict",
+    description:
+      "Check a proposed change on a branch before it is applied. Accepts a Terraform plan (terraform show -json), AWS API calls, AWS CLI commands, or a CloudFormation change set. Emfirge never runs the change. Returns the verdict and the hand-back: the exact input bound to the verdict by hash.",
+    schema: planVerdictSchema as Record<string, z.ZodTypeAny>,
+    zodObject: planVerdictZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: planVerdictHandler,
   },
   {
     name: "emfirge_rollback_branch",

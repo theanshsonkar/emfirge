@@ -70,7 +70,7 @@ export async function backendCall<T = unknown>(
         );
       }
 
-      throw new Error(`Backend ${res.status} on ${path}: ${text.slice(0, 300)}`);
+      throw new Error(`Backend ${res.status} on ${path}: ${extractDetail(text) ?? text.slice(0, 300)}`);
     }
 
     return (await res.json()) as T;
@@ -154,7 +154,7 @@ export async function backendCallSSE<T = unknown>(
           `Not found at ${path}. If you passed an analysis_id, run emfirge_scan first.`,
         );
       }
-      throw new Error(`Backend ${res.status} on ${path}: ${text.slice(0, 300)}`);
+      throw new Error(`Backend ${res.status} on ${path}: ${extractDetail(text) ?? text.slice(0, 300)}`);
     }
 
     if (!res.body) {
