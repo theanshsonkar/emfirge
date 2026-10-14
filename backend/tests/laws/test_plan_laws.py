@@ -436,3 +436,97 @@ def test_L19_sanity(plan_client):
     assert plan_client.post(f"/branches/{cfn}/plans/cloudformation", json={"Changes": [_l19_item(call)]}).status_code == 200
     assert plan_client.get(f"/branches/{api}/verdict").json()["verdict"] != "pass"
     assert plan_client.get(f"/branches/{cfn}/verdict").json()["verdict"] != "pass"
+
+
+import pytest
+
+
+def _one_sg_base():
+    base = load_synthetic_base("delete")
+    sg = next(item for item in base.ec2.security_groups if item.id == "sg-dl-web")
+    return base.model_copy(update={"ec2": base.ec2.model_copy(update={"security_groups": [sg]})})
+
+
+def _exposure_identities(verdict):
+    return {(item.get("rule_id", "internet_ingress"), item["resource_id"],
+             item["from_port"], item["to_port"])
+            for item in verdict["newly_exposed"]}
+
+
+def _terraform_ingress(shape, cidr, port):
+    ipv4 = [cidr] if "." in cidr else []
+    ipv6 = [cidr] if ":" in cidr else []
+    if shape == "inline":
+        before_rule = {"from_port": 443, "to_port": 443, "protocol": "tcp",
+                       "cidr_blocks": ["0.0.0.0/0"]}
+        after_rule = {"from_port": port, "to_port": port, "protocol": "tcp",
+                      "cidr_blocks": ipv4, "ipv6_cidr_blocks": ipv6}
+        return {"address": "aws_security_group.web", "mode": "managed", "type": "aws_security_group",
+                "name": "web", "change": {"actions": ["update"],
+                "before": {"id": "sg-dl-web", "ingress": [before_rule]},
+                "after": {"id": "sg-dl-web", "ingress": [before_rule, after_rule]}}}
+    if shape == "vpc_rule":
+        after = {"security_group_id": "sg-dl-web", "cidr_ipv4": cidr if ipv4 else None,
+                 "cidr_ipv6": cidr if ipv6 else None, "from_port": port,
+                 "to_port": port, "ip_protocol": "tcp"}
+        return {"address": "aws_vpc_security_group_ingress_rule.web", "mode": "managed",
+                "type": "aws_vpc_security_group_ingress_rule", "change": {"actions": ["create"],
+                "before": None, "after": after}}
+    after = {"security_group_id": "sg-dl-web", "type": "ingress",
+             "cidr_blocks": ipv4, "ipv6_cidr_blocks": ipv6,
+             "from_port": port, "to_port": port, "protocol": "tcp"}
+    return {"address": "aws_security_group_rule.web", "mode": "managed",
+            "type": "aws_security_group_rule", "change": {"actions": ["create"],
+            "before": None, "after": after}}
+
+
+@pytest.mark.parametrize("shape", ["inline", "vpc_rule", "sg_rule"],
+                         ids=["inline-aws-security-group-ingress", "aws-vpc-security-group-ingress-rule",
+                              "aws-security-group-rule-ingress"])
+@pytest.mark.parametrize("port", [22, 3389, 5432])
+def test_L20_ipv6_world_open_matches_ipv4_in_every_terraform_firewall_shape(
+        plan_client, monkeypatch, shape, port):
+    """L20: A port open on ::/0 is always seen like 0.0.0.0/0, in every Terraform firewall shape."""
+    monkeypatch.setattr("app.main.get_infrastructure_for_analysis", lambda _id: _one_sg_base())
+
+    def ingest(cidr, name):
+        branch_id, _, response = _post(plan_client, {"format_version": "1.0", "resource_changes": [
+            _terraform_ingress(shape, cidr, port)]})
+        assert response.status_code == 200, response.text
+        return plan_client.get(f"/branches/{branch_id}/verdict").json()
+
+    ipv6 = ingest("::/0", "ipv6")
+    ipv4 = ingest("0.0.0.0/0", "ipv4")
+    assert ipv6["verdict"] == ipv4["verdict"]
+    assert _exposure_identities(ipv6) == _exposure_identities(ipv4)
+    assert _exposure_identities(ipv6)
+    assert _exposure_identities(ipv4)
+
+
+@pytest.mark.parametrize("cidr, api_range", [
+    ("0.0.0.0/0", {"IpRanges": [{"CidrIp": "0.0.0.0/0"}]}),
+    ("::/0", {"Ipv6Ranges": [{"CidrIpv6": "::/0"}]}),
+    ("10.0.0.0/8", {"IpRanges": [{"CidrIp": "10.0.0.0/8"}]}),
+], ids=["ipv4-world", "ipv6-world", "private"])
+def test_L21_terraform_ingress_and_aws_api_authorize_ingress_are_equivalent(
+        plan_client, monkeypatch, cidr, api_range):
+    """L21: A Terraform ingress rule and the same AWS API AuthorizeSecurityGroupIngress get the same verdict."""
+    monkeypatch.setattr("app.main.get_infrastructure_for_analysis", lambda _id: _one_sg_base())
+    port = 22
+    tf_branch, _, tf_response = _post(plan_client, {"format_version": "1.0", "resource_changes": [
+        _terraform_ingress("vpc_rule", cidr, port)]})
+    assert tf_response.status_code == 200, tf_response.text
+    api_branch = plan_client.post("/branches", json={"base_analysis_id": "law18", "name": "law18-api"}).json()["branch_id"]
+    api_response = plan_client.post(f"/branches/{api_branch}/plans/aws-api", json={
+        "format": "aws-api-calls/1", "calls": [{"service": "ec2",
+        "operation": "AuthorizeSecurityGroupIngress", "parameters": {"GroupId": "sg-dl-web",
+        "IpPermissions": [{"IpProtocol": "tcp", "FromPort": port, "ToPort": port, **api_range}]}}]})
+    assert api_response.status_code == 200, api_response.text
+    tf_verdict = plan_client.get(f"/branches/{tf_branch}/verdict").json()
+    api_verdict = plan_client.get(f"/branches/{api_branch}/verdict").json()
+    assert tf_verdict["verdict"] == api_verdict["verdict"]
+    assert _exposure_identities(tf_verdict) == _exposure_identities(api_verdict)
+    if cidr == "10.0.0.0/8":
+        assert not _exposure_identities(tf_verdict)
+    else:
+        assert _exposure_identities(tf_verdict)

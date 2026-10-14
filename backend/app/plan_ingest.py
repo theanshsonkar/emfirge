@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.mutations import Change
+from app.aws_api_ingest import remove_security_group_rule
 
 _AWS_PROVIDER_TYPES = {"aws", "awscc"}
 
@@ -84,7 +85,7 @@ def _rules(value: Any) -> list[dict]:
 
 
 def _terraform_rule(typ: str, value: dict, parent_id: str) -> tuple[str, dict]:
-    ingress = typ.endswith("ingress_rule") or value.get("type", "ingress") == "ingress"
+    ingress = typ.endswith("ingress_rule") or (typ == "aws_security_group_rule" and value.get("type", "ingress") == "ingress")
     ranges = []
     groups = []
     if typ == "aws_security_group_rule":
@@ -103,7 +104,13 @@ def _terraform_rule(typ: str, value: dict, parent_id: str) -> tuple[str, dict]:
         if value.get("referenced_security_group_id"):
             groups.append(value["referenced_security_group_id"])
         protocol = value.get("ip_protocol", "-1")
-    rule = {"from_port": value.get("from_port"), "to_port": value.get("to_port"),
+    protocol = str(protocol)
+    if protocol == "-1":
+        from_port = to_port = None
+    else:
+        from_port = value.get("from_port")
+        to_port = value.get("to_port")
+    rule = {"from_port": from_port, "to_port": to_port,
             "protocol": str(protocol), "ip_ranges": ranges,
             "source_sg_ids": groups if ingress else [],
             "dest_sg_ids": groups if not ingress else []}
@@ -148,9 +155,9 @@ def _rule_change(item: dict, sg_rules: dict[str, list[dict]], config_resources: 
         current[field] = []
     if actions == ["delete"]:
         target = before_rule
-        current[field] = [rule for rule in current[field] if rule != target]
+        remove_security_group_rule(current[field], target)
     elif actions == ["update"] or set(actions) == {"delete", "create"}:
-        current[field] = [rule for rule in current[field] if rule != before_rule]
+        remove_security_group_rule(current[field], before_rule)
         current[field].append(after_rule)
     elif actions == ["create"]:
         if after_rule not in current[field]:
@@ -178,6 +185,8 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
         allowed = {"aws_security_group": {"ingress"}, "aws_db_instance": {"backup_retention_period", "deletion_protection"}}
         supported = {key: value for key, value in supported.items() if key in allowed.get(resource, set())}
     if resource == "aws_security_group":
+        if "name" in after:
+            fields["name"] = after["name"]
         if "ingress" in after and not _unknown(change, address, "ingress", unknown):
             fields["rules"] = _rules(after.get("ingress"))
     for source, target in supported.items():
@@ -308,8 +317,11 @@ def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None) -> dict[st
     deletes.extend(ordered_sg)
     ordered = deletes + sorted(
         modifies + adds,
-        key=lambda item: (0 if item[0].op == "add" and item[0].resource_type == "security_group" else 1,
-                          0 if item[0].op == "modify" else 1, item[1]),
+        key=lambda item: (
+            0 if item[0].op == "add" and item[0].resource_type == "security_group" else
+            1 if item[0].op == "modify" else 2,
+            item[1],
+        ),
     )
     return {"changes": [c for c, _, _ in ordered], "addresses": [a for _, a, _ in ordered],
             "unmodeled": unmodeled, "unknown_fields": unknown_fields}

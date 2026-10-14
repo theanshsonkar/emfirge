@@ -1599,7 +1599,7 @@ def _aws_translator(branch_id: str, document, cli: bool = False):
         for role in state.iam.role_policies
     }
     sg_rule_map = {
-        group.id: copy.deepcopy(group.rules)
+        group.id: {"rules": copy.deepcopy(group.rules), "egress_rules": copy.deepcopy(group.egress_rules)}
         for group in state.ec2.security_groups
     }
     if cli:
