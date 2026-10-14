@@ -1,10 +1,26 @@
 import json
-
 import pytest
 
 from tests.test_plan_ingest import plan_client  # noqa: F401
 from tests.test_aws_api_route import _branch
 from tests.laws.test_tenant_isolation import tenant_client  # noqa: F401
+
+
+def test_cli_route_refuses_shorthand_without_persisting(plan_client):
+    branch_id = _branch(plan_client)
+    before = plan_client.get(f"/branches/{branch_id}").json()
+    response = plan_client.post(
+        f"/branches/{branch_id}/plans/aws-cli",
+        json={"format": "aws-cli/1", "commands": [
+            "aws ec2 create-tags --resources i-1 --tags 'Key=a,Value=b'",
+        ]},
+    )
+    assert response.status_code == 422
+    assert "does not support shorthand" in response.json()["detail"]
+    after = plan_client.get(f"/branches/{branch_id}").json()
+    assert after["branch_revision"] == before["branch_revision"]
+    assert after["num_changes"] == before["num_changes"] == 0
+    assert plan_client.get(f"/branches/{branch_id}/verdict").json()["plans"] == []
 
 
 def _cli_post(client, command, *, raw=None):

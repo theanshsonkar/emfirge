@@ -97,7 +97,7 @@ def _json_value(command_no: int, option: str, value: str) -> Any:
     if _file_value(value):
         raise ValueError(f"Command {command_no}: cannot read files or URLs; pass literal values instead.")
     if not value.startswith(("{", "[")):
-        raise ValueError(f"Command {command_no}: {option} uses shorthand syntax, which is not supported yet; pass JSON instead.")
+        raise ValueError(f"Command {command_no}: {option} uses AWS shorthand syntax. Emfirge does not support shorthand and will not guess what it means; pass the value as JSON.")
     try:
         return json.loads(value)
     except (TypeError, json.JSONDecodeError) as exc:
