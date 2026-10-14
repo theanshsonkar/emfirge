@@ -195,3 +195,49 @@ def test_unrelated_unknown_aws_type_still_warns(plan_client):
     reasons = _verdict(plan_client, branch_id)["reasons"]
     assert any(reason["code"] == "unmodeled_change" and reason["level"] == "warn" for reason in reasons)
     assert not any(reason["code"] == "unseen_change" for reason in reasons)
+
+
+def _egress_api_call(operation, cidr="0.0.0.0/0"):
+    return {"format": "aws-api-calls/1", "calls": [{"service": "ec2", "operation": operation,
+        "parameters": {"GroupId": "sg-dl-web", "IpPermissions": [{"IpProtocol": "tcp",
+            "FromPort": 443, "ToPort": 443, "IpRanges": [{"CidrIp": cidr}]}]}}]}
+
+
+def test_authorize_security_group_egress_adds_rule_without_no_match(plan_client):
+    branch_id = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "egress-api"}).json()["branch_id"]
+    response = plan_client.post(f"/branches/{branch_id}/plans/aws-api", json=_egress_api_call("AuthorizeSecurityGroupEgress"))
+    assert response.status_code == 200, response.text
+    assert not any(item["reason"] == "no_matching_rule" for item in response.json()["unknown_fields"])
+    _, egress = _state_rules(branch_id, "sg-dl-web")
+    assert any(rule["protocol"] == "tcp" and rule["from_port"] == 443 and rule["ip_ranges"] == ["0.0.0.0/0"] for rule in egress)
+
+
+def test_revoke_security_group_egress_removes_only_matching_cidr(plan_client, monkeypatch):
+    base = load_synthetic_base("delete")
+    group = next(item for item in base.ec2.security_groups if item.id == "sg-dl-web")
+    group.egress_rules = [{"protocol": "tcp", "from_port": 443, "to_port": 443,
+                           "ip_ranges": ["0.0.0.0/0", "10.0.0.0/8"], "source_sg_ids": [], "dest_sg_ids": []}]
+    monkeypatch.setattr("app.main.get_infrastructure_for_analysis", lambda _id: base)
+    branch_id = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "egress-revoke"}).json()["branch_id"]
+    response = plan_client.post(f"/branches/{branch_id}/plans/aws-api", json=_egress_api_call("RevokeSecurityGroupEgress"))
+    assert response.status_code == 200, response.text
+    _, egress = _state_rules(branch_id, "sg-dl-web")
+    assert egress == [{"protocol": "tcp", "from_port": 443, "to_port": 443,
+                       "ip_ranges": ["10.0.0.0/8"], "source_sg_ids": [], "dest_sg_ids": []}]
+
+
+def test_terraform_and_authorize_security_group_egress_match(plan_client):
+    terraform = _plan(_item(
+        "aws_vpc_security_group_egress_rule.https", "aws_vpc_security_group_egress_rule", ["create"],
+        after={"security_group_id": "sg-dl-web", "cidr_ipv4": "0.0.0.0/0", "from_port": 443,
+               "to_port": 443, "ip_protocol": "tcp"}))
+    tf_branch_id, _, response = _post(plan_client, terraform)
+    assert response.status_code == 200, response.text
+    api_branch_id = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "egress-parity"}).json()["branch_id"]
+    response = plan_client.post(f"/branches/{api_branch_id}/plans/aws-api", json=_egress_api_call("AuthorizeSecurityGroupEgress"))
+    assert response.status_code == 200, response.text
+    _, tf_egress = _state_rules(tf_branch_id, "sg-dl-web")
+    _, api_egress = _state_rules(api_branch_id, "sg-dl-web")
+    egress_fields = ("protocol", "from_port", "to_port", "ip_ranges", "dest_sg_ids")
+    assert [{key: rule.get(key, []) for key in egress_fields} for rule in tf_egress] == [
+        {key: rule.get(key, []) for key in egress_fields} for rule in api_egress]

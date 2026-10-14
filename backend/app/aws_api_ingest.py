@@ -134,7 +134,7 @@ def _security_group_change(address, operation, parameters, working, sg_rules, un
         if permission.get("PrefixListIds"):
             unknown_fields.append({"address": address, "field": "PrefixListIds", "reason": "unsupported_attribute"})
         rule = build_security_group_rule(permission, egress=egress, include_ipv6=True)
-        if operation == "AuthorizeSecurityGroupIngress":
+        if operation.startswith("Authorize"):
             if rule not in current:
                 current.append(copy.deepcopy(rule))
                 emitted = True
