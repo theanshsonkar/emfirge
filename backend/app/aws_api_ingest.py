@@ -5,9 +5,12 @@ from typing import Any, Callable
 from app.mutations import Change
 from app.aws_collector import build_security_group_rule
 import copy
+import re
 
 
 _DELETE_PREFIXES = ("Delete", "Terminate", "Purge", "Deregister", "Release", "Remove")
+_RISKY_PREFIXES = ("Detach", "Disassociate", "Revoke", "Stop", "Disable")
+_RISKY_PUT = re.compile(r"^Put[A-Za-z0-9]*(Policy|Acl)$")
 _READ_ONLY_PREFIXES = ("Describe", "List", "Get", "Head")
 _INVALID_MESSAGE = "Invalid AWS API calls document"
 
@@ -46,9 +49,20 @@ def _validate_identifier(operation: str, parameters: dict[str, Any], identifier:
 
 
 def _unmodeled(address: str, service: str, operation: str) -> dict[str, Any]:
-    actions = ["delete"] if operation.startswith(_DELETE_PREFIXES) else ["update"]
-    return {"address": address, "type": f"{service}.{operation}", "actions": actions,
-            "provider_name": "aws", "outside_view": False, "source": "aws_api"}
+    if operation.startswith(_DELETE_PREFIXES):
+        actions = ["delete"]
+        risk = None
+    elif operation.startswith(_RISKY_PREFIXES) or _RISKY_PUT.fullmatch(operation):
+        actions = ["update"]
+        risk = "risky"
+    else:
+        actions = ["update"]
+        risk = None
+    result = {"address": address, "type": f"{service}.{operation}", "actions": actions,
+              "provider_name": "aws", "outside_view": False, "source": "aws_api"}
+    if risk is not None:
+        result["risk"] = risk
+    return result
 
 
 def _permission_list(parameters: dict[str, Any]) -> list[dict[str, Any]]:

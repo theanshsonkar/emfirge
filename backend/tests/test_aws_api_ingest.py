@@ -262,3 +262,34 @@ def test_modify_db_instance_without_mapped_field_has_no_change():
     result = translate_api_calls(doc(call("rds", "ModifyDBInstance", {
         "DBInstanceIdentifier": "db-1", "ApplyImmediately": True, "Other": 1})))
     assert result["changes"] == []
+
+
+@pytest.mark.parametrize("operation", [
+    "DetachRolePolicy", "DisassociateRouteTable", "RevokeGrant", "StopInstances",
+    "StopLogging", "DisableKey", "PutBucketPolicy", "PutRolePolicy", "PutBucketAcl",
+    "PutObjectAcl", "PutKeyPolicy",
+])
+def test_unmodeled_risky_operations_are_marked_risky(operation):
+    result = translate_api_calls(doc(call("custom", operation)))
+    assert result["unmodeled"][0]["actions"] == ["update"]
+    assert result["unmodeled"][0]["risk"] == "risky"
+
+
+@pytest.mark.parametrize("operation", [
+    "PutObject", "PutBucketTagging", "PutMetricData", "CreateBucket", "TagResource",
+    "StartInstances",
+])
+def test_unmodeled_non_risky_operations_remain_warn_changes(operation):
+    result = translate_api_calls(doc(call("custom", operation)))
+    assert result["unmodeled"][0]["actions"] == ["update"]
+    assert "risk" not in result["unmodeled"][0]
+
+
+@pytest.mark.parametrize("operation", [
+    "DeleteWidget", "TerminateWidget", "PurgeWidget", "DeregisterWidget",
+    "ReleaseWidget", "RemoveWidget",
+])
+def test_unmodeled_delete_prefixes_remain_delete_actions(operation):
+    result = translate_api_calls(doc(call("custom", operation)))
+    assert result["unmodeled"][0]["actions"] == ["delete"]
+    assert "risk" not in result["unmodeled"][0]
