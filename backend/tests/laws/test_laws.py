@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 
 from app import branches, database, main, verdict
 from app.diffing import diff_infrastructure
-from app.egraph import build_graph, get_internet_reachable_set
+from app.egraph import build_graph, find_attack_path, get_internet_reachable_set
+from app.exposure import compute_exposures
 from app.mutations import Change, apply_change, apply_changes
 from app.rules import run_all_checks
 from app.scoring import calculate_score
@@ -220,6 +221,25 @@ def test_L8_verdict_is_exactly_the_reason_policy(web_rules, latent_rules, public
         assert result.verdict == "pass"
 
 
+def _normalized_attack_paths(infra):
+    """Mirror the attack-path route: exposures grouped by entry resource."""
+    graph = build_graph(infra)
+    exposures_by_entry = {}
+    for exposure in compute_exposures(infra, graph):
+        exposures_by_entry.setdefault(exposure.resource_id, []).append(exposure)
+    paths = set()
+    for entry, exposures in sorted(exposures_by_entry.items()):
+        path = find_attack_path(graph, entry)
+        severity = "critical" if any(
+            exposure.source in ("0.0.0.0/0", "::/0")
+            and exposure.from_port <= 22 <= exposure.to_port
+            for exposure in exposures
+        ) else "moderate"
+        node_ids = tuple(node["id"] for node in (path or [{"id": entry}]))
+        paths.add((node_ids, severity))
+    return paths
+
+
 @given(st.lists(st.sampled_from([22, 80, 443, 3306, 5432, 6379]), min_size=1, max_size=4, unique=True))
 def test_L17_ipv6_any_is_internet_like_ipv4_any(ports):
     base = build_incident_base()
@@ -240,3 +260,20 @@ def test_L17_ipv6_any_is_internet_like_ipv4_any(ports):
     left = combined_verdict(base, apply_change(base, _changes_for_rules("sg-inc-web", web.rules)), run_scanners=False)
     right = combined_verdict(twin, apply_change(twin, _changes_for_rules("sg-inc-web", twin_web.rules)), run_scanners=False)
     assert (left.verdict, {reason["code"] for reason in left.reasons}) == (right.verdict, {reason["code"] for reason in right.reasons})
+    original_paths = _normalized_attack_paths(base)
+    ipv6_paths = _normalized_attack_paths(twin)
+    assert original_paths
+    assert original_paths == ipv6_paths
+
+
+def test_L17_sanity_paths_nonempty():
+    base = build_incident_base()
+    web = next(sg for sg in base.ec2.security_groups if sg.id == "sg-inc-web")
+    web.rules = [{"protocol": "tcp", "from_port": 22, "to_port": 22, "ip_ranges": ["0.0.0.0/0"]}]
+    twin = copy.deepcopy(base)
+    twin_web = next(sg for sg in twin.ec2.security_groups if sg.id == "sg-inc-web")
+    twin_web.rules[0]["ip_ranges"] = ["::/0"]
+    original_paths = _normalized_attack_paths(base)
+    ipv6_paths = _normalized_attack_paths(twin)
+    assert original_paths
+    assert original_paths == ipv6_paths

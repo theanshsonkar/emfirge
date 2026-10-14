@@ -83,3 +83,12 @@ def test_fix_ssh_open_removes_ipv6_any():
     ]}]}}
     assert _fix_ssh_open(infra, "sg-v6") is True
     assert infra["ec2"]["security_groups"][0]["rules"] == []
+
+
+def test_is_internet_cidr_normalizes_only_string_whitespace():
+    from app.cidr import is_internet_cidr
+
+    assert is_internet_cidr(" ::/0 ") is True
+    assert is_internet_cidr(None) is False
+    assert is_internet_cidr("0.0.0.0/0") is True
+    assert is_internet_cidr("10.0.0.0/8") is False
