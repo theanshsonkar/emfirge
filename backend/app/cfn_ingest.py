@@ -46,11 +46,20 @@ def _parts(resource_type: str) -> tuple[str, str]:
     return resource_type.split("::", 1)[0].lower(), bits[-1]
 
 
+_UNSEEN_CFN_TYPES = frozenset({
+    "AWS::EC2::NetworkAcl", "AWS::EC2::NetworkAclEntry",
+    "AWS::EC2::SubnetNetworkAclAssociation", "AWS::EC2::SecurityGroupEgress",
+})
+
+
 def _extra(address: str, resource_type: str, operation: str) -> dict[str, Any]:
     service, _ = _parts(resource_type)
     if operation in {"RetainResource", "ConditionalReplacement", "MissingPropertyValues"} or resource_type == "AWS::CloudFormation::Stack":
         service = "cloudformation"
-    return _unmodeled(address, service, operation)
+    result = _unmodeled(address, service, operation)
+    if resource_type in _UNSEEN_CFN_TYPES:
+        result["unseen"] = True
+    return result
 
 
 def _properties(doc: dict[str, Any] | None) -> dict[str, Any] | None:

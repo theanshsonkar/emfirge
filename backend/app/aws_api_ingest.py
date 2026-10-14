@@ -48,6 +48,12 @@ def _validate_identifier(operation: str, parameters: dict[str, Any], identifier:
         raise _invalid()
 
 
+_UNSEEN_EC2_OPERATIONS = frozenset({
+    "CreateNetworkAcl", "DeleteNetworkAcl", "CreateNetworkAclEntry",
+    "ReplaceNetworkAclEntry", "DeleteNetworkAclEntry", "ReplaceNetworkAclAssociation",
+})
+
+
 def _unmodeled(address: str, service: str, operation: str) -> dict[str, Any]:
     if operation.startswith(_DELETE_PREFIXES):
         actions = ["delete"]
@@ -60,6 +66,8 @@ def _unmodeled(address: str, service: str, operation: str) -> dict[str, Any]:
         risk = None
     result = {"address": address, "type": f"{service}.{operation}", "actions": actions,
               "provider_name": "aws", "outside_view": False, "source": "aws_api"}
+    if operation in _UNSEEN_EC2_OPERATIONS:
+        result["unseen"] = True
     if risk is not None:
         result["risk"] = risk
     return result
@@ -92,41 +100,54 @@ def _validate_permission(permission: dict[str, Any]) -> None:
             raise _invalid()
 
 
+def remove_security_group_rule(current: list[dict], target: dict) -> bool:
+    """Revoke one permission's ranges/groups without removing sibling entries."""
+    key = (target["protocol"], target["from_port"], target["to_port"])
+    remove_ips = set(target.get("ip_ranges", []))
+    remove_groups = set(target.get("source_sg_ids", [])) | set(target.get("dest_sg_ids", []))
+    matched = False
+    for existing in current:
+        if (existing.get("protocol"), existing.get("from_port"), existing.get("to_port")) != key:
+            continue
+        matched = True
+        existing["ip_ranges"] = [item for item in existing.get("ip_ranges", []) if item not in remove_ips]
+        existing["source_sg_ids"] = [item for item in existing.get("source_sg_ids", []) if item not in remove_groups]
+        existing["dest_sg_ids"] = [item for item in existing.get("dest_sg_ids", []) if item not in remove_groups]
+    current[:] = [item for item in current if item.get("ip_ranges") or item.get("source_sg_ids") or item.get("dest_sg_ids")]
+    return matched
+
+
 def _security_group_change(address, operation, parameters, working, sg_rules, unknown_fields):
     group_id = parameters.get("GroupId")
     if not _valid_string(group_id):
         return None
     permissions = _permission_list(parameters)
-    current = working.setdefault(group_id, copy.deepcopy(sg_rules(group_id) if sg_rules else None) or [])
+    egress = operation.endswith("Egress")
+    base = copy.deepcopy(sg_rules(group_id) if sg_rules else None) or []
+    if isinstance(base, dict):
+        current = working.setdefault(group_id, base).setdefault("egress_rules" if egress else "rules", [])
+    else:
+        current = working.setdefault(group_id, base)
     emitted = False
     for permission in permissions:
         _validate_permission(permission)
         if permission.get("PrefixListIds"):
             unknown_fields.append({"address": address, "field": "PrefixListIds", "reason": "unsupported_attribute"})
-        rule = build_security_group_rule(permission, include_ipv6=True)
-        if operation == "AuthorizeSecurityGroupIngress":
+        rule = build_security_group_rule(permission, egress=egress, include_ipv6=True)
+        if operation.startswith("Authorize"):
             if rule not in current:
                 current.append(copy.deepcopy(rule))
                 emitted = True
         else:
-            key = (rule["protocol"], rule["from_port"], rule["to_port"])
-            remove_ips = set(rule["ip_ranges"])
-            remove_groups = set(rule["source_sg_ids"])
-            matched = False
-            for existing in current:
-                if (existing.get("protocol"), existing.get("from_port"), existing.get("to_port")) != key:
-                    continue
-                matched = True
-                existing["ip_ranges"] = [item for item in existing.get("ip_ranges", []) if item not in remove_ips]
-                existing["source_sg_ids"] = [item for item in existing.get("source_sg_ids", []) if item not in remove_groups]
-            current[:] = [item for item in current if item.get("ip_ranges") or item.get("source_sg_ids")]
+            matched = remove_security_group_rule(current, rule)
             emitted = emitted or matched
             if not matched:
                 unknown_fields.append({"address": address, "field": "IpPermissions", "reason": "no_matching_rule"})
     if not emitted:
         return None
+    field = "egress_rules" if egress else "rules"
     return Change(op="modify", resource_type="security_group", resource_id=group_id,
-                  fields={"rules": copy.deepcopy(current)})
+                  fields={field: copy.deepcopy(current)})
 
 
 def translate_api_calls(
@@ -156,7 +177,7 @@ def translate_api_calls(
         if parameters.get("DryRun") is True or operation.startswith(_READ_ONLY_PREFIXES):
             continue
         lower_service = service.lower()
-        if lower_service == "ec2" and operation in {"AuthorizeSecurityGroupIngress", "RevokeSecurityGroupIngress"}:
+        if lower_service == "ec2" and operation in {"AuthorizeSecurityGroupIngress", "RevokeSecurityGroupIngress", "AuthorizeSecurityGroupEgress", "RevokeSecurityGroupEgress"}:
             if "GroupId" not in parameters:
                 unmodeled.append(_unmodeled(address, lower_service, operation))
                 continue

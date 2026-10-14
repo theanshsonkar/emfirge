@@ -1568,10 +1568,23 @@ async def _ingest_plan_endpoint(
             'unmodeled': translated['unmodeled'], 'unknown_fields': translated['unknown_fields']}
 
 
+def _terraform_translator(branch_id: str, document):
+    try:
+        branch = branches.get_branch(branch_id)
+    except branches.BranchNotFoundError:
+        return translate_plan(document)
+    state = branches.rebuild_branch_state(branch)
+    sg_rule_map = {
+        group.id: {"rules": copy.deepcopy(group.rules), "egress_rules": copy.deepcopy(group.egress_rules)}
+        for group in state.ec2.security_groups
+    }
+    return translate_plan(document, sg_rules=sg_rule_map)
+
+
 @app.post('/branches/{branch_id}/plans/terraform', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 async def terraform_plan_endpoint(branch_id: str, request: Request):
     return await _ingest_plan_endpoint(
-        branch_id, request, translate_plan, 'Invalid Terraform plan JSON schema',
+        branch_id, request, lambda document: _terraform_translator(branch_id, document), 'Invalid Terraform plan JSON schema',
     )
 
 
@@ -1586,7 +1599,7 @@ def _aws_translator(branch_id: str, document, cli: bool = False):
         for role in state.iam.role_policies
     }
     sg_rule_map = {
-        group.id: copy.deepcopy(group.rules)
+        group.id: {"rules": copy.deepcopy(group.rules), "egress_rules": copy.deepcopy(group.egress_rules)}
         for group in state.ec2.security_groups
     }
     if cli:
