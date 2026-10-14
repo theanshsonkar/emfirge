@@ -22,6 +22,21 @@ from app.models import (
 )
 from datetime import datetime, timezone
 
+
+def build_security_group_rule(permission: dict, *, egress: bool = False, include_ipv6: bool = False) -> dict:
+    """Convert an AWS IpPermission into the normalized infrastructure rule shape."""
+    ip_ranges = [ip.get('CidrIp') for ip in permission.get('IpRanges', [])]
+    if include_ipv6:
+        ip_ranges += [ip.get('CidrIpv6') for ip in permission.get('Ipv6Ranges', [])]
+    return {
+        'from_port': permission.get('FromPort'),
+        'to_port': permission.get('ToPort'),
+        'protocol': permission.get('IpProtocol'),
+        'ip_ranges': ip_ranges,
+        ('dest_sg_ids' if egress else 'source_sg_ids'):
+            [pair.get('GroupId') for pair in permission.get('UserIdGroupPairs', [])]
+    }
+
 # 10 second timeout for every boto3 call — prevents hangs on bad credentials
 # max_attempts=2: one initial call + one retry. Faster failure (11s max vs 25s with 5 retries).
 BOTO_CONFIG = Config(connect_timeout=5, read_timeout=10, retries={'max_attempts': 2, 'mode': 'standard'})
@@ -363,13 +378,7 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
             egress_rules = []
             
             for rule in sg['IpPermissions']:
-                rules.append({
-                    'from_port': rule.get('FromPort'),
-                    'to_port': rule.get('ToPort'),
-                    'protocol': rule.get('IpProtocol'),
-                    'ip_ranges': [ip.get('CidrIp') for ip in rule.get('IpRanges', [])],
-                    'source_sg_ids': [pair.get('GroupId') for pair in rule.get('UserIdGroupPairs', [])]
-                })
+                rules.append(build_security_group_rule(rule))
                 
                 for ip in rule.get('IpRanges', []):
                     if ip.get('CidrIp') == '0.0.0.0/0':
@@ -383,13 +392,7 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
                             rdp_security_group_id = sg_id
 
             for rule in sg.get('IpPermissionsEgress', []):
-                egress_rules.append({
-                    'from_port': rule.get('FromPort'),
-                    'to_port': rule.get('ToPort'),
-                    'protocol': rule.get('IpProtocol'),
-                    'ip_ranges': [ip.get('CidrIp') for ip in rule.get('IpRanges', [])],
-                    'dest_sg_ids': [pair.get('GroupId') for pair in rule.get('UserIdGroupPairs', [])]
-                })
+                egress_rules.append(build_security_group_rule(rule, egress=True))
             
             # Add to relationship tracking
             security_groups.append({

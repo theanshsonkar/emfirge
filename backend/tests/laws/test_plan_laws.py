@@ -1,3 +1,4 @@
+from tests.incidents.synthetic_base import load_synthetic_base
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from app import plan_ingest
@@ -141,3 +142,35 @@ def test_L15_terraform_and_aws_api_deletions_are_equivalent(plan_client):
          "change": {"actions": ["delete"], "before": {"id": "i-dl-web"}, "after": None}},
         {"service": "ec2", "operation": "TerminateInstances", "parameters": {"InstanceIds": ["i-dl-web"]}},
     )
+
+
+
+def test_L16_terraform_and_aws_api_public_ssh_are_equivalent(plan_client):
+    base = load_synthetic_base("delete")
+    sg = next(item for item in base.ec2.security_groups if item.id == "sg-dl-web")
+    before = [{"from_port": rule.get("from_port"), "to_port": rule.get("to_port"),
+               "protocol": rule.get("protocol"), "cidr_blocks": rule.get("ip_ranges", []),
+               "security_groups": rule.get("source_sg_ids", [])} for rule in sg.rules]
+    public_ssh = {"from_port": 22, "to_port": 22, "protocol": "tcp",
+                  "cidr_blocks": ["0.0.0.0/0"], "security_groups": []}
+    tf_branch, _, tf_response = _post(plan_client, {"format_version": "1.0", "resource_changes": [{
+        "address": "aws_security_group.web", "mode": "managed", "type": "aws_security_group",
+        "name": "web", "change": {"actions": ["update"], "before": {"id": sg.id, "ingress": before},
+        "after": {"id": sg.id, "ingress": before + [public_ssh]}}}]})
+    assert tf_response.status_code == 200, tf_response.text
+    tf_body = tf_response.json()
+    api_branch = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "l16-api"}).json()["branch_id"]
+    api_response = plan_client.post(f"/branches/{api_branch}/plans/aws-api", json={
+        "format": "aws-api-calls/1", "calls": [{"service": "ec2",
+        "operation": "AuthorizeSecurityGroupIngress", "parameters": {"GroupId": sg.id,
+        "IpPermissions": [{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+                           "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}]}}]})
+    assert api_response.status_code == 200, api_response.text
+    api_body = api_response.json()
+    for body in (tf_body, api_body):
+        assert body["applied"] and body["rejected"] == []
+    tf_verdict = plan_client.get(f"/branches/{tf_branch}/verdict").json()
+    api_verdict = plan_client.get(f"/branches/{api_branch}/verdict").json()
+    assert tf_verdict["verdict"] == api_verdict["verdict"]
+    assert {(r["code"], r["level"]) for r in tf_verdict["reasons"]}
+    assert {(r["code"], r["level"]) for r in tf_verdict["reasons"]} == {(r["code"], r["level"]) for r in api_verdict["reasons"]}

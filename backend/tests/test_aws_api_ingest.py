@@ -146,3 +146,119 @@ def test_mapped_identifier_validation_has_fixed_message(operation, parameters):
 def test_rds_delete_options_have_expected_types(parameters):
     with pytest.raises(ValueError, match=r"^Invalid AWS API calls document$"):
         translate_api_calls(doc(call("rds", "DeleteDBInstance", parameters)))
+
+
+def _sg_call(operation, parameters):
+    return call("ec2", operation, {"GroupId": "sg-test", **parameters})
+
+
+def _permission(**overrides):
+    value = {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22,
+             "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}
+    value.update(overrides)
+    return value
+
+
+def test_authorize_ip_permissions_appends_to_current_rules():
+    current = [{"protocol": "tcp", "from_port": 443, "to_port": 443,
+                "ip_ranges": ["10.0.0.0/8"], "source_sg_ids": []}]
+    result = translate_api_calls(doc(_sg_call("AuthorizeSecurityGroupIngress", {
+        "IpPermissions": [_permission()]})), sg_rules=lambda _: current)
+    assert result["changes"][0].fields["rules"] == current + [{
+        "protocol": "tcp", "from_port": 22, "to_port": 22,
+        "ip_ranges": ["0.0.0.0/0"], "source_sg_ids": []}]
+
+
+def test_legacy_permission_form_matches_ip_permissions_form():
+    nested = translate_api_calls(doc(_sg_call("AuthorizeSecurityGroupIngress", {
+        "IpPermissions": [_permission()]})), sg_rules=lambda _: [])
+    legacy = translate_api_calls(doc(_sg_call("AuthorizeSecurityGroupIngress", {
+        "IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "CidrIp": "0.0.0.0/0"})), sg_rules=lambda _: [])
+    assert nested["changes"][0].fields == legacy["changes"][0].fields
+
+
+def test_ipv6_and_source_security_group_fields_are_translated():
+    permission = _permission(IpRanges=[], Ipv6Ranges=[{"CidrIpv6": "::/0"}],
+                             UserIdGroupPairs=[{"GroupId": "sg-source"}])
+    result = translate_api_calls(doc(_sg_call("AuthorizeSecurityGroupIngress", {
+        "IpPermissions": [permission]})), sg_rules=lambda _: [])
+    assert result["changes"][0].fields["rules"] == [{
+        "protocol": "tcp", "from_port": 22, "to_port": 22,
+        "ip_ranges": ["::/0"], "source_sg_ids": ["sg-source"]}]
+
+
+def test_duplicate_authorize_adds_nothing():
+    rule = {"protocol": "tcp", "from_port": 22, "to_port": 22,
+            "ip_ranges": ["0.0.0.0/0"], "source_sg_ids": []}
+    result = translate_api_calls(doc(_sg_call("AuthorizeSecurityGroupIngress", {
+        "IpPermissions": [_permission()]})), sg_rules=lambda _: [rule])
+    assert result["changes"] == []
+
+
+def test_authorize_then_revoke_accumulates_working_rules():
+    current = [{"protocol": "tcp", "from_port": 443, "to_port": 443,
+                "ip_ranges": ["10.0.0.0/8"], "source_sg_ids": []}]
+    result = translate_api_calls(doc(
+        _sg_call("AuthorizeSecurityGroupIngress", {"IpPermissions": [_permission()]}),
+        _sg_call("RevokeSecurityGroupIngress", {"IpPermissions": [_permission()]})),
+        sg_rules=lambda _: current)
+    assert result["changes"][1].fields["rules"] == current
+
+
+def test_revoke_without_match_reports_unknown_and_no_change():
+    result = translate_api_calls(doc(_sg_call("RevokeSecurityGroupIngress", {
+        "IpPermissions": [_permission()]})), sg_rules=lambda _: [])
+    assert result["changes"] == []
+    assert result["unknown_fields"][0]["reason"] == "no_matching_rule"
+
+
+def test_prefix_list_is_reported_unsupported():
+    result = translate_api_calls(doc(_sg_call("AuthorizeSecurityGroupIngress", {
+        "IpPermissions": [_permission(PrefixListIds=[{"PrefixListId": "pl-1"}])]})), sg_rules=lambda _: [])
+    assert result["unknown_fields"] == [{"address": "calls[0] ec2.AuthorizeSecurityGroupIngress",
+        "field": "PrefixListIds", "reason": "unsupported_attribute"}]
+
+
+def test_group_name_only_is_unmodeled_update():
+    result = translate_api_calls(doc(call("ec2", "AuthorizeSecurityGroupIngress", {"GroupName": "default"})))
+    assert result["unmodeled"][0]["actions"] == ["update"]
+
+
+@pytest.mark.parametrize("permission", [
+    {"IpPermissions": "not-list"},
+    {"IpPermissions": [{} | {"IpProtocol": "tcp"}, "not-dict"]},
+    {"IpPermissions": [{"IpProtocol": "tcp", "FromPort": "22"}]},
+    {"IpPermissions": [{"IpProtocol": "tcp", "IpRanges": [{}]}]},
+])
+def test_malformed_security_group_permissions_have_fixed_message(permission):
+    with pytest.raises(ValueError, match=r"^Invalid AWS API calls document$"):
+        translate_api_calls(doc(_sg_call("AuthorizeSecurityGroupIngress", permission)), sg_rules=lambda _: [])
+
+
+def test_modify_db_instance_maps_all_fields_and_ignores_apply_immediately():
+    result = translate_api_calls(doc(call("rds", "ModifyDBInstance", {
+        "DBInstanceIdentifier": "db-1", "BackupRetentionPeriod": 3,
+        "DeletionProtection": True, "PubliclyAccessible": False,
+        "VpcSecurityGroupIds": ["sg-1"], "ApplyImmediately": True,
+        "Other": "ignored"})))
+    assert result["changes"][0].fields == {"backup_retention_days": 3, "deletion_protection": True,
+        "publicly_accessible": False, "sg_ids": ["sg-1"]}
+    assert all(item["field"] != "ApplyImmediately" for item in result["unknown_fields"])
+    assert result["unknown_fields"][0]["field"] == "Other"
+
+
+@pytest.mark.parametrize("parameters", [
+    {"DBInstanceIdentifier": "db-1", "BackupRetentionPeriod": True},
+    {"DBInstanceIdentifier": "db-1", "DeletionProtection": "true"},
+    {"DBInstanceIdentifier": "db-1", "PubliclyAccessible": 1},
+    {"DBInstanceIdentifier": "db-1", "VpcSecurityGroupIds": [1]},
+])
+def test_modify_db_instance_wrong_types_are_rejected(parameters):
+    with pytest.raises(ValueError, match=r"^Invalid AWS API calls document$"):
+        translate_api_calls(doc(call("rds", "ModifyDBInstance", parameters)))
+
+
+def test_modify_db_instance_without_mapped_field_has_no_change():
+    result = translate_api_calls(doc(call("rds", "ModifyDBInstance", {
+        "DBInstanceIdentifier": "db-1", "ApplyImmediately": True, "Other": 1})))
+    assert result["changes"] == []
