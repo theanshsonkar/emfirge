@@ -7,6 +7,7 @@ from datetime import datetime
 
 from dataclasses import dataclass
 from fastapi import HTTPException, Request, Depends
+from sqlalchemy.exc import IntegrityError
 
 from app.database import APIKey, Project, SessionLocal
 
@@ -68,12 +69,30 @@ def _get_or_create_project(session, project_name: str) -> Project:
     session.add(project)
     try:
         session.commit()
-    except Exception:
+    except IntegrityError:
         session.rollback()
         project = session.query(Project).filter(Project.name == project_name).first()
         if project is None:
             raise
     return project
+
+
+def backfill_legacy_key_projects(session_factory=SessionLocal) -> int:
+    """Create projects for API keys from before eager project provisioning."""
+    session = session_factory()
+    created = 0
+    try:
+        names = session.query(APIKey.project_name).distinct().all()
+        for (project_name,) in names:
+            if not project_name or not project_name.strip():
+                continue
+            if session.query(Project).filter(Project.name == project_name).first():
+                continue
+            _get_or_create_project(session, project_name)
+            created += 1
+        return created
+    finally:
+        session.close()
 
 
 async def get_caller(request: Request) -> Caller:

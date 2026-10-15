@@ -49,7 +49,8 @@ from app.aws_collector import collect_infrastructure, ROLE_SESSION_NAME
 from app.rules import run_all_checks, find_toxic_combos
 from app.scoring import calculate_score, count_scored_resources, score_snapshot
 from app.llm import generate_explanation
-from app.auth import require_api_key, get_caller, Caller, legacy_ci_enabled
+from app import auth
+from app.auth import require_api_key, get_caller, Caller, legacy_ci_enabled, backfill_legacy_key_projects
 from app.role_access import assume_customer_role
 from app.database import get_db
 from app.tenancy import allowed_accounts, account_visible
@@ -325,6 +326,18 @@ DAILY_SCAN_LIMIT = int(os.getenv('DAILY_SCAN_LIMIT', '5'))
 
 
 app = FastAPI(title='AWS Risk Analysis Agent', version='2.0')
+
+
+@app.on_event('startup')
+def report_startup():
+    try:
+        linked = backfill_legacy_key_projects()
+    except Exception as exc:
+        print(f'emfirge: legacy key backfill failed: {type(exc).__name__}', flush=True)
+        linked = 0
+    state = 'ON' if auth.AUTH_ENABLED else 'OFF'
+    print(f'emfirge: auth is {state}', flush=True)
+    print(f'emfirge: linked {linked} legacy API key project(s)', flush=True)
 
 # ── CORS ──────────────────────────────────────────────────────────
 # Allows the browser to call this API from Vercel and localhost
