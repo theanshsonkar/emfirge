@@ -7,6 +7,7 @@ with nodes (resources) and edges (relationships between resources).
 
 import copy
 import fnmatch
+import ipaddress
 import re
 from collections.abc import Mapping as MappingABC
 from enum import Enum
@@ -15,8 +16,10 @@ from typing import ClassVar, Dict, List, Any, Optional, Set, Mapping
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.cidr import INTERNET_CIDRS, is_internet_cidr
 from app.models import AWSInfrastructure
 import app.iam_classifier as iam_classifier
+from app.iam_escalation import matching_paths
 
 
 _ACCESS_LEVEL_ORDER = {
@@ -100,6 +103,22 @@ TRAVERSABLE_RELATIONSHIPS = frozenset({
 })
 
 
+
+
+# Explicit dependency direction for every edge type emitted by build_graph.
+# ``source_depends_on_target`` means deleting the target impacts the source.
+DEPENDENCY_EDGES: dict[str, str | None] = {
+    "uses_security_group": "source_depends_on_target", "in_subnet": "source_depends_on_target",
+    "uses_iam_role": "source_depends_on_target", "attached_to_instance": "target_depends_on_source",
+    "REACHES": "target_depends_on_source", "REACHES_VIA_SG": "target_depends_on_source",
+    "targets_instance": "source_depends_on_target", "serves_from_bucket": "source_depends_on_target",
+    "in_vpc": "source_depends_on_target", "REFERENCES_SECRET": "source_depends_on_target",
+    "USES_ROLE": "source_depends_on_target", "belongs_to_vpc": "source_depends_on_target",
+    "contains_resource": "target_depends_on_source", "associated_with": "source_depends_on_target",
+    "protected_by": "source_depends_on_target", "routes_to": "source_depends_on_target",
+    "peered_with": None, "can_access": "source_depends_on_target", "CAN_ASSUME": "source_depends_on_target",
+    "CAN_REACH": "target_depends_on_source", "UNKNOWN": None,
+}
 _RESOURCE_CATEGORIES = {
     "ec2_instance": NodeCategory.COMPUTE,
     "lambda_function": NodeCategory.COMPUTE,
@@ -653,7 +672,7 @@ def subnet_has_igw_route(subnet_id, graph) -> Optional[bool]:
             continue
         saw_data = True
         for route in routes:
-            if (_value(route, "destination_cidr") == "0.0.0.0/0" and
+            if (is_internet_cidr(_value(route, "destination_cidr")) and
                     str(_value(route, "target_type", "")).lower() == "internet_gateway"):
                 return True
     return False if saw_data else None
@@ -695,7 +714,7 @@ def nacl_allows_inbound(subnet_id, port_from, port_to, protocol, graph) -> tuple
     for _, entry in entries:
         if _value(entry, "egress", None) is not False:
             continue
-        if _value(entry, "cidr_block") != "0.0.0.0/0":
+        if not is_internet_cidr(_value(entry, "cidr_block")):
             continue
         entry_protocol = str(_value(entry, "protocol", "-1")).lower()
         if entry_protocol not in {"-1", "all", wanted_protocol}:
@@ -734,7 +753,7 @@ def internet_ingress(resource_node, subnet_id, sg_list, graph) -> list[dict]:
             rules = _value(_value(sg, "metadata", {}) or {}, "rules")
         for rule in rules if isinstance(rules, (list, tuple)) else []:
             ranges = _value(rule, "ip_ranges", []) or []
-            public = next((str(cidr) for cidr in ranges if str(cidr) in {"0.0.0.0/0", "::/0"}), None)
+            public = next((str(cidr) for cidr in ranges if is_internet_cidr(cidr)), None)
             if public is None:
                 continue
             from_port, to_port = _value(rule, "from_port"), _value(rule, "to_port")
@@ -914,15 +933,12 @@ def _nacl_subnets(subnet_id, graph):
 def _cidr_covers(cidr, opposite_cidr):
     if not cidr or not opposite_cidr:
         return False
-    if cidr == "0.0.0.0/0":
-        return True
     try:
-        import ipaddress
-        return ipaddress.ip_network(opposite_cidr, strict=False).subnet_of(
-            ipaddress.ip_network(cidr, strict=False)
-        )
-    except ValueError:
-        return cidr == opposite_cidr
+        network = ipaddress.ip_network(cidr, strict=False)
+        opposite = ipaddress.ip_network(opposite_cidr, strict=False)
+        return opposite.subnet_of(network)
+    except (ValueError, TypeError):
+        return False
 
 
 def _nacl_denies(entries, opposite_cidr, port_range, egress):
@@ -1674,8 +1690,10 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                     })
 
     # ── EBS VOLUME NODES ──────────────────────────────────────────
-    # Unattached volumes (state=available) — no edges, isolated for orphan detection
+    # All collected volumes are concrete graph resources; unattached volumes
+    # remain isolated while attached volumes are linked from their consumers.
     for vol in infrastructure.ec2.ebs_volumes:
+        state = vol['state'] if isinstance(vol, dict) else vol.state
         vol_id = vol['id'] if isinstance(vol, dict) else vol.id
         size_gb = vol['size_gb'] if isinstance(vol, dict) else vol.size_gb
         volume_type = vol['volume_type'] if isinstance(vol, dict) else vol.volume_type
@@ -1685,6 +1703,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             'type': 'ebs_volume',
             'label': f"EBS: {size_gb}GB",
             'metadata': {
+                'state': state,
                 'size_gb': size_gb,
                 'volume_type': volume_type,
                 'availability_zone': az,
@@ -1706,6 +1725,12 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 'is_attached': is_attached,
             }
         })
+
+    for vol in infrastructure.ec2.ebs_volumes:
+        attached_to = vol['attached_to'] if isinstance(vol, dict) else vol.attached_to
+        vol_id = vol['id'] if isinstance(vol, dict) else vol.id
+        if attached_to and any(node['id'] == attached_to for node in nodes):
+            edges.append({'from': vol_id, 'to': attached_to, 'relationship': 'attached_to_instance'})
 
     # ── API GATEWAY NODES ─────────────────────────────────────────
     for api in infrastructure.api_gateway.apis:
@@ -1945,6 +1970,9 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             's3_bucket', 'rds_instance', 'lambda_function', 'secretsmanager_secret',
             'dynamodb_table', 'sqs_queue')]
         access_statements = role_policy.access_statements if not isinstance(role_policy, dict) else role_policy.get('access_statements', [])
+        escalation_paths = matching_paths(access_statements)
+        role_metadata['has_privilege_escalation'] = bool(escalation_paths)
+        role_metadata['privilege_escalation_paths'] = [path['id'] for path in escalation_paths]
         edge_count = 0
         access_edge_targets = set()
 
@@ -2641,6 +2669,8 @@ def find_orphaned_resources(graph: Graph) -> List[Dict[str, Any]]:
     for node in graph.nodes:
         node_id = node['id']
         node_type = node['type']
+        if node_type == 'ebs_volume' and node.get('metadata', {}).get('state') != 'available':
+            continue
         
         # Get inbound and outbound connections
         inbound = graph.get_inbound(node_id)

@@ -4,7 +4,7 @@
 
 **The harness between your AI agent and your AWS cloud: branch, diff, verdict — with privacy-first masking.**
 
-Version **0.2.3** · Apache-2.0
+Version **0.2.6** · Apache-2.0
 
 </div>
 
@@ -36,7 +36,7 @@ Ask your assistant to scan with a read-only role. This is an example placeholder
 Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 ```
 
-## Tools (18)
+## Tools (20)
 
 ### Analyze
 
@@ -53,6 +53,7 @@ Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 - `emfirge_apply_change` — apply an add, modify, or delete change to the branch model, not AWS. `route_table` supports modify-only replacement of the complete normalized `routes` list on a collected table; associations stay derived from the snapshot.
 - `emfirge_branch_diff` — show the infrastructure diff against the base analysis.
 - `emfirge_branch_verdict` — evaluate an advisory `block`, `warn`, or `pass` verdict with coverage details.
+- `emfirge_plan_verdict` — check a Terraform, AWS API, AWS CLI, or CloudFormation plan before it is applied and return its hash-bound hand-back.
 - `emfirge_rollback_branch` — remove the most recent modeled change.
 - `emfirge_rollback_branch_to_count` — truncate the ordered branch history to a selected existing change count.
 - `emfirge_discard_branch` — discard an isolated branch; optionally pass `expected_change_count` to reject a stale discard with HTTP 409.
@@ -61,6 +62,7 @@ Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 - `emfirge_fork_branch` — create an independent open branch from an open branch's current base and ordered changes.
 - `emfirge_fork_branch` — fork an open branch into an independent branch with the same base and ordered changes.
 - `emfirge_compare_branches` — compare branch models and rank outcomes safest-first.
+- `emfirge_in_use_evidence` — estimate and, after explicit approval, read usage evidence for resources a branch deletes.
 
 ### Setup
 

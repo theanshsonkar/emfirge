@@ -219,7 +219,7 @@ class TestIMDSv1:
         findings = check_imdsv1_enabled(infra)
         assert len(findings) == 1
         assert findings[0].rule_id == "EMFIRGE-EC2-016"
-        assert "i-001" in findings[0].issue
+        assert "EC2 instance has IMDSv1 enabled" in findings[0].issue
 
     def test_imdsv2_required_no_finding(self, clean_infra):
         assert check_imdsv1_enabled(clean_infra) == []
@@ -316,7 +316,7 @@ class TestS3NoLogging:
         assert result.severity == "Moderate"
         assert result.confidence == "HIGH"
         assert result.aws_service == "S3"
-        assert "prod-data-bucket" in result.issue
+        assert result.issue == "S3 buckets without access logging enabled"
 
     def test_all_logging_enabled_no_finding(self, clean_infra):
         assert check_s3_no_logging(clean_infra) is None

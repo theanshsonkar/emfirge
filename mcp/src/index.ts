@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 
 import { getBaseUrl } from "./client.js";
-import { privacyMode } from "./tokenize.js";
+import { privacyMode, redactDeep } from "./tokenize.js";
 
 import { setupSchema, setupZodObject, setupHandler } from "./tools/setup.js";
 import { scanSchema, scanZodObject, scanHandler } from "./tools/scan.js";
@@ -37,6 +37,8 @@ import {
   complianceHandler,
 } from "./tools/compliance.js";
 import { simulateSchema, simulateZodObject, simulateHandler } from "./tools/simulate.js";
+import { inUseEvidenceSchema, inUseEvidenceZodObject, inUseEvidenceHandler } from "./tools/evidence.js";
+import { planVerdictSchema, planVerdictZodObject, planVerdictHandler } from "./tools/plan-verdict.js";
 import {
   applyChangeSchema,
   applyChangeZodObject,
@@ -287,6 +289,14 @@ const tools: ToolRegistration[] = [
     handler: branchVerdictHandler,
   },
   {
+    name: "emfirge_plan_verdict",
+    description:
+      "Check a proposed change on a branch before it is applied. Accepts a Terraform plan (terraform show -json), AWS API calls, AWS CLI commands, or a CloudFormation change set. Emfirge never runs the change. Returns the verdict and the hand-back: the exact input bound to the verdict by hash.",
+    schema: planVerdictSchema as Record<string, z.ZodTypeAny>,
+    zodObject: planVerdictZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: planVerdictHandler,
+  },
+  {
     name: "emfirge_rollback_branch",
     description:
       "Rollback an isolated branch to its base state without changing AWS.",
@@ -320,12 +330,12 @@ const tools: ToolRegistration[] = [
     handler: listBranchesHandler,
   },
   {
-    name: "emfirge_compare_branches",
+    name: "emfirge_in_use_evidence",
     description:
-      "Compare one or more isolated infrastructure branches to understand their modeled changes and security outcomes.",
-    schema: compareBranchesSchema as Record<string, z.ZodTypeAny>,
-    zodObject: compareBranchesZodObject as z.ZodObject<z.ZodRawShape>,
-    handler: compareBranchesHandler,
+      "Read-only: reads CloudTrail event history (free) and CloudWatch metrics (billed API requests beyond the free tier) only for resources the branch deletes; can only make a verdict stricter, never looser. role_arn is required only when accepting an estimate and must be the same role used by emfirge_scan. Never call with accept_estimate_id unless the user agreed to the shown estimate.",
+    schema: inUseEvidenceSchema as Record<string, z.ZodTypeAny>,
+    zodObject: inUseEvidenceZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: inUseEvidenceHandler,
   },
 ];
 
@@ -394,18 +404,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (req) => {
-  const tool = tools.find((t) => t.name === req.params.name);
-  if (!tool) {
-    throw new Error(`Unknown tool: ${req.params.name}`);
-  }
-
   try {
+    const tool = tools.find((t) => t.name === req.params.name);
+    if (!tool) {
+      throw new Error(`Unknown tool: ${req.params.name}`);
+    }
+
     const args = tool.zodObject.parse(req.params.arguments ?? {});
     return await tool.handler(args);
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return {
-      content: [{ type: "text" as const, text: `Error: ${message}` }],
+      content: [{ type: "text" as const, text: `Error: ${String(redactDeep(message))}` }],
       isError: true,
     };
   }

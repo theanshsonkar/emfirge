@@ -1,6 +1,8 @@
 from fastapi import FastAPI, HTTPException, Request, Query, Depends
+from pydantic import ValidationError
+from starlette.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware  # NEW
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from botocore.exceptions import ClientError, NoCredentialsError
 from typing import Optional
 import boto3
@@ -11,8 +13,10 @@ import json
 import re
 import subprocess
 import tempfile
+import hashlib
+import copy
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from collections import defaultdict
 from dotenv import load_dotenv
 
@@ -32,17 +36,28 @@ from app.models import (
     CIAnalyzeRequest, CIAnalyzeResponse, CIAPIKeyRequest, CIAPIKeyResponse,
 )
 from app.diffing import DiffResult
+from app.cidr import is_internet_cidr
 from app.mutations import Change, MutationCapabilities, apply_change, mutation_capabilities
+from app.plan_ingest import translate_plan
+from app.aws_api_ingest import translate_api_calls
+from app.aws_cli_ingest import parse_cli_commands
+from app.cfn_ingest import convert_change_set
 from app.verdict import CombinedVerdict, combined_verdict
-from app import branches
-from app.aws_collector import collect_infrastructure
+from app import branches, identifiers
+from app.in_use_evidence import EvidenceRequest, EvidenceEstimate, build_estimate, read_evidence, SOURCES, WINDOW_DAYS
+from app.aws_collector import collect_infrastructure, ROLE_SESSION_NAME
 from app.rules import run_all_checks, find_toxic_combos
-from app.scoring import calculate_score
+from app.scoring import calculate_score, count_scored_resources, score_snapshot
 from app.llm import generate_explanation
-from app.auth import require_api_key
-from app.database import create_tables, save_analysis, get_recent_logs, get_log_by_id, get_scan_count_today, get_previous_scan_for_account, save_drift_events, get_drift_events, save_simulation_log, get_simulation_count_today, save_feedback, get_feedback, save_llm_usage, get_llm_usage_count_today, save_tf_index, get_tf_index, get_tf_index_status, create_ci_api_key, validate_ci_api_key, get_ci_api_keys
+from app import auth
+from app.auth import require_api_key, get_caller, Caller, legacy_ci_enabled, backfill_legacy_key_projects
+from app.role_access import assume_customer_role
+from app.database import get_db
+from app.tenancy import allowed_accounts, account_visible
+from app.database import create_tables, save_analysis, get_recent_logs, get_log_by_id, get_scan_count_today, get_previous_scan_for_account, save_drift_events, get_drift_events, save_simulation_log, get_simulation_count_today, save_feedback, get_feedback, save_llm_usage, get_llm_usage_count_today, save_tf_index, get_tf_index, get_tf_index_status, create_ci_api_key, validate_ci_api_key, get_ci_api_keys, AccountBinding, AccountBindingEvent, BranchOwner
 from app.storage import save_report, get_report_url
 from app.egraph import build_graph, get_simulation_slice, validate_simulation_response, classify_query, format_graph_for_claude, bfs_from_internet, find_attack_path, Graph
+from app.exposure import compute_exposures
 from app.drift_service import compare_findings
 from app.compliance import evaluate_all_frameworks
 
@@ -117,9 +132,17 @@ def _check_pr_rate_limit(ip: str) -> None:
     _pr_request_log[ip].append(now)
 
 
+# Compatibility seam for evidence tests and older integrations; actual STS
+# operation remains exclusively in app.role_access.
+def assume_role_credentials(role_arn: str, caller: Caller, db):
+    credentials = assume_customer_role(role_arn, caller, db)
+    return credentials, role_arn.split(':')[4]
+
+
 # ── IN-MEMORY RATE LIMITER FOR BRANCH ROUTES ─────────────────────
 # Branches are persisted state and therefore use the same per-route IP
 # limiter pattern as the existing sensitive/cost-bearing endpoints. This is
+
 # not authentication; without global auth middleware these routes remain
 # publicly callable, subject to this process-local limiter.
 _branch_request_log: dict = defaultdict(list)
@@ -140,18 +163,20 @@ def _check_branch_rate_limit(ip: str) -> None:
     _branch_request_log[ip].append(now)
 
 
-def _load_analysis_record(analysis_id: str):
-    """Return the newest matching analysis infrastructure and stored data.
-
-    This intentionally mirrors verify-fix's newest-100 lookup and tolerates
-    malformed records, continuing to older records before reporting missing
-    data to the caller.
-    """
+def _load_analysis_record(analysis_id: str, caller: Caller | None = None, db=None):
+    """Load an analysis snapshot, applying hosted account visibility when supplied."""
     from app.database import AnalysisLog, SessionLocal
 
-    session = SessionLocal()
+    session = db or SessionLocal()
+    close_session = db is None
     try:
-        logs = session.query(AnalysisLog).order_by(AnalysisLog.timestamp.desc()).limit(100).all()
+        account_ids = allowed_accounts(caller, session) if caller is not None else None
+        query = session.query(AnalysisLog)
+        if account_ids is not None:
+            if not account_ids:
+                return None, None
+            query = query.filter(AnalysisLog.aws_account_id.in_(account_ids))
+        logs = query.order_by(AnalysisLog.timestamp.desc()).limit(100).all()
         for log in logs:
             try:
                 data = json.loads(log.findings_json)
@@ -164,8 +189,42 @@ def _load_analysis_record(analysis_id: str):
     except Exception as exc:
         logger.error(f'analysis load failed: {exc}')
     finally:
-        session.close()
+        if close_session:
+            session.close()
     return None, None
+
+
+def _record_branch_owner(branch_id: str, caller: Caller, db) -> None:
+    if caller.mode != 'hosted' or caller.project_id is None:
+        return
+    db.add(BranchOwner(branch_id=branch_id, project_id=caller.project_id))
+    db.commit()
+
+
+def _branch_is_visible(branch_id: str, caller: Caller, db) -> bool:
+    """Branches inherit ownership from their base analysis; ownerless branches are hidden hosted."""
+    try:
+        branch = branches.get_branch(branch_id)
+    except branches.BranchNotFoundError:
+        return False
+    owner = db.query(BranchOwner).filter(BranchOwner.branch_id == branch_id).first()
+    if owner is not None:
+        return owner.project_id == caller.project_id
+    if branch.base_analysis_id is None:
+        return False
+    account_ids = allowed_accounts(caller, db)
+    if account_ids is None:
+        return True
+    from app.database import AnalysisLog
+    return db.query(AnalysisLog.id).filter(
+        AnalysisLog.findings_json.like(f'%"analysis_id": "{branch.base_analysis_id}"%'),
+        AnalysisLog.aws_account_id.in_(account_ids),
+    ).first() is not None
+
+
+def _require_visible_branch(branch_id: str, caller: Caller, db):
+    if not _branch_is_visible(branch_id, caller, db):
+        raise HTTPException(status_code=404, detail=f'Branch not found: {branch_id}')
 
 
 def get_infrastructure_for_analysis(analysis_id: str) -> AWSInfrastructure:
@@ -175,6 +234,14 @@ def get_infrastructure_for_analysis(analysis_id: str) -> AWSInfrastructure:
         raise HTTPException(status_code=404, detail='Scan data not found for this analysis ID.')
     return infrastructure
 
+
+
+async def branch_tenant_guard(request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    if caller.mode != 'hosted':
+        return
+    parts = [part for part in request.url.path.split('/') if part]
+    if len(parts) >= 2 and parts[0] == 'branches' and parts[1] not in {'compare', 'capabilities'}:
+        _require_visible_branch(parts[1], caller, db)
 
 def _branch_summary(branch) -> dict:
     """Serialize only the safe, compact branch metadata exposed by the API."""
@@ -260,6 +327,18 @@ DAILY_SCAN_LIMIT = int(os.getenv('DAILY_SCAN_LIMIT', '5'))
 
 app = FastAPI(title='AWS Risk Analysis Agent', version='2.0')
 
+
+@app.on_event('startup')
+def report_startup():
+    try:
+        linked = backfill_legacy_key_projects()
+    except Exception as exc:
+        print(f'emfirge: legacy key backfill failed: {type(exc).__name__}', flush=True)
+        linked = 0
+    state = 'ON' if auth.AUTH_ENABLED else 'OFF'
+    print(f'emfirge: auth is {state}', flush=True)
+    print(f'emfirge: linked {linked} legacy API key project(s)', flush=True)
+
 # ── CORS ──────────────────────────────────────────────────────────
 # Allows the browser to call this API from Vercel and localhost
 # Without this, every fetch() from the frontend gets blocked silently
@@ -287,6 +366,7 @@ def health():
         from app.database import SessionLocal
         from sqlalchemy import text
         session = SessionLocal()
+
         session.execute(text('SELECT 1'))
         session.close()
     except Exception:
@@ -294,14 +374,25 @@ def health():
     return {'status': 'healthy' if db_ok else 'degraded', 'db': 'ok' if db_ok else 'unreachable'}
 
 @app.get('/logs')
-def logs(account_id: str = None):
-    recent_logs = get_recent_logs(limit=20, account_id=account_id)
+def logs(account_id: str = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    if caller.mode != 'hosted':
+        recent_logs = get_recent_logs(limit=20, account_id=account_id)
+    else:
+        account_ids = allowed_accounts(caller, db)
+        if account_id:
+            account_ids = {account_id} if account_id in account_ids else set()
+        recent_logs = get_recent_logs(limit=20, account_ids=account_ids)
     return {'logs': recent_logs, 'count': len(recent_logs)}
 
 @app.get('/history')
-def history(limit: int = 10, account_id: str = None):
-    logs = get_recent_logs(limit=limit, account_id=account_id)
-    # Calculate score delta vs previous scan
+def history(limit: int = 10, account_id: str = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    if caller.mode != 'hosted':
+        logs = get_recent_logs(limit=limit, account_id=account_id)
+    else:
+        account_ids = allowed_accounts(caller, db)
+        if account_id:
+            account_ids = {account_id} if account_id in account_ids else set()
+        logs = get_recent_logs(limit=limit, account_ids=account_ids)
     enriched = []
     for i, log in enumerate(logs):
         delta = None
@@ -314,48 +405,67 @@ def history(limit: int = 10, account_id: str = None):
         })
     return {'scans': enriched, 'count': len(enriched)}
 
+
+@app.get('/project')
+def project_info(caller: Caller = Depends(get_caller)):
+    if caller.mode == 'hosted':
+        return {'mode': 'hosted', 'project': caller.project_name, 'external_id': caller.external_id}
+    return {'mode': 'self-host', 'external_id': caller.external_id}
+
+
+@app.delete('/admin/account-bindings/{aws_account_id}')
+def unbind_account(aws_account_id: str, request: Request, db=Depends(get_db)):
+    import hmac
+    admin_key = os.environ.get('EMFIRGE_ADMIN_KEY')
+    if not admin_key:
+        raise HTTPException(status_code=404, detail='Not found')
+    supplied = request.headers.get('X-Admin-Key', '')
+    if not hmac.compare_digest(supplied, admin_key):
+        raise HTTPException(status_code=403, detail='Forbidden')
+    binding = db.query(AccountBinding).filter_by(aws_account_id=aws_account_id).first()
+    unbound = binding is not None
+    project_id = binding.project_id if binding else None
+    if binding:
+        db.delete(binding)
+    db.add(AccountBindingEvent(aws_account_id=aws_account_id, project_id=project_id,
+                               action='unbind', actor='admin'))
+    db.commit()
+    logger.warning('Admin unbound AWS account %s', aws_account_id)
+    return {'unbound': unbound}
+
 @app.get('/drift/events')
-def drift_events_endpoint(account_id: str = None, limit: int = 20):
-    events = get_drift_events(account_id=account_id, limit=limit)
+def drift_events_endpoint(account_id: str = None, limit: int = 20, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    account_ids = allowed_accounts(caller, db)
+    if account_id and account_ids is not None:
+        account_ids = {account_id} if account_id in account_ids else set()
+    events = get_drift_events(account_id=account_id if account_ids is None else None, limit=limit, account_ids=account_ids)
     return {'events': events, 'count': len(events)}
 
 @app.get('/logs/{log_id}')
-def get_log(log_id: int, account_id: str = None):
-    log = get_log_by_id(log_id, account_id=account_id)
+def get_log(log_id: int, account_id: str = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    account_ids = allowed_accounts(caller, db)
+    if account_id and account_ids is not None:
+        account_ids = {account_id} if account_id in account_ids else set()
+    log = get_log_by_id(log_id, account_id=account_id if account_ids is None else None, account_ids=account_ids)
     if not log:
         raise HTTPException(status_code=404, detail='Log not found')
     return log
 
 @app.get('/logs/by-uuid/{analysis_id}')
-def get_log_by_uuid(analysis_id: str, account_id: str = None):
-    """
-    Fetch a scan record by analysis_id (UUID). Used by MCP clients that
-    only know the UUID, not the integer DB id.
-
-    Mirrors the lookup pattern used by /egraph/{analysis_id}: validate
-    the UUID format, then run a LIKE query on findings_json.
-    """
-    import re
+def get_log_by_uuid(analysis_id: str, account_id: str = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     if not re.match(r'^[a-zA-Z0-9\-]+$', analysis_id):
         raise HTTPException(status_code=400, detail='Invalid analysis_id format')
+    account_ids = allowed_accounts(caller, db)
+    if account_id and account_ids is not None:
+        account_ids = {account_id} if account_id in account_ids else set()
+    from app.database import get_log_by_uuid as lookup_uuid
+    log = lookup_uuid(analysis_id, account_ids=account_ids)
+    if not log:
+        raise HTTPException(status_code=404, detail='Analysis not found')
+    return log
 
-    from app.database import SessionLocal, AnalysisLog
-    session = SessionLocal()
-    try:
-        target = session.query(AnalysisLog.id).filter(
-            AnalysisLog.findings_json.like(f'%"analysis_id": "{analysis_id}"%')
-        ).order_by(AnalysisLog.timestamp.desc()).first()
-        if not target:
-            raise HTTPException(status_code=404, detail=f'Analysis {analysis_id} not found')
-        log = get_log_by_id(target.id, account_id=account_id)
-        if not log:
-            raise HTTPException(status_code=404, detail='Log not found')
-        return log
-    finally:
-        session.close()
-
-@app.get('/egraph/{analysis_id}', dependencies=[Depends(require_api_key)])
-def get_graph(analysis_id: str):
+@app.get('/egraph/{analysis_id}', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def get_graph(analysis_id: str, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     """
     Get infrastructure graph data for a completed scan.
     
@@ -378,12 +488,16 @@ def get_graph(analysis_id: str):
     try:
         # Filter by analysis_id string inside findings_json at the DB level
         # This avoids fetching and deserializing all 100 rows in Python
-        target_log = session.query(AnalysisLog).filter(
+        query = session.query(AnalysisLog).filter(
             AnalysisLog.findings_json.like(f'%"analysis_id": "{analysis_id}"%')
-        ).order_by(AnalysisLog.timestamp.desc()).first()
+        )
+        account_ids = allowed_accounts(caller, db)
+        if account_ids is not None:
+            query = query.filter(AnalysisLog.aws_account_id.in_(account_ids)) if account_ids else query.filter(False)
+        target_log = query.order_by(AnalysisLog.timestamp.desc()).first()
 
         if not target_log:
-            raise HTTPException(status_code=404, detail=f'Analysis {analysis_id} not found')
+            raise HTTPException(status_code=404, detail='Analysis not found')
         
         # Parse the stored findings_json
         findings_data = json.loads(target_log.findings_json)
@@ -418,13 +532,32 @@ def get_graph(analysis_id: str):
         )
         seen_paths = set()
         attack_paths = []
+        active_exposures = compute_exposures(infrastructure, graph)
+        exposures_by_entry = defaultdict(list)
+        for exposure in active_exposures:
+            exposures_by_entry[exposure.resource_id].append({
+                'protocol': exposure.protocol,
+                'from_port': exposure.from_port,
+                'to_port': exposure.to_port,
+                'source': exposure.source,
+            })
+        for entry, exposures in sorted(exposures_by_entry.items()):
+            lateral_path = find_attack_path(graph, entry)
+            attack_paths.append({
+                'finding_id': '',
+                'finding_title': 'Active internet exposure',
+                'severity': 'critical' if any(is_internet_cidr(item['source']) and item['from_port'] <= 22 <= item['to_port'] for item in exposures) else 'moderate',
+                'path': lateral_path or [entry],
+                'entry': entry,
+                'exposures': exposures,
+                'lateral_path': lateral_path,
+                'status': 'lateral_path_found' if lateral_path else 'entry_exposed_no_lateral_path',
+            })
         for f in all_findings:
             path = f.get('attack_path', [])
             blast = f.get('blast_radius', 0) or 0
-            # Skip findings with no path AND no blast radius
             if not path and blast == 0:
                 continue
-            # If no traversal path but blast_radius > 0, use resource_id as the path
             if not path and f.get('resource_id'):
                 path = [f['resource_id']]
             if not path:
@@ -490,13 +623,13 @@ def get_graph(analysis_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Error retrieving graph data: {str(e)}')
+        raise HTTPException(status_code=500, detail='Unable to retrieve graph data')
     finally:
         session.close()
 
 
-@app.get('/compliance/{analysis_id}', dependencies=[Depends(require_api_key)])
-def get_compliance(analysis_id: str):
+@app.get('/compliance/{analysis_id}', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def get_compliance(analysis_id: str, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     """
     Evaluate compliance frameworks (CIS AWS 1.5, SOC 2) against a completed scan.
 
@@ -515,12 +648,16 @@ def get_compliance(analysis_id: str):
     session = SessionLocal()
     try:
         # Find the analysis by analysis_id in findings_json
-        target_log = session.query(AnalysisLog).filter(
+        query = session.query(AnalysisLog).filter(
             AnalysisLog.findings_json.like(f'%"analysis_id": "{analysis_id}"%')
-        ).order_by(AnalysisLog.timestamp.desc()).first()
+        )
+        account_ids = allowed_accounts(caller, db)
+        if account_ids is not None:
+            query = query.filter(AnalysisLog.aws_account_id.in_(account_ids)) if account_ids else query.filter(False)
+        target_log = query.order_by(AnalysisLog.timestamp.desc()).first()
 
         if not target_log:
-            raise HTTPException(status_code=404, detail=f'Analysis {analysis_id} not found')
+            raise HTTPException(status_code=404, detail='Analysis not found')
 
         # Parse findings_json
         findings_data = json.loads(target_log.findings_json)
@@ -550,13 +687,13 @@ def get_compliance(analysis_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Error evaluating compliance: {str(e)}')
+        raise HTTPException(status_code=500, detail='Unable to evaluate compliance')
     finally:
         session.close()
 
 
-@app.post("/simulate", dependencies=[Depends(require_api_key)])
-async def simulate(request: SimulateRequest, http_request: Request, raw: bool = False):
+@app.post("/simulate", dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+async def simulate(request: SimulateRequest, http_request: Request, raw: bool = False, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     """
     Single-phase SSE simulation: Haiku for narrative + deterministic BFS for attack chain.
     Fast (~2-4s), reliable, cheap. No Sonnet needed.
@@ -581,7 +718,11 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
     try:
         session = SessionLocal()
         try:
-            logs = session.query(AnalysisLog).order_by(AnalysisLog.timestamp.desc()).limit(100).all()
+            query = session.query(AnalysisLog)
+            account_ids = allowed_accounts(caller, db)
+            if account_ids is not None:
+                query = query.filter(AnalysisLog.aws_account_id.in_(account_ids)) if account_ids else query.filter(False)
+            logs = query.order_by(AnalysisLog.timestamp.desc()).limit(100).all()
             for log in logs:
                 try:
                     data = json.loads(log.findings_json)
@@ -657,6 +798,12 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
     graph_text = format_graph_for_claude(slice_dict)
     layers = slice_dict.get('layers', {})
 
+    # Keep customer identifiers out of third-party prompts and narrative fields.
+    customer_ids = identifiers.customer_identifiers(infrastructure, aws_account_id)
+    graph_text = identifiers.tokenize(graph_text, customer_ids)
+    safe_query = identifiers.tokenize(request.query, customer_ids)
+    layers = slice_dict.get('layers', {})
+
     # ── DETERMINISTIC: Build attack chain from BFS ────────────────
     def _build_attack_stages(slice_data: dict, graph_obj: Graph) -> list:
         """Build attack chain stages from BFS layers with narrative captions."""
@@ -684,35 +831,35 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
             source_label = source_node.get('label', edge['from']) if source_node else edge['from']
 
             if rel == 'REACHES' and target_type == 'security_group':
-                return f"Internet reaches {target_label} — open inbound rules"
+                return "Internet reaches this security group — open inbound rules"
             if rel == 'REACHES' and target_type == 'api_gateway':
-                return f"Internet reaches API Gateway {target_label}"
+                return "Internet reaches this API Gateway"
             if rel == 'REACHES_VIA_SG':
-                return f"Attacker lands on {target_label} via open security group"
+                return "Attacker lands on this resource via an open security group"
             if rel == 'REACHES':
-                return f"Internet directly reaches {target_label}"
+                return "Internet directly reaches this resource"
             if rel == 'attached_to_instance':
-                return f"Security group exposes {target_label} to network"
+                return "Security group exposes this resource to the network"
             if rel == 'uses_iam_role':
-                return f"{source_label} assumes {target_label} — credential theft possible"
+                return "A workload assumes an IAM role — credential theft possible"
             if rel == 'can_access':
-                return f"IAM role accesses {target_label} — data exfiltration risk"
+                return "An IAM role accesses this resource — data exfiltration risk"
             if rel == 'uses_security_group':
-                return f"{source_label} shares network access via {target_label}"
+                return "A workload shares network access via a security group"
             if rel == 'in_subnet':
-                return f"{source_label} is in {target_label} — lateral movement"
+                return "A workload is in a subnet — lateral movement"
             if rel == 'targets_instance':
-                return f"Load balancer routes traffic to {target_label}"
+                return "Load balancer routes traffic to this resource"
             if rel == 'contains_resource':
-                return f"Subnet contains {target_label}"
+                return "Subnet contains this resource"
             if rel == 'belongs_to_vpc':
-                return f"Network path reaches VPC {target_label}"
+                return "Network path reaches this VPC"
             if rel == 'REFERENCES_SECRET':
-                return f"{source_label} can read secret {target_label}"
+                return "A workload can read this secret"
             if rel == 'serves_from_bucket':
-                return f"CloudFront serves from {target_label}"
+                return "CloudFront serves from this bucket"
             # Fallback
-            return f"Reaches {target_label}"
+            return "Reaches this resource"
 
         # Group nodes by BFS depth, skip INTERNET (depth 0)
         depth_groups: dict = {}
@@ -750,7 +897,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
             if edge:
                 caption = _caption_for_edge(edge, best_node)
             else:
-                caption = f"Reaches {best_node.get('label', best_id)}"
+                caption = "Reaches this resource"
 
             # Include up to 3 node_ids for graph highlighting
             highlight_ids = [s[1] for s in scored[:3]]
@@ -803,6 +950,15 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
         return {"total": total, "by_type": by_type_summary}
 
     blast_radius = _compute_blast_radius(slice_dict, graph)
+
+    # Exposure and native findings use the same graph as the simulation slice.
+    active_exposures = compute_exposures(infrastructure, graph)
+    reachable = {item.resource_id for item in active_exposures}
+    native_findings = run_all_checks(infrastructure, graph)
+    native_on_entries = [
+        finding for findings in native_findings.values() for finding in findings
+        if getattr(finding, 'resource_id', None) in reachable
+    ]
 
     # ── SMART DETERMINISTIC NARRATIVE (fallback that's actually good) ─
     def _build_deterministic_narrative(stages: list, blast: dict, query: str, graph_obj: Graph) -> dict:
@@ -889,7 +1045,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
 INFRASTRUCTURE (real, IAM-scanned):
 {trimmed_graph}
 
-Query: {request.query}
+Query: {safe_query}
 Blast radius: {blast_radius['total']} resources reachable ({', '.join(f'{v} {k}' for k, v in blast_radius['by_type'].items())})
 Attack chain: {' → '.join(s['caption'][:60] for s in attack_stages[:4])}
 
@@ -906,13 +1062,13 @@ Respond with ONLY JSON (no markdown):
                         messages=[{"role": "user", "content": haiku_prompt}]
                     )
                     haiku_raw = haiku_msg.content[0].text.strip().replace('```json', '').replace('```', '').strip()
-                    haiku_data = json.loads(haiku_raw)
+                    haiku_data = identifiers.tokenize_obj(json.loads(haiku_raw), customer_ids)
                     break  # success
                 except Exception as e:
                     logger.warning(f"simulate: Haiku attempt {attempt + 1} failed: {e}")
                     if attempt == 0:
                         # Retry with even shorter prompt
-                        haiku_prompt = f"""AWS security query: "{request.query}"
+                        haiku_prompt = f"""AWS security query: "{safe_query}"
 Blast radius: {blast_radius['total']} resources. Types: {blast_radius['by_type']}
 Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical", "summary": "2 sentences", "follow_up": "next question"}}"""
                         anthropic_client = anthropic_lib.Anthropic(api_key=api_key, timeout=10)
@@ -920,6 +1076,15 @@ Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical
         # Use smart deterministic fallback if Haiku failed
         if not haiku_data:
             haiku_data = _build_deterministic_narrative(attack_stages, blast_radius, request.query, graph)
+
+        severity_rank = {'low': 0, 'moderate': 1, 'critical': 2}
+        exposure_severities = [item.severity.lower() for item in active_exposures]
+        native_severities = [item.severity.lower() for item in native_on_entries]
+        count_severity = str(haiku_data.get('severity', 'low')).lower()
+        haiku_data['severity'] = max(
+            [count_severity, *exposure_severities, *native_severities],
+            key=lambda value: severity_rank.get(value, 0),
+        )
 
         # ── Send preview immediately ──────────────────────────────
         preview_data = {
@@ -938,7 +1103,7 @@ Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical
             "blast_radius": blast_radius,
             "follow_up": haiku_data.get("follow_up", ""),
             "category": category,
-            "query": request.query,
+            "query": safe_query,
         }
         yield f"event: complete\ndata: {json.dumps(complete_data)}\n\n"
 
@@ -953,8 +1118,8 @@ Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@app.get('/simulate/remaining', dependencies=[Depends(require_api_key)])
-def simulate_remaining(analysis_id: str):
+@app.get('/simulate/remaining', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def simulate_remaining(analysis_id: str, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     """Returns how many simulations remain today for the account that owns this analysis."""
     SIMULATION_DAILY_LIMIT = 3
     from app.database import SessionLocal, AnalysisLog
@@ -963,7 +1128,11 @@ def simulate_remaining(analysis_id: str):
     try:
         session = SessionLocal()
         try:
-            logs = session.query(AnalysisLog).order_by(AnalysisLog.timestamp.desc()).limit(100).all()
+            query = session.query(AnalysisLog)
+            account_ids = allowed_accounts(caller, db)
+            if account_ids is not None:
+                query = query.filter(AnalysisLog.aws_account_id.in_(account_ids)) if account_ids else query.filter(False)
+            logs = query.order_by(AnalysisLog.timestamp.desc()).limit(100).all()
             for log in logs:
                 try:
                     data = json.loads(log.findings_json)
@@ -991,15 +1160,17 @@ def simulate_remaining(analysis_id: str):
 
 
 @app.get('/usage/remaining')
-def usage_remaining(account_id: str = Query(...)):
-    """Returns daily usage counts and limits for all rate-limited features."""
+def usage_remaining(account_id: str = Query(...), caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    """Returns daily usage counts, hiding usage for accounts outside the tenant."""
     if not account_id:
         raise HTTPException(status_code=400, detail="account_id required")
-
-    scans_used = get_scan_count_today(account_id)
-    sim_used = get_simulation_count_today(account_id)
-    insights_used = get_llm_usage_count_today(account_id, "insight")
-    terraform_used = get_llm_usage_count_today(account_id, "terraform")
+    if not account_visible(caller, db, account_id):
+        scans_used = sim_used = insights_used = terraform_used = 0
+    else:
+        scans_used = get_scan_count_today(account_id)
+        sim_used = get_simulation_count_today(account_id)
+        insights_used = get_llm_usage_count_today(account_id, "insight")
+        terraform_used = get_llm_usage_count_today(account_id, "terraform")
 
     return {
         "scans": {"used": scans_used, "limit": DAILY_SCAN_LIMIT},
@@ -1009,7 +1180,7 @@ def usage_remaining(account_id: str = Query(...)):
     }
 
 
-@app.post('/remediation/generate-insight', response_model=RemediationInsightResponse, dependencies=[Depends(require_api_key)])
+@app.post('/remediation/generate-insight', response_model=RemediationInsightResponse, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def generate_remediation_insight(request: RemediationInsightRequest, http_request: Request, raw: bool = False):
     """
     Generate AI-powered 'What this fixes' and 'Why it matters' text for a single finding.
@@ -1144,7 +1315,7 @@ def _validate_hcl_output(hcl: str, request: TerraformGenerateRequest) -> bool:
     return True
 
 
-@app.post('/remediation/generate-terraform', response_model=TerraformGenerateResponse, dependencies=[Depends(require_api_key)])
+@app.post('/remediation/generate-terraform', response_model=TerraformGenerateResponse, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def generate_terraform(request: TerraformGenerateRequest, http_request: Request, raw: bool = False):
     # Raw mode: MCP host generates HCL itself, skip Claude
     if _is_raw_mode(http_request, raw):
@@ -1271,39 +1442,49 @@ resource "aws_vpc_security_group_ingress_rule" "fix_ssh" {{
 # ── SIMULATION BRANCH API ─────────────────────────────────────────
 
 
-@app.post('/branches/compare', dependencies=[Depends(require_api_key)])
-def compare_branches_endpoint(payload: dict, request: Request):
+@app.post('/branches/compare', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def compare_branches_endpoint(payload: dict, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     _check_branch_rate_limit(_branch_request_ip(request))
     branch_ids = payload.get('branch_ids') if isinstance(payload, dict) else None
     if not isinstance(branch_ids, list) or not all(isinstance(item, str) for item in branch_ids):
         raise HTTPException(status_code=422, detail='branch_ids must be a list of strings')
+    if caller.mode == 'hosted':
+        for branch_id in branch_ids:
+            _require_visible_branch(branch_id, caller, db)
     try:
         return branches.compare_branches(branch_ids)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.post('/branches', dependencies=[Depends(require_api_key)])
-def create_branch_endpoint(payload: dict, request: Request):
+@app.post('/branches', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def create_branch_endpoint(payload: dict, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     _check_branch_rate_limit(_branch_request_ip(request))
     if not isinstance(payload, dict) or not isinstance(payload.get('base_analysis_id'), str) or not isinstance(payload.get('name'), str):
         raise HTTPException(status_code=422, detail='base_analysis_id and name are required strings')
-    base_infra = get_infrastructure_for_analysis(payload['base_analysis_id'])
+    if caller.mode == 'hosted':
+        base_infra, _ = _load_analysis_record(payload['base_analysis_id'], caller=caller, db=db)
+        if base_infra is None:
+            raise HTTPException(status_code=404, detail='Scan data not found for this analysis ID.')
+    else:
+        base_infra = get_infrastructure_for_analysis(payload['base_analysis_id'])
     try:
         branch_id = branches.create_branch(base_infra, payload['name'], payload['base_analysis_id'])
+        _record_branch_owner(branch_id, caller, db)
     except branches.BranchLimitError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     return {'branch_id': branch_id}
 
 
-@app.get('/branches', dependencies=[Depends(require_api_key)])
-def list_branches_endpoint(request: Request, base_analysis_id: Optional[str] = None):
+@app.get('/branches', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def list_branches_endpoint(request: Request, base_analysis_id: Optional[str] = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     _check_branch_rate_limit(_branch_request_ip(request))
-    return [_branch_summary(branch) for branch in branches.list_branches(base_analysis_id)]
+    return [_branch_summary(branch) for branch in branches.list_branches(base_analysis_id)
+            if _branch_is_visible(branch.branch_id, caller, db)]
 
 
 @app.get('/branches/capabilities', response_model=MutationCapabilities,
-         dependencies=[Depends(require_api_key)])
+         dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def branch_capabilities_endpoint(request: Request):
     """List supported branch mutation resource types, operations, and constraints."""
     _check_branch_rate_limit(_branch_request_ip(request))
@@ -1311,7 +1492,7 @@ def branch_capabilities_endpoint(request: Request):
 
 
 @app.get('/branches/{branch_id}', response_model=branches.BranchDetail,
-         dependencies=[Depends(require_api_key)])
+         dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def get_branch_endpoint(branch_id: str, request: Request):
     """Read branch metadata and ordered changes without returning its base snapshot."""
     _check_branch_rate_limit(_branch_request_ip(request))
@@ -1321,8 +1502,8 @@ def get_branch_endpoint(branch_id: str, request: Request):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.post('/branches/{branch_id}/fork', dependencies=[Depends(require_api_key)])
-def fork_branch_endpoint(branch_id: str, request: Request, payload: dict):
+@app.post('/branches/{branch_id}/fork', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def fork_branch_endpoint(branch_id: str, request: Request, payload: dict, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     _check_branch_rate_limit(_branch_request_ip(request))
     if not isinstance(payload, dict) or not isinstance(payload.get('name'), str) or not payload['name'].strip():
         raise HTTPException(status_code=422, detail='name is required and must be a non-empty string')
@@ -1349,10 +1530,211 @@ def fork_branch_endpoint(branch_id: str, request: Request, payload: dict):
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _record_branch_owner(new_branch_id, caller, db)
     return {'branch_id': new_branch_id, 'num_changes': num_changes}
 
 
-@app.post('/branches/{branch_id}/changes', dependencies=[Depends(require_api_key)])
+async def _ingest_plan_endpoint(
+    branch_id: str,
+    request: Request,
+    translate,
+    invalid_detail: str,
+    preserve_value_errors: bool = False,
+):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    raw = await request.body()
+    digest = hashlib.sha256(raw).hexdigest()
+    try:
+        plan = json.loads(raw)
+        translated = translate(plan)
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError, RecursionError):
+        raise HTTPException(status_code=422, detail=invalid_detail)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc) if preserve_value_errors else invalid_detail)
+    try:
+        branches.get_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    applied, rejected = [], []
+    for change, address in zip(translated['changes'], translated['addresses']):
+        try:
+            expected = branches.get_branch(branch_id)
+            if expected.status != 'open':
+                raise ValueError(f'Branch is not open: {branch_id}')
+            candidate = branches.rebuild_branch_infra(branch_id)
+            apply_change(candidate, change)
+            branches.apply_change_to_branch(branch_id, change.model_copy(update={"expected_change_count": len(expected.changes)}))
+            applied.append(address)
+        except branches.BranchNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            reason = 'dependency_violation' if 'depend' in str(exc).lower() or 'in use' in str(exc).lower() else 'mutation_rejected'
+            rejected.append({'address': address, 'reason_code': reason, 'op': change.op})
+    final_branch = branches.get_branch(branch_id)
+    plan_id = str(uuid.uuid4())
+    branches.save_plan(plan_id, branch_id, digest, raw.decode('utf-8', errors='replace'),
+                       branches.branch_revision(final_branch), rejected,
+                       translated['unmodeled'], translated['unknown_fields'])
+    revision = branches.branch_revision(final_branch)
+    return {'plan_id': plan_id, 'input_sha256': digest, 'branch_revision': revision,
+            'applied': applied, 'rejected': rejected,
+            'unmodeled': translated['unmodeled'], 'unknown_fields': translated['unknown_fields']}
+
+
+def _terraform_translator(branch_id: str, document):
+    try:
+        branch = branches.get_branch(branch_id)
+    except branches.BranchNotFoundError:
+        return translate_plan(document)
+    state = branches.rebuild_branch_state(branch)
+    sg_rule_map = {
+        group.id: {"rules": copy.deepcopy(group.rules), "egress_rules": copy.deepcopy(group.egress_rules)}
+        for group in state.ec2.security_groups
+    }
+    return translate_plan(document, sg_rules=sg_rule_map)
+
+
+@app.post('/branches/{branch_id}/plans/terraform', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+async def terraform_plan_endpoint(branch_id: str, request: Request):
+    return await _ingest_plan_endpoint(
+        branch_id, request, lambda document: _terraform_translator(branch_id, document), 'Invalid Terraform plan JSON schema',
+    )
+
+
+def _aws_translator(branch_id: str, document, cli: bool = False):
+    try:
+        branch = branches.get_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    state = branches.rebuild_branch_state(branch)
+    role_arns = {
+        role.role_arn.rsplit('/', 1)[-1]: role.role_arn
+        for role in state.iam.role_policies
+    }
+    sg_rule_map = {
+        group.id: {"rules": copy.deepcopy(group.rules), "egress_rules": copy.deepcopy(group.egress_rules)}
+        for group in state.ec2.security_groups
+    }
+    if cli:
+        document = parse_cli_commands(document)
+    return translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get)
+
+
+def _cfn_translator(branch_id: str, document):
+    api_document, extras = convert_change_set(document)
+    if api_document["calls"]:
+        translated = _aws_translator(branch_id, api_document)
+    else:
+        translated = {"changes": [], "addresses": [], "unmodeled": [], "unknown_fields": []}
+    translated["unmodeled"].extend(extras)
+    return translated
+
+
+@app.post('/branches/{branch_id}/plans/cloudformation', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+async def cloudformation_plan_endpoint(branch_id: str, request: Request):
+    return await _ingest_plan_endpoint(
+        branch_id, request, lambda document: _cfn_translator(branch_id, document),
+        'Invalid CloudFormation change set document', preserve_value_errors=True,
+    )
+
+
+@app.post('/branches/{branch_id}/plans/aws-api', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+async def aws_api_plan_endpoint(branch_id: str, request: Request):
+    return await _ingest_plan_endpoint(
+        branch_id, request, lambda document: _aws_translator(branch_id, document), 'Invalid AWS API calls document',
+    )
+
+
+@app.post('/branches/{branch_id}/plans/aws-cli', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+async def aws_cli_plan_endpoint(branch_id: str, request: Request):
+    return await _ingest_plan_endpoint(
+        branch_id, request, lambda document: _aws_translator(branch_id, document, cli=True), 'Invalid AWS CLI commands document',
+        preserve_value_errors=True,
+    )
+
+
+def _scanned_account_id(analysis_id: str) -> str | None:
+    if not analysis_id or re.fullmatch(r'[A-Za-z0-9-]{1,64}', analysis_id) is None:
+        return None
+    from app.database import AnalysisLog, SessionLocal
+    session = SessionLocal()
+    try:
+        log = (session.query(AnalysisLog.aws_account_id)
+               .filter(AnalysisLog.findings_json.like(f'%"analysis_id": "{analysis_id}"%'))
+               .order_by(AnalysisLog.timestamp.desc())
+               .first())
+        return log[0] if log and log[0] else None
+    finally:
+        session.close()
+
+
+@app.get('/branches/{branch_id}/in-use-evidence/estimate', response_model=EvidenceEstimate, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def in_use_evidence_estimate(branch_id: str, request: Request, sources: str = 'cloudtrail_events,cloudwatch_metrics'):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    requested = [item.strip() for item in sources.split(',') if item.strip()]
+    if not requested or len(set(requested)) != len(requested) or any(item not in SOURCES for item in requested):
+        raise HTTPException(status_code=422, detail='Invalid evidence sources')
+    try:
+        branch = branches.get_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='Branch not found') from exc
+    return build_estimate(branch.base, branches.rebuild_branch_state(branch), branches.branch_revision(branch), requested)
+
+
+_EVIDENCE_FIELDS = {"role_arn", "sources", "accept_estimate_id"}
+
+
+def _evidence_validation_detail(exc: ValidationError) -> list[dict]:
+    """422 detail without submitted values: only known field names, list indexes and pydantic's error type."""
+    detail = []
+    for error in exc.errors():
+        loc = [part for part in error.get("loc", ()) if isinstance(part, int) or part in _EVIDENCE_FIELDS]
+        detail.append({"loc": ["body", *loc], "type": str(error.get("type", "value_error"))})
+    return detail
+
+
+@app.post('/branches/{branch_id}/in-use-evidence', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+async def collect_in_use_evidence(branch_id: str, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    try:
+        body = json.loads(await request.body())
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(status_code=422, detail='Request body must be a JSON object')
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail='Request body must be a JSON object')
+    try:
+        payload = EvidenceRequest.model_validate(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=_evidence_validation_detail(exc)) from None
+    return await run_in_threadpool(_collect_in_use_evidence, branch_id, payload, caller, db)
+
+
+def _collect_in_use_evidence(branch_id: str, payload: EvidenceRequest, caller: Caller, db):
+    try:
+        branch = branches.get_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='Branch not found') from exc
+    estimate = build_estimate(branch.base, branches.rebuild_branch_state(branch), branches.branch_revision(branch), payload.sources)
+    if len(estimate.resources) > estimate.max_resources:
+        raise HTTPException(status_code=422, detail='Too many deleted resources for one evidence read (max 50)')
+    if payload.accept_estimate_id != estimate.estimate_id:
+        return JSONResponse(status_code=409, content={'detail': 'Estimate changed; review it and accept the new estimate_id', 'estimate': estimate.model_dump(mode='json')})
+    role_match = re.fullmatch(r'arn:[^:]+:iam::(\d{12}):role/.+', payload.role_arn)
+    account_id = role_match.group(1) if role_match else None
+    scanned = _scanned_account_id(branch.base_analysis_id)
+    if not account_id or not scanned or account_id != scanned:
+        raise HTTPException(status_code=409, detail='Role account does not match the scanned account')
+    try:
+        creds, assumed_account = assume_role_credentials(payload.role_arn, caller, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail='Could not assume the Emfirge role') from exc
+    if assumed_account != scanned:
+        raise HTTPException(status_code=409, detail='Role account does not match the scanned account')
+    now = datetime.now(timezone.utc)
+    records = read_evidence(creds, branch.base.region, estimate.resources, payload.sources, now=now, own_session_name=ROLE_SESSION_NAME, client_factory=None, sleep=None)
+    branches.save_evidence(branch_id, estimate.estimate_id, records)
+    return {'estimate_id': estimate.estimate_id, 'observed_at': now.isoformat().replace('+00:00', 'Z'), 'window_days': WINDOW_DAYS, 'records': [record.model_dump(mode='json') for record in records]}
+@app.post('/branches/{branch_id}/changes', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def add_branch_change_endpoint(branch_id: str, change: Change, request: Request):
     _check_branch_rate_limit(_branch_request_ip(request))
     try:
@@ -1376,7 +1758,87 @@ def add_branch_change_endpoint(branch_id: str, change: Change, request: Request)
     }
 
 
-@app.get('/branches/{branch_id}/diff', response_model=DiffResult, dependencies=[Depends(require_api_key)])
+def _handback_verdict_id(input_sha256: str, base_analysis_id: str | None,
+                         branch_revision: str, verdict: str) -> str:
+    payload = {
+        "input_sha256": input_sha256,
+        "base_analysis_id": base_analysis_id,
+        "branch_revision": branch_revision,
+        "verdict": verdict,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _current_handback_state(branch_id: str):
+    branch = branches.get_branch(branch_id)
+    rebuilt = branches.rebuild_branch_state(branch)
+    plan_records = branches.list_plans(branch_id)
+    verdict_kwargs = {"run_scanners": False}
+    if plan_records:
+        verdict_kwargs["plans"] = plan_records
+    evidence = branches.list_evidence(branch_id)
+    if evidence:
+        verdict_kwargs["evidence"] = evidence
+    result = combined_verdict(branch.base, rebuilt, **verdict_kwargs)
+    return branch, result, branches.branch_revision(branch)
+
+
+@app.get('/branches/{branch_id}/plans/{plan_id}/handback', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def plan_handback_endpoint(branch_id: str, plan_id: str, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    plan = branches.get_plan(plan_id)
+    if plan is None or plan['branch_id'] != branch_id:
+        raise HTTPException(status_code=404, detail='Not found')
+    try:
+        branch, result, revision = _current_handback_state(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='Not found') from exc
+    plan_text = plan['raw_input']
+    # A persisted receipt must remain bound to exactly the bytes represented by
+    # its recorded digest; never synthesize or regenerate a plan here.
+    assert hashlib.sha256(plan_text.encode('utf-8')).hexdigest() == plan['input_sha256']
+    verdict = result.verdict
+    verdict_id = _handback_verdict_id(
+        plan['input_sha256'], branch.base_analysis_id, revision, verdict,
+    )
+    return {
+        'plan_id': plan['plan_id'],
+        'input_sha256': plan['input_sha256'],
+        'base_analysis_id': branch.base_analysis_id,
+        'branch_revision': revision,
+        'verdict_id': verdict_id,
+        'verdict': verdict,
+        'plan_text': plan_text,
+    }
+
+
+@app.post('/handback/verify', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def verify_handback_endpoint(payload: dict, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail='Request body must be an object')
+    plan = branches.get_plan(payload.get('plan_id')) if isinstance(payload.get('plan_id'), str) else None
+    if plan is None:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'unknown_plan'})
+    plan_text = payload.get('plan_text')
+    if not isinstance(plan_text, str) or hashlib.sha256(plan_text.encode('utf-8')).hexdigest() != plan['input_sha256']:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'input_hash_mismatch'})
+    try:
+        branch, result, revision = _current_handback_state(plan['branch_id'])
+    except branches.BranchNotFoundError:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'unknown_plan'})
+    if revision != plan['branch_revision_after']:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'branch_revision_changed'})
+    expected_verdict_id = _handback_verdict_id(
+        plan['input_sha256'], branch.base_analysis_id, revision, result.verdict,
+    )
+    if payload.get('verdict_id') != expected_verdict_id:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'verdict_changed'})
+    return {'ok': True}
+
+
+@app.get('/branches/{branch_id}/diff', response_model=DiffResult, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def branch_diff_endpoint(branch_id: str, request: Request):
     _check_branch_rate_limit(_branch_request_ip(request))
     try:
@@ -1385,7 +1847,7 @@ def branch_diff_endpoint(branch_id: str, request: Request):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.get('/branches/{branch_id}/verdict', response_model=CombinedVerdict, dependencies=[Depends(require_api_key)])
+@app.get('/branches/{branch_id}/verdict', response_model=CombinedVerdict, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def branch_verdict_endpoint(branch_id: str, request: Request):
     _check_branch_rate_limit(_branch_request_ip(request))
     try:
@@ -1401,11 +1863,19 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
     # via scanner_status + coverage_warnings. Flip EMFIRGE_RUN_SCANNERS=1 once the
     # real fix lands (base-scan cache + async + bigger instance; see notes).
     run_scanners = os.environ.get("EMFIRGE_RUN_SCANNERS", "0") == "1"
-    result = combined_verdict(branch.base, rebuilt, run_scanners=run_scanners)
-    return result.model_copy(update={"branch_revision": branches.branch_revision(branch)})
+    plans = branches.list_plans(branch_id)
+    verdict_kwargs = {"run_scanners": run_scanners}
+    if plans:
+        verdict_kwargs["plans"] = plans
+    evidence = branches.list_evidence(branch_id)
+    if evidence:
+        verdict_kwargs["evidence"] = evidence
+    result = combined_verdict(branch.base, rebuilt, **verdict_kwargs)
+    return result.model_copy(update={"branch_revision": branches.branch_revision(branch),
+        "plans": [{"plan_id": item["plan_id"], "input_sha256": item["input_sha256"]} for item in plans]})
 
 
-@app.post('/branches/{branch_id}/rollback', dependencies=[Depends(require_api_key)])
+@app.post('/branches/{branch_id}/rollback', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def rollback_branch_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
     _check_branch_rate_limit(_branch_request_ip(request))
     payload = payload or {}
@@ -1437,7 +1907,7 @@ def rollback_branch_endpoint(branch_id: str, request: Request, payload: Optional
     return _branch_summary(branch)
 
 
-@app.post('/branches/{branch_id}/rollback-to-count', dependencies=[Depends(require_api_key)])
+@app.post('/branches/{branch_id}/rollback-to-count', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def rollback_branch_to_count_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
     _check_branch_rate_limit(_branch_request_ip(request))
     if not isinstance(payload, dict) or set(payload) - {'target_change_count', 'branch_revision'}:
@@ -1469,7 +1939,7 @@ def rollback_branch_to_count_endpoint(branch_id: str, request: Request, payload:
     return _branch_summary(branch)
 
 
-@app.post('/branches/{branch_id}/discard', dependencies=[Depends(require_api_key)])
+@app.post('/branches/{branch_id}/discard', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def discard_branch_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
     _check_branch_rate_limit(_branch_request_ip(request))
     if payload is None:
@@ -1502,8 +1972,8 @@ def discard_branch_endpoint(branch_id: str, request: Request, payload: Optional[
     return {'branch_id': branch.branch_id, 'status': branch.status}
 
 
-@app.post('/remediation/verify-fix', response_model=VerifyFixResponse, dependencies=[Depends(require_api_key)])
-def verify_fix(request: VerifyFixRequest, http_request: Request):
+@app.post('/remediation/verify-fix', response_model=VerifyFixResponse, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def verify_fix(request: VerifyFixRequest, http_request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     """
     Simulate applying a fix for a specific finding and return the impact.
 
@@ -1524,7 +1994,7 @@ def verify_fix(request: VerifyFixRequest, http_request: Request):
         return VerifyFixResponse(can_simulate=False)
 
     # ── LOAD INFRASTRUCTURE FROM DB ───────────────────────────────
-    infrastructure, original_findings_data = _load_analysis_record(request.analysis_id)
+    infrastructure, original_findings_data = _load_analysis_record(request.analysis_id, caller=caller, db=db)
     if infrastructure is None:
         raise HTTPException(status_code=404, detail='Scan data not found for this analysis ID.')
 
@@ -1821,7 +2291,7 @@ def _apply_rule_based_mutation(infra_dict: dict, rule_id: str, resource_id: str)
     return False
 
 
-@app.post('/remediation/fix', dependencies=[Depends(require_api_key)])
+@app.post('/remediation/fix', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def unified_fix(request: TerraformGenerateRequest, http_request: Request, raw: bool = False):
     """
     Unified fix endpoint: generates HCL + verifies it in one call.
@@ -2115,12 +2585,12 @@ CRITICAL RULES:
     }
 
 
-@app.get('/github/install-url', dependencies=[Depends(require_api_key)])
+@app.get('/github/install-url', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def github_install_url():
     return {"url": os.getenv('GITHUB_APP_INSTALL_URL', 'https://github.com/apps/emfirge-security')}
 
 
-@app.get('/github/repos', dependencies=[Depends(require_api_key)])
+@app.get('/github/repos', dependencies=[Depends(legacy_ci_enabled), Depends(require_api_key), Depends(branch_tenant_guard)])
 def github_repos(installation_id: int):
     from app.github_service import _get_private_key
     import requests as req
@@ -2142,7 +2612,7 @@ def github_repos(installation_id: int):
         return GitHubReposResponse(repos=[])
 
 
-@app.post('/github/pr', response_model=GitHubPRResponse, dependencies=[Depends(require_api_key)])
+@app.post('/github/pr', response_model=GitHubPRResponse, dependencies=[Depends(legacy_ci_enabled), Depends(require_api_key), Depends(branch_tenant_guard)])
 def create_github_pr(request: GitHubPRRequest, http_request: Request):
     client_ip = http_request.client.host if http_request.client else 'unknown'
     _check_pr_rate_limit(client_ip)
@@ -2197,10 +2667,10 @@ def create_github_pr(request: GitHubPRRequest, http_request: Request):
         result = create_fix_pr(gh, request.repo, request.finding, request.hcl, file_path, tf_match=tf_match)
         return GitHubPRResponse(**result)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
-@app.post('/github/webhook', dependencies=[Depends(require_api_key)])
+@app.post('/github/webhook', dependencies=[Depends(legacy_ci_enabled), Depends(require_api_key), Depends(branch_tenant_guard)])
 async def github_webhook(http_request: Request):
     import hmac
     import hashlib
@@ -2512,7 +2982,7 @@ async def github_webhook(http_request: Request):
 
 # ── TF INDEXING ──────────────────────────────────────────────────
 
-@app.post('/github/index-tf', response_model=TFIndexResponse, dependencies=[Depends(require_api_key)])
+@app.post('/github/index-tf', response_model=TFIndexResponse, dependencies=[Depends(legacy_ci_enabled), Depends(require_api_key), Depends(branch_tenant_guard)])
 def index_tf_repo(request: TFIndexRequest):
     """Manually trigger TF indexing for a repo. Called after GitHub App install."""
     from app.github_service import get_github_client
@@ -2531,11 +3001,11 @@ def index_tf_repo(request: TFIndexRequest):
         return TFIndexResponse(
             status="error",
             repo=request.repo,
-            message=str(e)
+            message='Request could not be completed'
         )
 
 
-@app.get('/github/index-status', dependencies=[Depends(require_api_key)])
+@app.get('/github/index-status', dependencies=[Depends(legacy_ci_enabled), Depends(require_api_key), Depends(branch_tenant_guard)])
 def tf_index_status(installation_id: int, repo: str):
     """Check TF indexing status for a repo."""
     status = get_tf_index_status(installation_id, repo)
@@ -2549,7 +3019,7 @@ def tf_index_status(installation_id: int, repo: str):
 
 # ── CI/CD GATE ───────────────────────────────────────────────────
 
-@app.post('/ci/api-key', response_model=CIAPIKeyResponse)
+@app.post('/ci/api-key', response_model=CIAPIKeyResponse, dependencies=[Depends(legacy_ci_enabled)])
 def create_ci_key(request: CIAPIKeyRequest):
     """Create a CI/CD API key for an installation. User stores this in GitHub Secrets."""
     api_key = create_ci_api_key(request.installation_id, request.repo)
@@ -2562,13 +3032,13 @@ def create_ci_key(request: CIAPIKeyRequest):
     )
 
 
-@app.get('/ci/api-keys')
+@app.get('/ci/api-keys', dependencies=[Depends(legacy_ci_enabled)])
 def list_ci_keys(installation_id: int):
     """List CI/CD API keys for an installation (shows prefixes only)."""
     return get_ci_api_keys(installation_id)
 
 
-@app.post('/ci/analyze', response_model=CIAnalyzeResponse)
+@app.post('/ci/analyze', response_model=CIAnalyzeResponse, dependencies=[Depends(legacy_ci_enabled)])
 def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
     """
     CI/CD Gate: Analyze a PR for security impact using FULL infrastructure simulation.
@@ -2973,8 +3443,9 @@ def list_feedback(limit: int = 50, key: str = None):
     return get_feedback(limit=min(limit, 100))
 
 
-@app.post('/analyze', dependencies=[Depends(require_api_key)])
-def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
+@app.post('/analyze', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    assumed_credentials = assume_customer_role(credentials.role_arn, caller, db)
     start_time = time.time()
 
     # AGENTOPS SESSION START
@@ -3010,7 +3481,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
         if is_demo_arn(credentials.role_arn):
             infrastructure = get_demo_infrastructure(credentials.role_arn)
         else:
-            infrastructure = collect_infrastructure(credentials)
+            infrastructure = collect_infrastructure(credentials, assumed_credentials)
 
         # STEP 1.5 — Build infrastructure graph for relationship-aware rules
         graph = build_graph(infrastructure)
@@ -3071,26 +3542,8 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
                 finding.mitre_technique_name = technique_name
 
         # STEP 3 — Calculate weighted scores
-        # total_resources must be computed here so it can be passed to calculate_score
-        total_resources = (
-            infrastructure.ec2.instance_count +
-            len(infrastructure.ec2.security_groups) +
-            len(infrastructure.ec2.ebs_volumes) +
-            len(infrastructure.ec2.elastic_ips) +
-            infrastructure.s3.total_buckets +
-            len(infrastructure.rds.instances) +
-            len(infrastructure.iam.iam_users) +
-            (1 if infrastructure.cloudtrail.is_enabled else 0) +
-            infrastructure.lambda_data.function_count +
-            infrastructure.secrets_manager.total_secrets +
-            (1 if infrastructure.guardduty.is_enabled else 0) +
-            infrastructure.vpc.total_vpcs +
-            len(infrastructure.vpc.subnets) +
-            infrastructure.kms.total_cmks +
-            infrastructure.sns.total_topics +
-            infrastructure.ecs.total_task_definitions
-        )
-        scores = calculate_score(findings, total_resources, infrastructure)
+        total_resources = count_scored_resources(infrastructure)
+        scores = score_snapshot(infrastructure, graph=graph, findings=findings)
 
         # Build local warnings list — starts with collector warnings (skipped services),
         # backend failures (Gemini, S3, DB) are appended below
@@ -3322,19 +3775,21 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False):
         if error_code == 'AccessDenied':
             raise HTTPException(status_code=400, detail='Could not assume the IAM role. Make sure you deployed the Emfirge CloudFormation stack correctly.')
         else:
-            raise HTTPException(status_code=400, detail=f'AWS error: {e.response["Error"]["Message"]}')
+            raise HTTPException(status_code=400, detail='AWS request failed')
 
     except Exception as e:
         if session: session.end_session(end_state='Fail')
-        raise HTTPException(status_code=500, detail=f'Server error: {str(e)}')
+        raise HTTPException(status_code=500, detail='Internal server error')
 
 
 # ── SSE STREAMING ANALYZE ENDPOINT ────────────────────────────────
 # Bypasses Vercel's 30s proxy timeout by streaming progress events.
 # Same logic as /analyze but wrapped in an SSE generator.
 
-@app.post('/analyze/stream', dependencies=[Depends(require_api_key)])
-async def analyze_stream(credentials: AWSCredentials, request: Request, raw: bool = False):
+@app.post('/analyze/stream', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+async def analyze_stream(credentials: AWSCredentials, request: Request, raw: bool = False, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    # Authorize before constructing the streaming response so failures are HTTP errors.
+    assumed_credentials = assume_customer_role(credentials.role_arn, caller, db)
     """
     SSE streaming version of /analyze. Sends progress events as each collector
     completes, then emits the full AnalysisResponse as the final event.
@@ -3404,29 +3859,9 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
                     SNSData, ECSData, WAFData
                 )
 
-                # Assume role
-                try:
-                    sts = boto3.client('sts', config=BOTO_CONFIG)
-                    assumed = sts.assume_role(
-                        RoleArn=credentials.role_arn,
-                        RoleSessionName='EmfirgeSecurityScan',
-                        ExternalId='aws-risk-agent',
-                        DurationSeconds=3600
-                    )
-                    key = assumed['Credentials']['AccessKeyId']
-                    secret = assumed['Credentials']['SecretAccessKey']
-                    token = assumed['Credentials']['SessionToken']
-                except _ClientError as e:
-                    code = e.response['Error']['Code']
-                    if code == 'AccessDenied':
-                        yield _emit("error", {"message": "Could not assume the IAM role. Make sure you deployed the Emfirge CloudFormation stack correctly."})
-                        return
-                    else:
-                        yield _emit("error", {"message": f"Role assumption failed: {e.response['Error']['Message']}"})
-                        return
-                except Exception as e:
-                    yield _emit("error", {"message": f"Could not connect to AWS: {str(e)}"})
-                    return
+                key = assumed_credentials['AccessKeyId']
+                secret = assumed_credentials['SecretAccessKey']
+                token = assumed_credentials['SessionToken']
 
                 yield _emit("progress", {"step": "collecting", "service": "sts", "status": "done", "detail": "Role assumed successfully"})
 
@@ -3569,25 +4004,8 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
 
             # ── STEP 3: Calculate scores ──────────────────────────
             yield _emit("progress", {"step": "analyzing", "detail": "Calculating risk scores..."})
-            total_resources = (
-                infrastructure.ec2.instance_count +
-                len(infrastructure.ec2.security_groups) +
-                len(infrastructure.ec2.ebs_volumes) +
-                len(infrastructure.ec2.elastic_ips) +
-                infrastructure.s3.total_buckets +
-                len(infrastructure.rds.instances) +
-                len(infrastructure.iam.iam_users) +
-                (1 if infrastructure.cloudtrail.is_enabled else 0) +
-                infrastructure.lambda_data.function_count +
-                infrastructure.secrets_manager.total_secrets +
-                (1 if infrastructure.guardduty.is_enabled else 0) +
-                infrastructure.vpc.total_vpcs +
-                len(infrastructure.vpc.subnets) +
-                infrastructure.kms.total_cmks +
-                infrastructure.sns.total_topics +
-                infrastructure.ecs.total_task_definitions
-            )
-            scores = calculate_score(findings, total_resources, infrastructure)
+            total_resources = count_scored_resources(infrastructure)
+            scores = score_snapshot(infrastructure, graph=graph, findings=findings)
 
             local_warnings = list(infrastructure.warnings)
 
@@ -3784,7 +4202,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
 
         except Exception as e:
             logger.error(f"analyze/stream error: {e}")
-            yield _emit("error", {"message": str(e)})
+            yield _emit("error", {"message": "Request could not be completed"})
 
     return StreamingResponse(
         scan_stream(),
@@ -3796,8 +4214,8 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
 # ── COMPONENT SIMULATION ENDPOINT ─────────────────────────────────
 # Deterministic mutation: Python mutates graph, Claude only writes prose.
 
-@app.post('/simulate/component', dependencies=[Depends(require_api_key)])
-def simulate_component(request: ComponentRequest, http_request: Request):
+@app.post('/simulate/component', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def simulate_component(request: ComponentRequest, http_request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     """
     Simulate adding/modifying a component in the infrastructure.
     
@@ -3833,7 +4251,11 @@ def simulate_component(request: ComponentRequest, http_request: Request):
     try:
         session = SessionLocal()
         try:
-            logs = session.query(AnalysisLog).order_by(AnalysisLog.timestamp.desc()).limit(100).all()
+            query = session.query(AnalysisLog)
+            account_ids = allowed_accounts(caller, db)
+            if account_ids is not None:
+                query = query.filter(AnalysisLog.aws_account_id.in_(account_ids)) if account_ids else query.filter(False)
+            logs = query.order_by(AnalysisLog.timestamp.desc()).limit(100).all()
             for log in logs:
                 try:
                     data = json.loads(log.findings_json)
@@ -4182,34 +4604,14 @@ class PurgeRequest(_PurgeBase):
     region: str = 'us-east-1'
 
 @app.post('/privacy/purge')
-def purge_user_data(payload: PurgeRequest, request: Request):
+def purge_user_data(payload: PurgeRequest, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     """
     Delete all stored data for the AWS account that owns this role.
     Re-assumes the role to verify caller controls the account.
     Deletes from analysis_logs, drift_events, simulation_logs + S3 reports.
     """
-    import re as _re
-    # Validate role ARN format and extract account ID
-    match = _re.match(r'^arn:aws:iam::(\d{12}):role/[\w+=,.@\-/]+$', payload.role_arn or '')
-    if not match:
-        raise HTTPException(status_code=400, detail='Invalid role ARN format')
-    account_id = match.group(1)
-
-    # Re-assume the role: caller must control this AWS account.
-    # If they can't assume, they can't purge.
-    try:
-        sts = boto3.client('sts')
-        sts.assume_role(
-            RoleArn=payload.role_arn,
-            RoleSessionName='emfirge-purge',
-            ExternalId='aws-risk-agent',
-            DurationSeconds=900,
-        )
-    except ClientError as e:
-        code = e.response.get('Error', {}).get('Code', 'Unknown')
-        raise HTTPException(status_code=403, detail=f'Cannot assume role ({code}). Stack may be missing or trust policy wrong.')
-    except Exception as e:
-        raise HTTPException(status_code=403, detail=f'Role verification failed: {str(e)[:200]}')
+    assume_customer_role(payload.role_arn, caller, db)
+    account_id = payload.role_arn.split(':')[4]
 
     # Collect analysis UUIDs first (needed for S3 cleanup), then delete DB rows
     from app.database import SessionLocal, AnalysisLog, DriftEvent, SimulationLog
@@ -4233,7 +4635,7 @@ def purge_user_data(payload: PurgeRequest, request: Request):
         session.commit()
     except Exception as e:
         session.rollback()
-        raise HTTPException(status_code=500, detail=f'DB purge failed: {str(e)[:200]}')
+        raise HTTPException(status_code=500, detail='Database purge failed')
     finally:
         session.close()
 

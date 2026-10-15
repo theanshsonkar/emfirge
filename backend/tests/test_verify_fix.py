@@ -7,10 +7,12 @@ from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.database import AccountBinding
 from app.fix_mutations import FIX_MUTATIONS
 from app.demo_seed import get_demo_infrastructure
 from app.models import AWSInfrastructure
 from app.scoring import calculate_score
+from app import auth, database
 
 client = TestClient(app)
 
@@ -129,6 +131,21 @@ class TestVerifyFixEndpoint:
 
         return mock_log
 
+    def _tenant_headers(self):
+        project_name = 'verify-fix-tests'
+        key = auth.create_api_key(project_name)
+        session = auth.SessionLocal()
+        try:
+            project = auth._get_or_create_project(session, project_name)
+            if session.query(AccountBinding).filter_by(
+                aws_account_id='000000000000', project_id=project.id
+            ).first() is None:
+                session.add(AccountBinding(aws_account_id='000000000000', project_id=project.id))
+                session.commit()
+        finally:
+            session.close()
+        return {'X-API-Key': key}
+
     def test_unsupported_rule_returns_cannot_simulate(self):
         resp = client.post('/remediation/verify-fix', json={
             'analysis_id': 'test-123',
@@ -139,18 +156,29 @@ class TestVerifyFixEndpoint:
         data = resp.json()
         assert data['can_simulate'] is False
 
+    @patch("app.auth.AUTH_ENABLED", True)
     @patch("app.database.SessionLocal")
     def test_verify_fix_ssh_open(self, mock_session_cls):
         mock_log = self._mock_db_with_demo()
         mock_session = MagicMock()
-        mock_session.query.return_value.order_by.return_value.limit.return_value.all.return_value = [mock_log]
+        binding_query = MagicMock()
+        binding_query.filter.return_value.all.return_value = [
+            MagicMock(aws_account_id='000000000000')
+        ]
+        analysis_query = MagicMock()
+        analysis_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [mock_log]
+        mock_session.query.side_effect = iter([binding_query, analysis_query])
         mock_session_cls.return_value = mock_session
 
-        resp = client.post('/remediation/verify-fix', json={
-            'analysis_id': 'test-analysis-123',
-            'rule_id': 'EMFIRGE-EC2-002',
-            'resource_id': 'sg-0a1b2c3d4e5f00002',
-        })
+        app.dependency_overrides[database.get_db] = lambda: mock_session
+        try:
+            resp = client.post('/remediation/verify-fix', headers=self._tenant_headers(), json={
+                'analysis_id': 'test-analysis-123',
+                'rule_id': 'EMFIRGE-EC2-002',
+                'resource_id': 'sg-0a1b2c3d4e5f00002',
+            })
+        finally:
+            app.dependency_overrides.pop(database.get_db, None)
         assert resp.status_code == 200
         data = resp.json()
         assert data['can_simulate'] is True
@@ -160,18 +188,29 @@ class TestVerifyFixEndpoint:
         removed_rules = [f.get('rule_id') for f in data['findings_removed']]
         assert 'EMFIRGE-EC2-002' in removed_rules
 
+    @patch("app.auth.AUTH_ENABLED", True)
     @patch("app.database.SessionLocal")
     def test_verify_fix_s3_public(self, mock_session_cls):
         mock_log = self._mock_db_with_demo()
         mock_session = MagicMock()
-        mock_session.query.return_value.order_by.return_value.limit.return_value.all.return_value = [mock_log]
+        binding_query = MagicMock()
+        binding_query.filter.return_value.all.return_value = [
+            MagicMock(aws_account_id='000000000000')
+        ]
+        analysis_query = MagicMock()
+        analysis_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [mock_log]
+        mock_session.query.side_effect = iter([binding_query, analysis_query])
         mock_session_cls.return_value = mock_session
 
-        resp = client.post('/remediation/verify-fix', json={
-            'analysis_id': 'test-analysis-123',
-            'rule_id': 'EMFIRGE-S3-001',
-            'resource_id': 'acme-public-assets',
-        })
+        app.dependency_overrides[database.get_db] = lambda: mock_session
+        try:
+            resp = client.post('/remediation/verify-fix', headers=self._tenant_headers(), json={
+                'analysis_id': 'test-analysis-123',
+                'rule_id': 'EMFIRGE-S3-001',
+                'resource_id': 'acme-public-assets',
+            })
+        finally:
+            app.dependency_overrides.pop(database.get_db, None)
         assert resp.status_code == 200
         data = resp.json()
         assert data['can_simulate'] is True

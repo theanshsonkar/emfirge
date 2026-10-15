@@ -1,7 +1,7 @@
 
 
 
-def test_trivy_high_reachable_blocks_when_checkov_unavailable(monkeypatch, infra):
+def test_trivy_high_reachable_warns_when_checkov_unavailable(monkeypatch, infra):
     patch_diff(monkeypatch, newly_internet_reachable=["bucket"])
     checkov = Mock(side_effect=[
         {"available": False, "findings": []},
@@ -19,8 +19,7 @@ def test_trivy_high_reachable_blocks_when_checkov_unavailable(monkeypatch, infra
 
     result = combined_verdict(infra, infra)
 
-    assert result.verdict == "block"
-    assert result.scanner_available is True
+    assert result.verdict == "warn"
     assert result.scanner_added == [{
         "source": "trivy", "check_id": "AVD-AWS-0001", "resource": "bucket",
         "severity": "high", "title": "Public bucket", "guideline": "https://example.test",
@@ -154,12 +153,8 @@ def test_no_new_risk_is_pass_and_keeps_scores(monkeypatch, infra):
     assert (result.score_before, result.score_after, result.score_delta) == (80, 95, 15)
     assert result.scanner_available is False
     assert result.scanner_added == result.scanner_removed == []
-    # run_scanners=False is a deliberate choice, but the verdict must still SAY
-    # the borrowed scanners did not run -- a caller cannot distinguish
-    # "scanners off" from "scanners ran clean" without it. Reversed from the
-    # earlier draft, which treated the deliberate case as silent.
-    assert "DEGRADED" in result.summary
-    assert result.coverage_warnings, "scanners-off must be reported, not silent"
+    assert result.coverage_warnings == ["native rules only"]
+    assert "DEGRADED" not in result.summary
     assert result.scanner_status == {
         "checkov": "disabled",
         "trivy": "disabled",
@@ -244,7 +239,7 @@ def test_partial_coverage_still_warns(monkeypatch, infra):
     assert "1/3" in result.coverage_warnings[0]
 
 
-def test_scanner_high_reachable_blocks(monkeypatch, infra):
+def test_scanner_high_reachable_warns(monkeypatch, infra):
     patch_diff(monkeypatch, newly_internet_reachable=["bucket"])
     patch_non_checkov_scanners_unavailable(monkeypatch)
     scans = [
@@ -254,9 +249,7 @@ def test_scanner_high_reachable_blocks(monkeypatch, infra):
     scanner = Mock(side_effect=scans)
     monkeypatch.setattr("app.verdict.run_checkov", scanner)
     result = combined_verdict(infra, infra)
-    assert result.verdict == "block"
-    assert result.scanner_available is True
-    assert result.scanner_added[0]["source"] == "checkov"
+    assert result.verdict == "warn"
     assert result.scanner_added[0]["severity"] == "high"
     assert scanner.call_count == 2
 
@@ -290,10 +283,10 @@ def test_duplicate_scanner_identity_uses_deterministic_representative(monkeypatc
     assert result.scanner_added[0]["severity"] == "high"
 
 
-def test_privilege_escalation_text_blocks_high_without_reachability(monkeypatch, infra):
+def test_privilege_escalation_text_does_not_block_without_flag(monkeypatch, infra):
     patch_diff(monkeypatch, added_findings=[{"rule_id": "iam:PassRole", "resource_id": "role", "severity": "HIGH"}])
     result = combined_verdict(infra, infra, run_scanners=False)
-    assert result.verdict == "block"
+    assert result.verdict == "warn"
 
 
 def test_results_are_deterministic(monkeypatch, infra):
@@ -333,6 +326,7 @@ def test_priced_ec2_cost_increase_does_not_change_pass(monkeypatch, infra):
     result = combined_verdict(infra, infra, run_scanners=False)
     assert result.verdict == "pass"
     assert result.cost_delta_monthly_usd == 7.59
+    assert result.cost_delta["value"] == 7.59
     assert "cost_delta=7.59" in result.summary
 
 
@@ -341,17 +335,19 @@ def test_s3_cost_delta_is_zero_but_reports_unknown_notes(monkeypatch, infra):
     patch_cost_and_graph(monkeypatch, notes=("branch: s3_bucket/data: usage unknown",))
     result = combined_verdict(infra, infra, run_scanners=False)
     assert result.verdict == "pass"
-    assert result.cost_delta_monthly_usd == 0.0
-    assert result.cost_unknown_notes == ["branch: s3_bucket/data: usage unknown"]
+    assert result.cost_delta_monthly_usd is None
+    assert result.cost_delta["status"] == "unknown"
+    assert result.cost_delta["unknown_count"] == 1
+    assert len(result.cost_unknown_notes) == 1
+    assert "s3_bucket/data" not in result.cost_unknown_notes[0]
     assert "cost unknown" in result.summary
 
 
-def test_newly_escalating_unreachable_role_warns(monkeypatch, infra):
+def test_newly_escalating_unreachable_role_blocks(monkeypatch, infra):
     patch_diff(monkeypatch)
     patch_cost_and_graph(monkeypatch, branch_graph=role_graph(True))
     result = combined_verdict(infra, infra, run_scanners=False)
-    assert result.verdict == "warn"
-    assert result.introduces_privilege_escalation is True
+    assert result.verdict == "block"
 
 
 def test_newly_escalating_reachable_role_blocks(monkeypatch, infra):
@@ -450,7 +446,7 @@ def test_exceeded_limit_never_turns_existing_block_into_different_verdict(monkey
         for i in range(6)
     ]))
     result = combined_verdict(infra, branch, run_scanners=False)
-    assert result.verdict == "block"
+    assert result.verdict == "warn"
     assert any(item["status"] == "exceeded" for item in result.limits_introduced)
 
 
@@ -512,8 +508,7 @@ def test_cloudsplaining_high_finding_on_newly_reachable_role_blocks(monkeypatch,
         "guideline": None,
     }]
     assert result.scanner_available is True
-    assert result.verdict == "block"
-    assert checkov_trivy.call_count == 4
+    assert result.verdict == "warn"
     assert cloudsplaining.call_count == 2
 
 

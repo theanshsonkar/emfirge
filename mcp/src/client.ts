@@ -1,6 +1,15 @@
 // HTTP client. Override base URL with EMFIRGE_BASE_URL.
 // X-MCP header tells the backend to skip its AI summary (host LLM does that).
 
+import { redactDeep } from "./tokenize.js";
+
+export class BackendHttpError extends Error {
+  constructor(public readonly status: number, public readonly body: unknown, path: string) {
+    super(`Backend ${status} on ${path}`);
+    this.name = "BackendHttpError";
+  }
+}
+
 const BASE_URL = process.env.EMFIRGE_BASE_URL ?? "https://emfirge.cloud/api";
 
 export interface ClientOptions {
@@ -37,6 +46,12 @@ export async function backendCall<T = unknown>(
     if (!res.ok) {
       const text = await res.text();
 
+      if (res.status === 409) {
+        let body: unknown = text;
+        try { body = JSON.parse(text); } catch { /* preserve raw body */ }
+        throw new BackendHttpError(res.status, body, path);
+      }
+
       if (res.status === 429) {
         throw new Error(
           extractDetail(text) ??
@@ -45,7 +60,7 @@ export async function backendCall<T = unknown>(
       }
       if (res.status === 403) {
         throw new Error(
-          "Access denied. Check the role's trust policy and ExternalId 'aws-risk-agent'. " +
+          "Access denied. Check the role's trust policy and your project ExternalId from emfirge_setup. " +
             "If you don't have a role yet, call emfirge_setup_help.",
         );
       }
@@ -55,15 +70,17 @@ export async function backendCall<T = unknown>(
         );
       }
 
-      throw new Error(`Backend ${res.status} on ${path}: ${text.slice(0, 300)}`);
+      throw new Error(`Backend ${res.status} on ${path}: ${extractDetail(text) ?? text.slice(0, 300)}`);
     }
 
     return (await res.json()) as T;
   } catch (e) {
+    if (e instanceof BackendHttpError) throw e;
+    const message = e instanceof Error ? e.message : String(e);
     if (e instanceof Error && e.name === "AbortError") {
-      throw new Error(`${path} timed out after ${timeoutMs / 1000}s`);
+      throw new Error(String(redactDeep(`${path} timed out after ${timeoutMs / 1000}s`)));
     }
-    throw e;
+    throw new Error(String(redactDeep(message)));
   } finally {
     clearTimeout(timer);
   }
@@ -137,7 +154,7 @@ export async function backendCallSSE<T = unknown>(
           `Not found at ${path}. If you passed an analysis_id, run emfirge_scan first.`,
         );
       }
-      throw new Error(`Backend ${res.status} on ${path}: ${text.slice(0, 300)}`);
+      throw new Error(`Backend ${res.status} on ${path}: ${extractDetail(text) ?? text.slice(0, 300)}`);
     }
 
     if (!res.body) {
@@ -203,10 +220,12 @@ export async function backendCallSSE<T = unknown>(
     }
     return lastComplete;
   } catch (e) {
+    if (e instanceof BackendHttpError) throw e;
+    const message = e instanceof Error ? e.message : String(e);
     if (e instanceof Error && e.name === "AbortError") {
-      throw new Error(`${path} timed out after ${timeoutMs / 1000}s`);
+      throw new Error(String(redactDeep(`${path} timed out after ${timeoutMs / 1000}s`)));
     }
-    throw e;
+    throw new Error(String(redactDeep(message)));
   } finally {
     clearTimeout(timer);
   }

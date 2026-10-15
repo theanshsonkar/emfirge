@@ -5,9 +5,11 @@ import os
 import secrets
 from datetime import datetime
 
-from fastapi import HTTPException, Request
+from dataclasses import dataclass
+from fastapi import HTTPException, Request, Depends
+from sqlalchemy.exc import IntegrityError
 
-from app.database import APIKey, SessionLocal
+from app.database import APIKey, Project, SessionLocal
 
 
 AUTH_ENABLED = os.getenv('EMFIRGE_REQUIRE_AUTH', '').lower() in {'1', 'true', 'yes'}
@@ -43,6 +45,71 @@ def create_api_key(project_name: str) -> str:
         session.close()
 
 
+@dataclass
+class Caller:
+    mode: str
+    project_id: int | None
+    project_name: str | None
+    external_id: str | None
+
+
+def _request_key(request: Request) -> str:
+    authorization = request.headers.get('authorization')
+    if authorization is not None:
+        scheme, separator, token = authorization.partition(' ')
+        return token.strip() if separator and scheme.lower() == 'bearer' else ''
+    return request.headers.get('x-api-key', '').strip()
+
+
+def _get_or_create_project(session, project_name: str) -> Project:
+    project = session.query(Project).filter(Project.name == project_name).first()
+    if project:
+        return project
+    project = Project(name=project_name, external_id=secrets.token_urlsafe(32))
+    session.add(project)
+    try:
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        project = session.query(Project).filter(Project.name == project_name).first()
+        if project is None:
+            raise
+    return project
+
+
+def backfill_legacy_key_projects(session_factory=SessionLocal) -> int:
+    """Create projects for API keys from before eager project provisioning."""
+    session = session_factory()
+    created = 0
+    try:
+        names = session.query(APIKey.project_name).distinct().all()
+        for (project_name,) in names:
+            if not project_name or not project_name.strip():
+                continue
+            if session.query(Project).filter(Project.name == project_name).first():
+                continue
+            _get_or_create_project(session, project_name)
+            created += 1
+        return created
+    finally:
+        session.close()
+
+
+async def get_caller(request: Request) -> Caller:
+    if not AUTH_ENABLED:
+        return Caller('self-host', None, None, os.environ.get('EMFIRGE_EXTERNAL_ID') or None)
+    raw = _request_key(request)
+    key = verify_api_key(raw)
+    if key is None:
+        raise HTTPException(status_code=401, detail='Unauthorized')
+    session = SessionLocal()
+    try:
+        project = _get_or_create_project(session, getattr(key, 'project_name', 'default'))
+        return Caller('hosted', project.id, project.name, project.external_id)
+    finally:
+        session.close()
+
+
 def verify_api_key(raw: str):
     """Validate an active key, recording its most recent use."""
     if not raw:
@@ -64,22 +131,16 @@ def verify_api_key(raw: str):
         session.close()
 
 
-async def require_api_key(request: Request):
-    """Require a valid API key when EMFIRGE_REQUIRE_AUTH is enabled.
+async def legacy_ci_enabled():
+    """Disable legacy CI and GitHub webhook integrations in hosted mode."""
+    if AUTH_ENABLED:
+        raise HTTPException(status_code=404, detail='Not Found')
 
-    Authorization: Bearer takes precedence over X-API-Key when both headers
-    are present. All authentication failures use the same generic response.
+
+async def require_api_key(request: Request, caller: Caller = Depends(get_caller)):
+    """Require a valid caller; retained name for compatibility with existing routes.
+
+    The caller dependency supplies the same authentication behavior and makes
+    tenant identity available to routes that have not yet migrated signatures.
     """
-    if not AUTH_ENABLED:
-        return None
-
-    authorization = request.headers.get('authorization')
-    if authorization is not None:
-        scheme, separator, token = authorization.partition(' ')
-        raw = token.strip() if separator and scheme.lower() == 'bearer' else ''
-    else:
-        raw = request.headers.get('x-api-key', '').strip()
-
-    if not raw or verify_api_key(raw) is None:
-        raise HTTPException(status_code=401, detail='Unauthorized')
     return None

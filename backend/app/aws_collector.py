@@ -1,10 +1,12 @@
 import boto3
+import datetime
 import json
 import time as _time_module
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointResolutionError
 from botocore.config import Config
+from app.cidr import is_internet_cidr
 from app.models import (
     AWSCredentials, AWSInfrastructure,
     EC2Data, S3Data, RDSData, IAMData, IAMUser,
@@ -15,43 +17,41 @@ from app.models import (
     ElastiCacheData, ElastiCacheCluster,
     SQSData, SQSQueue,
     DynamoDBData, DynamoDBTable,
-    EBSVolume, ElasticIP, Route, RouteTable, NACLEntry, NetworkACL,
-    VPCPeeringConnection, TransitGatewayAttachment, VPNGateway, InterfaceEndpoint
+    EBSVolume, EBSSnapshot, ElasticIP, Route, RouteTable, NACLEntry, NetworkACL, NetworkInterface,
+    VPCPeeringConnection, TransitGatewayAttachment, VPNGateway, InterfaceEndpoint, BlockDevice,
+    RDSSnapshot
 )
 from datetime import datetime, timezone
+
+
+def build_security_group_rule(permission: dict, *, egress: bool = False, include_ipv6: bool = False) -> dict:
+    """Convert an AWS IpPermission into the normalized infrastructure rule shape."""
+    ip_ranges = [ip.get('CidrIp') for ip in permission.get('IpRanges', [])]
+    if include_ipv6:
+        ip_ranges += [ip.get('CidrIpv6') for ip in permission.get('Ipv6Ranges', [])]
+    return {
+        'from_port': permission.get('FromPort'),
+        'to_port': permission.get('ToPort'),
+        'protocol': permission.get('IpProtocol'),
+        'ip_ranges': ip_ranges,
+        ('dest_sg_ids' if egress else 'source_sg_ids'):
+            [pair.get('GroupId') for pair in permission.get('UserIdGroupPairs', [])]
+    }
 
 # 10 second timeout for every boto3 call — prevents hangs on bad credentials
 # max_attempts=2: one initial call + one retry. Faster failure (11s max vs 25s with 5 retries).
 BOTO_CONFIG = Config(connect_timeout=5, read_timeout=10, retries={'max_attempts': 2, 'mode': 'standard'})
 
-def collect_infrastructure(credentials: AWSCredentials) -> AWSInfrastructure:
+def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dict | None = None) -> AWSInfrastructure:
     region = credentials.region
     warnings = []
 
-    # ── ASSUME ROLE ───────────────────────────────────────────────
-    # Exchange the user's Role ARN for temporary credentials
-    # These credentials expire after 1 hour automatically
-    try:
-        sts = boto3.client('sts', config=BOTO_CONFIG)
-        assumed = sts.assume_role(
-            RoleArn=credentials.role_arn,
-            RoleSessionName='EmfirgeSecurityScan',
-            ExternalId='aws-risk-agent',
-            DurationSeconds=3600
-        )
-        key = assumed['Credentials']['AccessKeyId']
-        secret = assumed['Credentials']['SecretAccessKey']
-        token = assumed['Credentials']['SessionToken']
-    except ClientError as e:
-        code = e.response['Error']['Code']
-        if code == 'AccessDenied':
-            raise ValueError('Could not assume the IAM role. Make sure you deployed the Emfirge CloudFormation stack correctly.')
-        elif code == 'InvalidClientTokenId':
-            raise ValueError('Invalid Role ARN. Please check the ARN you copied from the CloudFormation stack output.')
-        else:
-            raise ValueError(f'Role assumption failed: {e.response["Error"]["Message"]}')
-    except Exception as e:
-        raise ValueError(f'Could not connect to AWS: {str(e)}')
+    # Credentials are authorized by app.role_access before collection starts.
+    if assumed_credentials is None:
+        raise ValueError('Role credentials were not authorized')
+    key = assumed_credentials['AccessKeyId']
+    secret = assumed_credentials['SecretAccessKey']
+    token = assumed_credentials['SessionToken']
 
     # ── VALIDATE REGION ───────────────────────────────────────────
     # Fail fast if region is invalid before firing all 10 threads
@@ -77,10 +77,18 @@ def collect_infrastructure(credentials: AWSCredentials) -> AWSInfrastructure:
     # threading.Lock() protects the shared warnings list from race conditions
 
     warnings_lock = threading.Lock()
+    collection_status = {}
 
     def safe_warnings(collector_fn):
         local_warnings = []
         result = collector_fn(key, secret, token, region, local_warnings)
+        if isinstance(result, tuple):
+            result, statuses = result
+            with warnings_lock:
+                collection_status.update(statuses)
+        elif getattr(result, 'collection_status', None):
+            with warnings_lock:
+                collection_status.update(result.collection_status)
         if local_warnings:
             with warnings_lock:
                 warnings.extend(local_warnings)
@@ -237,7 +245,10 @@ def collect_infrastructure(credentials: AWSCredentials) -> AWSInfrastructure:
         elasticache=results['elasticache'],
         sqs=results['sqs'],
         dynamodb=results['dynamodb'],
+        network_interfaces=results['ec2'].network_interfaces,
+        collection={**collection_status, 'network_interfaces': results['ec2'].network_interfaces_status},
         region=region,
+        collected_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
         warnings=warnings
     )
 
@@ -300,7 +311,11 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
     security_groups = []
     load_balancers = []
     ebs_volumes = []
+    ebs_snapshots = []
+    collection_status = {'ebs_volumes': 'error', 'ebs_snapshots': 'error'}
     elastic_ips = []
+    network_interfaces = None
+    network_interfaces_status = 'error'
     sg_to_instances = {}  # Track which instances use which security groups
 
     FREE_TIER_TYPES = ['t2.micro', 't3.micro']
@@ -333,6 +348,12 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
                     'imdsv2_required': imdsv2_required,
                     'has_public_ip': has_public_ip,
                     'instance_profile_arn': instance.get('IamInstanceProfile', {}).get('Arn'),
+                    'block_devices': [BlockDevice(
+                        volume_id=item['Ebs']['VolumeId'],
+                        device_name=item.get('DeviceName'),
+                        delete_on_termination=item['Ebs'].get('DeleteOnTermination'),
+                    ) for item in instance.get('BlockDeviceMappings', [])
+                    if isinstance(item.get('Ebs'), dict) and item['Ebs'].get('VolumeId')],
                 })
                 
                 # Track SG to instance mapping
@@ -358,33 +379,20 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
             egress_rules = []
             
             for rule in sg['IpPermissions']:
-                rules.append({
-                    'from_port': rule.get('FromPort'),
-                    'to_port': rule.get('ToPort'),
-                    'protocol': rule.get('IpProtocol'),
-                    'ip_ranges': [ip.get('CidrIp') for ip in rule.get('IpRanges', [])],
-                    'source_sg_ids': [pair.get('GroupId') for pair in rule.get('UserIdGroupPairs', [])]
-                })
+                rules.append(build_security_group_rule(rule, include_ipv6=True))
                 
-                for ip in rule.get('IpRanges', []):
-                    if ip.get('CidrIp') == '0.0.0.0/0':
-                        open_security_groups.append(sg_name)
-                        port = rule.get('FromPort', 0)
-                        if port == 22:
-                            ssh_open = True
-                            ssh_security_group_id = sg_id
-                        if port == 3389:
-                            rdp_open = True
-                            rdp_security_group_id = sg_id
+                if any(is_internet_cidr(ip.get('CidrIp')) for ip in rule.get('IpRanges', [])) or any(is_internet_cidr(ip.get('CidrIpv6')) for ip in rule.get('Ipv6Ranges', [])):
+                    open_security_groups.append(sg_name)
+                    port = rule.get('FromPort', 0)
+                    if port == 22:
+                        ssh_open = True
+                        ssh_security_group_id = sg_id
+                    if port == 3389:
+                        rdp_open = True
+                        rdp_security_group_id = sg_id
 
             for rule in sg.get('IpPermissionsEgress', []):
-                egress_rules.append({
-                    'from_port': rule.get('FromPort'),
-                    'to_port': rule.get('ToPort'),
-                    'protocol': rule.get('IpProtocol'),
-                    'ip_ranges': [ip.get('CidrIp') for ip in rule.get('IpRanges', [])],
-                    'dest_sg_ids': [pair.get('GroupId') for pair in rule.get('UserIdGroupPairs', [])]
-                })
+                egress_rules.append(build_security_group_rule(rule, egress=True, include_ipv6=True))
             
             # Add to relationship tracking
             security_groups.append({
@@ -409,6 +417,33 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
         msg = f'EC2 scan skipped: unexpected error — {str(e)}'
         print(msg)
         warnings.append(msg)
+
+    try:
+        paginator = ec2.get_paginator('describe_network_interfaces')
+        network_interfaces = []
+        for page in paginator.paginate():
+            for item in page.get('NetworkInterfaces', []):
+                network_interfaces.append(NetworkInterface(
+                    id=item['NetworkInterfaceId'],
+                    interface_type=item.get('InterfaceType', 'interface'),
+                    sg_ids=[group['GroupId'] for group in item.get('Groups', [])],
+                    attached_resource=item.get('Attachment', {}).get('InstanceId'),
+                ))
+        network_interfaces_status = 'ok'
+    except ClientError as e:
+        code = get_error_code(e)
+        if code in ['AccessDenied', 'UnauthorizedOperation']:
+            network_interfaces_status = 'denied'
+            network_interfaces = None
+            warnings.append('Network interfaces scan skipped: insufficient permissions')
+        else:
+            network_interfaces_status = 'error'
+            network_interfaces = None
+            print(f'Network interfaces scan skipped: {code}')
+    except Exception as e:
+        network_interfaces_status = 'error'
+        network_interfaces = None
+        print(f'Network interfaces scan skipped: {e}')
 
     try:
         elb = boto3.client('elbv2', aws_access_key_id=key,
@@ -468,23 +503,38 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
         print(f'Auto Scaling scan skipped: {e}')
 
     try:
-        vols_resp = ec2.describe_volumes(Filters=[{'Name': 'status', 'Values': ['available']}])
-        for v in vols_resp.get('Volumes', []):
-            ebs_volumes.append(EBSVolume(
-                id=v['VolumeId'],
-                size_gb=v['Size'],
-                volume_type=v['VolumeType'],
-                create_time=v['CreateTime'].isoformat(),
-                availability_zone=v['AvailabilityZone'],
-            ))
+        paginator = ec2.get_paginator('describe_volumes')
+        for page in paginator.paginate():
+            for v in page.get('Volumes', []):
+                create_time = v.get('CreateTime')
+                ebs_volumes.append(EBSVolume(
+                    id=v['VolumeId'], size_gb=v['Size'], volume_type=v['VolumeType'],
+                    create_time=create_time.isoformat() if hasattr(create_time, 'isoformat') else create_time,
+                    availability_zone=v.get('AvailabilityZone'), state=v.get('State', 'available'),
+                    attached_to=(v.get('Attachments') or [{}])[0].get('InstanceId'),
+                ))
+        collection_status['ebs_volumes'] = 'ok'
     except ClientError as e:
         code = get_error_code(e)
-        if code in ['AccessDenied', 'UnauthorizedOperation']:
-            warnings.append('EBS volumes scan skipped: insufficient permissions')
-        else:
-            print(f'EBS volumes scan skipped: {code}')
+        collection_status['ebs_volumes'] = 'denied' if code in ['AccessDenied', 'UnauthorizedOperation', 'AccessDeniedException'] else 'error'
+        if collection_status['ebs_volumes'] == 'denied': warnings.append('EBS volumes scan skipped: insufficient permissions')
+        else: warnings.append(f'EBS volumes scan skipped: {code}')
     except Exception as e:
-        print(f'EBS volumes scan skipped: {e}')
+        warnings.append(f'EBS volumes scan skipped: unexpected error — {str(e)}')
+
+    try:
+        paginator = ec2.get_paginator('describe_snapshots')
+        for page in paginator.paginate(OwnerIds=['self']):
+            for snap in page.get('Snapshots', []):
+                ebs_snapshots.append(EBSSnapshot(id=snap['SnapshotId'], volume_id=snap.get('VolumeId'), state=snap.get('State')))
+        collection_status['ebs_snapshots'] = 'ok'
+    except ClientError as e:
+        code = get_error_code(e)
+        collection_status['ebs_snapshots'] = 'denied' if code in ['AccessDenied', 'UnauthorizedOperation', 'AccessDeniedException'] else 'error'
+        if collection_status['ebs_snapshots'] == 'denied': warnings.append('EBS snapshots scan skipped: insufficient permissions')
+        else: warnings.append(f'EBS snapshots scan skipped: {code}')
+    except Exception as e:
+        warnings.append(f'EBS snapshots scan skipped: unexpected error — {str(e)}')
 
     try:
         eips_resp = ec2.describe_addresses()
@@ -520,7 +570,11 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
         security_groups=security_groups,
         load_balancers=load_balancers,
         ebs_volumes=ebs_volumes,
+        ebs_snapshots=ebs_snapshots,
         elastic_ips=elastic_ips,
+        network_interfaces=network_interfaces,
+        network_interfaces_status=network_interfaces_status,
+        collection_status=collection_status,
     )
 
 # ── S3 COLLECTOR ──────────────────────────────────────────────────
@@ -699,6 +753,8 @@ def collect_rds(key, secret, token, region, warnings) -> RDSData:
     
     # Relationship tracking
     rds_instances = []
+    rds_snapshots = []
+    collection_status = {'rds_snapshots': 'error'}
 
     try:
         rds = boto3.client('rds', aws_access_key_id=key,
@@ -733,7 +789,10 @@ def collect_rds(key, secret, token, region, warnings) -> RDSData:
                 'id': name,
                 'sg_ids': sg_ids,
                 'publicly_accessible': is_public,
-                'encrypted': is_encrypted
+                'encrypted': is_encrypted,
+                'engine': db.get('Engine'),
+                'backup_retention_days': db.get('BackupRetentionPeriod'),
+                'deletion_protection': db.get('DeletionProtection'),
             })
 
     except ClientError as e:
@@ -751,6 +810,22 @@ def collect_rds(key, secret, token, region, warnings) -> RDSData:
         print(msg)
         warnings.append(msg)
 
+    try:
+        paginator = rds.get_paginator('describe_db_snapshots')
+        for page in paginator.paginate():
+            for snap in page.get('DBSnapshots', []):
+                rds_snapshots.append(RDSSnapshot(
+                    id=snap['DBSnapshotIdentifier'], db_instance_id=snap.get('DBInstanceIdentifier'),
+                    snapshot_type=snap.get('SnapshotType'), status=snap.get('Status'),
+                ))
+        collection_status['rds_snapshots'] = 'ok'
+    except ClientError as e:
+        code = get_error_code(e)
+        collection_status['rds_snapshots'] = 'denied' if code in ['AccessDenied', 'UnauthorizedOperation', 'AccessDeniedException'] else 'error'
+        warnings.append('RDS snapshots scan skipped: insufficient permissions' if collection_status['rds_snapshots'] == 'denied' else f'RDS snapshots scan skipped: {code}')
+    except Exception as e:
+        warnings.append(f'RDS snapshots scan skipped: unexpected error — {str(e)}')
+
     return RDSData(
         instances=instances,
         multi_az_enabled=multi_az,
@@ -760,7 +835,9 @@ def collect_rds(key, secret, token, region, warnings) -> RDSData:
         unencrypted_instances=unencrypted,
         instances_without_deletion_protection=without_deletion_protection,
         instances_without_log_exports=without_log_exports,
-        rds_instances=rds_instances
+        rds_instances=rds_instances,
+        rds_snapshots=rds_snapshots,
+        collection_status=collection_status,
     )
 
 # ── IAM COLLECTOR ─────────────────────────────────────────────────
@@ -866,6 +943,10 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
     iam_users = []
     users_with_admin_policy = []
     role_policies = []
+    role_last_used = {}
+    role_last_used_denied = False
+    role_last_used_error = False
+    collection_status = {'iam_role_last_used': 'error'}
     instance_profile_roles = {}
 
     try:
@@ -1065,6 +1146,21 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                     if '/aws-service-role/' in role_path:
                         continue
 
+                    try:
+                        last_used = iam.get_role(RoleName=role_name).get('Role', {}).get('RoleLastUsed', {}).get('LastUsedDate')
+                        role_last_used[role_name] = last_used.astimezone(timezone.utc).isoformat().replace('+00:00', 'Z') if hasattr(last_used, 'astimezone') else None
+                    except ClientError as e:
+                        code = get_error_code(e)
+                        if code in ['AccessDenied', 'UnauthorizedOperation', 'AccessDeniedException']:
+                            role_last_used_denied = True
+                            warnings.append('IAM role last-used scan skipped: insufficient permissions')
+                        else:
+                            role_last_used_error = True
+                            warnings.append(f'IAM role last-used scan skipped: {code}')
+                    except Exception as e:
+                        role_last_used_error = True
+                        warnings.append(f'IAM role last-used scan skipped: unexpected error — {str(e)}')
+
                     accessible_resources = []
                     access_statements = []
                     has_admin = False
@@ -1198,6 +1294,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                             trusted_services=trusted_services,
                             trust_allows_external=trust_allows_external,
                             trust_has_conditions=trust_has_conditions,
+                            last_used_at=role_last_used.get(role_name),
                         ))
 
                     # Throttle between roles to stay under 15 TPS
@@ -1226,6 +1323,15 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
         print(msg)
         warnings.append(msg)
 
+    if role_last_used_denied:
+        for policy in role_policies:
+            policy.last_used_at = None
+        collection_status['iam_role_last_used'] = 'denied'
+    elif role_last_used_error:
+        collection_status['iam_role_last_used'] = 'error'
+    else:
+        collection_status['iam_role_last_used'] = 'ok'
+
     return IAMData(
         root_has_access_keys=root_has_keys,
         users_without_mfa=users_without_mfa,
@@ -1235,6 +1341,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
         iam_users=iam_users,
         role_policies=role_policies,
         instance_profile_roles=instance_profile_roles,
+        collection_status=collection_status,
     )
 
 # ── CLOUDTRAIL COLLECTOR ──────────────────────────────────────────
@@ -1747,7 +1854,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
                 ]
                 routes = []
                 for route in rt.get('Routes', []):
-                    destination_cidr = route.get('DestinationCidrBlock')
+                    destination_cidr = route.get('DestinationCidrBlock') or route.get('DestinationIpv6CidrBlock')
                     if not destination_cidr:
                         continue
                     gateway_id = route.get('GatewayId')
@@ -1783,9 +1890,9 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
                 ))
 
                 has_igw_route = any(
-                    r.get('GatewayId', '').startswith('igw-')
+                    r.get('GatewayId', '').startswith('igw-') and
+                    (is_internet_cidr(r.get('DestinationCidrBlock')) or is_internet_cidr(r.get('DestinationIpv6CidrBlock')))
                     for r in rt.get('Routes', [])
-                    if r.get('DestinationCidrBlock') == '0.0.0.0/0'
                 )
 
                 is_main_rt = False
@@ -2898,3 +3005,6 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
         tables_without_backup=tables_without_backup,
         tables=tables,
     )
+
+
+ROLE_SESSION_NAME = 'EmfirgeSecurityScan'

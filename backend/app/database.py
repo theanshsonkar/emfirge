@@ -1,7 +1,7 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, Boolean
+from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, Float, Boolean, ForeignKey
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime, date
+from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
 import os
@@ -13,6 +13,13 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 engine = create_engine(DATABASE_URL)
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
+
+def get_db():
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
 
 class AnalysisLog(Base):
     __tablename__ = 'analysis_logs'
@@ -115,6 +122,39 @@ class BranchLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class BranchOwner(Base):
+    """Hosted tenant ownership for branches created without an analysis base."""
+    __tablename__ = 'branch_owners'
+    branch_id = Column(String(36), primary_key=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PlanLog(Base):
+    """Raw Terraform plan receipt and ingest outcome for one branch."""
+    __tablename__ = 'plan_logs'
+    plan_id = Column(String(36), primary_key=True, unique=True)
+    branch_id = Column(String(36), nullable=False, index=True)
+    input_sha256 = Column(String(64), nullable=False)
+    raw_input = Column(Text, nullable=False)
+    branch_revision_after = Column(String(64), nullable=False)
+    rejected_json = Column(Text, nullable=False, default='[]')
+    unmodeled_json = Column(Text, nullable=False, default='[]')
+    unknown_fields_json = Column(Text, nullable=False, default='[]')
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BranchEvidenceLog(Base):
+    """Persisted opt-in in-use evidence for a branch."""
+    __tablename__ = 'branch_evidence_logs'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    branch_id = Column(String(36), nullable=False, index=True)
+    estimate_id = Column(String(64), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    records_json = Column(Text, nullable=False, default='[]')
+
+
 class CIAPIKey(Base):
     """API keys for CI/CD gate endpoint authentication."""
     __tablename__ = 'ci_api_keys'
@@ -141,6 +181,30 @@ class APIKey(Base):
 def create_tables():
     Base.metadata.create_all(engine)
     print('Database tables created successfully')
+
+class Project(Base):
+    __tablename__ = 'projects'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), unique=True, nullable=False)
+    external_id = Column(String(200), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AccountBinding(Base):
+    __tablename__ = 'account_bindings'
+    aws_account_id = Column(String(12), primary_key=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    bound_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AccountBindingEvent(Base):
+    __tablename__ = 'account_binding_events'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    aws_account_id = Column(String(12), nullable=False)
+    project_id = Column(Integer, nullable=True)
+    action = Column(String(20), nullable=False)
+    actor = Column(String(200), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 def save_analysis(data: dict) -> int:
     session = SessionLocal()
@@ -173,11 +237,16 @@ def save_analysis(data: dict) -> int:
     finally:
         session.close()
 
-def get_recent_logs(limit: int = 20, account_id: str = None) -> list:
+def get_recent_logs(limit: int = 20, account_id: str = None,
+                    account_ids: set[str] | None = None) -> list:
     session = SessionLocal()
     try:
         q = session.query(AnalysisLog)
-        if account_id:
+        if account_ids is not None:
+            if not account_ids:
+                return []
+            q = q.filter(AnalysisLog.aws_account_id.in_(account_ids))
+        elif account_id:
             q = q.filter(AnalysisLog.aws_account_id == account_id)
         logs = q.order_by(
             AnalysisLog.timestamp.desc()
@@ -205,13 +274,18 @@ def get_recent_logs(limit: int = 20, account_id: str = None) -> list:
     finally:
         session.close()
 
-def get_log_by_id(log_id: int, account_id: str = None) -> dict:
+def get_log_by_id(log_id: int, account_id: str = None,
+                  account_ids: set[str] | None = None) -> dict:
     session = SessionLocal()
     try:
         q = session.query(AnalysisLog).filter(
             AnalysisLog.id == log_id
         )
-        if account_id:
+        if account_ids is not None:
+            if not account_ids:
+                return {}
+            q = q.filter(AnalysisLog.aws_account_id.in_(account_ids))
+        elif account_id:
             q = q.filter(AnalysisLog.aws_account_id == account_id)
         log = q.first()
         if not log:
@@ -239,6 +313,27 @@ def get_log_by_id(log_id: int, account_id: str = None) -> dict:
     finally:
         session.close()
 
+def get_log_by_uuid(analysis_id: str, account_ids: set[str] | None = None) -> dict:
+    session = SessionLocal()
+    try:
+        if account_ids is not None and not account_ids:
+            return {}
+        q = session.query(AnalysisLog).filter(
+            AnalysisLog.findings_json.like(f'%"analysis_id": "{analysis_id}"%')
+        )
+        if account_ids is not None:
+            q = q.filter(AnalysisLog.aws_account_id.in_(account_ids))
+        log = q.order_by(AnalysisLog.timestamp.desc()).first()
+        if not log:
+            return {}
+        return get_log_by_id(log.id, account_ids=account_ids)
+    finally:
+        session.close()
+
+def _utc_midnight() -> datetime:
+    return datetime.combine(datetime.utcnow().date(), datetime.min.time())
+
+
 def get_scan_count_today(account_id: str) -> int:
     # Returns how many successful scans this AWS account has done today
     # Used for rate limiting — max 5 scans per account per day
@@ -246,10 +341,9 @@ def get_scan_count_today(account_id: str) -> int:
     # Better to let a scan through than to block a legitimate user due to a DB error
     session = SessionLocal()
     try:
-        today = date.today()
         count = session.query(AnalysisLog).filter(
             AnalysisLog.aws_account_id == account_id,
-            AnalysisLog.timestamp >= datetime.combine(today, datetime.min.time())
+            AnalysisLog.timestamp >= _utc_midnight()
         ).count()
         return count
     except Exception as e:
@@ -286,11 +380,16 @@ def save_drift_events(events: list) -> None:
     finally:
         session.close()
 
-def get_drift_events(account_id: str = None, limit: int = 20) -> list:
+def get_drift_events(account_id: str = None, limit: int = 20,
+                     account_ids: set[str] | None = None) -> list:
     session = SessionLocal()
     try:
         q = session.query(DriftEvent)
-        if account_id:
+        if account_ids is not None:
+            if not account_ids:
+                return []
+            q = q.filter(DriftEvent.aws_account_id.in_(account_ids))
+        elif account_id:
             q = q.filter(DriftEvent.aws_account_id == account_id)
         rows = q.order_by(DriftEvent.detected_at.desc()).limit(limit).all()
         return [{
@@ -327,10 +426,9 @@ def save_simulation_log(aws_account_id: str, analysis_id: str, query: str) -> No
 def get_simulation_count_today(aws_account_id: str) -> int:
     session = SessionLocal()
     try:
-        today = date.today()
         count = session.query(SimulationLog).filter(
             SimulationLog.aws_account_id == aws_account_id,
-            SimulationLog.timestamp >= datetime.combine(today, datetime.min.time())
+            SimulationLog.timestamp >= _utc_midnight()
         ).count()
         return count
     except Exception as e:
@@ -388,11 +486,10 @@ def get_llm_usage_count_today(aws_account_id: str, endpoint_type: str) -> int:
     """Count how many LLM requests this account has made today for the given endpoint type."""
     session = SessionLocal()
     try:
-        today = date.today()
         count = session.query(LLMUsage).filter(
             LLMUsage.aws_account_id == aws_account_id,
             LLMUsage.endpoint_type == endpoint_type,
-            LLMUsage.timestamp >= datetime.combine(today, datetime.min.time())
+            LLMUsage.timestamp >= _utc_midnight()
         ).count()
         return count
     except Exception as e:

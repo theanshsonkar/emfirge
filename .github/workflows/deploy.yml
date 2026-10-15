@@ -64,5 +64,6 @@ jobs:
               --memory=1500m --memory-swap=1500m \
               -e EMFIRGE_RUN_SCANNERS=0 \
               --env-file /home/ubuntu/.env \
+              -e EMFIRGE_REQUIRE_AUTH=1 \
               -p 8000:8000 \
               ${{ secrets.DOCKERHUB_USERNAME }}/aws-risk-agent:latest

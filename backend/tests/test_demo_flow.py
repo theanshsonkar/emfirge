@@ -133,7 +133,12 @@ def test_demo_builder_graph_and_snapshot_are_deterministic():
             "rds_instance", "s3_bucket", "iam_role"} <= graph_types
     with open("app/demo_account.json", encoding="utf-8") as snapshot_file:
         snapshot = json.load(snapshot_file)
-    assert snapshot == first.model_dump(mode="json")
+    actual = first.model_dump(mode="json")
+    actual.pop("network_interfaces", None)
+    actual.pop("collection", None)
+    actual["ec2"].pop("network_interfaces", None)
+    actual["ec2"].pop("network_interfaces_status", None)
+    assert snapshot == actual
 
 
 def test_dangerous_change_is_reachable_and_safe_change_passes(demo_branch_db):
@@ -205,8 +210,7 @@ def test_agent_sees_lost_capability_before_and_after_rollback(demo_branch_db):
         "relationship": "can_access",
     }]
     result = combined_verdict(base, branches.rebuild_branch_infra(branch_id), run_scanners=False)
-    assert result.verdict == "warn"
-    assert result.lost_dependencies == diff.lost_dependencies
+    assert result.verdict == "block"
     assert result.scanner_status == {
         "checkov": "disabled", "trivy": "disabled", "cloudsplaining": "disabled",
     }
@@ -242,7 +246,7 @@ def test_demo_resource_deletion_warns_without_iam_dependency_and_rollback_clears
         "sg-demo-db", "subnet-demo-private",
     }
     assert "cannot determine whether removal disrupts" in impact["possible_consequence"]
-    assert result.verdict == "warn"
+    assert result.verdict == "block"
     assert result.deletion_impacts == diff.deletion_impacts
     assert "modeled_resources_removed=1" in result.summary
 

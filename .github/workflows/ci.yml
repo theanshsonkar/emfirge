@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   push:
-    branches: [main]
+    branches: [main, dev]
 
 jobs:
   mcp:
@@ -49,11 +49,24 @@ jobs:
       - name: install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-mock
+          pip install -r requirements.txt -r requirements-dev.txt
       - name: AST parse all modules
         run: python -c "import ast, glob; [ast.parse(open(f).read()) for f in glob.glob('app/*.py')]; print('all modules parse clean')"
       - name: run pytest
-        run: python -m pytest -q --no-header
+        run: python -m pytest -q --no-header --junitxml=test-results.xml
         env:
           DATABASE_URL: 'sqlite:///:memory:'
+      - name: generate scorecard
+        if: always() && matrix.python == '3.12'
+        run: |
+          python scripts/scorecard.py test-results.xml --json scorecard.json --md scorecard.md --commit ${{ github.sha }}
+          cat scorecard.md >> "$GITHUB_STEP_SUMMARY"
+      - name: upload scorecard
+        if: always() && matrix.python == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scorecard
+          path: |
+            backend/scorecard.json
+            backend/scorecard.md
+            backend/test-results.xml

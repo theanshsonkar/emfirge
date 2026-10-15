@@ -5,16 +5,21 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from typing import Any, Dict, Iterable, Type
+from typing import Any, Dict, Iterable, Literal, Type, get_args
+from ipaddress import ip_network
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError, field_validator
+from app.cidr import is_internet_cidr
 
 from app.models import (
     AccessStatement,
     AWSInfrastructure,
+    EBSSnapshot,
+    EBSVolume,
     EC2Instance,
     LambdaFunction,
     RDSInstance,
+    RDSSnapshot,
     Route,
     RouteTable,
     S3Bucket,
@@ -22,10 +27,151 @@ from app.models import (
 )
 
 
-_CRUD_OPERATIONS = frozenset({"add", "modify", "delete"})
+class _StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
-# Authoritative branch mutation contract. Runtime validation, model lookup, the
-# capabilities endpoint, and its schema-drift tests all derive from this table.
+
+class SecurityGroupRuleChange(_StrictModel):
+    from_port: int | None = None
+    to_port: int | None = None
+    protocol: str
+    ip_ranges: list[str] = Field(default_factory=list)
+    source_sg_ids: list[str] = Field(default_factory=list)
+    dest_sg_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("protocol")
+    @classmethod
+    def valid_protocol(cls, value: str) -> str:
+        if value not in {"-1", "tcp", "udp", "icmp", "icmpv6"}:
+            try:
+                if not 0 <= int(value) <= 255:
+                    raise ValueError
+            except (TypeError, ValueError) as exc:
+                raise ValueError("must be an AWS protocol name or numeric protocol") from exc
+        return value
+
+    @field_validator("from_port", "to_port")
+    @classmethod
+    def valid_ports(cls, value: int | None) -> int | None:
+        if value is not None and not -1 <= value <= 65535:
+            raise ValueError("must be between -1 and 65535")
+        return value
+
+    @field_validator("ip_ranges", mode="after")
+    @classmethod
+    def valid_cidrs(cls, values: list[str]) -> list[str]:
+        for value in values:
+            try:
+                ip_network(value, strict=False)
+            except ValueError as exc:
+                raise ValueError("must contain valid CIDR strings") from exc
+        return values
+
+
+class AccessStatementChange(_StrictModel):
+    effect: str
+    actions: list[str] = Field(default_factory=list)
+    resources: list[str] = Field(default_factory=list)
+    is_not_action: bool = False
+    is_not_resource: bool = False
+    has_condition: bool = False
+
+    @field_validator("effect", mode="before")
+    @classmethod
+    def normalize_effect(cls, value: str) -> str:
+        if value not in {"Allow", "Deny", "allow", "deny"}:
+            raise ValueError("must be exactly Allow, Deny, allow, or deny")
+        return value.lower()
+
+
+class RouteChange(_StrictModel):
+    destination_cidr: str
+    target_type: str
+    target_id: str
+
+    @field_validator("destination_cidr")
+    @classmethod
+    def valid_destination_cidr(cls, value: str) -> str:
+        try:
+            ip_network(value, strict=False)
+        except ValueError as exc:
+            raise ValueError("must be a valid CIDR string") from exc
+        return value
+
+
+_MUTATION_NESTED_TYPES = {
+    ("security_group", "rules"): list[SecurityGroupRuleChange],
+    ("security_group", "egress_rules"): list[SecurityGroupRuleChange],
+    ("iam_role_policy", "access_statements"): list[AccessStatementChange],
+    ("route_table", "routes"): list[RouteChange],
+}
+
+
+def _loc_text(loc: tuple[Any, ...]) -> str:
+    result = ""
+    for part in loc:
+        result += f"[{part}]" if isinstance(part, int) else ("." if result else "") + str(part)
+    return result
+
+
+def _validation_message(resource_type: str, field: str, error: dict[str, Any], annotation: Any) -> str:
+    loc = tuple(error.get("loc", ()))
+    path = f"{resource_type}.{field}{_loc_text(loc[1:] if loc and loc[0] == field else loc)}"
+    error_type = error.get("type", "")
+    if error_type == "extra_forbidden":
+        unknown = str(loc[-1]) if loc else field
+        item_type = next((arg for arg in get_args(annotation) if hasattr(arg, "model_fields")), annotation)
+        allowed = ", ".join(sorted(getattr(item_type, "model_fields", {}).keys()))
+        prefix = path.rsplit(".", 1)[0] if loc else path
+        return f"{prefix}: unknown field '{unknown}' (allowed: {allowed})"
+    if error_type in {"value_error", "assertion_error"}:
+        problem = str(error.get("msg", "validation failed"))
+        if problem.lower().startswith("value error, "):
+            problem = problem[13:]
+        return f"{path}: {problem}"
+    expected = {
+        "int_type": "an integer", "str_type": "a string", "bool_type": "a boolean",
+        "list_type": "a list", "dict_type": "an object", "none_required": "null",
+    }.get(error_type, "the expected type")
+    return f"{path}: expected {expected}"
+
+
+def _strict_validate_field(resource_type: str, field: str, value: Any, annotation: Any) -> None:
+    try:
+        TypeAdapter(annotation).validate_json(json.dumps(value), strict=True)
+    except (ValidationError, TypeError, ValueError) as exc:
+        if isinstance(exc, ValidationError) and exc.errors():
+            raise ValueError(_validation_message(resource_type, field, exc.errors()[0], annotation)) from exc
+        raise ValueError(f"{resource_type}.{field}: expected the field's declared JSON type") from exc
+
+
+def _validate_change_fields(change: Change) -> None:
+    if change.op not in {"add", "modify"}:
+        return
+    if change.resource_type in {"iam_role_policy", "route_table"}:
+        annotations = {field: type_ for (resource, field), type_ in _MUTATION_NESTED_TYPES.items() if resource == change.resource_type}
+    else:
+        model_type = _MUTATION_CAPABILITIES[change.resource_type]["model"]
+        annotations = {field: info.annotation for field, info in model_type.model_fields.items()}
+        annotations.update({field: type_ for (resource, field), type_ in _MUTATION_NESTED_TYPES.items() if resource == change.resource_type})
+    for field, value in change.fields.items():
+        if field in annotations:
+            # The special complete-replacement handlers provide the established
+            # field-level message for a non-list replacement; nested contents
+            # are still validated strictly here whenever the outer value is a list.
+            if (change.resource_type, field) in _MUTATION_NESTED_TYPES and not isinstance(value, list):
+                continue
+            _strict_validate_field(change.resource_type, field, value, annotations[field])
+
+
+_CRUD_OPERATIONS = frozenset({"add", "modify", "delete"})
+_DELETE_ONLY = frozenset({"delete"})
+_RDS_DELETE_FIELDS = {
+    "skip_final_snapshot": bool,
+    "final_db_snapshot_identifier": str,
+    "delete_automated_backups": bool,
+}
+
 _MUTATION_CAPABILITIES = {
     "ec2_instance": {"model": EC2Instance, "operations": _CRUD_OPERATIONS, "constraints": ()},
     "security_group": {
@@ -43,6 +189,10 @@ _MUTATION_CAPABILITIES = {
     "rds_instance": {"model": RDSInstance, "operations": _CRUD_OPERATIONS, "constraints": ()},
     "s3_bucket": {"model": S3Bucket, "operations": _CRUD_OPERATIONS, "constraints": ()},
     "lambda_function": {"model": LambdaFunction, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "ebs_volume": {"model": EBSVolume, "operations": _DELETE_ONLY, "constraints": ()},
+    "ebs_snapshot": {"model": EBSSnapshot, "operations": _DELETE_ONLY, "constraints": ()},
+    "rds_snapshot": {"model": RDSSnapshot, "operations": _DELETE_ONLY, "constraints": ()},
+    "iam_role": {"model": None, "operations": _DELETE_ONLY, "constraints": ()},
     "iam_role_policy": {
         "model": None,
         "operations": frozenset({"modify"}),
@@ -120,7 +270,32 @@ class Change(BaseModel):
 
 def _fresh(infra: AWSInfrastructure) -> AWSInfrastructure:
     """Reconstruct the model so neither it nor any nested value is shared."""
-    return AWSInfrastructure.model_validate(copy.deepcopy(infra.model_dump()))
+    result = AWSInfrastructure.model_validate(copy.deepcopy(infra.model_dump()))
+    result._deletions = copy.deepcopy(infra._deletions)
+    return result
+
+
+def deletion_ledger(infra: AWSInfrastructure) -> list[dict]:
+    """Return a copy of the ordered delete ledger for one branch view."""
+    return copy.deepcopy(infra._deletions)
+
+
+def _validate_delete_fields(change: Change) -> None:
+    if change.resource_type == "rds_instance":
+        unknown = set(change.fields) - set(_RDS_DELETE_FIELDS)
+        if unknown:
+            raise ValueError("rds_instance delete fields: unknown schema field")
+        for field, annotation in _RDS_DELETE_FIELDS.items():
+            if field in change.fields:
+                _strict_validate_field("rds_instance", field, change.fields[field], annotation)
+        skip = change.fields.get("skip_final_snapshot")
+        identifier = change.fields.get("final_db_snapshot_identifier")
+        if skip is False and not identifier:
+            raise ValueError("rds_instance.final_db_snapshot_identifier: required when skip_final_snapshot is false")
+        if skip is True and identifier is not None:
+            raise ValueError("rds_instance.final_db_snapshot_identifier: must be absent when skip_final_snapshot is true")
+    elif change.fields:
+        raise ValueError(f"{change.resource_type} delete fields: no schema fields are allowed")
 
 
 def _validate_change(change: Change) -> None:
@@ -133,10 +308,13 @@ def _validate_change(change: Change) -> None:
         raise ValueError(f"{change.resource_type} supports {', '.join(sorted(capability['operations']))} only")
     if not isinstance(change.fields, dict):
         raise ValueError("Change fields must be a dictionary")
+    _validate_change_fields(change)
     for constraint in capability["constraints"]:
         if constraint["kind"] == "derived_field" and change.op in constraint["operations"]:
             if set(change.fields).intersection(constraint["fields"]):
                 raise ValueError(constraint["message"])
+    if change.op == "delete":
+        _validate_delete_fields(change)
 
 
 def _model_for(resource_type: str) -> Type[BaseModel]:
@@ -147,23 +325,35 @@ def _model_for(resource_type: str) -> Type[BaseModel]:
 
 
 def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
-    if resource_type in {"ec2_instance", "security_group"}:
-        return infra.ec2.instances if resource_type == "ec2_instance" else infra.ec2.security_groups
-    if resource_type == "rds_instance":
-        return infra.rds.rds_instances
+    if resource_type in {"ec2_instance", "security_group", "ebs_volume", "ebs_snapshot"}:
+        return {
+            "ec2_instance": infra.ec2.instances,
+            "security_group": infra.ec2.security_groups,
+            "ebs_volume": infra.ec2.ebs_volumes,
+            "ebs_snapshot": infra.ec2.ebs_snapshots,
+        }[resource_type]
+    if resource_type in {"rds_instance", "rds_snapshot"}:
+        return infra.rds.rds_instances if resource_type == "rds_instance" else infra.rds.rds_snapshots
     if resource_type == "s3_bucket":
         return infra.s3.buckets
+    if resource_type == "iam_role":
+        return infra.iam.role_policies
     return infra.lambda_data.functions
 
 
 def _identity(resource_type: str, resource: BaseModel) -> str:
-    return resource.name if resource_type in {"s3_bucket", "lambda_function"} else resource.id
+    if resource_type in {"s3_bucket", "lambda_function"}:
+        return resource.name
+    if resource_type == "iam_role":
+        return resource.role_arn
+    return resource.id
 
 
 def _field_check(model_type: Type[BaseModel], fields: Dict[str, Any]) -> None:
     unknown = set(fields) - set(model_type.model_fields)
     if unknown:
-        raise ValueError(f"Unknown field(s) for {model_type.__name__}: {sorted(unknown)}")
+        allowed = ', '.join(sorted(model_type.model_fields))
+        raise ValueError(f"Unknown field(s) for {model_type.__name__}; allowed fields: {allowed}")
 
 
 def _auto_id(infra: AWSInfrastructure, change: Change) -> str:
@@ -234,7 +424,7 @@ def _sync_route_table_public_subnets(infra: AWSInfrastructure) -> None:
         get = (lambda key, default=None: getattr(table, key, default)) if isinstance(table, RouteTable) else table.get
         routes = get("routes", []) or []
         if any(
-            str(route.destination_cidr if isinstance(route, Route) else route.get("destination_cidr", "")) == "0.0.0.0/0"
+            is_internet_cidr(str(route.destination_cidr if isinstance(route, Route) else route.get("destination_cidr", "")))
             and str(route.target_type if isinstance(route, Route) else route.get("target_type", "")).lower() == "internet_gateway"
             for route in routes
         ):
@@ -294,36 +484,45 @@ def _sync_security_group_attachments(infra: AWSInfrastructure) -> None:
         group.attached_to = attachments[group.id]
 
 
-def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> None:
+def _delete(
+    infra: AWSInfrastructure, resource_type: str, resource_id: str,
+    options: dict[str, Any] | None = None, *, implicit: bool = False, via: str | None = None,
+) -> None:
+    options = options or {}
     collection = _collection(infra, resource_type)
     index = next((i for i, item in enumerate(collection) if _identity(resource_type, item) == resource_id), None)
     if index is None:
-        raise ValueError(f"Target not found: {resource_type}/{resource_id}")
-    if resource_type == "security_group":
-        users = sorted({
-            item.id for item in infra.ec2.instances if resource_id in item.sg_ids
-        } | {
-            item.id for item in infra.rds.rds_instances if resource_id in item.sg_ids
-        } | {
-            item.name for item in infra.lambda_data.functions if resource_id in item.sg_ids
-        } | {
-            item.id for item in infra.elasticache.clusters if resource_id in item.sg_ids
-        } | {
-            group.id for group in infra.ec2.security_groups if group.id != resource_id
-            and any(
-                resource_id in (rule.get("source_sg_ids") or [])
-                or resource_id in (rule.get("dest_sg_ids") or [])
-                for rule in group.rules + group.egress_rules
-            )
-        })
-        if users:
-            raise ValueError(
-                f"Security group {resource_id} is still in use by {', '.join(users)}; "
-                "model detaching or replacing it before deletion"
-            )
+        raise ValueError(f"Target not found: {resource_type}")
     target = collection[index]
+    if resource_type == "security_group":
+        users = sorted({item.id for item in infra.ec2.instances if resource_id in item.sg_ids} | {
+            item.id for item in infra.rds.rds_instances if resource_id in item.sg_ids
+        } | {item.name for item in infra.lambda_data.functions if resource_id in item.sg_ids} | {
+            item.id for item in infra.elasticache.clusters if resource_id in item.sg_ids
+        } | {group.id for group in infra.ec2.security_groups if group.id != resource_id and any(
+            resource_id in (rule.get("source_sg_ids") or []) or resource_id in (rule.get("dest_sg_ids") or [])
+            for rule in group.rules + group.egress_rules
+        )})
+        if users:
+            raise ValueError("Security group is still in use; model detaching or replacing it before deletion")
+    if resource_type == "ebs_volume" and target.attached_to is not None and not implicit:
+        raise ValueError("ebs_volume.attached_to: volume is in use")
+    if resource_type == "rds_instance":
+        if target.deletion_protection is True:
+            raise ValueError("rds_instance.deletion_protection: deletion is protected")
+        identifier = options.get("final_db_snapshot_identifier")
+        if identifier and any(snapshot.id == identifier for snapshot in infra.rds.rds_snapshots):
+            raise ValueError("rds_instance.final_db_snapshot_identifier: snapshot already exists")
+    state_before = target.model_dump()
     collection.pop(index)
-
+    ledger_options = {
+        "skip_final_snapshot": options.get("skip_final_snapshot"),
+        "delete_automated_backups": options.get("delete_automated_backups", True),
+        "final_db_snapshot_identifier": options.get("final_db_snapshot_identifier"),
+    }
+    infra._deletions.append({"step": len(infra._deletions) + 1, "resource_type": resource_type,
+        "resource_id": resource_id, "implicit": implicit, "via": via, "options": ledger_options,
+        "state_before": state_before})
     if resource_type == "ec2_instance":
         _remove_one(infra.ec2.instance_types, target.type)
         for subnet in infra.vpc.subnets:
@@ -331,6 +530,17 @@ def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> N
         for group in infra.ec2.security_groups:
             _remove_value(group.attached_to, resource_id)
         _remove_value(infra.ec2.stopped_instances, resource_id)
+        for device in target.block_devices:
+            volume = next((item for item in infra.ec2.ebs_volumes if item.id == device.volume_id), None)
+            if volume is None:
+                continue
+            if device.delete_on_termination is True:
+                _delete(infra, "ebs_volume", volume.id, options, implicit=True, via=resource_id)
+            else:
+                volume.state = "available"
+                volume.attached_to = None
+        if infra.network_interfaces is not None:
+            infra.network_interfaces[:] = [item for item in infra.network_interfaces if item.attached_resource != resource_id]
     elif resource_type == "security_group":
         _remove_value(infra.ec2.open_security_groups, resource_id)
         if infra.ec2.ssh_security_group_id == resource_id:
@@ -341,29 +551,26 @@ def _delete(infra: AWSInfrastructure, resource_type: str, resource_id: str) -> N
         _remove_value(infra.rds.instances, resource_id)
         for subnet in infra.vpc.subnets:
             _remove_value(subnet.resources, resource_id)
-        for values in (
-            infra.rds.publicly_accessible,
-            infra.rds.unencrypted_instances,
-            infra.rds.instances_without_deletion_protection,
-            infra.rds.instances_without_log_exports,
-        ):
+        for values in (infra.rds.publicly_accessible, infra.rds.unencrypted_instances,
+                       infra.rds.instances_without_deletion_protection, infra.rds.instances_without_log_exports):
             _remove_value(values, resource_id)
+        identifier = options.get("final_db_snapshot_identifier")
+        if identifier:
+            infra.rds.rds_snapshots.append(RDSSnapshot(id=identifier, db_instance_id=resource_id,
+                snapshot_type="manual", status="available"))
+        if infra.network_interfaces is not None:
+            infra.network_interfaces[:] = [item for item in infra.network_interfaces if item.attached_resource != resource_id]
+    elif resource_type == "iam_role":
+        pass
     elif resource_type == "s3_bucket":
-        for values in (
-            infra.s3.public_buckets,
-            infra.s3.unencrypted_buckets,
-            infra.s3.buckets_without_versioning,
-            infra.s3.buckets_without_logging,
-        ):
+        for values in (infra.s3.public_buckets, infra.s3.unencrypted_buckets,
+                       infra.s3.buckets_without_versioning, infra.s3.buckets_without_logging):
             _remove_value(values, resource_id)
     elif resource_type == "lambda_function":
         for subnet in infra.vpc.subnets:
             _remove_value(subnet.resources, resource_id)
-        for values in (
-            infra.lambda_data.functions_with_admin_role,
-            infra.lambda_data.functions_with_outdated_runtime,
-            infra.lambda_data.functions_with_no_timeout,
-        ):
+        for values in (infra.lambda_data.functions_with_admin_role, infra.lambda_data.functions_with_outdated_runtime,
+                       infra.lambda_data.functions_with_no_timeout):
             _remove_value(values, resource_id)
 
 
@@ -393,12 +600,15 @@ def _replace_iam_role_policy_statements(
 
     matches = [policy for policy in infra.iam.role_policies if policy.role_arn == change.resource_id]
     if not matches:
-        raise ValueError(f"Target not found: iam_role_policy/{change.resource_id}")
+        raise ValueError("Target not found: iam_role_policy")
     if len(matches) != 1:
         raise ValueError("IAM role policy target is ambiguous; role ARN must identify exactly one collected role")
 
     policy = matches[0]
-    policy.access_statements = [AccessStatement.model_validate(statement) for statement in statements]
+    policy.access_statements = [
+        AccessStatement.model_validate(AccessStatementChange.model_validate(statement).model_dump())
+        for statement in statements
+    ]
     # Do not let stale collector summaries override an empty/replaced statement
     # set in egraph.build_graph's legacy fallback path.
     policy.has_admin = False
@@ -416,7 +626,7 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
         raise ValueError("routes must be a list replacing the complete normalized route set")
     matches = [table for table in infra.vpc.route_tables if table.id == change.resource_id]
     if not matches:
-        raise ValueError(f"Target not found: route_table/{change.resource_id}")
+        raise ValueError("Target not found: route_table")
     if len(matches) != 1:
         raise ValueError("Route table target is ambiguous; ID must identify exactly one collected route table")
     normalized = [Route.model_validate(route) for route in routes]
@@ -450,8 +660,8 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
         )
         if not same_vpc_attachment:
             raise ValueError(
-                f"Internet gateway target is not attached to route table VPC {matches[0].vpc_id}: "
-                f"{route.target_id}"
+                "Internet gateway target is not attached to the route table VPC; "
+                "verify the route table and gateway belong to the same VPC"
             )
     matches[0].routes = normalized
     _sync_route_table_public_subnets(infra)
@@ -489,7 +699,7 @@ def recompute_derived_state(
             continue
         for rule in group.rules:
             cidrs = rule.get("ip_ranges") or []
-            if not {"0.0.0.0/0", "::/0"}.intersection(cidrs):
+            if not any(is_internet_cidr(cidr) for cidr in cidrs):
                 continue
             if covers_port(rule, 22):
                 ssh_matches.append(group.id)
@@ -514,6 +724,10 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     if resource_type == "route_table":
         _replace_route_table_routes(result, change)
         return recompute_derived_state(result)
+    if change.op == "delete":
+        _delete(result, resource_type, change.resource_id, change.fields)
+        _sync_counts(result)
+        return recompute_derived_state(result)
 
     model_type = _model_for(resource_type)
 
@@ -521,7 +735,7 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         data = _resource_data(result, change)
         resource = model_type.model_validate(data)
         if any(_identity(resource_type, item) == _identity(resource_type, resource) for item in _collection(result, resource_type)):
-            raise ValueError(f"Target already exists: {resource_type}/{_identity(resource_type, resource)}")
+            raise ValueError(f"Target already exists: {resource_type}")
         _collection(result, resource_type).append(resource)
         _update_add_summaries(result, resource_type, resource)
     elif change.op == "modify":
@@ -535,7 +749,7 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
             None,
         )
         if index is None:
-            raise ValueError(f"Target not found: {resource_type}/{change.resource_id}")
+            raise ValueError(f"Target not found: {resource_type}")
         target = collection[index]
         updated_data = target.model_dump()
         updated_data.update(change.fields)

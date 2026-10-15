@@ -44,7 +44,7 @@ EC2_HOURLY_USD = {
 }
 
 CostBasis = Literal[
-    "provisioned-estimate", "usage-based-unknown", "price-unavailable"
+    "provisioned-estimate", "usage-based-unknown", "price-unavailable", "free"
 ]
 
 
@@ -65,12 +65,12 @@ class CostEstimate(BaseModel):
 
 
 class CostDelta(BaseModel):
-    monthly_delta_usd: float
-    base_total: float
-    branch_total: float
-    added_cost: List[ResourceCost]
-    removed_cost: List[ResourceCost]
-    unknown_notes: List[str]
+    value: Optional[float]
+    status: Literal["estimated", "unknown", "n/a"]
+    reason: str
+    unknown_count: int
+    known_provisioned_delta: Optional[float]
+    currency: Literal["USD"] = "USD"
 
 
 def _record(resource_id: str, resource_type: str, monthly_usd: Optional[float], basis: CostBasis) -> ResourceCost:
@@ -106,6 +106,8 @@ def estimate_monthly_cost(infra: AWSInfrastructure) -> CostEstimate:
         ))
 
     for volume in infra.ec2.ebs_volumes:
+        if volume.state != "available":
+            continue
         monthly = None
         if volume.volume_type.lower() == "gp3" and volume.size_gb > 0:
             monthly = volume.size_gb * EBS_GP3_GB_MONTH_USD
@@ -126,7 +128,7 @@ def estimate_monthly_cost(infra: AWSInfrastructure) -> CostEstimate:
 
     for security_group in infra.ec2.security_groups:
         resources.append(_record(
-            security_group.id, "security_group", None, "price-unavailable",
+            security_group.id, "security_group", None, "free",
         ))
 
     for elastic_ip in infra.ec2.elastic_ips:
@@ -136,27 +138,27 @@ def estimate_monthly_cost(infra: AWSInfrastructure) -> CostEstimate:
 
     for gateway_id in infra.vpc.internet_gateways:
         resources.append(_record(
-            gateway_id, "internet_gateway", None, "price-unavailable",
+            gateway_id, "internet_gateway", None, "free",
         ))
 
     for subnet in infra.vpc.subnets:
         resources.append(_record(
-            subnet.id, "vpc_subnet", None, "price-unavailable",
+            subnet.id, "vpc_subnet", None, "free",
         ))
 
     for route_table in infra.vpc.route_tables:
         resources.append(_record(
-            route_table.id, "route_table", None, "price-unavailable",
+            route_table.id, "route_table", None, "free",
         ))
 
     for peering in infra.vpc.vpc_peering_connections:
         resources.append(_record(
-            peering.id, "vpc_peering_connection", None, "price-unavailable",
+            peering.id, "vpc_peering_connection", None, "free",
         ))
 
     for nacl in infra.vpc.nacls:
         resources.append(_record(
-            nacl.id, "network_acl", None, "price-unavailable",
+            nacl.id, "network_acl", None, "free",
         ))
 
     for attachment in infra.vpc.transit_gateway_attachments:
@@ -192,12 +194,12 @@ def estimate_monthly_cost(infra: AWSInfrastructure) -> CostEstimate:
 
     for user in infra.iam.iam_users:
         resources.append(_record(
-            user.username, "iam_user", None, "price-unavailable",
+            user.username, "iam_user", None, "free",
         ))
 
     for policy in infra.iam.role_policies:
         resources.append(_record(
-            policy.role_arn or policy.role_name, "iam_role_policy", None, "price-unavailable",
+            policy.role_arn or policy.role_name, "iam_role_policy", None, "free",
         ))
 
     for api in infra.api_gateway.apis:
@@ -246,34 +248,46 @@ def _unknown_reason(resource: ResourceCost) -> str:
     return "price is not embedded"
 
 
-def _unknown_notes(side: str, estimate: CostEstimate) -> List[str]:
-    return [
-        f"{side}: {resource.resource_type}/{resource.resource_id}: "
-        f"incomplete/unknown ({resource.basis}; {_unknown_reason(resource)})"
-        for resource in estimate.resources
-        if resource.monthly_usd is None
-    ]
-
-
 def cost_delta(base: AWSInfrastructure, branch: AWSInfrastructure) -> CostDelta:
-    """Compare deterministic estimates and identify resources by type and stable ID."""
+    """Return a typed delta for resources whose cost-relevant state changed."""
     base_estimate = estimate_monthly_cost(base)
     branch_estimate = estimate_monthly_cost(branch)
     base_by_key = {(item.resource_type, item.resource_id): item for item in base_estimate.resources}
     branch_by_key = {(item.resource_type, item.resource_id): item for item in branch_estimate.resources}
+    changed: list[tuple[ResourceCost | None, ResourceCost | None]] = []
+    for key in sorted(base_by_key.keys() | branch_by_key.keys()):
+        before = base_by_key.get(key)
+        after = branch_by_key.get(key)
+        if before is None or after is None or (
+            before.monthly_usd != after.monthly_usd or before.basis != after.basis
+        ):
+            changed.append((before, after))
 
-    added = [branch_by_key[key] for key in sorted(branch_by_key.keys() - base_by_key.keys())]
-    removed = [base_by_key[key] for key in sorted(base_by_key.keys() - branch_by_key.keys())]
-    notes = _unknown_notes("base", base_estimate) + _unknown_notes("branch", branch_estimate)
-    # ALB's known fixed charge intentionally excludes usage-dependent LCUs.
-    if any(item.resource_type == "load_balancer" and item.monthly_usd is not None for item in base_estimate.resources + branch_estimate.resources):
-        notes.append("incomplete/unknown: ALB estimates include fixed hourly charge only; LCU usage is excluded")
-
+    cost_bearing = [(before, after) for before, after in changed
+                    if (before or after).basis != "free"]
+    unknown = [(before, after) for before, after in cost_bearing
+               if (before is not None and before.monthly_usd is None)
+               or (after is not None and after.monthly_usd is None)]
+    priced = [(before, after) for before, after in cost_bearing
+              if (before is None or before.monthly_usd is not None)
+              and (after is None or after.monthly_usd is not None)]
+    known_delta = round(sum(
+        (after.monthly_usd if after and after.monthly_usd is not None else 0.0)
+        - (before.monthly_usd if before and before.monthly_usd is not None else 0.0)
+        for before, after in priced
+    ), 2)
+    if not cost_bearing:
+        return CostDelta(value=0.0, status="n/a", reason="no changed cost-bearing resources",
+                         unknown_count=0, known_provisioned_delta=None)
+    if unknown:
+        return CostDelta(
+            value=None, status="unknown",
+            reason=f"{len(unknown)} changed resources have usage-based or unavailable prices",
+            unknown_count=len(unknown),
+            known_provisioned_delta=known_delta if priced else None,
+        )
     return CostDelta(
-        monthly_delta_usd=round(branch_estimate.total_monthly_usd - base_estimate.total_monthly_usd, 2),
-        base_total=base_estimate.total_monthly_usd,
-        branch_total=branch_estimate.total_monthly_usd,
-        added_cost=added,
-        removed_cost=removed,
-        unknown_notes=notes,
+        value=known_delta, status="estimated",
+        reason="embedded AWS us-east-1 on-demand/list-price snapshot",
+        unknown_count=0, known_provisioned_delta=known_delta,
     )
