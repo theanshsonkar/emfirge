@@ -389,7 +389,7 @@ def logs(account_id: str = None, caller: Caller = Depends(get_caller), db=Depend
     return {'logs': recent_logs, 'count': len(recent_logs)}
 
 
-@app.post('/auth/link-project', dependencies=[Depends(get_caller)])
+@app.post('/auth/link-project')
 def link_project(request: Request, db=Depends(get_db)):
     """Attach a verified Supabase sign-in to an existing API-key project."""
     authorization = request.headers.get('authorization', '')

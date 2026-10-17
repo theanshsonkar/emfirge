@@ -97,9 +97,6 @@ def backfill_legacy_key_projects(session_factory=SessionLocal) -> int:
 
 
 async def get_caller(request: Request) -> Caller:
-    # The project-link route performs its own dual authentication atomically.
-    if request.url.path == '/auth/link-project':
-        return Caller('link-project', None, None, None)
     if not AUTH_ENABLED:
         return Caller('self-host', None, None, os.environ.get('EMFIRGE_EXTERNAL_ID') or None)
     raw = _request_key(request)

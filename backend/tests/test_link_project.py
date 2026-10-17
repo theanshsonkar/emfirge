@@ -30,6 +30,15 @@ def test_link_moves_empty_supabase_project_to_api_key_project(client):
         assert db.query(SupabaseIdentity).filter_by(supabase_user_id="link-user").one().project_id == db.query(Project).filter_by(name="old-project").one().id
 
 
+def test_link_requires_supabase_token_and_link_key(client):
+    assert client.post("/auth/link-project").status_code == 401
+    key = auth.create_api_key("missing-link-header-project")
+    assert client.post(
+        "/auth/link-project",
+        headers={"Authorization": f"Bearer {key}"},
+    ).status_code == 401
+
+
 def test_link_is_idempotent_and_rejects_bad_key_without_mutation(client):
     token = make_token("idempotent-user")
     key = auth.create_api_key("idempotent-project")

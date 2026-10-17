@@ -63,7 +63,7 @@ def test_self_host_remains_unrestricted(tenant_client, monkeypatch):
 
 
 def test_tenant_routes_have_caller_dependency():
-    public = {'/', '/health', '/admin/account-bindings/{aws_account_id}', '/feedback', '/docs', '/docs/oauth2-redirect', '/openapi.json', '/redoc'}
+    public = {'/', '/health', '/admin/account-bindings/{aws_account_id}', '/feedback', '/docs', '/docs/oauth2-redirect', '/openapi.json', '/redoc', '/auth/link-project'}  # self-authenticating: requires Supabase token AND API key
 
     def has_dependency(deps, dependency):
         return any(dep.call is dependency or has_dependency(dep.dependencies, dependency) for dep in deps)
