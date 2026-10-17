@@ -2,7 +2,7 @@
 import pytest
 
 from app.egraph import Edge, Graph, Node, RelationshipType, build_graph
-from app.graph_schema import EDGE_SCHEMAS, NODE_SCHEMAS, validate_edge, validate_node
+from app.graph_schema import EDGE_SCHEMAS, KEY_TYPES, LAYER_NAMES, NODE_SCHEMAS, validate_edge, validate_node
 from app.demo_seed import build_demo_infrastructure
 from tests.incidents.synthetic_base import load_synthetic_base
 from tests.laws.coverage_snapshot import build_coverage_infrastructure
@@ -97,3 +97,20 @@ def test_L27_wrong_value_type_is_a_violation():
     node = Node(id="x", type="ec2_instance", label="x", base={"instance_type": 42})
     violations = validate_node(node)
     assert "wrong type for base.instance_type" in " ".join(violations)
+
+
+def test_L27_every_schema_key_has_an_explicit_type():
+    catch_all = (str, int, bool, list, dict, type(None))
+    for schema in NODE_SCHEMAS.values():
+        for layer in LAYER_NAMES:
+            for key in (*schema.required.get(layer, {}), *schema.optional.get(layer, {})):
+                assert KEY_TYPES[key]
+                assert KEY_TYPES[key] != catch_all
+
+
+def test_L27_none_is_rejected_where_not_declared():
+    graph = build_graph(ALL_SNAPSHOTS[0][1])
+    node = next(node for node in graph.nodes if node.resource_type == "ec2_instance")
+    node.base["sg_ids"] = None
+    violations = validate_node(node)
+    assert "wrong type for base.sg_ids" in " ".join(violations)

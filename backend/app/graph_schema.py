@@ -18,22 +18,74 @@ class NodeSchema:
     optional: dict[str, dict[str, tuple[type, ...]]]
 
 
-def _types_for(key: str) -> tuple[type, ...]:
-    """Types observed in the catalog snapshots for a metadata key."""
-    if key in {"rules", "egress_rules", "sg_ids", "subnet_ids", "trusted_services", "policies", "privilege_escalation_paths", "entries", "routes"}:
-        return (list,)
-    if key in {"rules_count", "target_count", "subnet_count", "resource_count", "size_gb"}:
-        return (int,)
-    if key in {"has_public_ip", "publicly_accessible", "encrypted", "is_public", "is_empty", "pitr_enabled", "has_waf", "is_attached", "is_main", "is_default", "trust_allows_external", "trust_has_conditions", "has_privilege_escalation", "has_admin"}:
-        return (bool, type(None))
-    if key in {"vpc_id", "subnet_id", "role_arn", "origin_bucket", "arn", "cidr", "state", "instance_type", "type", "engine", "node_type", "subnet_group", "source", "api_type", "endpoint_type", "auth_type", "status", "public_ip", "billing_mode", "encryption_type"}:
-        return (str, type(None))
-    return (str, int, bool, list, dict, type(None))
+KEY_TYPES: dict[str, tuple[type, ...]] = {
+    "instance_type": (str,),
+    "state": (str, type(None)),
+    "subnet_id": (str, type(None)),
+    "sg_ids": (list,),
+    "has_public_ip": (bool, type(None)),
+    "role_arn": (str, type(None)),
+    "vpc_id": (str, type(None)),
+    "subnet_ids": (list,),
+    "subnet_count": (int,),
+    "is_virtual": (bool,),
+    "type": (str,),
+    "target_count": (int,),
+    "api_type": (str,),
+    "endpoint_type": (str,),
+    "auth_type": (str,),
+    "has_waf": (bool,),
+    "engine": (str,),
+    "node_type": (str,),
+    "subnet_group": (str, type(None)),
+    "is_public": (bool,),
+    "has_cloudfront": (bool,),
+    "has_policy": (bool,),
+    "is_empty": (bool,),
+    "size_gb": (int,),
+    "volume_type": (str,),
+    "availability_zone": (str,),
+    "publicly_accessible": (bool,),
+    "encrypted": (bool,),
+    "arn": (str,),
+    "encryption_type": (str,),
+    "pitr_enabled": (bool,),
+    "billing_mode": (str,),
+    "source": (str,),
+    "name": (str,),
+    "rules_count": (int,),
+    "rules": (list,),
+    "egress_rules": (list,),
+    "attached_instances": (list,),
+    "entries": (list,),
+    "is_default": (bool,),
+    "cidr": (str, type(None)),
+    "resource_count": (int,),
+    "collected": (bool,),
+    "requester_vpc_id": (str,),
+    "accepter_vpc_id": (str,),
+    "status": (str,),
+    "origin_bucket": (str,),
+    "trusted_services": (list,),
+    "trust_allows_external": (bool,),
+    "trust_has_conditions": (bool,),
+    "has_privilege_escalation": (bool,),
+    "has_admin": (bool,),
+    "policies": (list,),
+    "privilege_escalation_paths": (list,),
+    "routes": (list,),
+    "is_main": (bool,),
+    "id": (str,),
+    "transit_gateway_id": (str,),
+    "service_name": (str,),
+    "public_ip": (str,),
+    "is_attached": (bool,),
+}
 
 
 def _node(resource_type, category, required=(), optional=()):
-    required_keys = {key: _types_for(key) for key in required}
-    optional_keys = {key: _types_for(key) for key in optional}
+    required_keys = {key: KEY_TYPES[key] for key in required}
+    optional_keys = {key: KEY_TYPES[key] for key in optional}
     return NodeSchema(resource_type, category,
                       {layer: (required_keys.copy() if layer == "base" else {}) for layer in LAYER_NAMES},
                       {layer: (optional_keys.copy() if layer == "base" else {}) for layer in LAYER_NAMES})
