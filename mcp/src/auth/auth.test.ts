@@ -5,7 +5,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import nodeTest, { after, afterEach, before, beforeEach } from "node:test";
-import { assertPublicKey, browserSignInApplies } from "./config.js";
+import { assertPublicKey } from "./config.js";
 import { credentialsPath } from "./credentials.js";
 import { _resetForTests as _resetLoginForTests, startLogin } from "./login.js";
 import { _resetForTests, getAccessToken } from "./session.js";
@@ -198,7 +198,7 @@ test("correct state saves only refresh credentials with restricted permissions a
 test("PKCE start includes S256 challenge and exchanges matching verifier", async () => {
   const { pending, location, host } = await requestLoginStart();
   assert.equal(location.searchParams.get("provider"), "github");
-  assert.equal(location.searchParams.get("code_challenge_method"), "s256");
+  assert.equal(location.searchParams.get("code_challenge_method"), "S256");
   const redirect = new URL(location.searchParams.get("redirect_to") ?? "");
   assert.match(redirect.href, new RegExp(`^http://127\\.0\\.0\\.1:${new URL(pending.url).port}/callback/`));
   await fetch(`${redirect}?code=AUTHCODE-SECRET`, { headers: { Host: host } });
@@ -209,6 +209,31 @@ test("PKCE start includes S256 challenge and exchanges matching verifier", async
   assert.equal(location.searchParams.get("code_challenge"), challenge);
 });
 
+
+test("callback without code is rejected without exchanging or saving credentials", async () => {
+  const { pending, location, host } = await requestLoginStart();
+  const redirect = new URL(location.searchParams.get("redirect_to") ?? "");
+  const response = await fetch(redirect, { headers: { Host: host } });
+  assert.equal(response.status, 400);
+  assert.equal(requests.filter((request) => request.path === "/auth/v1/token").length, 0);
+  assert.equal(fs.existsSync(credentialsFile()), false);
+  _resetLoginForTests();
+  assert.equal(await pending.pending, false);
+});
+
+test("each login gets a distinct random state", async () => {
+  const first = await requestLoginStart();
+  const firstState = new URL(first.location.searchParams.get("redirect_to") ?? "").pathname.split("/").pop();
+  _resetLoginForTests();
+  await first.pending.pending;
+  const second = await requestLoginStart();
+  const secondState = new URL(second.location.searchParams.get("redirect_to") ?? "").pathname.split("/").pop();
+  assert.ok(firstState);
+  assert.ok(secondState);
+  assert.notEqual(firstState, secondState);
+  _resetLoginForTests();
+  await second.pending.pending;
+});
 test("wrong Host header is rejected", async () => {
   const pending = await startLogin({ timeoutMs: 200 });
   assert.equal(await requestWithHost(pending.url, "evil.example"), 400);
@@ -227,11 +252,15 @@ test("refresh works and rotates the stored refresh token", async () => {
   assert.equal(refreshRequest?.headers.apikey, "test-anon");
 });
 
-test("rejected refresh removes credentials and returns null", async () => {
+test("rejected refresh removes credentials and reports sign-in required", async () => {
   await completeLogin();
   rejectRefresh = true;
   _resetForTests();
-  assert.equal(await getAccessToken(), null);
+  await assert.rejects(getAccessToken(), (error: unknown) => {
+    assert.match(String(error), /please sign in again/i);
+    assert.equal(String(error).includes("REFRESH-SECRET-1"), false);
+    return true;
+  });
   assert.equal(fs.existsSync(credentialsFile()), false);
 });
 
@@ -243,11 +272,20 @@ test("API key wins and login tool reports that it is in use", async () => {
   assert.equal(requests.length, 0);
 });
 
-test("self-hosted backend preserves origin no-key behavior and does not start login", async () => {
+test("API key is selected for normal backend authorization", async () => {
+  process.env.EMFIRGE_API_KEY = "key-123";
+  assert.equal(await authHeader(), "Bearer key-123");
+  assert.equal(requests.length, 0);
+});
+
+test("no API key or credentials cannot bypass sign-in", async () => {
   process.env.EMFIRGE_BASE_URL = "http://localhost:8000";
   delete process.env.EMFIRGE_SUPABASE_URL;
-  assert.equal(browserSignInApplies(), false);
-  assert.equal(await authHeader(), "");
+  delete process.env.EMFIRGE_SUPABASE_ANON_KEY;
+  await assert.rejects(
+    authHeader(),
+    /Browser sign-in isn't set up in this build yet|Sign-in is misconfigured/,
+  );
   assert.equal(requests.length, 0);
 });
 
@@ -267,7 +305,11 @@ test("no secret appears in output or tool results", async () => {
     await getAccessToken();
     rejectRefresh = true;
     _resetForTests();
-    await getAccessToken();
+    try {
+      await getAccessToken();
+    } catch (error) {
+      captured.push(String(error));
+    }
     process.env.EMFIRGE_API_KEY = "key-for-test";
     const loginResult = await loginHandler({});
     delete process.env.EMFIRGE_API_KEY;

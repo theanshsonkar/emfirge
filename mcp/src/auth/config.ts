@@ -10,12 +10,6 @@ export function supabaseAnonKey(): string {
   return process.env.EMFIRGE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY;
 }
 
-export function browserSignInApplies(): boolean {
-  if (process.env.EMFIRGE_SUPABASE_URL !== undefined) return true;
-  const baseUrl = process.env.EMFIRGE_BASE_URL;
-  return baseUrl === undefined || baseUrl === "https://emfirge.cloud/api";
-}
-
 export function assertPublicKey(k: string): void {
   if (k.startsWith("sb_secret_")) throw new Error("Sign-in is misconfigured");
   try {

@@ -4,12 +4,10 @@
 import { redactDeep } from "./tokenize.js";
 import { getAccessToken, forceExpire } from "./auth/session.js";
 import { startLogin } from "./auth/login.js";
-import { browserSignInApplies } from "./auth/config.js";
 
 export async function authHeader(): Promise<string> {
   const apiKey = process.env.EMFIRGE_API_KEY;
   if (apiKey) return `Bearer ${apiKey}`;
-  if (!browserSignInApplies()) return "";
   const token = await getAccessToken();
   if (token) return `Bearer ${token}`;
   const { url } = await startLogin();
@@ -23,7 +21,7 @@ function setAuthorizationHeader(headers: Record<string, string>, value: string):
 }
 
 function shouldRetrySignIn(): boolean {
-  return !process.env.EMFIRGE_API_KEY && browserSignInApplies();
+  return !process.env.EMFIRGE_API_KEY;
 }
 
 export class BackendHttpError extends Error {

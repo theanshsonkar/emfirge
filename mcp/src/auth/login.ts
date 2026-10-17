@@ -74,7 +74,7 @@ export async function startLogin(opts: { timeoutMs?: number } = {}): Promise<Pen
     if (pathname === "/start/github" || pathname === "/start/google") {
       const provider = pathname.split("/").pop();
       const redirect = `${base}/callback/${state}`;
-      const location = `${supabaseUrl()}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirect)}&code_challenge=${challenge}&code_challenge_method=s256`;
+      const location = `${supabaseUrl()}/auth/v1/authorize?provider=${provider}&redirect_to=${encodeURIComponent(redirect)}&code_challenge=${challenge}&code_challenge_method=S256`;
       return page(res, 302, "Redirecting.", location);
     }
     if (pathname.startsWith("/callback/")) {

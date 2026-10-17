@@ -32,6 +32,11 @@ export const logoutSchema = {} as const;
 export const logoutZodObject = z.object(logoutSchema);
 
 export async function logoutHandler(_args: Record<string, never>) {
+  if (process.env.EMFIRGE_API_KEY) {
+    credentials.remove();
+    clearSession();
+    return { content: [{ type: "text" as const, text: "Signed out." }] };
+  }
   const access = await getAccessToken();
   if (access) {
     try {

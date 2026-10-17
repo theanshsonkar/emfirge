@@ -61,11 +61,14 @@ async function refresh(): Promise<string | null> {
     if (response.status === 400 || response.status === 401) {
       credentials.remove();
       clearSession();
-      return null;
+      throw new Error("Your sign-in has expired. Please sign in again.");
     }
     throw new Error("Could not reach the sign-in service. Try again.");
   } catch (e) {
-    if (e instanceof Error && e.message === "Could not reach the sign-in service. Try again.") throw e;
+    if (e instanceof Error && (
+      e.message === "Could not reach the sign-in service. Try again." ||
+      e.message === "Your sign-in has expired. Please sign in again."
+    )) throw e;
     throw new Error("Could not reach the sign-in service. Try again.");
   }
 }
