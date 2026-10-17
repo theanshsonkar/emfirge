@@ -194,7 +194,7 @@ def test_L16_terraform_and_aws_api_public_ssh_are_equivalent(plan_client):
     st.builds(lambda suffix: "Put" + suffix + "Acl",
               st.from_regex(r"[A-Z][a-z]{2,8}", fullmatch=True)),
 ), suffix=st.from_regex(r"[A-Z][a-z]{2,8}", fullmatch=True))
-def test_L16_unmapped_aws_call_block_rule(plan_client, monkeypatch, prefix, suffix):
+def test_L23_unmapped_aws_call_block_rule(plan_client, monkeypatch, prefix, suffix):
     from app import branches
     from app.aws_api_ingest import _DELETE_PREFIXES, _MAPPED
     import re
