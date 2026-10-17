@@ -1,6 +1,6 @@
-// Public Supabase configuration. Filled in when Ansh provides the project's public values.
-export const DEFAULT_SUPABASE_URL = "";
-export const DEFAULT_SUPABASE_ANON_KEY = "";
+// Public anon key, safe to ship; never put a service_role key here.
+export const DEFAULT_SUPABASE_URL = "https://sdzohfnoutehzcqfnmko.supabase.co";
+export const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNkem9oZm5vdXRlaHpjcWZubWtvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI4MDQ5NjcsImV4cCI6MjA4ODM4MDk2N30.OJXflDtmlb25Yurt3yDIUbA61GyePH7lEKm314EoPY8";
 
 export function supabaseUrl(): string {
   return (process.env.EMFIRGE_SUPABASE_URL || DEFAULT_SUPABASE_URL).replace(/\/+$/, "");
