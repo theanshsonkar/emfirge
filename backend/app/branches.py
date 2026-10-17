@@ -21,7 +21,7 @@ from app import cost
 from app.database import BranchEvidenceLog, BranchLog, PlanLog, SessionLocal
 from app.in_use_evidence import EvidenceRecord
 from app.diffing import DiffResult, diff_infrastructure, modeled_state_unchanged
-from app.egraph import build_graph
+from app.egraph import GRAPH_SCHEMA_VERSION, build_graph
 from app.models import AWSInfrastructure
 
 
@@ -185,7 +185,14 @@ def _load_branch(session, branch_id: str) -> BranchLog:
 
 
 def _decode(row: BranchLog) -> Branch:
-    base = AWSInfrastructure.model_validate(json.loads(row.base_infra_json))
+    raw_base = json.loads(row.base_infra_json)
+    snapshot_version = raw_base.get("schema_version", 1)
+    if snapshot_version > GRAPH_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported branch snapshot schema version {snapshot_version}; "
+            f"current version is {GRAPH_SCHEMA_VERSION}"
+        )
+    base = AWSInfrastructure.model_validate(raw_base)
     raw_changes = json.loads(row.changes_json or "[]")
     changes = [Change.model_validate(change) for change in raw_changes]
     return Branch(
@@ -237,7 +244,9 @@ def _lock_branch_quota(session, base_analysis_id: str) -> None:
 def create_branch(base_infra: AWSInfrastructure | dict, name: str,
                   base_analysis_id: Optional[str] = None) -> str:
     """Create an open branch and return its UUID string."""
-    base_json = json.dumps(_model_dump(base_infra), sort_keys=True, separators=(",", ":"))
+    snapshot = _model_dump(base_infra)
+    snapshot["schema_version"] = GRAPH_SCHEMA_VERSION
+    base_json = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
 
     def operation(session):
         if base_analysis_id is not None:

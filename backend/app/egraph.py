@@ -23,6 +23,9 @@ import app.iam_classifier as iam_classifier
 from app.iam_escalation import matching_paths
 
 
+GRAPH_SCHEMA_VERSION = 1
+
+
 _ACCESS_LEVEL_ORDER = {
     "Unknown": 0,
     "Read": 1,
@@ -440,6 +443,7 @@ class Graph:
     def to_dict(self) -> Dict[str, List[Dict[str, Any]]]:
         """Convert the graph to its serializable legacy dictionary representation."""
         return {
+            'schema_version': GRAPH_SCHEMA_VERSION,
             'nodes': [node.as_legacy_dict() for node in self.nodes],
             'edges': [edge.as_legacy_dict() for edge in self.edges],
         }

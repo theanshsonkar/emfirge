@@ -2,9 +2,7 @@
 from dataclasses import dataclass
 from typing import Any
 
-from app.egraph import Graph, Node, Edge, NodeCategory, RelationshipType
-
-GRAPH_SCHEMA_VERSION = 1
+from app.egraph import Graph, Node, Edge, NodeCategory, RelationshipType, GRAPH_SCHEMA_VERSION
 
 
 LAYER_NAMES = ("base", "security", "cost", "limits", "telemetry")
