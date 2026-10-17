@@ -147,12 +147,30 @@ EDGE_SCHEMAS = {
     RelationshipType.UNKNOWN: frozenset(),
 }
 
+# Explicit edge-attribute catalog. Types are observed in ALL_SNAPSHOTS and in
+# build_graph's ingress/internal/IAM emitters (egraph.py:780, 1008, 2166).
+EDGE_ATTR_TYPES: dict[RelationshipType, dict[str, tuple[type, ...]]] = {
+    RelationshipType.REACHES: {
+        "ports": (list,), "reason": (str,), "confidence": (str,),
+    },
+    RelationshipType.REACHES_VIA_SG: {
+        "ports": (list,), "reason": (str,), "confidence": (str,),
+    },
+    RelationshipType.can_access: {
+        "actions": (list,), "effect": (str,), "has_condition": (bool,),
+        "confidence": (str,), "access_level": (str,), "privilege_escalation": (bool,),
+    },
+    RelationshipType.CAN_ASSUME: {
+        "conditional": (bool,), "confidence": (str,), "reason": (str,),
+    },
+    RelationshipType.CAN_REACH: {
+        "ports": (list,), "reason": (str,), "confidence": (str,), "flagged": (bool,),
+    },
+}
+
+# Backwards-compatible key-only view for callers that import EDGE_ATTRS.
 EDGE_ATTRS = {
-    RelationshipType.REACHES: frozenset({"ports", "reason", "confidence"}),
-    RelationshipType.REACHES_VIA_SG: frozenset({"ports", "reason", "confidence"}),
-    RelationshipType.can_access: frozenset({"actions", "effect", "has_condition", "confidence", "access_level", "privilege_escalation"}),
-    RelationshipType.CAN_ASSUME: frozenset({"conditional", "confidence", "reason"}),
-    RelationshipType.CAN_REACH: frozenset({"ports", "reason", "confidence", "flagged"}),
+    relationship: frozenset(attrs) for relationship, attrs in EDGE_ATTR_TYPES.items()
 }
 
 
@@ -212,9 +230,12 @@ def validate_edge(edge, graph) -> list[str]:
     if (src_type, dst_type) not in pairs:
         violations.append(f"disallowed endpoint types for {relationship.value}: {src_type} -> {dst_type}")
     attrs = _value(edge, "attrs", {}) or {}
-    for key in attrs:
-        if key not in EDGE_ATTRS.get(relationship, frozenset()):
+    declared_attrs = EDGE_ATTR_TYPES.get(relationship, {})
+    for key, value in attrs.items():
+        if key not in declared_attrs:
             violations.append(f"undeclared attrs key {key} for {relationship.value}")
+        elif not isinstance(value, declared_attrs[key]):
+            violations.append(f"wrong type for attrs.{key} on {relationship.value}: got {type(value)}")
     return violations
 
 

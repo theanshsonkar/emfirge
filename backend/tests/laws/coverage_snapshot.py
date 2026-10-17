@@ -49,7 +49,7 @@ def build_coverage_infrastructure() -> AWSInfrastructure:
             public_subnet_ids=[SUBNET_ID],
             internet_gateway_attachments=[{"internet_gateway_id": "igw-0cov0001", "vpc_id": VPC_ID, "state": "available"}],
             internet_gateway_attachments_complete=True,
-            nacls=[NetworkACL(id="acl-0cov0001", vpc_id=VPC_ID, associated_subnet_ids=[SUBNET_ID], entries=[NACLEntry(rule_number=100, protocol="-1", rule_action="allow", egress=False)])],
+            nacls=[NetworkACL(id="acl-0cov0001", vpc_id=VPC_ID, associated_subnet_ids=[SUBNET_ID], entries=[NACLEntry(rule_number=100, protocol="-1", rule_action="allow", egress=False, cidr_block="0.0.0.0/0")])],
             vpc_peering_connections=[VPCPeeringConnection(id="pcx-0cov0001", requester_vpc_id=VPC_ID, accepter_vpc_id="vpc-0cov0002", status="active")],
             transit_gateway_attachments=[TransitGatewayAttachment(id="tgw-attach-0cov0001", transit_gateway_id="tgw-0cov0001", vpc_id=VPC_ID)],
             vpn_gateways=[VPNGateway(id="vgw-0cov0001", vpc_id=VPC_ID)],
