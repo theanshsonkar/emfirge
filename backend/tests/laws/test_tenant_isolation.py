@@ -10,18 +10,26 @@ from app.database import AccountBinding, AnalysisLog, DriftEvent, Project
 from app.main import app
 
 
-@pytest.fixture
-def tenant_client(shared_test_db, monkeypatch):
+@pytest.fixture(params=['api_key', 'supabase_jwt'], ids=['api_key', 'supabase_jwt'])
+def tenant_client(shared_test_db, monkeypatch, request, supabase_env):
+    mode = request.param
     monkeypatch.setattr(auth, 'AUTH_ENABLED', True)
     client = TestClient(app)
-    key_a = auth.create_api_key('tenant-law-a')
-    key_b = auth.create_api_key('tenant-law-b')
+    if mode == 'supabase_jwt':
+        from tests.supabase_fake import make_token
+        key_a = make_token('tenant-law-a')
+        key_b = make_token('tenant-law-b')
+        name_a, name_b = 'sb-tenant-law-a', 'sb-tenant-law-b'
+    else:
+        key_a = auth.create_api_key('tenant-law-a')
+        key_b = auth.create_api_key('tenant-law-b')
+        name_a, name_b = 'tenant-law-a', 'tenant-law-b'
     client.get('/project', headers={'X-API-Key': key_a})
     client.get('/project', headers={'X-API-Key': key_b})
     db = database.SessionLocal()
     try:
-        pa = db.query(Project).filter_by(name='tenant-law-a').one()
-        pb = db.query(Project).filter_by(name='tenant-law-b').one()
+        pa = db.query(Project).filter_by(name=name_a).one()
+        pb = db.query(Project).filter_by(name=name_b).one()
         db.add_all([
             AccountBinding(aws_account_id='111111111111', project_id=pa.id),
             AccountBinding(aws_account_id='222222222222', project_id=pb.id),

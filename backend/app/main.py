@@ -50,6 +50,7 @@ from app.rules import run_all_checks, find_toxic_combos
 from app.scoring import calculate_score, count_scored_resources, score_snapshot
 from app.llm import generate_explanation
 from app import auth
+from app import supabase_auth
 from app.auth import require_api_key, get_caller, Caller, legacy_ci_enabled, backfill_legacy_key_projects
 from app.role_access import assume_customer_role
 from app.database import get_db
@@ -337,6 +338,7 @@ def report_startup():
         linked = 0
     state = 'ON' if auth.AUTH_ENABLED else 'OFF'
     print(f'emfirge: auth is {state}', flush=True)
+    print(f'emfirge: supabase sign-in is {"ON" if supabase_auth.supabase_url() else "OFF"}', flush=True)
     print(f'emfirge: linked {linked} legacy API key project(s)', flush=True)
 
 # ── CORS ──────────────────────────────────────────────────────────
