@@ -60,7 +60,7 @@ jobs:
       - name: AST parse all modules
         run: python -c "import ast, glob; [ast.parse(open(f).read()) for f in glob.glob('app/*.py')]; print('all modules parse clean')"
       - name: run pytest
-        run: python -m pytest -q --no-header --junitxml=test-results.xml
+        run: python -m pytest -q --no-header -n auto --junitxml=test-results.xml
         env:
           DATABASE_URL: 'sqlite:///:memory:'
       - name: generate scorecard
