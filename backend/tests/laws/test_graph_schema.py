@@ -5,6 +5,7 @@ from app.egraph import Edge, Graph, Node, RelationshipType, build_graph
 from app.graph_schema import EDGE_SCHEMAS, NODE_SCHEMAS, validate_edge, validate_node
 from app.demo_seed import build_demo_infrastructure
 from tests.incidents.synthetic_base import load_synthetic_base
+from tests.laws.coverage_snapshot import build_coverage_infrastructure
 
 
 def _snapshots():
@@ -13,6 +14,7 @@ def _snapshots():
               ("clean_infra", "nightmare_infra", "empty_infra")]
     values.append(("demo", build_demo_infrastructure()))
     values.append(("delete_base", load_synthetic_base("delete")))
+    values.append(("coverage", build_coverage_infrastructure()))
     return values
 
 
@@ -71,3 +73,27 @@ def test_L27_no_dangling_edges():
         graph = build_graph(infrastructure)
         node_ids = {node.id for node in graph.nodes}
         assert all(edge.src in node_ids and edge.dst in node_ids for edge in graph.edges)
+
+
+def test_L27_coverage_snapshot_exercises_every_type():
+    graph = build_graph(build_coverage_infrastructure())
+    assert {node.resource_type for node in graph.nodes} == set(NODE_SCHEMAS)
+    unreachable = {RelationshipType.REACHES_VIA_SG}
+    assert {edge.relationship for edge in graph.edges} == set(RelationshipType) - {RelationshipType.UNKNOWN} - unreachable
+
+
+@pytest.mark.xfail(strict=True, reason="known_gap: REACHES_VIA_SG is not emitted by build_graph coverage topology")
+def test_L27_coverage_snapshot_known_unreachable_relationships():
+    graph = build_graph(build_coverage_infrastructure())
+    assert RelationshipType.REACHES_VIA_SG in {edge.relationship for edge in graph.edges}
+
+
+def test_L27_undeclared_security_key_is_a_violation():
+    node = Node(id="x", type="ec2_instance", label="x", security={"not_declared": True})
+    assert "undeclared key security.not_declared" in " ".join(validate_node(node))
+
+
+def test_L27_wrong_value_type_is_a_violation():
+    node = Node(id="x", type="ec2_instance", label="x", base={"instance_type": 42})
+    violations = validate_node(node)
+    assert "wrong type for base.instance_type" in " ".join(violations)

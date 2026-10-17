@@ -7,17 +7,36 @@ from app.egraph import Graph, Node, Edge, NodeCategory, RelationshipType
 GRAPH_SCHEMA_VERSION = 1
 
 
+LAYER_NAMES = ("base", "security", "cost", "limits", "telemetry")
+
+
 @dataclass(frozen=True)
 class NodeSchema:
     resource_type: str
     category: str
-    required: dict[str, frozenset[str]]
-    optional: dict[str, frozenset[str]]
+    required: dict[str, dict[str, tuple[type, ...]]]
+    optional: dict[str, dict[str, tuple[type, ...]]]
+
+
+def _types_for(key: str) -> tuple[type, ...]:
+    """Types observed in the catalog snapshots for a metadata key."""
+    if key in {"rules", "egress_rules", "sg_ids", "subnet_ids", "trusted_services", "policies", "privilege_escalation_paths", "entries", "routes"}:
+        return (list,)
+    if key in {"rules_count", "target_count", "subnet_count", "resource_count", "size_gb"}:
+        return (int,)
+    if key in {"has_public_ip", "publicly_accessible", "encrypted", "is_public", "is_empty", "pitr_enabled", "has_waf", "is_attached", "is_main", "is_default", "trust_allows_external", "trust_has_conditions", "has_privilege_escalation", "has_admin"}:
+        return (bool, type(None))
+    if key in {"vpc_id", "subnet_id", "role_arn", "origin_bucket", "arn", "cidr", "state", "instance_type", "type", "engine", "node_type", "subnet_group", "source", "api_type", "endpoint_type", "auth_type", "status", "public_ip", "billing_mode", "encryption_type"}:
+        return (str, type(None))
+    return (str, int, bool, list, dict, type(None))
 
 
 def _node(resource_type, category, required=(), optional=()):
-    return NodeSchema(resource_type, category, {"base": frozenset(required)},
-                      {"base": frozenset(optional)})
+    required_keys = {key: _types_for(key) for key in required}
+    optional_keys = {key: _types_for(key) for key in optional}
+    return NodeSchema(resource_type, category,
+                      {layer: (required_keys.copy() if layer == "base" else {}) for layer in LAYER_NAMES},
+                      {layer: (optional_keys.copy() if layer == "base" else {}) for layer in LAYER_NAMES})
 
 
 NODE_SCHEMAS = {
@@ -36,17 +55,17 @@ NODE_SCHEMAS = {
     "security_group": _node("security_group", "network_boundary", ("name", "rules_count", "rules", "egress_rules", "attached_instances")),
     "network_acl": _node("network_acl", "network_boundary", ("entries", "is_default", "vpc_id")),
     "vpc_subnet": _node("vpc_subnet", "network", ("vpc_id", "cidr", "resource_count")),
-    "vpc": _node("vpc", "network", ("is_default", "subnet_count", "source")),
+    "vpc": _node("vpc", "network", optional=("is_default", "subnet_count", "source", "collected")),
     "vpc_peering_connection": _node("vpc_peering_connection", "network", ("requester_vpc_id", "accepter_vpc_id", "status")),
     "cloudfront_distribution": _node("cloudfront_distribution", "edge", ("origin_bucket",)),
     "iam_role": _node("iam_role", "identity", ("arn", "trusted_services", "trust_allows_external", "trust_has_conditions", "has_privilege_escalation"), ("source", "has_admin", "policies", "privilege_escalation_paths")),
     "internet": _node("internet", "other", ("is_virtual",)),
     "route_table": _node("route_table", "network", ("routes", "is_main", "vpc_id")),
-    "internet_gateway": _node("internet_gateway", "network_boundary"),
-    "nat_gateway": _node("nat_gateway", "network"),
-    "transit_gateway_attachment": _node("transit_gateway_attachment", "network_boundary", ("vpc_id",)),
-    "vpn_gateway": _node("vpn_gateway", "network_boundary", ("vpc_id",)),
-    "interface_endpoint": _node("interface_endpoint", "network_boundary", ("vpc_id",)),
+    "internet_gateway": _node("internet_gateway", "network_boundary", optional=("id",)),
+    "nat_gateway": _node("nat_gateway", "network", optional=("id",)),
+    "transit_gateway_attachment": _node("transit_gateway_attachment", "network_boundary", ("vpc_id",), ("id", "transit_gateway_id", "state")),
+    "vpn_gateway": _node("vpn_gateway", "network_boundary", ("vpc_id",), ("id", "state")),
+    "interface_endpoint": _node("interface_endpoint", "network_boundary", ("vpc_id",), ("id", "service_name")),
     "elastic_ip": _node("elastic_ip", "other", ("public_ip", "is_attached")),
 }
 
@@ -72,7 +91,7 @@ EDGE_SCHEMAS = {
     RelationshipType.PEERED_WITH: frozenset({("vpc_peering_connection", "vpc")} ),
     RelationshipType.can_access: frozenset({("iam_role", t) for t in ("s3_bucket", "rds_instance", "lambda_function", "secretsmanager_secret", "dynamodb_table", "sqs_queue")} ),
     RelationshipType.CAN_ASSUME: frozenset({("iam_role", "iam_role")} ),
-    RelationshipType.CAN_REACH: frozenset({("ec2_instance", "rds_instance"), ("rds_instance", "ec2_instance"), ("lambda_function", "rds_instance"), ("rds_instance", "lambda_function")} ),
+    RelationshipType.CAN_REACH: frozenset({("ec2_instance", "rds_instance"), ("rds_instance", "ec2_instance"), ("lambda_function", "rds_instance"), ("rds_instance", "lambda_function"), ("lambda_function", "ec2_instance"), ("ec2_instance", "lambda_function")} ),
     RelationshipType.UNKNOWN: frozenset(),
 }
 
@@ -101,16 +120,23 @@ def validate_node(node) -> list[str]:
     category = getattr(category, "value", category)
     if category != schema.category:
         violations.append(f"wrong category for {resource_type}: {category}")
-    for layer in set(schema.required) | set(schema.optional):
-        values = _value(node, layer)
-        values = values or {}
-        allowed = schema.required.get(layer, frozenset()) | schema.optional.get(layer, frozenset())
-        for key in schema.required.get(layer, frozenset()):
+    # Iterate the node's layers, rather than only layers declared by the schema.
+    for layer in LAYER_NAMES:
+        values = _value(node, layer) or {}
+        if not isinstance(values, dict):
+            continue
+        required = schema.required.get(layer, {})
+        optional = schema.optional.get(layer, {})
+        allowed = {**required, **optional}
+        for key in required:
             if key not in values:
                 violations.append(f"missing required key {layer}.{key} for {resource_type}")
-        for key in values:
+        for key, value in values.items():
             if key not in allowed:
                 violations.append(f"undeclared key {layer}.{key} for {resource_type}")
+                continue
+            if not isinstance(value, allowed[key]):
+                violations.append(f"wrong type for {layer}.{key} on {resource_type}: got {type(value)}")
     return violations
 
 
@@ -127,7 +153,9 @@ def validate_edge(edge, graph) -> list[str]:
     if pairs is None:
         return [f"unknown relationship: {relationship}"]
     src, dst = _value(edge, "src", _value(edge, "from")), _value(edge, "dst", _value(edge, "to"))
-    nodes = {n.id: n for n in getattr(graph, "nodes", [])}
+    nodes = getattr(graph, "_node_index", None)
+    if nodes is None:
+        nodes = {n.id: n for n in getattr(graph, "nodes", [])}
     src_type, dst_type = _value(nodes.get(src), "resource_type", _value(nodes.get(src), "type")), _value(nodes.get(dst), "resource_type", _value(nodes.get(dst), "type"))
     if (src_type, dst_type) not in pairs:
         violations.append(f"disallowed endpoint types for {relationship.value}: {src_type} -> {dst_type}")
