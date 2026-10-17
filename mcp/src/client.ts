@@ -4,17 +4,26 @@
 import { redactDeep } from "./tokenize.js";
 import { getAccessToken, forceExpire } from "./auth/session.js";
 import { startLogin } from "./auth/login.js";
-import { supabaseUrl, supabaseAnonKey } from "./auth/config.js";
+import { browserSignInApplies } from "./auth/config.js";
 
 export async function authHeader(): Promise<string> {
   const apiKey = process.env.EMFIRGE_API_KEY;
   if (apiKey) return `Bearer ${apiKey}`;
-  // Self-hosted/legacy callers may override the backend without configuring Supabase.
-  if (process.env.EMFIRGE_BASE_URL && (!supabaseUrl() || !supabaseAnonKey())) return "Bearer ";
+  if (!browserSignInApplies()) return "";
   const token = await getAccessToken();
   if (token) return `Bearer ${token}`;
   const { url } = await startLogin();
-  throw new Error(`Sign in needed. Your browser should have opened; if not, open ${url}. Then run this again.`);
+  throw new Error(
+    `Sign in needed. Your browser should have opened; if not, open ${url}. Then run this again.`,
+  );
+}
+
+function setAuthorizationHeader(headers: Record<string, string>, value: string): void {
+  if (value) headers.Authorization = value;
+}
+
+function shouldRetrySignIn(): boolean {
+  return !process.env.EMFIRGE_API_KEY && browserSignInApplies();
 }
 
 export class BackendHttpError extends Error {
@@ -42,8 +51,7 @@ export async function backendCall<T = unknown>(
     "X-MCP": "1",
     "X-Source": "mcp",
   };
-  const usingApiKey = Boolean(process.env.EMFIRGE_API_KEY);
-  headers.Authorization = await authHeader();
+  setAuthorizationHeader(headers, await authHeader());
 
   const controller = new AbortController();
   const timeoutMs = opts.timeout ?? 90_000;
@@ -56,10 +64,15 @@ export async function backendCall<T = unknown>(
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
-    if (res.status === 401 && !usingApiKey) {
+    if (res.status === 401 && shouldRetrySignIn()) {
       forceExpire();
-      headers.Authorization = await authHeader();
-      res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: controller.signal });
+      setAuthorizationHeader(headers, await authHeader());
+      res = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
       if (res.status === 401) throw new Error("Your sign-in has expired. Run emfirge_login.");
     }
 
@@ -146,8 +159,7 @@ export async function backendCallSSE<T = unknown>(
     "X-MCP": "1",
     "X-Source": "mcp",
   };
-  const usingApiKey = Boolean(process.env.EMFIRGE_API_KEY);
-  headers.Authorization = await authHeader();
+  setAuthorizationHeader(headers, await authHeader());
 
   const controller = new AbortController();
   const timeoutMs = opts.timeout ?? 90_000;
@@ -160,10 +172,15 @@ export async function backendCallSSE<T = unknown>(
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
-    if (res.status === 401 && !usingApiKey) {
+    if (res.status === 401 && shouldRetrySignIn()) {
       forceExpire();
-      headers.Authorization = await authHeader();
-      res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: controller.signal });
+      setAuthorizationHeader(headers, await authHeader());
+      res = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
       if (res.status === 401) throw new Error("Your sign-in has expired. Run emfirge_login.");
     }
 
