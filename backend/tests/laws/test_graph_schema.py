@@ -1,0 +1,73 @@
+"""Law 27: every emitted graph node and edge has a declared schema."""
+import pytest
+
+from app.egraph import Edge, Graph, Node, RelationshipType, build_graph
+from app.graph_schema import EDGE_SCHEMAS, NODE_SCHEMAS, validate_edge, validate_node
+from app.demo_seed import build_demo_infrastructure
+from tests.incidents.synthetic_base import load_synthetic_base
+
+
+def _snapshots():
+    from tests import conftest
+    values = [(name, getattr(conftest, name).__wrapped__()) for name in
+              ("clean_infra", "nightmare_infra", "empty_infra")]
+    values.append(("demo", build_demo_infrastructure()))
+    values.append(("delete_base", load_synthetic_base("delete")))
+    return values
+
+
+ALL_SNAPSHOTS = _snapshots()
+EMITTED_RESOURCE_TYPES = frozenset({
+    "ec2_instance", "lambda_function", "ecs_tasks", "load_balancer", "api_gateway",
+    "elasticache_cluster", "s3_bucket", "ebs_volume", "rds_instance", "dynamodb_table",
+    "sqs_queue", "secretsmanager_secret", "security_group", "network_acl", "vpc_subnet",
+    "vpc", "vpc_peering_connection", "cloudfront_distribution", "iam_role", "internet",
+    "route_table", "internet_gateway", "nat_gateway", "transit_gateway_attachment",
+    "vpn_gateway", "interface_endpoint", "elastic_ip",
+})
+
+
+def test_L27_every_node_matches_its_schema():
+    for _, infrastructure in ALL_SNAPSHOTS:
+        graph = build_graph(infrastructure)
+        for node in graph.nodes:
+            assert validate_node(node) == [], node
+
+
+def test_L27_every_edge_matches_its_schema():
+    for _, infrastructure in ALL_SNAPSHOTS:
+        graph = build_graph(infrastructure)
+        for edge in graph.edges:
+            assert validate_edge(edge, graph) == [], edge
+
+
+def test_L27_every_emitted_type_has_a_schema():
+    assert all(member in EDGE_SCHEMAS for member in RelationshipType)
+    assert all(resource_type in NODE_SCHEMAS for resource_type in EMITTED_RESOURCE_TYPES)
+
+
+def test_L27_unknown_field_is_a_violation():
+    node = Node(id="x", type="ec2_instance", label="x", base={"unknown": 1})
+    violations = validate_node(node)
+    assert violations and "unknown" in " ".join(violations)
+
+
+def test_L27_unknown_type_is_a_violation():
+    node = Node(id="x", type="not_a_resource", label="x")
+    violations = validate_node(node)
+    assert violations and "not_a_resource" in " ".join(violations)
+
+
+def test_L27_wrong_endpoint_types_is_a_violation():
+    graph = Graph([Node(id="a", type="ec2_instance", label="a"),
+                   Node(id="b", type="rds_instance", label="b")], [])
+    edge = Edge(src="a", dst="b", relationship=RelationshipType.uses_security_group)
+    violations = validate_edge(edge, graph)
+    assert violations and "endpoint" in " ".join(violations).lower()
+
+
+def test_L27_no_dangling_edges():
+    for _, infrastructure in ALL_SNAPSHOTS:
+        graph = build_graph(infrastructure)
+        node_ids = {node.id for node in graph.nodes}
+        assert all(edge.src in node_ids and edge.dst in node_ids for edge in graph.edges)
