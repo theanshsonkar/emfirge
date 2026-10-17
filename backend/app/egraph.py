@@ -1161,11 +1161,12 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         
         # Edge: Security Group -> Instance (attached_to)
         for instance_id in attached_to:
-            edges.append({
-                'from': sg_id,
-                'to': instance_id,
-                'relationship': 'attached_to_instance'
-            })
+            if any(node['id'] == instance_id for node in nodes):
+                edges.append({
+                    'from': sg_id,
+                    'to': instance_id,
+                    'relationship': 'attached_to_instance'
+                })
     
     # ── INTERNET REACHABILITY ─────────────────────────────────────
     # Evaluate against route-table and NACL relationships without using the
@@ -1486,11 +1487,12 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         
         # Edge: Subnet -> Resources (EC2, Lambda, etc.)
         for resource_id in resources:
-            edges.append({
-                'from': subnet_id,
-                'to': resource_id,
-                'relationship': 'contains_resource'
-            })
+            if any(node['id'] == resource_id for node in nodes):
+                edges.append({
+                    'from': subnet_id,
+                    'to': resource_id,
+                    'relationship': 'contains_resource'
+                })
     
     # Route tables and network boundary nodes
     for route_table in infrastructure.vpc.route_tables:
@@ -2174,6 +2176,13 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                               'attrs': {key: item[key] for key in ("ports", "reason", "confidence", "flagged")}})
                 existing_can_reach.add((source.id, target.id))
 
+    unique_nodes = {}
+    for node in nodes:
+        unique_nodes.setdefault(_value(node, 'id'), node)
+    nodes = list(unique_nodes.values())
+    node_ids = set(unique_nodes)
+    edges = [edge for edge in edges
+             if _value(edge, 'from') in node_ids and _value(edge, 'to') in node_ids]
     return Graph(nodes=nodes, edges=edges)
 
 
