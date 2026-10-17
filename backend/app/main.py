@@ -41,7 +41,7 @@ from app.cidr import is_internet_cidr
 from app.mutations import Change, MutationCapabilities, apply_change, mutation_capabilities
 from app.typed_handback import UnmappableChanges, build_api_calls, canonical_sha256
 from app.plan_ingest import translate_plan
-from app.aws_api_ingest import translate_api_calls
+from app.aws_api_ingest import translate_api_calls, validate_change_regions
 from app.aws_cli_ingest import parse_cli_commands
 from app.cfn_ingest import convert_change_set
 from app.verdict import CombinedVerdict, combined_verdict
@@ -1683,14 +1683,27 @@ def _aws_translator(branch_id: str, document, cli: bool = False):
     }
     if cli:
         document = parse_cli_commands(document)
-    return translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get)
+    translated = translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get)
+    validate_change_regions(document["calls"], state.region)
+    return translated
 
 
 def _cfn_translator(branch_id: str, document):
+    document_region = None
+    if isinstance(document, dict):
+        document_region = document.get("region", document.get("Region"))
+    try:
+        branch = branches.get_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     api_document, extras = convert_change_set(document)
     if api_document["calls"]:
+        state = branches.rebuild_branch_state(branch)
+        validate_change_regions(api_document["calls"], state.region, document_region)
         translated = _aws_translator(branch_id, api_document)
     else:
+        if document_region is not None and not isinstance(document_region, str):
+            raise ValueError("Invalid CloudFormation change set document")
         translated = {"changes": [], "addresses": [], "unmodeled": [], "unknown_fields": []}
     translated["unmodeled"].extend(extras)
     return translated
@@ -1707,7 +1720,8 @@ async def cloudformation_plan_endpoint(branch_id: str, request: Request):
 @app.post('/branches/{branch_id}/plans/aws-api', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 async def aws_api_plan_endpoint(branch_id: str, request: Request):
     return await _ingest_plan_endpoint(
-        branch_id, request, lambda document: _aws_translator(branch_id, document), 'Invalid AWS API calls document',
+        branch_id, request, lambda document: _aws_translator(branch_id, document),
+        'Invalid AWS API calls document', preserve_value_errors=True,
     )
 
 
