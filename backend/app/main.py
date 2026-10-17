@@ -9,6 +9,7 @@ import boto3
 import os
 import time
 import uuid
+import secrets
 import json
 import re
 import subprocess
@@ -45,6 +46,7 @@ from app.cfn_ingest import convert_change_set
 from app.verdict import CombinedVerdict, combined_verdict
 from app import branches, identifiers
 from app.in_use_evidence import EvidenceRequest, EvidenceEstimate, build_estimate, read_evidence, SOURCES, WINDOW_DAYS
+from app.database import Project, SupabaseIdentity
 from app.aws_collector import collect_infrastructure, ROLE_SESSION_NAME
 from app.rules import run_all_checks, find_toxic_combos
 from app.scoring import calculate_score, count_scored_resources, score_snapshot
@@ -385,6 +387,67 @@ def logs(account_id: str = None, caller: Caller = Depends(get_caller), db=Depend
             account_ids = {account_id} if account_id in account_ids else set()
         recent_logs = get_recent_logs(limit=20, account_ids=account_ids)
     return {'logs': recent_logs, 'count': len(recent_logs)}
+
+
+@app.post('/auth/link-project', dependencies=[Depends(get_caller)])
+def link_project(request: Request, db=Depends(get_db)):
+    """Attach a verified Supabase sign-in to an existing API-key project."""
+    authorization = request.headers.get('authorization', '')
+    scheme, separator, token = authorization.partition(' ')
+    token = token.strip() if separator and scheme.lower() == 'bearer' else ''
+    if not token or not supabase_auth.supabase_url():
+        raise HTTPException(status_code=401, detail='Unauthorized')
+    try:
+        sub = supabase_auth.verify_supabase_token(token)
+    except supabase_auth.SignInUnavailable:
+        raise HTTPException(status_code=503, detail='Sign-in is temporarily unavailable')
+    except supabase_auth.TokenInvalid:
+        raise HTTPException(status_code=401, detail='Unauthorized')
+
+    link_key = request.headers.get('x-emfirge-link-key', '').strip()
+    key = auth.verify_api_key(link_key)
+    if key is None:
+        raise HTTPException(status_code=401, detail='Unauthorized')
+
+    try:
+        target = db.query(Project).filter(Project.name == key.project_name).first()
+        if target is None:
+            target = Project(name=key.project_name, external_id=secrets.token_urlsafe(32))
+            db.add(target)
+            db.flush()
+
+        identity = db.query(SupabaseIdentity).filter(SupabaseIdentity.supabase_user_id == sub).first()
+        current = db.get(Project, identity.project_id) if identity else None
+        if current is not None and current.id == target.id:
+            db.rollback()
+            return {'linked': True, 'project': target.name}
+
+        target_identity = db.query(SupabaseIdentity).filter(SupabaseIdentity.project_id == target.id).first()
+        if target_identity is not None and target_identity.supabase_user_id != sub:
+            db.rollback()
+            raise HTTPException(status_code=409, detail='This project is already linked to another sign-in.')
+
+        if current is not None and (
+            db.query(AccountBinding).filter(AccountBinding.project_id == current.id).first() is not None or
+            db.query(BranchOwner).filter(BranchOwner.project_id == current.id).first() is not None
+        ):
+            db.rollback()
+            raise HTTPException(status_code=409, detail='Your signed-in project already has data. Ask the operator to merge.')
+
+        if identity is None:
+            db.add(SupabaseIdentity(supabase_user_id=sub, project_id=target.id))
+        else:
+            identity.project_id = target.id
+        if current is not None and current.name == f'sb-{sub}':
+            db.delete(current)
+        db.commit()
+        logger.info('Supabase project link: project_id=%s target_project_id=%s', current.id if current is not None else target.id, target.id)
+        return {'linked': True, 'project': target.name}
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        raise
 
 @app.get('/history')
 def history(limit: int = 10, account_id: str = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):

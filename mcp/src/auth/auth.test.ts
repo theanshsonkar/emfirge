@@ -10,6 +10,7 @@ import { credentialsPath } from "./credentials.js";
 import { _resetForTests as _resetLoginForTests, startLogin } from "./login.js";
 import { _resetForTests, getAccessToken, setSession } from "./session.js";
 import { loginHandler, logoutHandler } from "../tools/login.js";
+import { backendCall } from "../client.js";
 
 
 const test = (name: string, fn: () => void | Promise<void>) => nodeTest(name, { concurrency: false }, fn);
