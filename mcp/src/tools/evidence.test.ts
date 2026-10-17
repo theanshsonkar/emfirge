@@ -8,6 +8,7 @@ const home = mkdtempSync(join(tmpdir(), "emfirge-evidence-"));
 process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.EMFIRGE_PRIVACY = "strict";
+process.env.EMFIRGE_API_KEY = "synthetic-test-api-key";
 process.env.EMFIRGE_BASE_URL = "http://stub.invalid/api";
 
 type Call = { method: string; url: string; body?: unknown };

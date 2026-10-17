@@ -2,6 +2,27 @@
 // X-MCP header tells the backend to skip its AI summary (host LLM does that).
 
 import { redactDeep } from "./tokenize.js";
+import { getAccessToken, forceExpire } from "./auth/session.js";
+import { startLogin } from "./auth/login.js";
+
+export async function authHeader(): Promise<string> {
+  const apiKey = process.env.EMFIRGE_API_KEY;
+  if (apiKey) return `Bearer ${apiKey}`;
+  const token = await getAccessToken();
+  if (token) return `Bearer ${token}`;
+  const { url } = await startLogin();
+  throw new Error(
+    `Sign in needed. Your browser should have opened; if not, open ${url}. Then run this again.`,
+  );
+}
+
+function setAuthorizationHeader(headers: Record<string, string>, value: string): void {
+  if (value) headers.Authorization = value;
+}
+
+function shouldRetrySignIn(): boolean {
+  return !process.env.EMFIRGE_API_KEY;
+}
 
 export class BackendHttpError extends Error {
   constructor(public readonly status: number, public readonly body: unknown, path: string) {
@@ -28,20 +49,30 @@ export async function backendCall<T = unknown>(
     "X-MCP": "1",
     "X-Source": "mcp",
   };
-  const apiKey = process.env.EMFIRGE_API_KEY;
-  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  setAuthorizationHeader(headers, await authHeader());
 
   const controller = new AbortController();
   const timeoutMs = opts.timeout ?? 90_000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
+    if (res.status === 401 && shouldRetrySignIn()) {
+      forceExpire();
+      setAuthorizationHeader(headers, await authHeader());
+      res = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      if (res.status === 401) throw new Error("Your sign-in has expired. Run emfirge_login.");
+    }
 
     if (!res.ok) {
       const text = await res.text();
@@ -126,20 +157,30 @@ export async function backendCallSSE<T = unknown>(
     "X-MCP": "1",
     "X-Source": "mcp",
   };
-  const apiKey = process.env.EMFIRGE_API_KEY;
-  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  setAuthorizationHeader(headers, await authHeader());
 
   const controller = new AbortController();
   const timeoutMs = opts.timeout ?? 90_000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
+    if (res.status === 401 && shouldRetrySignIn()) {
+      forceExpire();
+      setAuthorizationHeader(headers, await authHeader());
+      res = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      if (res.status === 401) throw new Error("Your sign-in has expired. Run emfirge_login.");
+    }
 
     if (!res.ok) {
       const text = await res.text();

@@ -1,6 +1,6 @@
 {
   "name": "@emfirge/mcp",
-  "version": "0.2.6",
+  "version": "0.2.8",
   "mcpName": "io.github.theanshsonkar/emfirge",
   "description": "Git branch for your cloud. Understand AWS risk, prioritize what matters, and prove fixes before touching production. Read-only by design.",
   "main": "dist/index.js",
@@ -13,7 +13,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "node --import tsx --test src/tokenize.test.ts src/tools/branches.test.ts src/tools/evidence.test.ts src/tools/plan-verdict.test.ts src/presigned.test.ts",
+    "test": "node --import tsx --test src/tokenize.test.ts src/tools/branches.test.ts src/tools/evidence.test.ts src/tools/plan-verdict.test.ts src/presigned.test.ts src/auth/auth.test.ts",
     "install-cli": "node dist/index.js install",
     "uninstall-cli": "node dist/index.js uninstall",
     "prepublishOnly": "npm run build"

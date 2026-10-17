@@ -9,7 +9,7 @@ process.env.HOME = home;
 process.env.USERPROFILE = home;
 process.env.EMFIRGE_PRIVACY = "strict";
 process.env.EMFIRGE_BASE_URL = "http://stub.invalid/api";
-delete process.env.EMFIRGE_API_KEY;
+process.env.EMFIRGE_API_KEY = "synthetic-test-api-key";
 
 const { redactDeep } = await import("../tokenize.js");
 const planVerdict = await import("./plan-verdict.js");

@@ -197,6 +197,14 @@ class AccountBinding(Base):
     bound_at = Column(DateTime, default=datetime.utcnow)
 
 
+class SupabaseIdentity(Base):
+    __tablename__ = 'supabase_identities'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    supabase_user_id = Column(String(64), unique=True, index=True, nullable=False)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class AccountBindingEvent(Base):
     __tablename__ = 'account_binding_events'
     id = Column(Integer, primary_key=True, autoincrement=True)
