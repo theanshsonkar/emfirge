@@ -20,7 +20,7 @@ CREDS = {"AccessKeyId": "x", "SecretAccessKey": "y", "SessionToken": "z"}
 ROLE = "arn:aws:iam::111122223333:role/EmfirgeRole"
 RANK = {"pass": 0, "warn": 1, "block": 2}
 SOURCES = ["cloudtrail_events", "cloudwatch_metrics"]
-STATUSES = ["ok", "no_data", "denied", "error", "incomplete"]
+STATUSES = ["ok", "no_data", "denied", "error", "incomplete", "unknown"]
 USAGE_TYPES = {"ec2_instance", "rds_instance", "lambda_function", "ebs_volume"}
 SETTINGS = dict(deadline=None, suppress_health_check=[HealthCheck.too_slow, HealthCheck.function_scoped_fixture])
 

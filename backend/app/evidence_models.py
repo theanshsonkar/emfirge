@@ -36,7 +36,7 @@ class EvidenceRecord(BaseModel):
     resource_id: str
     resource_type: str
     source: str
-    status: Literal["ok", "no_data", "denied", "error", "incomplete"]
+    status: Literal["ok", "no_data", "denied", "error", "incomplete", "unknown"]
     used: bool | None
     holds_data: bool | None = None
     window_days: int

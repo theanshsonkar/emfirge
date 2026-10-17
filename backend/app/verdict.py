@@ -459,6 +459,12 @@ def combined_verdict(
         reasons.append(_reason("block", "usage_unknown", "Deleted IAM role usage could not be verified"))
     if recently_used_deleted(base_infra, branch_infra):
         reasons.append(_reason("block", "recently_used", "Deleted IAM role was recently used"))
+    if any(
+        _value(item, "source") == "cloudtrail_events"
+        and _value(item, "status") in {"denied", "error", "incomplete", "unknown"}
+        for item in deletion.in_use_evidence
+    ):
+        reasons.append(_reason("block", "usage_unknown", "CloudTrail usage could not be verified for a deleted resource"))
     if any(_value(item, "source") == "cloudwatch_metrics" and _value(item, "status") == "ok" and _value(item, "used") is True for item in deletion.in_use_evidence):
         reasons.append(_reason("block", "recently_used", "CloudWatch metrics show a deleted resource was used in the last 90 days"))
     if any(

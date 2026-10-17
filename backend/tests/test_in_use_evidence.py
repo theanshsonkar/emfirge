@@ -144,7 +144,7 @@ def test_cloudtrail_incomplete_and_invalid_event_names():
     trail = FakeTrail([{"Events": [], "NextToken": "1"}, {"Events": [], "NextToken": "2"}, {"Events": [], "NextToken": "3"}])
     record = read_evidence(CREDS, "r", [resource("iam_role", "arn:role")], ["cloudtrail_events"], now=NOW,
                            own_session_name="s", client_factory=lambda *_: trail, sleep=lambda _: None)[0]
-    assert record.status == "incomplete"
+    assert record.status == "unknown"
     for bad in ("Delete Bucket", "Delete/Bucket"):
         trail = FakeTrail([{"Events": [{"EventName": bad}]}])
         record = read_evidence(CREDS, "r", [resource("s3_bucket")], ["cloudtrail_events"], now=NOW,
