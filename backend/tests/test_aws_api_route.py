@@ -65,10 +65,10 @@ def test_aws_api_handback_preserves_raw_input(plan_client):
     assert handback.status_code == 200
     values = handback.json()
     assert values["plan_text"].encode() == raw
-    verified = plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": values["verdict_id"], "plan_text": values["plan_text"]})
+    verified = plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": values["verdict_id"], "plan_text": values["plan_text"], "base_analysis_id": values["base_analysis_id"], "branch_revision": values["branch_revision"]})
     assert verified.json() == {"ok": True}
     changed = values["plan_text"][:-1] + ("0" if values["plan_text"][-1] != "0" else "1")
-    conflict = plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": values["verdict_id"], "plan_text": changed})
+    conflict = plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": values["verdict_id"], "plan_text": changed, "base_analysis_id": values["base_analysis_id"], "branch_revision": values["branch_revision"]})
     assert conflict.status_code == 409
     assert conflict.json() == {"ok": False, "reason_code": "input_hash_mismatch"}
 

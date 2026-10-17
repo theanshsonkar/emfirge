@@ -192,7 +192,8 @@ def test_L9_http_free_text_never_contains_planted_identifiers(
     handback_payload = handback.json()
     verified = client.post("/handback/verify", json={
         "plan_id": plan_id, "verdict_id": handback_payload["verdict_id"],
-        "plan_text": handback_payload["plan_text"],
+        "plan_text": handback_payload["plan_text"], "base_analysis_id": handback_payload["base_analysis_id"],
+        "branch_revision": handback_payload["branch_revision"],
     })
     _assert_safe(verified, markers, account)
     assert verified.status_code == 200, verified.text
