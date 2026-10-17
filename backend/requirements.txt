@@ -29,3 +29,4 @@ policy-sentry==0.15.2
 # "borrowed scanners at arm's length" actually requires: a scanner's dependency
 # tree must not be able to constrain the app's.
 cloudsplaining==0.9.1
+PyJWT==2.15.1
