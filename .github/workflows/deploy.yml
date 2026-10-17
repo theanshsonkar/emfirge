@@ -72,7 +72,7 @@ jobs:
           url="https://emfirge.cloud/api/project"
           code="none"
           for i in $(seq 1 12); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo "000")
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || true)
             echo "attempt $i/12: HTTP $code"
             if [ "$code" = "401" ]; then
               echo "Health check passed: auth lock is on."

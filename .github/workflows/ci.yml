@@ -11,6 +11,23 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    name: Decide which jobs run
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          BEFORE: ${{ github.event.before }}
+          SHA: ${{ github.sha }}
+        run: bash .github/scripts/backend-changed.sh >> "$GITHUB_OUTPUT"
+
   mcp:
     name: MCP build (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
@@ -36,6 +53,8 @@ jobs:
           node dist/index.js privacy || true
 
   backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     name: Backend tests (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
     strategy:
