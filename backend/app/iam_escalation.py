@@ -15,7 +15,13 @@ def _value(item: Any, key: str, default: Any = None) -> Any:
 
 
 def _action_matches(pattern: Any, permission: str) -> bool:
-    return isinstance(pattern, str) and fnmatch.fnmatchcase(permission.lower(), pattern.lower())
+    if not isinstance(pattern, str) or not isinstance(permission, str):
+        return False
+    translated = "".join(
+        ".*" if char == "*" else "." if char == "?" else re.escape(char)
+        for char in pattern
+    )
+    return re.fullmatch(translated, permission, flags=re.IGNORECASE) is not None
 
 
 @lru_cache(maxsize=4096)
