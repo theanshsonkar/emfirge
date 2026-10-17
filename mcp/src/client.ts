@@ -2,6 +2,20 @@
 // X-MCP header tells the backend to skip its AI summary (host LLM does that).
 
 import { redactDeep } from "./tokenize.js";
+import { getAccessToken, forceExpire } from "./auth/session.js";
+import { startLogin } from "./auth/login.js";
+import { supabaseUrl, supabaseAnonKey } from "./auth/config.js";
+
+export async function authHeader(): Promise<string> {
+  const apiKey = process.env.EMFIRGE_API_KEY;
+  if (apiKey) return `Bearer ${apiKey}`;
+  // Self-hosted/legacy callers may override the backend without configuring Supabase.
+  if (process.env.EMFIRGE_BASE_URL && (!supabaseUrl() || !supabaseAnonKey())) return "Bearer ";
+  const token = await getAccessToken();
+  if (token) return `Bearer ${token}`;
+  const { url } = await startLogin();
+  throw new Error(`Sign in needed. Your browser should have opened; if not, open ${url}. Then run this again.`);
+}
 
 export class BackendHttpError extends Error {
   constructor(public readonly status: number, public readonly body: unknown, path: string) {
@@ -28,20 +42,26 @@ export async function backendCall<T = unknown>(
     "X-MCP": "1",
     "X-Source": "mcp",
   };
-  const apiKey = process.env.EMFIRGE_API_KEY;
-  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  const usingApiKey = Boolean(process.env.EMFIRGE_API_KEY);
+  headers.Authorization = await authHeader();
 
   const controller = new AbortController();
   const timeoutMs = opts.timeout ?? 90_000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
+    if (res.status === 401 && !usingApiKey) {
+      forceExpire();
+      headers.Authorization = await authHeader();
+      res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: controller.signal });
+      if (res.status === 401) throw new Error("Your sign-in has expired. Run emfirge_login.");
+    }
 
     if (!res.ok) {
       const text = await res.text();
@@ -126,20 +146,26 @@ export async function backendCallSSE<T = unknown>(
     "X-MCP": "1",
     "X-Source": "mcp",
   };
-  const apiKey = process.env.EMFIRGE_API_KEY;
-  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+  const usingApiKey = Boolean(process.env.EMFIRGE_API_KEY);
+  headers.Authorization = await authHeader();
 
   const controller = new AbortController();
   const timeoutMs = opts.timeout ?? 90_000;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(url, {
+    let res = await fetch(url, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
+    if (res.status === 401 && !usingApiKey) {
+      forceExpire();
+      headers.Authorization = await authHeader();
+      res = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined, signal: controller.signal });
+      if (res.status === 401) throw new Error("Your sign-in has expired. Run emfirge_login.");
+    }
 
     if (!res.ok) {
       const text = await res.text();

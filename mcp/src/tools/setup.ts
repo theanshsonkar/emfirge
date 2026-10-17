@@ -12,7 +12,7 @@ const TEMPLATE_URL =
 
 const TRUSTED_ACCOUNT = process.env.EMFIRGE_TRUSTED_ACCOUNT_ID ?? "000000000000";
 const NO_EXTERNAL_ID =
-  "No ExternalId. Hosted: set EMFIRGE_API_KEY. Self-host: set EMFIRGE_EXTERNAL_ID on the server and here.";
+  "No ExternalId yet. Run emfirge_login to sign in (or set EMFIRGE_API_KEY). Self-host: set EMFIRGE_EXTERNAL_ID on the server and here.";
 
 type ProjectResponse = {
   mode?: "hosted" | "self-host";
