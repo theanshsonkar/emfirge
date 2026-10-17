@@ -19,6 +19,7 @@ import { getBaseUrl } from "./client.js";
 import { privacyMode, redactDeep } from "./tokenize.js";
 
 import { setupSchema, setupZodObject, setupHandler } from "./tools/setup.js";
+import { loginSchema, loginZodObject, loginHandler, logoutSchema, logoutZodObject, logoutHandler } from "./tools/login.js";
 import { scanSchema, scanZodObject, scanHandler } from "./tools/scan.js";
 import { findingsSchema, findingsZodObject, findingsHandler } from "./tools/findings.js";
 import {
@@ -173,6 +174,16 @@ interface ToolRegistration {
 }
 
 const tools: ToolRegistration[] = [
+  {
+    name: "emfirge_login",
+    description: "Sign in to Emfirge with GitHub or Google in your browser.",
+    schema: loginSchema as Record<string, z.ZodTypeAny>, zodObject: loginZodObject as z.ZodObject<z.ZodRawShape>, handler: loginHandler,
+  },
+  {
+    name: "emfirge_logout",
+    description: "Sign out of Emfirge on this device.",
+    schema: logoutSchema as Record<string, z.ZodTypeAny>, zodObject: logoutZodObject as z.ZodObject<z.ZodRawShape>, handler: logoutHandler,
+  },
   {
     name: "emfirge_setup_help",
     description:

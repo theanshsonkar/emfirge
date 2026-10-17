@@ -36,7 +36,7 @@ process.env.HOME = home;
 process.env.USERPROFILE = home; // Windows homedir()
 process.env.EMFIRGE_PRIVACY = "strict";
 process.env.EMFIRGE_BASE_URL = "http://stub.invalid/api";
-delete process.env.EMFIRGE_API_KEY;
+process.env.EMFIRGE_API_KEY = "synthetic-test-api-key";
 
 const { redactDeep } = await import("../tokenize.js");
 const branches = await import("./branches.js");
