@@ -2,3 +2,4 @@ pytest==9.1.1
 pytest-mock==3.16.0
 hypothesis==6.168.5
 PyYAML==6.0.3
+moto[ec2,s3,rds,awslambda]==5.2.4
