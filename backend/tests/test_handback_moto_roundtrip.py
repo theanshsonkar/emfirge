@@ -20,6 +20,7 @@ from app.typed_handback import build_api_calls
 REGION = "ap-south-1"
 CREDS = {"aws_access_key_id": "testing", "aws_secret_access_key": "testing", "aws_session_token": "testing"}
 KNOWN_MOTO_GAPS = {}
+VOLATILE_FIELDS = set()
 
 
 def _client(service):
@@ -55,6 +56,38 @@ def _resource(state, typ, ident):
     return next((x for x in groups[typ] if getattr(x, key) == ident), None)
 
 
+def _route_key(route):
+    target_type = "igw" if route.target_type == "internet_gateway" else route.target_type
+    return route.destination_cidr, target_type, route.target_id
+
+
+def _assert_matches(recollected, modeled, change, typ, ident, touched):
+    if change.op == "delete":
+        assert _resource(recollected, typ, ident) is None
+        assert _resource(modeled, typ, ident) is None
+        return
+    actual = _resource(recollected, typ, ident)
+    expected = _resource(modeled, typ, ident)
+    assert actual is not None and expected is not None
+    fields = type(actual).model_fields.keys()
+    for field in fields:
+        if field in VOLATILE_FIELDS:
+            continue
+        actual_value = getattr(actual, field)
+        expected_value = getattr(expected, field)
+        if field == "rules":
+            def rule_key(rule):
+                value = dict(rule)
+                value.setdefault("source_sg_ids", [])
+                return value
+            actual_value = [rule_key(x) for x in actual_value]
+            expected_value = [rule_key(x) for x in expected_value]
+        elif field == "routes":
+            actual_value = [_route_key(x) for x in actual_value]
+            expected_value = [_route_key(x) for x in expected_value]
+        assert actual_value == expected_value, (field, actual, expected)
+
+
 def _roundtrip(base, change, collector, typ, ident, touched):
     modeled = apply_changes(base, [change])
     calls = build_api_calls(base, [change])
@@ -63,26 +96,7 @@ def _roundtrip(base, change, collector, typ, ident, touched):
         client = _client(item["service"])
         getattr(client, _method(client, item["operation"]))(**item["params"])
     recollected = collector()
-    if change.op == "delete":
-        assert _resource(recollected, typ, ident) is None
-        assert _resource(modeled, typ, ident) is None
-        return
-    actual = _resource(recollected, typ, ident)
-    expected = _resource(modeled, typ, ident)
-    assert actual is not None and expected is not None
-    for field in touched:
-        actual_value = getattr(actual, field)
-        expected_value = getattr(expected, field)
-        if field == "rules":
-            def rule_key(rule):
-                value = dict(rule)
-                value.setdefault("source_sg_ids", [])
-                return value
-            assert [rule_key(x) for x in actual_value] == [rule_key(x) for x in expected_value]
-        elif field == "routes":
-            assert [(x.destination_cidr, "igw" if x.target_type == "internet_gateway" else x.target_type, x.target_id) for x in actual_value] == [(x.destination_cidr, x.target_type, x.target_id) for x in expected_value]
-        else:
-            assert actual_value == expected_value, (field, actual, expected)
+    _assert_matches(recollected, modeled, change, typ, ident, touched)
 
 
 def _vpc():
@@ -173,14 +187,19 @@ def test_route_table_modify_roundtrip():
 def test_tampered_handback_call_is_detected():
     vpc = _vpc(); sg = _sg(vpc); ec2 = _client("ec2")
     ec2.authorize_security_group_ingress(GroupId=sg, IpPermissions=[{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}])
-    base = _base(_collect(collect_ec2), "ec2")
+    def collect(): return _base(_collect(collect_ec2), "ec2")
+    base = collect()
     change = Change(op="modify", resource_type="security_group", resource_id=sg, fields={"rules": [{"protocol": "tcp", "from_port": 443, "to_port": 443, "ip_ranges": ["10.0.0.0/8"]}]})
-    modeled = apply_changes(base, [change]); calls = build_api_calls(base, [change]); calls[0]["params"]["GroupId"] = "sg-tampered"
-    with pytest.raises(Exception):
-        for item in calls:
-            client = _client(item["service"])
-            getattr(client, _method(client, item["operation"]))(**item["params"])
-    assert _resource(modeled, "security_group", sg).rules != _resource(base, "security_group", sg).rules
+    modeled = apply_changes(base, [change]); calls = build_api_calls(base, [change])
+    for permission in calls[0]["params"]["IpPermissions"]:
+        permission["FromPort"] = 444
+        permission["ToPort"] = 444
+    for item in calls:
+        client = _client(item["service"])
+        getattr(client, _method(client, item["operation"]))(**item["params"])
+    recollected = collect()
+    with pytest.raises(AssertionError):
+        _assert_matches(recollected, modeled, change, "security_group", sg, ["rules"])
 
 
 def test_known_moto_gaps_are_explicit():
