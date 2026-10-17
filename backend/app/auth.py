@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from fastapi import HTTPException, Request, Depends
 from sqlalchemy.exc import IntegrityError
 
-from app.database import APIKey, Project, SessionLocal
+from app.database import APIKey, Project, SupabaseIdentity, SessionLocal
+from app import supabase_auth
 
 
 AUTH_ENABLED = os.getenv('EMFIRGE_REQUIRE_AUTH', '').lower() in {'1', 'true', 'yes'}
@@ -101,6 +102,33 @@ async def get_caller(request: Request) -> Caller:
     raw = _request_key(request)
     key = verify_api_key(raw)
     if key is None:
+        if raw and supabase_auth.supabase_url():
+            try:
+                sub = supabase_auth.verify_supabase_token(raw)
+            except supabase_auth.SignInUnavailable:
+                raise HTTPException(status_code=503, detail='Sign-in is temporarily unavailable')
+            except supabase_auth.TokenInvalid:
+                raise HTTPException(status_code=401, detail='Unauthorized')
+            session = SessionLocal()
+            try:
+                identity = session.query(SupabaseIdentity).filter_by(supabase_user_id=sub).first()
+                if identity is None:
+                    project = Project(name=f'sb-{sub}', external_id=secrets.token_urlsafe(32))
+                    session.add(project)
+                    session.flush()
+                    identity = SupabaseIdentity(supabase_user_id=sub, project_id=project.id)
+                    session.add(identity)
+                    try:
+                        session.commit()
+                    except IntegrityError:
+                        session.rollback()
+                        identity = session.query(SupabaseIdentity).filter_by(supabase_user_id=sub).first()
+                        if identity is None:
+                            raise
+                project = session.query(Project).filter_by(id=identity.project_id).one()
+                return Caller('hosted', project.id, project.name, project.external_id)
+            finally:
+                session.close()
         raise HTTPException(status_code=401, detail='Unauthorized')
     session = SessionLocal()
     try:

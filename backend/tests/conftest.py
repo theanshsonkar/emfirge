@@ -1,3 +1,4 @@
+pytest_plugins = ['tests.supabase_fake']
 import os
 
 os.environ.setdefault("WHITELISTED_ACCOUNTS", "000000000000")
