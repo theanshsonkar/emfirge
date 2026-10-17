@@ -67,3 +67,18 @@ jobs:
               -e EMFIRGE_REQUIRE_AUTH=1 \
               -p 8000:8000 \
               ${{ secrets.DOCKERHUB_USERNAME }}/aws-risk-agent:latest
+      - name: Post-deploy health check (/api/project must return 401)
+        run: |
+          url="https://emfirge.cloud/api/project"
+          code="none"
+          for i in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$url" || echo "000")
+            echo "attempt $i/12: HTTP $code"
+            if [ "$code" = "401" ]; then
+              echo "Health check passed: auth lock is on."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Expected HTTP 401 from $url after ~60s, last status was $code. Deploy is not healthy or auth is off."
+          exit 1
