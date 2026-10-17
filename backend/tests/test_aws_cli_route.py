@@ -107,11 +107,11 @@ def test_cli_route_preserves_raw_handback_and_rejects_changed_text(plan_client):
     handback = handback_response.json()
     assert handback["plan_text"].encode() == raw
     verified = plan_client.post("/handback/verify", json={
-        "plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": handback["plan_text"]})
+        "plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": handback["plan_text"], "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"]})
     assert verified.json() == {"ok": True}
     changed = handback["plan_text"][:-1] + ("0" if handback["plan_text"][-1] != "0" else "1")
     rejected = plan_client.post("/handback/verify", json={
-        "plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": changed})
+        "plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": changed, "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"]})
     assert rejected.status_code == 409
     assert rejected.json() == {"ok": False, "reason_code": "input_hash_mismatch"}
 

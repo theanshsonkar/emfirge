@@ -39,8 +39,9 @@ from app.models import (
 from app.diffing import DiffResult
 from app.cidr import is_internet_cidr
 from app.mutations import Change, MutationCapabilities, apply_change, mutation_capabilities
+from app.typed_handback import UnmappableChanges, build_api_calls, canonical_sha256
 from app.plan_ingest import translate_plan
-from app.aws_api_ingest import translate_api_calls
+from app.aws_api_ingest import translate_api_calls, validate_change_regions
 from app.aws_cli_ingest import parse_cli_commands
 from app.cfn_ingest import convert_change_set
 from app.verdict import CombinedVerdict, combined_verdict
@@ -1682,14 +1683,27 @@ def _aws_translator(branch_id: str, document, cli: bool = False):
     }
     if cli:
         document = parse_cli_commands(document)
-    return translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get)
+    translated = translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get)
+    validate_change_regions(document["calls"], state.region)
+    return translated
 
 
 def _cfn_translator(branch_id: str, document):
+    document_region = None
+    if isinstance(document, dict):
+        document_region = document.get("region", document.get("Region"))
+    try:
+        branch = branches.get_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     api_document, extras = convert_change_set(document)
     if api_document["calls"]:
+        state = branches.rebuild_branch_state(branch)
+        validate_change_regions(api_document["calls"], state.region, document_region)
         translated = _aws_translator(branch_id, api_document)
     else:
+        if document_region is not None and not isinstance(document_region, str):
+            raise ValueError("Invalid CloudFormation change set document")
         translated = {"changes": [], "addresses": [], "unmodeled": [], "unknown_fields": []}
     translated["unmodeled"].extend(extras)
     return translated
@@ -1706,7 +1720,8 @@ async def cloudformation_plan_endpoint(branch_id: str, request: Request):
 @app.post('/branches/{branch_id}/plans/aws-api', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 async def aws_api_plan_endpoint(branch_id: str, request: Request):
     return await _ingest_plan_endpoint(
-        branch_id, request, lambda document: _aws_translator(branch_id, document), 'Invalid AWS API calls document',
+        branch_id, request, lambda document: _aws_translator(branch_id, document),
+        'Invalid AWS API calls document', preserve_value_errors=True,
     )
 
 
@@ -1883,7 +1898,10 @@ def verify_handback_endpoint(payload: dict, request: Request):
     _check_branch_rate_limit(_branch_request_ip(request))
     if not isinstance(payload, dict):
         raise HTTPException(status_code=422, detail='Request body must be an object')
-    plan = branches.get_plan(payload.get('plan_id')) if isinstance(payload.get('plan_id'), str) else None
+    required = ('plan_id', 'plan_text', 'verdict_id', 'base_analysis_id', 'branch_revision')
+    if any(not isinstance(payload.get(field), str) for field in required):
+        raise HTTPException(status_code=422, detail='Missing or invalid handback fields')
+    plan = branches.get_plan(payload.get('plan_id'))
     if plan is None:
         return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'unknown_plan'})
     plan_text = payload.get('plan_text')
@@ -1895,6 +1913,10 @@ def verify_handback_endpoint(payload: dict, request: Request):
         return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'unknown_plan'})
     if revision != plan['branch_revision_after']:
         return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'branch_revision_changed'})
+    if payload['base_analysis_id'] != branch.base_analysis_id:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'base_snapshot_changed'})
+    if payload['branch_revision'] != plan['branch_revision_after']:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'branch_revision_changed'})
     expected_verdict_id = _handback_verdict_id(
         plan['input_sha256'], branch.base_analysis_id, revision, result.verdict,
     )
@@ -1902,6 +1924,62 @@ def verify_handback_endpoint(payload: dict, request: Request):
         return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'verdict_changed'})
     return {'ok': True}
 
+
+
+@app.get('/branches/{branch_id}/handback', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def typed_handback_endpoint(branch_id: str, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    try:
+        branch = branches.get_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='Not found') from exc
+    if branches.list_plans(branch_id):
+        return JSONResponse(status_code=409, content={'error': 'branch_has_plan_receipts'})
+    if not branch.changes:
+        return JSONResponse(status_code=409, content={'error': 'no_changes'})
+    try:
+        branch, result, revision = _current_handback_state(branch_id)
+        calls = build_api_calls(branch.base, branch.changes)
+    except UnmappableChanges as exc:
+        return JSONResponse(status_code=422, content={'error': 'unmappable_changes', 'changes': exc.changes})
+    verdict = result.verdict
+    digest = canonical_sha256(calls)
+    return {'branch_id': branch_id, 'kind': 'aws-api-calls', 'calls': calls,
+            'input_sha256': digest, 'base_analysis_id': branch.base_analysis_id,
+            'branch_revision': revision, 'verdict': verdict,
+            'verdict_id': _handback_verdict_id(digest, branch.base_analysis_id, revision, verdict)}
+
+
+@app.post('/branches/{branch_id}/handback/verify', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def verify_typed_handback_endpoint(branch_id: str, payload: dict, request: Request):
+    _check_branch_rate_limit(_branch_request_ip(request))
+    required = ('calls', 'input_sha256', 'base_analysis_id', 'branch_revision', 'verdict_id')
+    if not isinstance(payload, dict) or any(field not in payload for field in required):
+        raise HTTPException(status_code=422, detail='Missing handback fields')
+    if not isinstance(payload['calls'], list) or any(not isinstance(payload[field], str) for field in required[1:]):
+        raise HTTPException(status_code=422, detail='Invalid handback fields')
+    if canonical_sha256(payload['calls']) != payload['input_sha256']:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'input_hash_mismatch'})
+    try:
+        branch, result, revision = _current_handback_state(branch_id)
+        if not branch.changes:
+            return JSONResponse(status_code=409, content={'error': 'no_changes'})
+        expected_calls = build_api_calls(branch.base, branch.changes)
+    except branches.BranchNotFoundError:
+        raise HTTPException(status_code=404, detail='Not found')
+    except UnmappableChanges as exc:
+        return JSONResponse(status_code=422, content={'error': 'unmappable_changes', 'changes': exc.changes})
+    expected_hash = canonical_sha256(expected_calls)
+    if payload['input_sha256'] != expected_hash:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'input_hash_mismatch'})
+    if payload['base_analysis_id'] != branch.base_analysis_id:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'base_snapshot_changed'})
+    if payload['branch_revision'] != revision:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'branch_revision_changed'})
+    verdict_id = _handback_verdict_id(expected_hash, branch.base_analysis_id, revision, result.verdict)
+    if payload['verdict_id'] != verdict_id:
+        return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'verdict_changed'})
+    return {'ok': True, 'verdict': result.verdict, 'verdict_id': verdict_id}
 
 @app.get('/branches/{branch_id}/diff', response_model=DiffResult, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def branch_diff_endpoint(branch_id: str, request: Request):

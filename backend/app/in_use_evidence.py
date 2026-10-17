@@ -111,6 +111,14 @@ def _trail_record(resource, client, now, own_session_name, observed_at, sleep, f
             if token:
                 kwargs["NextToken"] = token
             response = client.lookup_events(**kwargs)
+            trail_start = response.get("TrailStartTime")
+            if trail_start:
+                if isinstance(trail_start, datetime):
+                    trail_start = trail_start.astimezone(timezone.utc)
+                else:
+                    trail_start = parse_iso(trail_start)
+                if trail_start and trail_start > start:
+                    return EvidenceRecord(resource_id=resource.resource_id, resource_type=resource.resource_type, source="cloudtrail_events", status="unknown", used=None, window_days=WINDOW_DAYS, observed_at=observed_at)
             for event in response.get("Events", []):
                 if event.get("ReadOnly") == "true" or event.get("Username") == own_session_name:
                     continue
@@ -121,13 +129,13 @@ def _trail_record(resource, client, now, own_session_name, observed_at, sleep, f
             token = response.get("NextToken")
             if not token:
                 break
-        status = "ok" if found else ("incomplete" if token else "no_data")
+        status = "ok" if found else ("unknown" if token else "no_data")
         stamp = found.get("EventTime") if found else None
         event_time = stamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z") if isinstance(stamp, datetime) else (str(stamp).replace("+00:00", "Z") if stamp else None)
         name = found.get("EventName") if found and re.fullmatch(r"[A-Za-z0-9]{1,128}", str(found.get("EventName", ""))) else None
         return EvidenceRecord(resource_id=resource.resource_id, resource_type=resource.resource_type, source="cloudtrail_events", status=status, used=None, window_days=WINDOW_DAYS, observed_at=observed_at, last_event_at=event_time, event_name=name)
-    except Exception as exc:
-        return EvidenceRecord(resource_id=resource.resource_id, resource_type=resource.resource_type, source="cloudtrail_events", status="denied" if _denied(exc) else "error", used=None, window_days=WINDOW_DAYS, observed_at=observed_at)
+    except Exception:
+        return EvidenceRecord(resource_id=resource.resource_id, resource_type=resource.resource_type, source="cloudtrail_events", status="unknown", used=None, window_days=WINDOW_DAYS, observed_at=observed_at)
 
 
 def read_evidence(creds, region, resources, sources, *, now, own_session_name, client_factory=None, sleep=None):

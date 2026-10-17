@@ -41,6 +41,7 @@ import {
 import { simulateSchema, simulateZodObject, simulateHandler } from "./tools/simulate.js";
 import { inUseEvidenceSchema, inUseEvidenceZodObject, inUseEvidenceHandler } from "./tools/evidence.js";
 import { planVerdictSchema, planVerdictZodObject, planVerdictHandler } from "./tools/plan-verdict.js";
+import { branchHandbackSchema, branchHandbackZodObject, branchHandbackHandler } from "./tools/branch-handback.js";
 import {
   applyChangeSchema,
   applyChangeZodObject,
@@ -314,6 +315,14 @@ const tools: ToolRegistration[] = [
     schema: planVerdictSchema as Record<string, z.ZodTypeAny>,
     zodObject: planVerdictZodObject as z.ZodObject<z.ZodRawShape>,
     handler: planVerdictHandler,
+  },
+  {
+    name: "emfirge_branch_handback",
+    description:
+      "Return the exact AWS API calls for an isolated branch and their hash binding; optionally verify the calls with the backend. Unmappable changes are returned as gaps and never as partial calls.",
+    schema: branchHandbackSchema as Record<string, z.ZodTypeAny>,
+    zodObject: branchHandbackZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: branchHandbackHandler,
   },
   {
     name: "emfirge_rollback_branch",

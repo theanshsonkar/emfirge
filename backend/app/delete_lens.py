@@ -147,9 +147,9 @@ def analyze_deletions(base: Any, branch: Any, evidence=None) -> DeletionLens:
     deleted_resource_ids = {str(x.get("resource_id")) for x in ledger}
     for item in scoped:
         status = _v(item, "status")
-        if status in {"denied", "error"} and _v(item, "used") is None:
+        if status in {"denied", "error", "incomplete", "unknown"} and _v(item, "used") is None:
             resource_id = str(_v(item, "resource_id"))
-            reason = "access denied" if status == "denied" else "read error"
+            reason = "access denied" if status == "denied" else "read error" if status == "error" else "incomplete history"
             entry = f"recent use of {resource_id}: could not check ({reason})"
             if entry not in cannot:
                 cannot.append(entry)

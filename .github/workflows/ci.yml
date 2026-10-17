@@ -25,6 +25,7 @@ jobs:
           cache-dependency-path: mcp/package-lock.json
       - run: npm ci
       - run: npm run build
+      - run: npm test
       - name: smoke test CLI
         run: |
           node dist/index.js status || true

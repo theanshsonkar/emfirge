@@ -13,6 +13,28 @@ _RISKY_PREFIXES = ("Detach", "Disassociate", "Revoke", "Stop", "Disable")
 _RISKY_PUT = re.compile(r"^Put[A-Za-z0-9]*(Policy|Acl)$")
 _READ_ONLY_PREFIXES = ("Describe", "List", "Get", "Head")
 _INVALID_MESSAGE = "Invalid AWS API calls document"
+_GLOBAL_SERVICES = frozenset({"iam", "route53", "cloudfront", "s3"})
+
+
+def validate_change_regions(
+    calls: list[dict[str, Any]], snapshot_region: str,
+    document_region: str | None = None,
+) -> None:
+    """Reject regional changes that cannot be judged against this snapshot."""
+    if document_region is not None and not isinstance(document_region, str):
+        raise _invalid()
+    for call in calls:
+        service = str(call.get("service", "")).lower()
+        explicit = call.get("region", document_region)
+        if explicit is None or service in _GLOBAL_SERVICES:
+            continue
+        if not isinstance(explicit, str):
+            raise _invalid()
+        if explicit != snapshot_region:
+            raise ValueError(
+                f"region_mismatch: change region '{explicit}' does not match "
+                f"snapshot region '{snapshot_region}'"
+            )
 
 # service, operation -> (resource type, identifier parameter, allowed parameters)
 _MAPPED = {

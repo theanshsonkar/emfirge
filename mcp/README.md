@@ -54,6 +54,7 @@ Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 - `emfirge_branch_diff` — show the infrastructure diff against the base analysis.
 - `emfirge_branch_verdict` — evaluate an advisory `block`, `warn`, or `pass` verdict with coverage details.
 - `emfirge_plan_verdict` — check a Terraform, AWS API, AWS CLI, or CloudFormation plan before it is applied and return its hash-bound hand-back.
+- `emfirge_branch_handback` — return a branch's exact AWS API calls and hash binding, optionally verified by the backend.
 - `emfirge_rollback_branch` — remove the most recent modeled change.
 - `emfirge_rollback_branch_to_count` — truncate the ordered branch history to a selected existing change count.
 - `emfirge_discard_branch` — discard an isolated branch; optionally pass `expected_change_count` to reject a stale discard with HTTP 409.

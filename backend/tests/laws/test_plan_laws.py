@@ -8,6 +8,7 @@ from botocore import xform_name
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from app import plan_ingest
+from app.mutations import Change
 from tests.test_plan_ingest import _post, plan_client  # noqa: F401
 
 
@@ -530,3 +531,25 @@ def test_L21_terraform_ingress_and_aws_api_authorize_ingress_are_equivalent(
         assert not _exposure_identities(tf_verdict)
     else:
         assert _exposure_identities(tf_verdict)
+
+
+def test_L24_mixed_typed_handback_is_atomic(plan_client):
+    from app import typed_handback
+    base = load_synthetic_base("delete")
+    changes = [
+        Change(op="delete", resource_type="security_group", resource_id="sg-dl-unused", fields={}),
+        Change(op="modify", resource_type="s3_bucket", resource_id="dl-data-bucket", fields={"is_public": True}),
+    ]
+    with pytest.raises(typed_handback.UnmappableChanges):
+        typed_handback.build_api_calls(base, changes)
+    branch_id = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "l24-mixed"}).json()["branch_id"]
+    for index, payload in enumerate((
+        {"op": "delete", "resource_type": "security_group", "resource_id": "sg-dl-unused", "fields": {}},
+        {"op": "modify", "resource_type": "s3_bucket", "resource_id": "dl-data-bucket", "fields": {"is_public": True}},
+    )):
+        response = plan_client.post(f"/branches/{branch_id}/changes", json={**payload, "expected_change_count": index})
+        assert response.status_code == 200, response.text
+    response = plan_client.get(f"/branches/{branch_id}/handback")
+    assert response.status_code == 422
+    assert response.json()["error"] == "unmappable_changes"
+    assert "calls" not in response.json()

@@ -85,9 +85,9 @@ def test_cloudformation_exact_handback_and_one_character_rejection(plan_client):
     plan_id = response.json()["plan_id"]
     handback = plan_client.get(f"/branches/{branch}/plans/{plan_id}/handback").json()
     assert handback["plan_text"].encode() == raw
-    assert plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": handback["plan_text"]}).json() == {"ok": True}
+    assert plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": handback["plan_text"], "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"]}).json() == {"ok": True}
     changed = handback["plan_text"][:-1] + ("0" if handback["plan_text"][-1] != "0" else "1")
-    rejected = plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": changed})
+    rejected = plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": changed, "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"]})
     assert rejected.status_code == 409 and rejected.json() == {"ok": False, "reason_code": "input_hash_mismatch"}
 
 
