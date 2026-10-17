@@ -5,11 +5,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 import nodeTest, { after, afterEach, before, beforeEach } from "node:test";
-import { assertPublicKey } from "./config.js";
+import { DEFAULT_SUPABASE_ANON_KEY, DEFAULT_SUPABASE_URL, assertPublicKey, supabaseAnonKey, supabaseUrl } from "./config.js";
 import { credentialsPath } from "./credentials.js";
 import { _resetForTests as _resetLoginForTests, startLogin } from "./login.js";
-import { _resetForTests, getAccessToken } from "./session.js";
-import { authHeader } from "../client.js";
+import { _resetForTests, getAccessToken, setSession } from "./session.js";
 import { loginHandler, logoutHandler } from "../tools/login.js";
 
 
@@ -167,6 +166,39 @@ test("auth public keys reject service credentials", () => {
   assert.throws(() => assertPublicKey(`e30.${payload}.sig`), /Sign-in is misconfigured/);
 });
 
+test("uses built-in Supabase defaults when environment is unset", () => {
+  delete process.env.EMFIRGE_SUPABASE_URL;
+  delete process.env.EMFIRGE_SUPABASE_ANON_KEY;
+  assert.equal(supabaseUrl(), DEFAULT_SUPABASE_URL);
+  assert.equal(supabaseAnonKey(), DEFAULT_SUPABASE_ANON_KEY);
+});
+
+test("environment overrides built-in Supabase defaults", () => {
+  process.env.EMFIRGE_SUPABASE_URL = "http://127.0.0.1:4321/";
+  process.env.EMFIRGE_SUPABASE_ANON_KEY = "override-anon";
+  assert.equal(supabaseUrl(), "http://127.0.0.1:4321");
+  assert.equal(supabaseAnonKey(), "override-anon");
+});
+
+test("Supabase anon key is not sent to the Emfirge backend", async () => {
+  setSession("ACCESS-SECRET-1", 3600, "REFRESH-SECRET-1");
+  const originalFetch = globalThis.fetch;
+  let backendHeaders: Headers | undefined;
+  globalThis.fetch = (async (_input: URL | RequestInfo, init?: RequestInit) => {
+    backendHeaders = new Headers(init?.headers);
+    return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    await backendCall("GET", "/project");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.ok(backendHeaders);
+  assert.equal(backendHeaders.get("authorization"), "Bearer ACCESS-SECRET-1");
+  assert.equal(backendHeaders.get("apikey"), null);
+  assert.equal(backendHeaders.get("x-supabase-key"), null);
+  assert.equal(backendHeaders.get("authorization")?.includes(DEFAULT_SUPABASE_ANON_KEY), false);
+});
 test("wrong state rejects without exchanging token, then correct state succeeds", async () => {
   const { pending, location, host } = await requestLoginStart();
   const redirect = new URL(location.searchParams.get("redirect_to") ?? "");
@@ -284,7 +316,7 @@ test("no API key or credentials cannot bypass sign-in", async () => {
   delete process.env.EMFIRGE_SUPABASE_ANON_KEY;
   await assert.rejects(
     authHeader(),
-    /Browser sign-in isn't set up in this build yet|Sign-in is misconfigured/,
+    /Sign in needed\.|Sign-in is misconfigured/,
   );
   assert.equal(requests.length, 0);
 });
