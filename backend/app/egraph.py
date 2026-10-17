@@ -8,6 +8,7 @@ with nodes (resources) and edges (relationships between resources).
 import copy
 import fnmatch
 import ipaddress
+import json
 import re
 from collections.abc import Mapping as MappingABC
 from enum import Enum
@@ -288,8 +289,20 @@ class Graph:
     
     def __init__(self, nodes: List[Node | Dict[str, Any]], edges: List[Edge | Dict[str, Any]]):
         """Initialize the graph and normalize legacy dictionaries to typed models."""
-        self.nodes: List[Node] = [node if isinstance(node, Node) else Node.model_validate(node) for node in nodes]
-        self.edges: List[Edge] = [edge if isinstance(edge, Edge) else Edge.model_validate(edge) for edge in edges]
+        normalized_nodes = [node if isinstance(node, Node) else Node.model_validate(node) for node in nodes]
+        normalized_edges = [edge if isinstance(edge, Edge) else Edge.model_validate(edge) for edge in edges]
+
+        # Graph order must depend only on graph content, not collector input order.
+        self.nodes: List[Node] = sorted(normalized_nodes, key=lambda node: node.id)
+        self.edges: List[Edge] = sorted(
+            normalized_edges,
+            key=lambda edge: (
+                edge.src,
+                edge.dst,
+                edge.relationship.value,
+                json.dumps(edge.attrs, sort_keys=True, default=str, separators=(",", ":")),
+            ),
+        )
 
         # Build lookup indexes for efficient queries
         self._node_index = {node['id']: node for node in self.nodes}
@@ -2438,13 +2451,13 @@ def bfs_from_internet(graph: Graph) -> dict:
                 queue.append(neighbor)
 
     edges = []
-    for nid in visited:
+    for nid in sorted(visited):
         for edge in filter_traversable_edges(graph._edges_by_source.get(nid, [])):
             if edge['to'] in visited:
                 edges.append(edge)
 
     return {
-        'nodes': [graph._node_index[nid] for nid in visited if nid in graph._node_index],
+        'nodes': [graph._node_index[nid] for nid in sorted(visited) if nid in graph._node_index],
         'edges': edges,
         'category': 'attack_surface',
         'layers': layers,
@@ -2506,7 +2519,7 @@ def get_simulation_slice(graph: Graph, category: str) -> dict:
                     edges.append(edge)
 
         return {
-            'nodes': [graph._node_index[nid] for nid in node_ids if nid in graph._node_index],
+            'nodes': [graph._node_index[nid] for nid in sorted(node_ids) if nid in graph._node_index],
             'edges': edges,
             'category': category,
             'layers': layers,
@@ -2522,13 +2535,13 @@ def get_simulation_slice(graph: Graph, category: str) -> dict:
             node_ids = set(list(graph._node_index.keys())[:50])
 
     edges = []
-    for nid in node_ids:
+    for nid in sorted(node_ids):
         for edge in graph._edges_by_source.get(nid, []):
             if edge['to'] in node_ids:
                 edges.append(edge)
 
     return {
-        'nodes': [graph._node_index[nid] for nid in node_ids if nid in graph._node_index],
+        'nodes': [graph._node_index[nid] for nid in sorted(node_ids) if nid in graph._node_index],
         'edges': edges,
         'category': category,
         'layers': {},
