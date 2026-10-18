@@ -2196,21 +2196,39 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
     eligible.sort(key=lambda node: node.id)
     existing_can_reach = {(edge['from'], edge['to']) for edge in edges
                           if _is_relationship(edge, RelationshipType.CAN_REACH.value)}
-    for source in eligible:
-        for target in eligible:
-            if source.id == target.id or (source.id, target.id) in existing_can_reach:
-                continue
+    # Resources with identical security/topology inputs have identical
+    # directional reachability behavior. Evaluate each ordered class pair once,
+    # then expand to members; classes are never merged directionlessly.
+    classes = {}
+    for node in eligible:
+        class_key = (node.resource_type, tuple(_sg_ids(node)), tuple(_resource_subnets(node, reachability_graph, graph_index)), _resource_vpc(node, reachability_graph, graph_index))
+        classes.setdefault(class_key, []).append(node)
+    ordered_classes = [classes[key] for key in sorted(classes, key=str)]
+    for source_members in ordered_classes:
+        for target_members in ordered_classes:
+            source = source_members[0]
+            target = target_members[0]
+            if source_members is target_members:
+                if len(source_members) < 2:
+                    continue
+                target = target_members[1]
             evidence = internal_reachable(source, target, reachability_graph, graph_index)
-            if evidence:
-                # A pair gets one stable edge even when several target ingress
-                # rules independently provide evidence.
-                item = min(evidence, key=lambda value: (
-                    tuple(value.get("ports", [])), value.get("reason", ""),
-                    value.get("confidence", ""), bool(value.get("flagged", False))))
-                edges.append({'from': source.id, 'to': target.id,
-                              'relationship': RelationshipType.CAN_REACH,
-                              'attrs': {key: item[key] for key in ("ports", "reason", "confidence", "flagged")}})
-                existing_can_reach.add((source.id, target.id))
+            if not evidence:
+                continue
+            item = min(evidence, key=lambda value: (
+                tuple(value.get("ports", [])), value.get("reason", ""),
+                value.get("confidence", ""), bool(value.get("flagged", False))))
+            attrs = {key: item[key] for key in ("ports", "reason", "confidence", "flagged")}
+            for source_member in source_members:
+                for target_member in target_members:
+                    if source_member.id == target_member.id:
+                        continue
+                    if (source_member.id, target_member.id) in existing_can_reach:
+                        continue
+                    edges.append({'from': source_member.id, 'to': target_member.id,
+                                  'relationship': RelationshipType.CAN_REACH,
+                                  'attrs': attrs})
+                    existing_can_reach.add((source_member.id, target_member.id))
 
     unique_nodes = {}
     for node in nodes:
