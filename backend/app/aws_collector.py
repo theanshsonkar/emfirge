@@ -1967,6 +1967,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
                         rule_action=entry.get('RuleAction', ''),
                         egress=entry.get('Egress', False),
                         cidr_block=entry.get('CidrBlock'),
+                        ipv6_cidr_block=entry.get('Ipv6CidrBlock'),
                         port_from=port_range.get('From'),
                         port_to=port_range.get('To'),
                     ))
@@ -1979,6 +1980,11 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
                         for association in acl.get('Associations', [])
                         if association.get('SubnetId')
                     ],
+                    association_ids={
+                        association['NetworkAclAssociationId']: association['SubnetId']
+                        for association in acl.get('Associations', [])
+                        if association.get('NetworkAclAssociationId') and association.get('SubnetId')
+                    },
                     entries=entries,
                 ))
         except ClientError as e:

@@ -1,0 +1,5109 @@
+{
+  "edges": [
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-001",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-001",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-004",
+      "relationship": "can_reach",
+      "src": "fn-08-008",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-007",
+      "relationship": "can_reach",
+      "src": "db-08-001",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-007",
+      "relationship": "can_reach",
+      "src": "db-08-016",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-007",
+      "relationship": "can_reach",
+      "src": "fn-08-011",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-007",
+      "relationship": "can_reach",
+      "src": "i-08-006",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-007",
+      "relationship": "can_reach",
+      "src": "i-08-021",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-013",
+      "relationship": "can_reach",
+      "src": "fn-08-002",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-013",
+      "relationship": "can_reach",
+      "src": "fn-08-017",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-016",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-016",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-019",
+      "relationship": "can_reach",
+      "src": "fn-08-008",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-002",
+      "relationship": "can_reach",
+      "src": "db-08-001",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-002",
+      "relationship": "can_reach",
+      "src": "db-08-016",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-002",
+      "relationship": "can_reach",
+      "src": "fn-08-011",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-002",
+      "relationship": "can_reach",
+      "src": "i-08-006",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-002",
+      "relationship": "can_reach",
+      "src": "i-08-021",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "can_reach",
+      "src": "db-08-007",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "can_reach",
+      "src": "fn-08-002",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "can_reach",
+      "src": "fn-08-017",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "can_reach",
+      "src": "i-08-012",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-011",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-011",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-014",
+      "relationship": "can_reach",
+      "src": "fn-08-008",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-017",
+      "relationship": "can_reach",
+      "src": "db-08-001",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-017",
+      "relationship": "can_reach",
+      "src": "db-08-016",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-017",
+      "relationship": "can_reach",
+      "src": "fn-08-011",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-017",
+      "relationship": "can_reach",
+      "src": "i-08-006",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-017",
+      "relationship": "can_reach",
+      "src": "i-08-021",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-003",
+      "relationship": "can_reach",
+      "src": "fn-08-002",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-003",
+      "relationship": "can_reach",
+      "src": "fn-08-017",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-006",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-006",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-009",
+      "relationship": "can_reach",
+      "src": "fn-08-008",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-012",
+      "relationship": "can_reach",
+      "src": "db-08-001",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-012",
+      "relationship": "can_reach",
+      "src": "db-08-016",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-012",
+      "relationship": "can_reach",
+      "src": "fn-08-011",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-012",
+      "relationship": "can_reach",
+      "src": "i-08-006",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-012",
+      "relationship": "can_reach",
+      "src": "i-08-021",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-018",
+      "relationship": "can_reach",
+      "src": "fn-08-002",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-018",
+      "relationship": "can_reach",
+      "src": "fn-08-017",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-021",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-021",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-001",
+      "relationship": "can_reach",
+      "src": "db-08-016",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-001",
+      "relationship": "can_reach",
+      "src": "fn-08-011",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-001",
+      "relationship": "can_reach",
+      "src": "i-08-006",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-001",
+      "relationship": "can_reach",
+      "src": "i-08-021",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-004",
+      "relationship": "can_reach",
+      "src": "db-08-019",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-004",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-004",
+      "relationship": "can_reach",
+      "src": "i-08-009",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-007",
+      "relationship": "can_reach",
+      "src": "fn-08-002",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-007",
+      "relationship": "can_reach",
+      "src": "fn-08-017",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-007",
+      "relationship": "can_reach",
+      "src": "i-08-012",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-010",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-010",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-010",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-010",
+      "relationship": "can_reach",
+      "src": "i-08-000",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-010",
+      "relationship": "can_reach",
+      "src": "i-08-015",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-013",
+      "relationship": "can_reach",
+      "src": "fn-08-008",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-013",
+      "relationship": "can_reach",
+      "src": "i-08-003",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-013",
+      "relationship": "can_reach",
+      "src": "i-08-018",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-016",
+      "relationship": "can_reach",
+      "src": "db-08-001",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-016",
+      "relationship": "can_reach",
+      "src": "fn-08-011",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-016",
+      "relationship": "can_reach",
+      "src": "i-08-006",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-016",
+      "relationship": "can_reach",
+      "src": "i-08-021",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-019",
+      "relationship": "can_reach",
+      "src": "db-08-004",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-019",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-019",
+      "relationship": "can_reach",
+      "src": "i-08-009",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-002",
+      "relationship": "can_reach",
+      "src": "db-08-007",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-002",
+      "relationship": "can_reach",
+      "src": "fn-08-017",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-002",
+      "relationship": "can_reach",
+      "src": "i-08-012",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-005",
+      "relationship": "can_reach",
+      "src": "db-08-004",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-005",
+      "relationship": "can_reach",
+      "src": "db-08-010",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-005",
+      "relationship": "can_reach",
+      "src": "db-08-019",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-005",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-005",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-005",
+      "relationship": "can_reach",
+      "src": "i-08-000",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-005",
+      "relationship": "can_reach",
+      "src": "i-08-009",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-005",
+      "relationship": "can_reach",
+      "src": "i-08-015",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "can_reach",
+      "src": "db-08-013",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "can_reach",
+      "src": "i-08-003",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "can_reach",
+      "src": "i-08-018",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-011",
+      "relationship": "can_reach",
+      "src": "db-08-001",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-011",
+      "relationship": "can_reach",
+      "src": "db-08-016",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-011",
+      "relationship": "can_reach",
+      "src": "i-08-006",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-011",
+      "relationship": "can_reach",
+      "src": "i-08-021",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-014",
+      "relationship": "can_reach",
+      "src": "db-08-004",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-014",
+      "relationship": "can_reach",
+      "src": "db-08-019",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-014",
+      "relationship": "can_reach",
+      "src": "i-08-009",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-017",
+      "relationship": "can_reach",
+      "src": "db-08-007",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-017",
+      "relationship": "can_reach",
+      "src": "fn-08-002",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-017",
+      "relationship": "can_reach",
+      "src": "i-08-012",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-020",
+      "relationship": "can_reach",
+      "src": "db-08-004",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-020",
+      "relationship": "can_reach",
+      "src": "db-08-010",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-020",
+      "relationship": "can_reach",
+      "src": "db-08-019",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-020",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-020",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-020",
+      "relationship": "can_reach",
+      "src": "i-08-000",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-020",
+      "relationship": "can_reach",
+      "src": "i-08-009",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-020",
+      "relationship": "can_reach",
+      "src": "i-08-015",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-000",
+      "relationship": "can_reach",
+      "src": "db-08-010",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-000",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-000",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-000",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-000",
+      "relationship": "can_reach",
+      "src": "i-08-015",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-003",
+      "relationship": "can_reach",
+      "src": "db-08-013",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-003",
+      "relationship": "can_reach",
+      "src": "fn-08-008",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-003",
+      "relationship": "can_reach",
+      "src": "i-08-018",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-006",
+      "relationship": "can_reach",
+      "src": "db-08-001",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-006",
+      "relationship": "can_reach",
+      "src": "db-08-016",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-006",
+      "relationship": "can_reach",
+      "src": "fn-08-011",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-006",
+      "relationship": "can_reach",
+      "src": "i-08-021",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-009",
+      "relationship": "can_reach",
+      "src": "db-08-004",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-009",
+      "relationship": "can_reach",
+      "src": "db-08-019",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-009",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-012",
+      "relationship": "can_reach",
+      "src": "db-08-007",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-012",
+      "relationship": "can_reach",
+      "src": "fn-08-002",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-012",
+      "relationship": "can_reach",
+      "src": "fn-08-017",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-015",
+      "relationship": "can_reach",
+      "src": "db-08-010",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-015",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-015",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-015",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-015",
+      "relationship": "can_reach",
+      "src": "i-08-000",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-018",
+      "relationship": "can_reach",
+      "src": "db-08-013",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-018",
+      "relationship": "can_reach",
+      "src": "fn-08-008",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-018",
+      "relationship": "can_reach",
+      "src": "i-08-003",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-021",
+      "relationship": "can_reach",
+      "src": "db-08-001",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-021",
+      "relationship": "can_reach",
+      "src": "db-08-016",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-021",
+      "relationship": "can_reach",
+      "src": "fn-08-011",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-021",
+      "relationship": "can_reach",
+      "src": "i-08-006",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-001",
+      "relationship": "can_reach",
+      "src": "db-08-004",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-001",
+      "relationship": "can_reach",
+      "src": "db-08-019",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-001",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-001",
+      "relationship": "can_reach",
+      "src": "i-08-009",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-016",
+      "relationship": "can_reach",
+      "src": "db-08-004",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-016",
+      "relationship": "can_reach",
+      "src": "db-08-019",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-016",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-016",
+      "relationship": "can_reach",
+      "src": "i-08-009",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-005",
+      "relationship": "can_reach",
+      "src": "fn-08-008",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-011",
+      "relationship": "can_reach",
+      "src": "db-08-004",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-011",
+      "relationship": "can_reach",
+      "src": "db-08-019",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-011",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-011",
+      "relationship": "can_reach",
+      "src": "i-08-009",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-020",
+      "relationship": "can_reach",
+      "src": "fn-08-008",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-006",
+      "relationship": "can_reach",
+      "src": "db-08-004",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-006",
+      "relationship": "can_reach",
+      "src": "db-08-019",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-006",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-006",
+      "relationship": "can_reach",
+      "src": "i-08-009",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-021",
+      "relationship": "can_reach",
+      "src": "db-08-004",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-021",
+      "relationship": "can_reach",
+      "src": "db-08-019",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-021",
+      "relationship": "can_reach",
+      "src": "fn-08-014",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-021",
+      "relationship": "can_reach",
+      "src": "i-08-009",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-004",
+      "relationship": "can_reach",
+      "src": "db-08-007",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-004",
+      "relationship": "can_reach",
+      "src": "fn-08-002",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-004",
+      "relationship": "can_reach",
+      "src": "fn-08-017",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-004",
+      "relationship": "can_reach",
+      "src": "i-08-012",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-019",
+      "relationship": "can_reach",
+      "src": "db-08-007",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-019",
+      "relationship": "can_reach",
+      "src": "fn-08-002",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-019",
+      "relationship": "can_reach",
+      "src": "fn-08-017",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-019",
+      "relationship": "can_reach",
+      "src": "i-08-012",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "can_reach",
+      "src": "db-08-001",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "can_reach",
+      "src": "db-08-016",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "can_reach",
+      "src": "fn-08-011",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "can_reach",
+      "src": "i-08-006",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "can_reach",
+      "src": "i-08-021",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-014",
+      "relationship": "can_reach",
+      "src": "db-08-007",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-014",
+      "relationship": "can_reach",
+      "src": "fn-08-002",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-014",
+      "relationship": "can_reach",
+      "src": "fn-08-017",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-014",
+      "relationship": "can_reach",
+      "src": "i-08-012",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-009",
+      "relationship": "can_reach",
+      "src": "db-08-007",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-009",
+      "relationship": "can_reach",
+      "src": "fn-08-002",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-009",
+      "relationship": "can_reach",
+      "src": "fn-08-017",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-009",
+      "relationship": "can_reach",
+      "src": "i-08-012",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          443,
+          443
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-007",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          443,
+          443
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "db-08-007",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          443,
+          443
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-002",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          443,
+          443
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-002",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          443,
+          443
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-017",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          443,
+          443
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-08-017",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          443,
+          443
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-012",
+      "relationship": "can_reach",
+      "src": "fn-08-005",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          443,
+          443
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-08-012",
+      "relationship": "can_reach",
+      "src": "fn-08-020",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "acl-08-00",
+      "relationship": "protected_by",
+      "src": "subnet-08-00",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "acl-08-01",
+      "relationship": "protected_by",
+      "src": "subnet-08-01",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "acl-08-02",
+      "relationship": "protected_by",
+      "src": "subnet-08-02",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "acl-08-03",
+      "relationship": "protected_by",
+      "src": "subnet-08-03",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "acl-08-04",
+      "relationship": "protected_by",
+      "src": "subnet-08-04",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "db-08-001",
+      "relationship": "contains_resource",
+      "src": "subnet-08-01",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "db-08-004",
+      "relationship": "contains_resource",
+      "src": "subnet-08-04",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "db-08-007",
+      "relationship": "contains_resource",
+      "src": "subnet-08-02",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "db-08-010",
+      "relationship": "contains_resource",
+      "src": "subnet-08-00",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "db-08-013",
+      "relationship": "contains_resource",
+      "src": "subnet-08-03",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "db-08-016",
+      "relationship": "contains_resource",
+      "src": "subnet-08-01",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "db-08-019",
+      "relationship": "contains_resource",
+      "src": "subnet-08-04",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-002",
+      "relationship": "contains_resource",
+      "src": "subnet-08-02",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-002",
+      "relationship": "contains_resource",
+      "src": "subnet-08-03",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-005",
+      "relationship": "contains_resource",
+      "src": "subnet-08-00",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-005",
+      "relationship": "contains_resource",
+      "src": "subnet-08-01",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "contains_resource",
+      "src": "subnet-08-03",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-008",
+      "relationship": "contains_resource",
+      "src": "subnet-08-04",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-011",
+      "relationship": "contains_resource",
+      "src": "subnet-08-01",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-011",
+      "relationship": "contains_resource",
+      "src": "subnet-08-02",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-014",
+      "relationship": "contains_resource",
+      "src": "subnet-08-00",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-014",
+      "relationship": "contains_resource",
+      "src": "subnet-08-04",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-017",
+      "relationship": "contains_resource",
+      "src": "subnet-08-02",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-017",
+      "relationship": "contains_resource",
+      "src": "subnet-08-03",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-020",
+      "relationship": "contains_resource",
+      "src": "subnet-08-00",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "fn-08-020",
+      "relationship": "contains_resource",
+      "src": "subnet-08-01",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "i-08-000",
+      "relationship": "contains_resource",
+      "src": "subnet-08-00",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "i-08-003",
+      "relationship": "contains_resource",
+      "src": "subnet-08-03",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "i-08-006",
+      "relationship": "contains_resource",
+      "src": "subnet-08-01",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "i-08-009",
+      "relationship": "contains_resource",
+      "src": "subnet-08-04",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "i-08-012",
+      "relationship": "contains_resource",
+      "src": "subnet-08-02",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "i-08-015",
+      "relationship": "contains_resource",
+      "src": "subnet-08-00",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "i-08-018",
+      "relationship": "contains_resource",
+      "src": "subnet-08-03",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "i-08-021",
+      "relationship": "contains_resource",
+      "src": "subnet-08-01",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "igw-08",
+      "relationship": "routes_to",
+      "src": "rtb-08-a",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "igw-08",
+      "relationship": "routes_to",
+      "src": "rtb-08-b",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "nat-08",
+      "relationship": "routes_to",
+      "src": "rtb-08-a",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "nat-08",
+      "relationship": "routes_to",
+      "src": "rtb-08-b",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "pcx-08",
+      "relationship": "routes_to",
+      "src": "rtb-08-a",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "pcx-08",
+      "relationship": "routes_to",
+      "src": "rtb-08-b",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "rtb-08-a",
+      "relationship": "associated_with",
+      "src": "subnet-08-00",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "rtb-08-a",
+      "relationship": "associated_with",
+      "src": "subnet-08-02",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "rtb-08-a",
+      "relationship": "associated_with",
+      "src": "subnet-08-04",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "rtb-08-b",
+      "relationship": "associated_with",
+      "src": "subnet-08-01",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "rtb-08-b",
+      "relationship": "associated_with",
+      "src": "subnet-08-03",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-00",
+      "relationship": "uses_security_group",
+      "src": "db-08-004",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-00",
+      "relationship": "uses_security_group",
+      "src": "db-08-010",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-00",
+      "relationship": "uses_security_group",
+      "src": "db-08-019",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-00",
+      "relationship": "uses_security_group",
+      "src": "fn-08-005",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-00",
+      "relationship": "uses_security_group",
+      "src": "fn-08-014",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-00",
+      "relationship": "uses_security_group",
+      "src": "fn-08-020",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-00",
+      "relationship": "uses_security_group",
+      "src": "i-08-000",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-00",
+      "relationship": "uses_security_group",
+      "src": "i-08-009",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-00",
+      "relationship": "uses_security_group",
+      "src": "i-08-015",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-01",
+      "relationship": "uses_security_group",
+      "src": "db-08-001",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-01",
+      "relationship": "uses_security_group",
+      "src": "db-08-010",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-01",
+      "relationship": "uses_security_group",
+      "src": "db-08-016",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-01",
+      "relationship": "uses_security_group",
+      "src": "fn-08-005",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-01",
+      "relationship": "uses_security_group",
+      "src": "fn-08-011",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-01",
+      "relationship": "uses_security_group",
+      "src": "fn-08-020",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-01",
+      "relationship": "uses_security_group",
+      "src": "i-08-000",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-01",
+      "relationship": "uses_security_group",
+      "src": "i-08-006",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-01",
+      "relationship": "uses_security_group",
+      "src": "i-08-015",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-01",
+      "relationship": "uses_security_group",
+      "src": "i-08-021",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-02",
+      "relationship": "uses_security_group",
+      "src": "db-08-001",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-02",
+      "relationship": "uses_security_group",
+      "src": "db-08-007",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-02",
+      "relationship": "uses_security_group",
+      "src": "db-08-016",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-02",
+      "relationship": "uses_security_group",
+      "src": "fn-08-002",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-02",
+      "relationship": "uses_security_group",
+      "src": "fn-08-011",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-02",
+      "relationship": "uses_security_group",
+      "src": "fn-08-017",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-02",
+      "relationship": "uses_security_group",
+      "src": "i-08-006",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-02",
+      "relationship": "uses_security_group",
+      "src": "i-08-012",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-02",
+      "relationship": "uses_security_group",
+      "src": "i-08-021",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-03",
+      "relationship": "uses_security_group",
+      "src": "db-08-007",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-03",
+      "relationship": "uses_security_group",
+      "src": "db-08-013",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-03",
+      "relationship": "uses_security_group",
+      "src": "fn-08-002",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-03",
+      "relationship": "uses_security_group",
+      "src": "fn-08-008",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-03",
+      "relationship": "uses_security_group",
+      "src": "fn-08-017",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-03",
+      "relationship": "uses_security_group",
+      "src": "i-08-003",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-03",
+      "relationship": "uses_security_group",
+      "src": "i-08-012",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-03",
+      "relationship": "uses_security_group",
+      "src": "i-08-018",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-04",
+      "relationship": "uses_security_group",
+      "src": "db-08-004",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-04",
+      "relationship": "uses_security_group",
+      "src": "db-08-013",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-04",
+      "relationship": "uses_security_group",
+      "src": "db-08-019",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-04",
+      "relationship": "uses_security_group",
+      "src": "fn-08-008",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-04",
+      "relationship": "uses_security_group",
+      "src": "fn-08-014",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-04",
+      "relationship": "uses_security_group",
+      "src": "i-08-003",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-04",
+      "relationship": "uses_security_group",
+      "src": "i-08-009",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "sg-08-04",
+      "relationship": "uses_security_group",
+      "src": "i-08-018",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-00",
+      "relationship": "in_subnet",
+      "src": "fn-08-005",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-00",
+      "relationship": "in_subnet",
+      "src": "fn-08-014",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-00",
+      "relationship": "in_subnet",
+      "src": "fn-08-020",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-00",
+      "relationship": "in_subnet",
+      "src": "i-08-000",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-00",
+      "relationship": "in_subnet",
+      "src": "i-08-015",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-01",
+      "relationship": "in_subnet",
+      "src": "fn-08-005",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-01",
+      "relationship": "in_subnet",
+      "src": "fn-08-011",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-01",
+      "relationship": "in_subnet",
+      "src": "fn-08-020",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-01",
+      "relationship": "in_subnet",
+      "src": "i-08-006",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-01",
+      "relationship": "in_subnet",
+      "src": "i-08-021",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-02",
+      "relationship": "in_subnet",
+      "src": "fn-08-002",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-02",
+      "relationship": "in_subnet",
+      "src": "fn-08-011",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-02",
+      "relationship": "in_subnet",
+      "src": "fn-08-017",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-02",
+      "relationship": "in_subnet",
+      "src": "i-08-012",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-03",
+      "relationship": "in_subnet",
+      "src": "fn-08-002",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-03",
+      "relationship": "in_subnet",
+      "src": "fn-08-008",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-03",
+      "relationship": "in_subnet",
+      "src": "fn-08-017",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-03",
+      "relationship": "in_subnet",
+      "src": "i-08-003",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-03",
+      "relationship": "in_subnet",
+      "src": "i-08-018",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-04",
+      "relationship": "in_subnet",
+      "src": "fn-08-008",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-04",
+      "relationship": "in_subnet",
+      "src": "fn-08-014",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "subnet-08-04",
+      "relationship": "in_subnet",
+      "src": "i-08-009",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-a",
+      "relationship": "belongs_to_vpc",
+      "src": "subnet-08-00",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-a",
+      "relationship": "belongs_to_vpc",
+      "src": "subnet-08-02",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-a",
+      "relationship": "belongs_to_vpc",
+      "src": "subnet-08-04",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-a",
+      "relationship": "in_vpc",
+      "src": "fn-08-002",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-a",
+      "relationship": "in_vpc",
+      "src": "fn-08-005",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-a",
+      "relationship": "in_vpc",
+      "src": "fn-08-014",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-a",
+      "relationship": "in_vpc",
+      "src": "fn-08-017",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-a",
+      "relationship": "in_vpc",
+      "src": "fn-08-020",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-a",
+      "relationship": "peered_with",
+      "src": "pcx-08",
+      "weight": 3
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-b",
+      "relationship": "belongs_to_vpc",
+      "src": "subnet-08-01",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-b",
+      "relationship": "belongs_to_vpc",
+      "src": "subnet-08-03",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-b",
+      "relationship": "in_vpc",
+      "src": "fn-08-008",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-b",
+      "relationship": "in_vpc",
+      "src": "fn-08-011",
+      "weight": 0
+    },
+    {
+      "attrs": {},
+      "directed": true,
+      "dst": "vpc-08-b",
+      "relationship": "peered_with",
+      "src": "pcx-08",
+      "weight": 3
+    }
+  ],
+  "nodes": [
+    {
+      "base": {
+        "accepter_vpc_id": "vpc-08-b",
+        "requester_vpc_id": "vpc-08-a",
+        "status": "active"
+      },
+      "category": "network",
+      "cost": null,
+      "id": "pcx-08",
+      "label": "VPC Peering: pcx-08",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "vpc_peering_connection",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "attached_instances": [],
+        "egress_rules": [
+          {
+            "dest_sg_ids": [
+              "sg-08-00"
+            ],
+            "from_port": 0,
+            "ip_ranges": [],
+            "protocol": "-1",
+            "to_port": 65535
+          }
+        ],
+        "name": "account-8-sg-4",
+        "rules": [
+          {
+            "from_port": 22,
+            "ip_ranges": [
+              "10.0.0.0/8"
+            ],
+            "protocol": "tcp",
+            "source_sg_ids": [
+              "sg-08-04"
+            ],
+            "to_port": 22
+          },
+          {
+            "from_port": 443,
+            "ip_ranges": [
+              "0.0.0.0/0",
+              "::/0"
+            ],
+            "protocol": "tcp",
+            "to_port": 443
+          },
+          {
+            "from_port": null,
+            "ip_ranges": [],
+            "protocol": "-1",
+            "source_sg_ids": [
+              "sg-08-04"
+            ],
+            "to_port": null
+          }
+        ],
+        "rules_count": 3
+      },
+      "category": "network_boundary",
+      "cost": null,
+      "id": "sg-08-04",
+      "label": "SG: account-8-sg-4",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "security_group",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "attached_instances": [],
+        "egress_rules": [
+          {
+            "dest_sg_ids": [
+              "sg-08-01"
+            ],
+            "from_port": 0,
+            "ip_ranges": [],
+            "protocol": "-1",
+            "to_port": 65535
+          }
+        ],
+        "name": "account-8-sg-0",
+        "rules": [
+          {
+            "from_port": 0,
+            "ip_ranges": [],
+            "protocol": "-1",
+            "source_sg_ids": [
+              "sg-08-00"
+            ],
+            "to_port": 65535
+          },
+          {
+            "from_port": 443,
+            "ip_ranges": [
+              "0.0.0.0/0",
+              "::/0"
+            ],
+            "protocol": "tcp",
+            "to_port": 443
+          },
+          {
+            "from_port": null,
+            "ip_ranges": [],
+            "protocol": "-1",
+            "source_sg_ids": [
+              "sg-08-00"
+            ],
+            "to_port": null
+          }
+        ],
+        "rules_count": 3
+      },
+      "category": "network_boundary",
+      "cost": null,
+      "id": "sg-08-00",
+      "label": "SG: account-8-sg-0",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "security_group",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "attached_instances": [],
+        "egress_rules": [
+          {
+            "dest_sg_ids": [
+              "sg-08-02"
+            ],
+            "from_port": 0,
+            "ip_ranges": [],
+            "protocol": "-1",
+            "to_port": 65535
+          }
+        ],
+        "name": "account-8-sg-1",
+        "rules": [
+          {
+            "from_port": 443,
+            "ip_ranges": [
+              "0.0.0.0/0",
+              "::/0"
+            ],
+            "protocol": "tcp",
+            "to_port": 443
+          },
+          {
+            "from_port": 22,
+            "ip_ranges": [
+              "10.0.0.0/8"
+            ],
+            "protocol": "tcp",
+            "source_sg_ids": [
+              "sg-08-02"
+            ],
+            "to_port": 22
+          },
+          {
+            "from_port": null,
+            "ip_ranges": [],
+            "protocol": "-1",
+            "source_sg_ids": [
+              "sg-08-01"
+            ],
+            "to_port": null
+          }
+        ],
+        "rules_count": 3
+      },
+      "category": "network_boundary",
+      "cost": null,
+      "id": "sg-08-01",
+      "label": "SG: account-8-sg-1",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "security_group",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "attached_instances": [],
+        "egress_rules": [
+          {
+            "dest_sg_ids": [
+              "sg-08-03"
+            ],
+            "from_port": 0,
+            "ip_ranges": [],
+            "protocol": "-1",
+            "to_port": 65535
+          }
+        ],
+        "name": "account-8-sg-2",
+        "rules": [
+          {
+            "from_port": 443,
+            "ip_ranges": [
+              "0.0.0.0/0",
+              "::/0"
+            ],
+            "protocol": "tcp",
+            "to_port": 443
+          },
+          {
+            "from_port": 443,
+            "ip_ranges": [
+              "0.0.0.0/0",
+              "::/0"
+            ],
+            "protocol": "tcp",
+            "to_port": 443
+          },
+          {
+            "from_port": null,
+            "ip_ranges": [],
+            "protocol": "-1",
+            "source_sg_ids": [
+              "sg-08-02"
+            ],
+            "to_port": null
+          }
+        ],
+        "rules_count": 3
+      },
+      "category": "network_boundary",
+      "cost": null,
+      "id": "sg-08-02",
+      "label": "SG: account-8-sg-2",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "security_group",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "attached_instances": [],
+        "egress_rules": [
+          {
+            "dest_sg_ids": [
+              "sg-08-04"
+            ],
+            "from_port": 0,
+            "ip_ranges": [],
+            "protocol": "-1",
+            "to_port": 65535
+          }
+        ],
+        "name": "account-8-sg-3",
+        "rules": [
+          {
+            "from_port": 443,
+            "ip_ranges": [
+              "0.0.0.0/0",
+              "::/0"
+            ],
+            "protocol": "tcp",
+            "to_port": 443
+          },
+          {
+            "from_port": 443,
+            "ip_ranges": [
+              "0.0.0.0/0",
+              "::/0"
+            ],
+            "protocol": "tcp",
+            "to_port": 443
+          },
+          {
+            "from_port": null,
+            "ip_ranges": [],
+            "protocol": "-1",
+            "source_sg_ids": [
+              "sg-08-03"
+            ],
+            "to_port": null
+          }
+        ],
+        "rules_count": 3
+      },
+      "category": "network_boundary",
+      "cost": null,
+      "id": "sg-08-03",
+      "label": "SG: account-8-sg-3",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "security_group",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "cidr": "10.8.0.0/24",
+        "resource_count": 6,
+        "vpc_id": "vpc-08-a"
+      },
+      "category": "network",
+      "cost": null,
+      "id": "subnet-08-00",
+      "label": "Subnet: subnet-08-00",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "vpc_subnet",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "cidr": "10.8.1.0/24",
+        "resource_count": 7,
+        "vpc_id": "vpc-08-b"
+      },
+      "category": "network",
+      "cost": null,
+      "id": "subnet-08-01",
+      "label": "Subnet: subnet-08-01",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "vpc_subnet",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "cidr": "10.8.2.0/24",
+        "resource_count": 5,
+        "vpc_id": "vpc-08-a"
+      },
+      "category": "network",
+      "cost": null,
+      "id": "subnet-08-02",
+      "label": "Subnet: subnet-08-02",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "vpc_subnet",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "cidr": "10.8.3.0/24",
+        "resource_count": 6,
+        "vpc_id": "vpc-08-b"
+      },
+      "category": "network",
+      "cost": null,
+      "id": "subnet-08-03",
+      "label": "Subnet: subnet-08-03",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "vpc_subnet",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "cidr": "10.8.4.0/24",
+        "resource_count": 5,
+        "vpc_id": "vpc-08-a"
+      },
+      "category": "network",
+      "cost": null,
+      "id": "subnet-08-04",
+      "label": "Subnet: subnet-08-04",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "vpc_subnet",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "encrypted": true,
+        "publicly_accessible": false,
+        "sg_ids": [
+          "sg-08-00",
+          "sg-08-01"
+        ],
+        "subnet_id": "subnet-08-00"
+      },
+      "category": "database",
+      "cost": null,
+      "id": "db-08-010",
+      "label": "RDS: db-08-010",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "rds_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "encrypted": true,
+        "publicly_accessible": false,
+        "sg_ids": [
+          "sg-08-01",
+          "sg-08-02"
+        ],
+        "subnet_id": "subnet-08-01"
+      },
+      "category": "database",
+      "cost": null,
+      "id": "db-08-001",
+      "label": "RDS: db-08-001",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "rds_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "encrypted": true,
+        "publicly_accessible": false,
+        "sg_ids": [
+          "sg-08-01",
+          "sg-08-02"
+        ],
+        "subnet_id": "subnet-08-01"
+      },
+      "category": "database",
+      "cost": null,
+      "id": "db-08-016",
+      "label": "RDS: db-08-016",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "rds_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "encrypted": true,
+        "publicly_accessible": false,
+        "sg_ids": [
+          "sg-08-02",
+          "sg-08-03"
+        ],
+        "subnet_id": "subnet-08-02"
+      },
+      "category": "database",
+      "cost": null,
+      "id": "db-08-007",
+      "label": "RDS: db-08-007",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "rds_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "encrypted": true,
+        "publicly_accessible": false,
+        "sg_ids": [
+          "sg-08-03",
+          "sg-08-04"
+        ],
+        "subnet_id": "subnet-08-03"
+      },
+      "category": "database",
+      "cost": null,
+      "id": "db-08-013",
+      "label": "RDS: db-08-013",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "rds_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "encrypted": true,
+        "publicly_accessible": false,
+        "sg_ids": [
+          "sg-08-04",
+          "sg-08-00"
+        ],
+        "subnet_id": "subnet-08-04"
+      },
+      "category": "database",
+      "cost": null,
+      "id": "db-08-004",
+      "label": "RDS: db-08-004",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "rds_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "encrypted": true,
+        "publicly_accessible": false,
+        "sg_ids": [
+          "sg-08-04",
+          "sg-08-00"
+        ],
+        "subnet_id": "subnet-08-04"
+      },
+      "category": "database",
+      "cost": null,
+      "id": "db-08-019",
+      "label": "RDS: db-08-019",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "rds_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "entries": [
+          {
+            "cidr_block": "10.0.0.0/8",
+            "egress": false,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "allow",
+            "rule_number": 50
+          },
+          {
+            "cidr_block": "10.0.0.0/8",
+            "egress": false,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "deny",
+            "rule_number": 100
+          },
+          {
+            "cidr_block": "0.0.0.0/0",
+            "egress": true,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "allow",
+            "rule_number": 110
+          }
+        ],
+        "is_default": false,
+        "vpc_id": "vpc-08-a"
+      },
+      "category": "network_boundary",
+      "cost": null,
+      "id": "acl-08-02",
+      "label": "Network ACL: acl-08-02",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "network_acl",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "entries": [
+          {
+            "cidr_block": "10.0.0.0/8",
+            "egress": false,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "allow",
+            "rule_number": 50
+          },
+          {
+            "cidr_block": "10.0.0.0/8",
+            "egress": false,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "deny",
+            "rule_number": 100
+          },
+          {
+            "cidr_block": "0.0.0.0/0",
+            "egress": true,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "allow",
+            "rule_number": 110
+          }
+        ],
+        "is_default": false,
+        "vpc_id": "vpc-08-a"
+      },
+      "category": "network_boundary",
+      "cost": null,
+      "id": "acl-08-04",
+      "label": "Network ACL: acl-08-04",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "network_acl",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "entries": [
+          {
+            "cidr_block": "10.0.0.0/8",
+            "egress": false,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "allow",
+            "rule_number": 50
+          },
+          {
+            "cidr_block": "10.0.0.0/8",
+            "egress": false,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "deny",
+            "rule_number": 100
+          },
+          {
+            "cidr_block": "0.0.0.0/0",
+            "egress": true,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "allow",
+            "rule_number": 110
+          }
+        ],
+        "is_default": false,
+        "vpc_id": "vpc-08-b"
+      },
+      "category": "network_boundary",
+      "cost": null,
+      "id": "acl-08-01",
+      "label": "Network ACL: acl-08-01",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "network_acl",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "entries": [
+          {
+            "cidr_block": "10.0.0.0/8",
+            "egress": false,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "deny",
+            "rule_number": 100
+          },
+          {
+            "cidr_block": "0.0.0.0/0",
+            "egress": true,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "allow",
+            "rule_number": 110
+          }
+        ],
+        "is_default": false,
+        "vpc_id": "vpc-08-a"
+      },
+      "category": "network_boundary",
+      "cost": null,
+      "id": "acl-08-00",
+      "label": "Network ACL: acl-08-00",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "network_acl",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "entries": [
+          {
+            "cidr_block": "10.0.0.0/8",
+            "egress": false,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "deny",
+            "rule_number": 100
+          },
+          {
+            "cidr_block": "0.0.0.0/0",
+            "egress": true,
+            "ipv6_cidr_block": null,
+            "port_from": 0,
+            "port_to": 65535,
+            "protocol": "-1",
+            "rule_action": "allow",
+            "rule_number": 110
+          }
+        ],
+        "is_default": false,
+        "vpc_id": "vpc-08-b"
+      },
+      "category": "network_boundary",
+      "cost": null,
+      "id": "acl-08-03",
+      "label": "Network ACL: acl-08-03",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "network_acl",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "has_public_ip": false,
+        "instance_type": "t3.micro",
+        "sg_ids": [
+          "sg-08-00",
+          "sg-08-01"
+        ],
+        "state": "running",
+        "subnet_id": "subnet-08-00"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "i-08-015",
+      "label": "EC2: i-08-015",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "ec2_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "has_public_ip": false,
+        "instance_type": "t3.micro",
+        "sg_ids": [
+          "sg-08-01",
+          "sg-08-02"
+        ],
+        "state": "running",
+        "subnet_id": "subnet-08-01"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "i-08-006",
+      "label": "EC2: i-08-006",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "ec2_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "has_public_ip": false,
+        "instance_type": "t3.micro",
+        "sg_ids": [
+          "sg-08-01",
+          "sg-08-02"
+        ],
+        "state": "running",
+        "subnet_id": "subnet-08-01"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "i-08-021",
+      "label": "EC2: i-08-021",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "ec2_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "has_public_ip": false,
+        "instance_type": "t3.micro",
+        "sg_ids": [
+          "sg-08-03",
+          "sg-08-04"
+        ],
+        "state": "running",
+        "subnet_id": "subnet-08-03"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "i-08-003",
+      "label": "EC2: i-08-003",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "ec2_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "has_public_ip": false,
+        "instance_type": "t3.micro",
+        "sg_ids": [
+          "sg-08-03",
+          "sg-08-04"
+        ],
+        "state": "running",
+        "subnet_id": "subnet-08-03"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "i-08-018",
+      "label": "EC2: i-08-018",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "ec2_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "has_public_ip": false,
+        "instance_type": "t3.micro",
+        "sg_ids": [
+          "sg-08-04",
+          "sg-08-00"
+        ],
+        "state": "running",
+        "subnet_id": "subnet-08-04"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "i-08-009",
+      "label": "EC2: i-08-009",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "ec2_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "has_public_ip": true,
+        "instance_type": "t3.micro",
+        "sg_ids": [
+          "sg-08-00",
+          "sg-08-01"
+        ],
+        "state": "running",
+        "subnet_id": "subnet-08-00"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "i-08-000",
+      "label": "EC2: i-08-000",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "ec2_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "has_public_ip": true,
+        "instance_type": "t3.micro",
+        "sg_ids": [
+          "sg-08-02",
+          "sg-08-03"
+        ],
+        "state": "running",
+        "subnet_id": "subnet-08-02"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "i-08-012",
+      "label": "EC2: i-08-012",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "ec2_instance",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "is_default": false,
+        "source": "subnet_reference",
+        "subnet_count": 2
+      },
+      "category": "network",
+      "cost": null,
+      "id": "vpc-08-b",
+      "label": "VPC: vpc-08-b",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "vpc",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "is_default": false,
+        "source": "subnet_reference",
+        "subnet_count": 3
+      },
+      "category": "network",
+      "cost": null,
+      "id": "vpc-08-a",
+      "label": "VPC: vpc-08-a",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "vpc",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "is_main": true,
+        "routes": [
+          {
+            "destination_cidr": "0.0.0.0/0",
+            "target_id": "igw-08",
+            "target_type": "internet_gateway"
+          },
+          {
+            "destination_cidr": "10.99.0.0/16",
+            "target_id": "nat-08",
+            "target_type": "nat_gateway"
+          },
+          {
+            "destination_cidr": "10.8.0.0/16",
+            "target_id": "pcx-08",
+            "target_type": "vpc_peering"
+          }
+        ],
+        "vpc_id": "vpc-08-a"
+      },
+      "category": "network",
+      "cost": null,
+      "id": "rtb-08-a",
+      "label": "Route Table: rtb-08-a",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "route_table",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "is_main": true,
+        "routes": [
+          {
+            "destination_cidr": "0.0.0.0/0",
+            "target_id": "igw-08",
+            "target_type": "internet_gateway"
+          },
+          {
+            "destination_cidr": "10.99.0.0/16",
+            "target_id": "nat-08",
+            "target_type": "nat_gateway"
+          },
+          {
+            "destination_cidr": "10.8.0.0/16",
+            "target_id": "pcx-08",
+            "target_type": "vpc_peering"
+          }
+        ],
+        "vpc_id": "vpc-08-b"
+      },
+      "category": "network",
+      "cost": null,
+      "id": "rtb-08-b",
+      "label": "Route Table: rtb-08-b",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "route_table",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "role_arn": null,
+        "sg_ids": [
+          "sg-08-00",
+          "sg-08-01"
+        ],
+        "subnet_count": 2,
+        "subnet_ids": [
+          "subnet-08-00",
+          "subnet-08-01"
+        ],
+        "vpc_id": "vpc-08-a"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "fn-08-005",
+      "label": "Lambda: fn-08-005",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "lambda_function",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "role_arn": null,
+        "sg_ids": [
+          "sg-08-00",
+          "sg-08-01"
+        ],
+        "subnet_count": 2,
+        "subnet_ids": [
+          "subnet-08-00",
+          "subnet-08-01"
+        ],
+        "vpc_id": "vpc-08-a"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "fn-08-020",
+      "label": "Lambda: fn-08-020",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "lambda_function",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "role_arn": null,
+        "sg_ids": [
+          "sg-08-01",
+          "sg-08-02"
+        ],
+        "subnet_count": 2,
+        "subnet_ids": [
+          "subnet-08-01",
+          "subnet-08-02"
+        ],
+        "vpc_id": "vpc-08-b"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "fn-08-011",
+      "label": "Lambda: fn-08-011",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "lambda_function",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "role_arn": null,
+        "sg_ids": [
+          "sg-08-02",
+          "sg-08-03"
+        ],
+        "subnet_count": 2,
+        "subnet_ids": [
+          "subnet-08-02",
+          "subnet-08-03"
+        ],
+        "vpc_id": "vpc-08-a"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "fn-08-002",
+      "label": "Lambda: fn-08-002",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "lambda_function",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "role_arn": null,
+        "sg_ids": [
+          "sg-08-02",
+          "sg-08-03"
+        ],
+        "subnet_count": 2,
+        "subnet_ids": [
+          "subnet-08-02",
+          "subnet-08-03"
+        ],
+        "vpc_id": "vpc-08-a"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "fn-08-017",
+      "label": "Lambda: fn-08-017",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "lambda_function",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "role_arn": null,
+        "sg_ids": [
+          "sg-08-03",
+          "sg-08-04"
+        ],
+        "subnet_count": 2,
+        "subnet_ids": [
+          "subnet-08-03",
+          "subnet-08-04"
+        ],
+        "vpc_id": "vpc-08-b"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "fn-08-008",
+      "label": "Lambda: fn-08-008",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "lambda_function",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {
+        "role_arn": null,
+        "sg_ids": [
+          "sg-08-04",
+          "sg-08-00"
+        ],
+        "subnet_count": 2,
+        "subnet_ids": [
+          "subnet-08-04",
+          "subnet-08-00"
+        ],
+        "vpc_id": "vpc-08-a"
+      },
+      "category": "compute",
+      "cost": null,
+      "id": "fn-08-014",
+      "label": "Lambda: fn-08-014",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "lambda_function",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {},
+      "category": "network",
+      "cost": null,
+      "id": "nat-08",
+      "label": "NAT Gateway: nat-08",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "nat_gateway",
+      "security": null,
+      "telemetry": null
+    },
+    {
+      "base": {},
+      "category": "network_boundary",
+      "cost": null,
+      "id": "igw-08",
+      "label": "Internet Gateway: igw-08",
+      "limits": null,
+      "provider": "aws",
+      "resource_type": "internet_gateway",
+      "security": null,
+      "telemetry": null
+    }
+  ]
+}

@@ -24,6 +24,8 @@ from app.models import (
     RouteTable,
     S3Bucket,
     SecurityGroup,
+    NetworkACL,
+    NACLEntry,
 )
 
 
@@ -99,11 +101,23 @@ class RouteChange(_StrictModel):
         return value
 
 
+class NACLEntryChange(_StrictModel):
+    rule_number: int
+    protocol: str
+    rule_action: str
+    egress: bool
+    cidr_block: str | None = None
+    ipv6_cidr_block: str | None = None
+    port_from: int | None = None
+    port_to: int | None = None
+
+
 _MUTATION_NESTED_TYPES = {
     ("security_group", "rules"): list[SecurityGroupRuleChange],
     ("security_group", "egress_rules"): list[SecurityGroupRuleChange],
     ("iam_role_policy", "access_statements"): list[AccessStatementChange],
     ("route_table", "routes"): list[RouteChange],
+    ("network_acl", "entries"): list[NACLEntryChange],
 }
 
 
@@ -203,6 +217,16 @@ _MUTATION_CAPABILITIES = {
             "required_fields": ["access_statements"],
             "allowed_fields": ["access_statements"],
             "message": "Replace the complete normalized statement list for one existing collected role identified by role ARN",
+        },),
+    },
+    "network_acl": {
+        "model": NetworkACL,
+        "operations": _CRUD_OPERATIONS,
+        "constraints": ({
+            "operations": ["modify"], "kind": "complete_field_replacement",
+            "fields": [], "required_fields": [],
+            "allowed_fields": ["entries", "associated_subnet_ids"],
+            "message": "Replace complete NACL entries and/or subnet associations",
         },),
     },
     "route_table": {
@@ -336,6 +360,8 @@ def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
         return infra.rds.rds_instances if resource_type == "rds_instance" else infra.rds.rds_snapshots
     if resource_type == "s3_bucket":
         return infra.s3.buckets
+    if resource_type == "network_acl":
+        return infra.vpc.nacls
     if resource_type == "iam_role":
         return infra.iam.role_policies
     return infra.lambda_data.functions
@@ -494,6 +520,11 @@ def _delete(
     if index is None:
         raise ValueError(f"Target not found: {resource_type}")
     target = collection[index]
+    if resource_type == "network_acl":
+        if target.associated_subnet_ids:
+            raise ValueError("Network ACL still has associated subnets")
+        if target.is_default:
+            raise ValueError("Cannot delete the default network ACL")
     if resource_type == "security_group":
         users = sorted({item.id for item in infra.ec2.instances if resource_id in item.sg_ids} | {
             item.id for item in infra.rds.rds_instances if resource_id in item.sg_ids
@@ -667,6 +698,42 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
     _sync_route_table_public_subnets(infra)
 
 
+def _replace_network_acl(infra: AWSInfrastructure, change: Change) -> None:
+    matches = [acl for acl in infra.vpc.nacls if acl.id == change.resource_id]
+    if not matches:
+        raise ValueError("Target not found: network_acl")
+    if set(change.fields) - {"entries", "associated_subnet_ids"}:
+        raise ValueError("network_acl modify allows only entries and associated_subnet_ids")
+    acl = matches[0]
+    if "entries" in change.fields:
+        entries = [NACLEntry.model_validate(item) for item in change.fields["entries"]]
+        keys = [(entry.egress, entry.rule_number) for entry in entries]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Network ACL rule_number must be unique per egress direction")
+        acl.entries = entries
+    if "associated_subnet_ids" in change.fields:
+        requested = list(dict.fromkeys(change.fields["associated_subnet_ids"]))
+        for subnet_id in requested:
+            for other in infra.vpc.nacls:
+                if other.id == acl.id:
+                    continue
+                if subnet_id in other.associated_subnet_ids:
+                    other.associated_subnet_ids.remove(subnet_id)
+                    other.association_ids = {k: v for k, v in other.association_ids.items() if v != subnet_id}
+        acl.associated_subnet_ids = requested
+        acl.association_ids = {k: v for k, v in acl.association_ids.items() if v in requested}
+
+
+def _default_network_acl_entries() -> list[NACLEntry]:
+    result = []
+    for egress in (False, True):
+        result.extend([
+            NACLEntry(rule_number=32767, protocol="-1", rule_action="deny", egress=egress, cidr_block="0.0.0.0/0"),
+            NACLEntry(rule_number=32767, protocol="-1", rule_action="deny", egress=egress, ipv6_cidr_block="::/0"),
+        ])
+    return result
+
+
 def recompute_derived_state(
     infra: AWSInfrastructure, *, reconcile_security_group_attachments: bool = False,
 ) -> AWSInfrastructure:
@@ -728,6 +795,23 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         _delete(result, resource_type, change.resource_id, change.fields)
         _sync_counts(result)
         return recompute_derived_state(result)
+    if resource_type == "network_acl":
+        if change.op == "add":
+            if "association_ids" in change.fields:
+                raise ValueError("association_ids is collector-derived and cannot be supplied")
+            entries = change.fields.get("entries", [])
+            keys = [(item.get("egress"), item.get("rule_number")) for item in entries]
+            if len(keys) != len(set(keys)):
+                raise ValueError("Network ACL rule_number must be unique per egress direction")
+        elif change.op == "modify":
+            _replace_network_acl(result, change)
+            return recompute_derived_state(result)
+        if change.op == "add" and "entries" not in change.fields:
+            change = change.model_copy(update={"fields": {**change.fields, "entries": [entry.model_dump() for entry in _default_network_acl_entries()]}})
+        if change.op == "delete":
+            _delete(result, resource_type, change.resource_id, change.fields)
+            _sync_counts(result)
+            return recompute_derived_state(result)
 
     model_type = _model_for(resource_type)
 
@@ -737,6 +821,12 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         if any(_identity(resource_type, item) == _identity(resource_type, resource) for item in _collection(result, resource_type)):
             raise ValueError(f"Target already exists: {resource_type}")
         _collection(result, resource_type).append(resource)
+        if resource_type == "network_acl":
+            for subnet_id in resource.associated_subnet_ids:
+                for other in result.vpc.nacls:
+                    if other.id != resource.id and subnet_id in other.associated_subnet_ids:
+                        other.associated_subnet_ids.remove(subnet_id)
+                        other.association_ids = {k: v for k, v in other.association_ids.items() if v != subnet_id}
         _update_add_summaries(result, resource_type, resource)
     elif change.op == "modify":
         _field_check(model_type, change.fields)

@@ -45,6 +45,7 @@ from app.aws_api_ingest import translate_api_calls, validate_change_regions
 from app.aws_cli_ingest import parse_cli_commands
 from app.cfn_ingest import convert_change_set
 from app.verdict import CombinedVerdict, combined_verdict
+from app.diffing import graph_warning_strings
 from app import branches, identifiers
 from app.in_use_evidence import EvidenceRequest, EvidenceEstimate, build_estimate, read_evidence, SOURCES, WINDOW_DAYS
 from app.database import Project, SupabaseIdentity
@@ -1657,7 +1658,7 @@ def _terraform_translator(branch_id: str, document):
         group.id: {"rules": copy.deepcopy(group.rules), "egress_rules": copy.deepcopy(group.egress_rules)}
         for group in state.ec2.security_groups
     }
-    return translate_plan(document, sg_rules=sg_rule_map)
+    return translate_plan(document, sg_rules=sg_rule_map, nacls={acl.id: acl for acl in state.vpc.nacls})
 
 
 @app.post('/branches/{branch_id}/plans/terraform', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
@@ -1683,7 +1684,15 @@ def _aws_translator(branch_id: str, document, cli: bool = False):
     }
     if cli:
         document = parse_cli_commands(document)
-    translated = translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get)
+    nacl_map = {acl.id: copy.deepcopy(acl) for acl in state.vpc.nacls}
+    def nacl_lookup(acl_id):
+        if acl_id in nacl_map:
+            return nacl_map[acl_id]
+        if acl_id.startswith("association:"):
+            association_id = acl_id.split(":", 1)[1]
+            return next((acl for acl in nacl_map.values() if association_id in acl.association_ids), None)
+        return None
+    translated = translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get, nacls=nacl_lookup)
     validate_change_regions(document["calls"], state.region)
     return translated
 
@@ -1696,7 +1705,9 @@ def _cfn_translator(branch_id: str, document):
         branch = branches.get_branch(branch_id)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    api_document, extras = convert_change_set(document)
+    state = branches.rebuild_branch_state(branch)
+    nacl_snapshot = {acl.id: acl for acl in state.vpc.nacls}
+    api_document, extras = convert_change_set(document, nacls=nacl_snapshot)
     if api_document["calls"]:
         state = branches.rebuild_branch_state(branch)
         validate_change_regions(api_document["calls"], state.region, document_region)
@@ -3690,7 +3701,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
 
         # Build local warnings list — starts with collector warnings (skipped services),
         # backend failures (Gemini, S3, DB) are appended below
-        warnings = list(infrastructure.warnings)
+        warnings = list(infrastructure.warnings) + graph_warning_strings(graph.warnings)
 
         # STEP 4 — Get AI explanation from Gemini (skipped in raw mode for MCP callers)
         if _is_raw_mode(request, raw):

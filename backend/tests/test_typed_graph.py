@@ -740,7 +740,15 @@ def _allow_ssh_nacl(*entries):
         id="acl-adversarial",
         vpc_id="vpc-adversarial",
         associated_subnet_ids=["subnet-adversarial"],
-        entries=list(entries),
+        entries=list(entries) + [NACLEntry(
+            rule_number=100,
+            protocol="6",
+            rule_action="allow",
+            egress=True,
+            cidr_block="0.0.0.0/0",
+            port_from=1024,
+            port_to=65535,
+        )],
     )]
 
 

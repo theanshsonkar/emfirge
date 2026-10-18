@@ -148,7 +148,51 @@ def _removal(resource: dict[str, Any], address: str, policy_action: str | None) 
     return [], [_extra(address, typ, "Delete" + suffix)]
 
 
-def convert_change_set(doc: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _resolved(value: Any) -> Any:
+    if isinstance(value, (str, int, bool)) or value is None:
+        return value
+    return None
+
+
+def _nacl_entry_call(resource: dict[str, Any], properties: dict[str, Any], operation: str) -> dict[str, Any] | None:
+    acl_id = _resolved(properties.get("NetworkAclId")); number = _resolved(properties.get("RuleNumber"))
+    protocol = _resolved(properties.get("Protocol", properties.get("IpProtocol")))
+    action = _resolved(properties.get("RuleAction")); egress = _resolved(properties.get("Egress", False))
+    if not isinstance(acl_id, str) or not isinstance(number, int) or isinstance(number, bool) or not isinstance(protocol, (str, int)) or not isinstance(action, str) or not isinstance(egress, bool):
+        return None
+    params: dict[str, Any] = {"NetworkAclId": acl_id, "RuleNumber": number, "Protocol": str(protocol), "RuleAction": action, "Egress": egress}
+    if isinstance(properties.get("CidrBlock"), str): params["CidrBlock"] = properties["CidrBlock"]
+    if isinstance(properties.get("Ipv6CidrBlock"), str): params["Ipv6CidrBlock"] = properties["Ipv6CidrBlock"]
+    port = properties.get("PortRange")
+    if isinstance(port, dict):
+        lo, hi = _resolved(port.get("From")), _resolved(port.get("To"))
+        if isinstance(lo, int) and isinstance(hi, int): params["PortRange"] = {"From": lo, "To": hi}
+    return {"service": "ec2", "operation": operation, "parameters": params}
+
+
+def _nacl_snapshot_lookup(snapshot: Any, acl_id: str) -> Any:
+    if snapshot is None: return None
+    if callable(snapshot): return snapshot(acl_id)
+    if acl_id in snapshot: return snapshot.get(acl_id)
+    if acl_id.startswith("association:"):
+        association_id = acl_id.split(":", 1)[1]
+        return next((acl for acl in snapshot.values() if association_id in getattr(acl, "association_ids", {})), None)
+    return None
+
+
+def _nacl_association_id(snapshot: Any, subnet_id: str) -> str | None:
+    if snapshot is None: return None
+    values = snapshot.values() if isinstance(snapshot, dict) else []
+    for acl in values:
+        associated = getattr(acl, "associated_subnet_ids", []) if not isinstance(acl, dict) else acl.get("associated_subnet_ids", [])
+        if subnet_id not in associated: continue
+        ids = getattr(acl, "association_ids", {}) if not isinstance(acl, dict) else acl.get("association_ids", {})
+        for association_id, subnet in ids.items():
+            if subnet == subnet_id: return association_id
+    return None
+
+
+def convert_change_set(doc: Any, nacls: Any = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     if not isinstance(doc, dict) or not isinstance(doc.get("Changes"), list) or len(doc["Changes"]) > _MAX_CHANGES:
         raise _invalid()
     calls: list[dict[str, Any]] = []
@@ -165,6 +209,38 @@ def convert_change_set(doc: Any) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         service, suffix = _parts(typ)
         physical = resource.get("PhysicalResourceId")
         policy = resource.get("PolicyAction")
+        if typ == "AWS::EC2::NetworkAclEntry":
+            context = _context(resource, "AfterContext") or _context(resource, "BeforeContext")
+            props = _properties(context) if context else None
+            operation = {"Add": "CreateNetworkAclEntry", "Modify": "ReplaceNetworkAclEntry", "Remove": "DeleteNetworkAclEntry"}.get(action)
+            call = _nacl_entry_call(resource, props, operation) if operation and isinstance(props, dict) else None
+            if call: calls.append(call)
+            else: extras.append(_extra(address, typ, operation or action + suffix));
+            continue
+        if typ == "AWS::EC2::NetworkAcl":
+            context = _context(resource, "AfterContext") or _context(resource, "BeforeContext")
+            props = _properties(context) if context else {}
+            vpc_id = _resolved(props.get("VpcId")) if isinstance(props, dict) else None
+            if action == "Add" and isinstance(vpc_id, str): calls.append({"service": "ec2", "operation": "CreateNetworkAcl", "parameters": {"VpcId": vpc_id}})
+            elif action == "Remove" and isinstance(physical, str) and physical: calls.append({"service": "ec2", "operation": "DeleteNetworkAcl", "parameters": {"NetworkAclId": physical}})
+            else: extras.append(_extra(address, typ, "CreateNetworkAcl" if action == "Add" else "DeleteNetworkAcl"))
+            continue
+        if typ == "AWS::EC2::SubnetNetworkAclAssociation":
+            context = _context(resource, "AfterContext") or _context(resource, "BeforeContext")
+            props = _properties(context) if context else {}
+            subnet_id = _resolved(props.get("SubnetId")) if isinstance(props, dict) else None
+            target_id = _resolved(props.get("NetworkAclId")) if isinstance(props, dict) else None
+            association_id = _nacl_association_id(nacls, subnet_id) if isinstance(subnet_id, str) else None
+            if action in {"Add", "Modify"} and isinstance(subnet_id, str) and isinstance(target_id, str) and association_id:
+                calls.append({"service": "ec2", "operation": "ReplaceNetworkAclAssociation", "parameters": {"AssociationId": association_id, "NetworkAclId": target_id}})
+            elif action == "Remove" and isinstance(subnet_id, str) and association_id:
+                snapshot_acl = _nacl_snapshot_lookup(nacls, "association:" + association_id)
+                vpc_id = getattr(snapshot_acl, "vpc_id", None) if snapshot_acl is not None else None
+                default_id = next((str(k) for k, a in (nacls or {}).items() if getattr(a, "vpc_id", None) == vpc_id and getattr(a, "is_default", False)), None) if isinstance(nacls, dict) else None
+                if default_id: calls.append({"service": "ec2", "operation": "ReplaceNetworkAclAssociation", "parameters": {"AssociationId": association_id, "NetworkAclId": default_id}})
+                else: extras.append(_extra(address, typ, "ReplaceNetworkAclAssociation"))
+            else: extras.append(_extra(address, typ, "ReplaceNetworkAclAssociation"))
+            continue
         if action == "Remove":
             removal_calls, removal_extras = _removal(resource, address, policy)
             calls.extend(removal_calls)

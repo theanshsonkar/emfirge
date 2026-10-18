@@ -2,7 +2,8 @@ pytest_plugins = ['tests.supabase_fake']
 import os
 
 os.environ.setdefault("WHITELISTED_ACCOUNTS", "000000000000")
-os.environ.setdefault("DATABASE_URL", "sqlite:////tmp/emfirge-test.sqlite")
+_worker = os.environ.get('PYTEST_XDIST_WORKER', 'main')
+os.environ.setdefault("DATABASE_URL", f"sqlite:////tmp/emfirge-test-{_worker}.sqlite")
 
 """
 Shared fixtures for Emfirge test suite.

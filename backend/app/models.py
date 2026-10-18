@@ -44,6 +44,7 @@ class NACLEntry(BaseModel):
     rule_action: str
     egress: bool
     cidr_block: Optional[str] = None
+    ipv6_cidr_block: Optional[str] = None
     port_from: Optional[int] = None
     port_to: Optional[int] = None
 
@@ -52,6 +53,7 @@ class NetworkACL(BaseModel):
     vpc_id: str
     is_default: bool = False
     associated_subnet_ids: List[str] = Field(default_factory=list)
+    association_ids: Dict[str, str] = Field(default_factory=dict)
     entries: List[NACLEntry] = Field(default_factory=list)
 
 class S3Bucket(BaseModel):

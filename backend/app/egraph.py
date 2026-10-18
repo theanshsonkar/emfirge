@@ -8,6 +8,7 @@ with nodes (resources) and edges (relationships between resources).
 import copy
 import fnmatch
 import ipaddress
+import json
 import re
 from collections.abc import Mapping as MappingABC
 from enum import Enum
@@ -20,6 +21,10 @@ from app.cidr import INTERNET_CIDRS, is_internet_cidr
 from app.models import AWSInfrastructure
 import app.iam_classifier as iam_classifier
 from app.iam_escalation import matching_paths
+
+
+GRAPH_SCHEMA_VERSION = 1
+INTERNAL_REACH_EDGE_BUDGET = 50_000
 
 
 _ACCESS_LEVEL_ORDER = {
@@ -226,7 +231,10 @@ class Node(BaseModel, MappingABC):
         return tuple((key, self[key]) for key in self._SHIM_KEYS)
 
     def as_legacy_dict(self) -> Dict[str, Any]:
-        return {"id": self.id, "type": self.resource_type, "label": self.label, "metadata": dict(self.metadata)}
+        label = self.label
+        if ":" in label:
+            label = self.resource_type.replace("_", " ").title()
+        return {"id": self.id, "type": self.resource_type, "label": label, "metadata": dict(self.metadata)}
 
 
 class Edge(BaseModel):
@@ -286,10 +294,49 @@ class Graph:
     Provides query methods to traverse and analyze the infrastructure graph.
     """
     
-    def __init__(self, nodes: List[Node | Dict[str, Any]], edges: List[Edge | Dict[str, Any]]):
+    def __init__(self, nodes: List[Node | Dict[str, Any]], edges: List[Edge | Dict[str, Any]], warnings: Optional[List[Any]] = None):
         """Initialize the graph and normalize legacy dictionaries to typed models."""
-        self.nodes: List[Node] = [node if isinstance(node, Node) else Node.model_validate(node) for node in nodes]
-        self.edges: List[Edge] = [edge if isinstance(edge, Edge) else Edge.model_validate(edge) for edge in edges]
+        normalized_nodes = [node if isinstance(node, Node) else Node.model_validate(node) for node in nodes]
+        normalized_edges = [edge if isinstance(edge, Edge) else Edge.model_validate(edge) for edge in edges]
+        self.warnings: List[Any] = list(warnings or [])
+
+        # Resolve duplicate IDs by canonical content, never collector order.
+        candidates_by_id: Dict[str, List[Node]] = {}
+        for node in normalized_nodes:
+            candidates_by_id.setdefault(node.id, []).append(node)
+        unique_nodes: List[Node] = []
+        for node_id, candidates in candidates_by_id.items():
+            ordered = sorted(candidates, key=lambda node: json.dumps(node.model_dump(mode="json"), sort_keys=True, separators=(",", ":")))
+            unique_nodes.append(ordered[0])
+            if len(ordered) > 1:
+                self.warnings.append({
+                    "kind": "duplicate_node_id",
+                    "node_id": node_id,
+                    "discarded": len(ordered) - 1,
+                })
+
+        self.nodes: List[Node] = sorted(unique_nodes, key=lambda node: node.id)
+        node_ids = {node.id for node in self.nodes}
+        kept_edges = []
+        for edge in normalized_edges:
+            if edge.src in node_ids and edge.dst in node_ids:
+                kept_edges.append(edge)
+            else:
+                self.warnings.append({
+                    "kind": "dangling_edge_dropped",
+                    "from": edge.src,
+                    "to": edge.dst,
+                    "relationship": edge.relationship.value,
+                })
+        self.edges: List[Edge] = sorted(
+            kept_edges,
+            key=lambda edge: (
+                edge.src,
+                edge.dst,
+                edge.relationship.value,
+                json.dumps(edge.attrs, sort_keys=True, default=str, separators=(",", ":")),
+            ),
+        )
 
         # Build lookup indexes for efficient queries
         self._node_index = {node['id']: node for node in self.nodes}
@@ -427,6 +474,7 @@ class Graph:
     def to_dict(self) -> Dict[str, List[Dict[str, Any]]]:
         """Convert the graph to its serializable legacy dictionary representation."""
         return {
+            'schema_version': GRAPH_SCHEMA_VERSION,
             'nodes': [node.as_legacy_dict() for node in self.nodes],
             'edges': [edge.as_legacy_dict() for edge in self.edges],
         }
@@ -689,40 +737,82 @@ def _port_overlap(request_from, request_to, entry_from, entry_to):
         return True
 
 
+def _nacl_protocol(value):
+    return {"tcp": "6", "udp": "17", "icmp": "1", "icmpv6": "58", "all": "-1"}.get(str(value if value is not None else "-1").lower(), str(value if value is not None else "-1").lower())
+
+
+def _nacl_allowed_intervals(entries, egress: bool, peer_cidrs: list[str], protocol, port_from, port_to):
+    """Return port intervals whose first applicable NACL rule allows them."""
+    lo, hi = (0 if port_from is None else int(port_from)), (65535 if port_to is None else int(port_to))
+    if not entries:
+        return [(lo, hi)]
+    wanted = _nacl_protocol(protocol)
+    direction_entries = [entry for entry in entries if bool(_value(entry, "egress", False)) == egress]
+    if not direction_entries:
+        return [(lo, hi)]
+    relevant = []
+    boundaries = {lo, hi + 1}
+    internet_peer = any(is_internet_cidr(cidr) for cidr in peer_cidrs if cidr)
+    for entry in sorted(entries, key=lambda item: _value(item, "rule_number", 10**9)):
+        if bool(_value(entry, "egress", False)) != egress:
+            continue
+        entry_protocol = _nacl_protocol(_value(entry, "protocol", "-1"))
+        if entry_protocol not in {"-1", wanted}:
+            continue
+        cidrs = [_value(entry, "cidr_block"), _value(entry, "ipv6_cidr_block")]
+        def applies(cidr):
+            if not cidr:
+                return False
+            if internet_peer:
+                try:
+                    return is_internet_cidr(cidr) and ipaddress.ip_network(cidr, strict=False).version == ipaddress.ip_network(peer_cidrs[0], strict=False).version
+                except (ValueError, TypeError):
+                    return False
+            return any(_cidr_covers(cidr, peer) for peer in peer_cidrs)
+        if not any(applies(cidr) for cidr in cidrs):
+            continue
+        entry_lo = 0 if _value(entry, "port_from") is None or entry_protocol in {"-1", "1", "58"} else int(_value(entry, "port_from"))
+        entry_hi = 65535 if _value(entry, "port_to") is None or entry_protocol in {"-1", "1", "58"} else int(_value(entry, "port_to"))
+        if entry_hi < lo or entry_lo > hi:
+            continue
+        relevant.append((entry, entry_lo, entry_hi))
+        boundaries.add(max(lo, entry_lo)); boundaries.add(min(hi + 1, entry_hi + 1))
+    allowed = []
+    points = sorted(boundaries)
+    for start, end in zip(points, points[1:]):
+        if start >= end:
+            continue
+        match = next((item for item in relevant if item[1] <= start <= item[2]), None)
+        if match and str(_value(match[0], "rule_action", "")).lower() == "allow":
+            allowed.append((start, end - 1))
+    merged = []
+    for interval in allowed:
+        if merged and merged[-1][1] + 1 >= interval[0]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], interval[1]))
+        else:
+            merged.append(interval)
+    return merged
+
+
+def _nacl_entries_for_subnet(subnet_id, graph, index=None):
+    return [entry for acl in _nacl_subnets(subnet_id, graph, index) for entry in (_node_data(acl).get("entries", []) or [])]
+
+
 def nacl_allows_inbound(subnet_id, port_from, port_to, protocol, graph) -> tuple[bool, str]:
-    """Evaluate associated inbound NACL entries using AWS first-match ordering."""
-    acl_edges = [edge for edge in _graph_edges(graph)
-                 if _value(edge, "src", _value(edge, "from")) == subnet_id
-                 and _is_relationship(edge, "PROTECTED_BY")]
+    index = _graph_index(graph)
+    acl_edges = [edge for edge in _graph_edges(graph) if _value(edge, "src", _value(edge, "from")) == subnet_id and _is_relationship(edge, "PROTECTED_BY")]
     if not acl_edges:
         return True, "assumed"
-    entries = []
-    for edge_index, edge in enumerate(acl_edges):
-        acl = _graph_node(graph, _value(edge, "dst", _value(edge, "to")))
-        data = _value(acl, "base", {}) if acl else {}
-        raw_entries = _value(data, "entries") if data else None
-        if raw_entries is None and acl:
-            raw_entries = _value(_value(acl, "metadata", {}) or {}, "entries")
-        if isinstance(raw_entries, (list, tuple)):
-            entries.extend((edge_index, item) for item in raw_entries)
-    def sort_key(pair):
-        number = _value(pair[1], "rule_number", 10**9)
-        return (number if isinstance(number, (int, float)) else 10**9, pair[0])
-    entries.sort(key=sort_key)
-    wanted_protocol = str(protocol or "-1").lower()
-    wanted_protocol = {"tcp": "6", "udp": "17", "icmp": "1"}.get(wanted_protocol, wanted_protocol)
-    for _, entry in entries:
-        if _value(entry, "egress", None) is not False:
-            continue
-        if not is_internet_cidr(_value(entry, "cidr_block")):
-            continue
-        entry_protocol = str(_value(entry, "protocol", "-1")).lower()
-        if entry_protocol not in {"-1", "all", wanted_protocol}:
-            continue
-        if not _port_overlap(port_from, port_to, _value(entry, "port_from"), _value(entry, "port_to")):
-            continue
-        return str(_value(entry, "rule_action", "")).lower() == "allow", "high"
-    return False, "high"
+    entries = _nacl_entries_for_subnet(subnet_id, graph, index)
+    inbound_v4 = _nacl_allowed_intervals(entries, False, ["0.0.0.0/0"], protocol, port_from, port_to)
+    inbound_v6 = _nacl_allowed_intervals(entries, False, ["::/0"], protocol, port_from, port_to)
+    egress_v4 = _nacl_allowed_intervals(entries, True, ["0.0.0.0/0"], protocol, 1024, 65535)
+    egress_v6 = _nacl_allowed_intervals(entries, True, ["::/0"], protocol, 1024, 65535)
+    inbound = inbound_v4 or inbound_v6
+    egress = egress_v4 or egress_v6
+    has_inbound = any(not bool(_value(entry, "egress", False)) for entry in entries)
+    has_egress = any(bool(_value(entry, "egress", False)) for entry in entries)
+    return bool(inbound and egress), "high" if has_inbound and has_egress else "assumed"
 
 
 def internet_ingress(resource_node, subnet_id, sg_list, graph) -> list[dict]:
@@ -753,6 +843,7 @@ def internet_ingress(resource_node, subnet_id, sg_list, graph) -> list[dict]:
             rules = _value(_value(sg, "metadata", {}) or {}, "rules")
         for rule in rules if isinstance(rules, (list, tuple)) else []:
             ranges = _value(rule, "ip_ranges", []) or []
+            ranges = list(ranges) + list(_value(rule, "ipv6_ranges", []) or [])
             public = next((str(cidr) for cidr in ranges if is_internet_cidr(cidr)), None)
             if public is None:
                 continue
@@ -779,91 +870,197 @@ def _node_data(node):
     return base or {}
 
 
-def _resource_subnets(node, graph):
-    data = _node_data(node)
-    ids = []
-    for key in ("subnet_id", "subnet_ids"):
-        value = _value(data, key)
-        if isinstance(value, (list, tuple)):
-            ids.extend(str(item) for item in value if item)
-        elif value:
-            ids.append(str(value))
+class _GraphIndex:
+    """Per-build topology/security indexes used by reachability evaluation."""
+
+    def __init__(self, graph):
+        self.graph = graph
+        self.nodes = {_value(node, "id"): node for node in graph.nodes}
+        self.resource_subnets = {}
+        self.subnet_vpc = {}
+        self.subnet_cidr = {}
+        self.route_tables = {}
+        self.main_route_tables = {}
+        self.nacls = {}
+        self.routes = {}
+        self.sg_rules = {}
+        self.peerings = {}
+        self.tgw_vpcs = set()
+        # Pure reachability memoization; scoped to this graph build.
+        self.resource_subnets_cache = {}
+        self.resource_vpc_cache = {}
+        self.sg_ids_cache = {}
+        self.sg_rules_cache = {}
+        self.route_cache = {}
+        self.sg_allow_cache = {}
+        self.nacl_ok_cache = {}
+        edges = _graph_edges(graph)
+        for node_id, node in self.nodes.items():
+            data = _node_data(node)
+            ids = []
+            for key in ("subnet_id", "subnet_ids"):
+                value = _value(data, key)
+                if isinstance(value, (list, tuple)):
+                    ids.extend(str(item) for item in value if item)
+                elif value:
+                    ids.append(str(value))
+            self.resource_subnets[node_id] = set(ids)
+            self.sg_rules[node_id] = {
+                "rules": _node_data(node).get("rules", []) or [],
+                "egress_rules": _node_data(node).get("egress_rules", []) or [],
+            }
+            if _value(node, "resource_type") == "vpc_subnet":
+                self.subnet_vpc[node_id] = _value(data, "vpc_id")
+                self.subnet_cidr[node_id] = _value(data, "cidr")
+            if _value(node, "resource_type") == "route_table":
+                self.routes[node_id] = data.get("routes", []) or []
+                if _value(data, "is_main"):
+                    vpc_id = _value(data, "vpc_id")
+                    if vpc_id:
+                        self.main_route_tables.setdefault(vpc_id, []).append(node_id)
+        for edge in edges:
+            source = _value(edge, "src", _value(edge, "from"))
+            target = _value(edge, "dst", _value(edge, "to"))
+            if _is_relationship(edge, "in_subnet"):
+                self.resource_subnets.setdefault(source, set()).add(str(target))
+            if _is_relationship(edge, "belongs_to_vpc"):
+                self.subnet_vpc[source] = target
+            if _is_relationship(edge, "associated_with"):
+                self.route_tables.setdefault(source, set()).add(target)
+            if _is_relationship(edge, "protected_by"):
+                self.nacls.setdefault(source, set()).add(target)
+        for node_id, node in self.nodes.items():
+            if _value(node, "resource_type") == "vpc_peering_connection":
+                data = _node_data(node)
+                if str(_value(data, "status", "")).lower() == "active":
+                    pair = frozenset((_value(data, "requester_vpc_id"), _value(data, "accepter_vpc_id")))
+                    self.peerings.setdefault(pair, []).append(node_id)
+            if _value(node, "resource_type") == "transit_gateway_attachment":
+                vpc_id = _value(_node_data(node), "vpc_id")
+                if vpc_id:
+                    self.tgw_vpcs.add(vpc_id)
+        for resource_id in list(self.resource_subnets):
+            self.resource_subnets[resource_id] = tuple(sorted(set(self.resource_subnets[resource_id])))
+        for pair in self.peerings:
+            self.peerings[pair].sort()
+
+
+def _graph_index(graph, index=None):
+    return index if index is not None else _GraphIndex(graph)
+
+
+def _resource_subnets(node, graph, index=None):
+    index = _graph_index(graph, index)
     node_id = _value(node, "id")
-    for edge in _graph_edges(graph):
-        if _value(edge, "src", _value(edge, "from")) != node_id:
+    cached = index.resource_subnets_cache.get(node_id)
+    if cached is None:
+        cached = tuple(sorted(index.resource_subnets.get(node_id, ())))
+        index.resource_subnets_cache[node_id] = cached
+    return list(cached)
+
+
+def _subnet_vpc(subnet_id, graph, index=None):
+    index = _graph_index(graph, index)
+    return index.subnet_vpc.get(subnet_id)
+
+
+def _subnet_cidr(subnet_id, graph, index=None):
+    index = _graph_index(graph, index)
+    return index.subnet_cidr.get(subnet_id)
+
+
+def _resource_vpc(node, graph, index=None):
+    index = _graph_index(graph, index)
+    node_id = _value(node, "id")
+    if node_id not in index.resource_vpc_cache:
+        subnets = _resource_subnets(node, graph, index)
+        index.resource_vpc_cache[node_id] = _subnet_vpc(subnets[0], graph, index) if subnets else None
+    return index.resource_vpc_cache[node_id]
+
+
+def _route_table_ids_for_subnet(subnet_id, graph, index=None):
+    index = _graph_index(graph, index)
+    explicit = sorted(index.route_tables.get(subnet_id, ()))
+    if explicit:
+        return explicit
+    vpc_id = _subnet_vpc(subnet_id, graph, index)
+    return sorted(index.main_route_tables.get(vpc_id, ()))
+
+
+def _peering_route_matches(resource, peer_resource, peering_id, graph, index):
+    """Return (matches, certain), selecting the longest matching IPv4 route."""
+    resource_subnets = _resource_subnets(resource, graph, index)
+    peer_subnets = _resource_subnets(peer_resource, graph, index)
+    peer_networks = []
+    for subnet_id in peer_subnets:
+        try:
+            cidr = _subnet_cidr(subnet_id, graph, index)
+            network = ipaddress.ip_network(str(cidr), strict=False)
+            if network.version == 4:
+                peer_networks.append(network)
+        except (TypeError, ValueError):
             continue
-        if _is_relationship(edge, "in_subnet"):
-            subnet_id = _value(edge, "dst", _value(edge, "to"))
-            if subnet_id and subnet_id not in ids:
-                ids.append(subnet_id)
-    return sorted(set(ids))
+    if not resource_subnets or not peer_networks:
+        # Preserve the previous conservative behavior when topology/CIDR data is incomplete.
+        return any(
+            str(_value(route, "target_type", "")).lower() == "vpc_peering" and
+            _value(route, "target_id") == peering_id
+            for subnet_id in resource_subnets
+            for table_id in _route_table_ids_for_subnet(subnet_id, graph, index)
+            for route in index.routes.get(table_id, ())
+        ), False
 
-
-def _subnet_vpc(subnet_id, graph):
-    subnet = _graph_node(graph, subnet_id)
-    if subnet is None:
-        return None
-    data = _node_data(subnet)
-    vpc_id = _value(data, "vpc_id")
-    if vpc_id:
-        return vpc_id
-    for edge in _graph_edges(graph):
-        if (_value(edge, "src", _value(edge, "from")) == subnet_id and
-                _is_relationship(edge, "belongs_to_vpc")):
-            return _value(edge, "dst", _value(edge, "to"))
-    return None
-
-
-def _subnet_cidr(subnet_id, graph):
-    subnet = _graph_node(graph, subnet_id)
-    return _value(_node_data(subnet), "cidr") if subnet else None
-
-
-def _resource_vpc(node, graph):
-    subnets = _resource_subnets(node, graph)
-    return _subnet_vpc(subnets[0], graph) if subnets else None
-
-
-def _route_table_ids_for_subnet(subnet_id, graph):
-    return sorted({_value(edge, "dst", _value(edge, "to")) for edge in _graph_edges(graph)
-                   if _value(edge, "src", _value(edge, "from")) == subnet_id
-                   and _is_relationship(edge, "associated_with")})
-
-
-def route_between(a_node, b_node, graph):
-    """Classify the modeled or conservatively assumed route between resources."""
-    a_vpc, b_vpc = _resource_vpc(a_node, graph), _resource_vpc(b_node, graph)
-    if not a_vpc or not b_vpc:
-        return "assumed_flagged", "placement unknown"
-    if a_vpc == b_vpc:
-        return "routed_high", "same-VPC local"
-    peering_nodes = list(graph.find_nodes_by_type("vpc_peering_connection") if hasattr(graph, "find_nodes_by_type") else [])
-    for peering in sorted(peering_nodes, key=lambda node: _value(node, "id", "")):
-        data = _node_data(peering)
-        if {_value(data, "requester_vpc_id"), _value(data, "accepter_vpc_id")} != {a_vpc, b_vpc}:
-            continue
-        if _value(data, "status", "") != "active":
-            continue
-        peering_id = _value(peering, "id")
-        sides_ok = True
-        for resource in (a_node, b_node):
-            if not any(any(str(_value(route, "target_type", "")).lower() == "vpc_peering" and
-                           _value(route, "target_id") == peering_id
-                           for route in (_node_data(_graph_node(graph, table_id)).get("routes", []) or []))
-                         for subnet_id in _resource_subnets(resource, graph)
-                         for table_id in _route_table_ids_for_subnet(subnet_id, graph)):
-                sides_ok = False
+    for subnet_id in resource_subnets:
+        routes = []
+        for table_id in _route_table_ids_for_subnet(subnet_id, graph, index):
+            for route in index.routes.get(table_id, ()):
+                try:
+                    network = ipaddress.ip_network(str(_value(route, "destination_cidr")), strict=False)
+                except (TypeError, ValueError):
+                    continue
+                if network.version == 4:
+                    routes.append((network.prefixlen, network, route))
+        for peer_network in peer_networks:
+            matching = [item for item in routes if peer_network.network_address in item[1]]
+            if matching:
+                _, _, route = max(matching, key=lambda item: item[0])
+                if (str(_value(route, "target_type", "")).lower() == "vpc_peering" and
+                        _value(route, "target_id") == peering_id):
+                    return True, True
                 break
-        if sides_ok:
-            return "routed_high", "active peering"
-    # VPN/on-prem and PrivateLink provider/consumer paths are a known coverage gap;
-    # they are not modeled here.
-    if any(_value(_node_data(node), "vpc_id") in {a_vpc, b_vpc}
-           for node in (graph.find_nodes_by_type("transit_gateway_attachment")
-                        if hasattr(graph, "find_nodes_by_type") else [])):
-        return "assumed_flagged", "possible via unmodeled Transit Gateway"
-    return "blocked", "no modeled cross-VPC path"
+    return False, True
 
+
+def route_between(a_node, b_node, graph, index=None):
+    """Classify the modeled or conservatively assumed route between resources."""
+    index = _graph_index(graph, index)
+    cache_key = (_value(a_node, "id"), _value(b_node, "id"))
+    if cache_key in index.route_cache:
+        return index.route_cache[cache_key]
+    a_vpc, b_vpc = _resource_vpc(a_node, graph, index), _resource_vpc(b_node, graph, index)
+    if not a_vpc or not b_vpc:
+        result = ("assumed_flagged", "placement unknown")
+        index.route_cache[cache_key] = result
+        return result
+    if a_vpc == b_vpc:
+        result = ("routed_high", "same-VPC local")
+        index.route_cache[cache_key] = result
+        return result
+    pair = frozenset((a_vpc, b_vpc))
+    for peering_id in index.peerings.get(pair, ()):
+        a_ok, a_certain = _peering_route_matches(a_node, b_node, peering_id, graph, index)
+        b_ok, b_certain = _peering_route_matches(b_node, a_node, peering_id, graph, index)
+        if a_ok and b_ok:
+            result = (("routed_high" if a_certain and b_certain else "assumed_flagged"),
+                      ("active peering" if a_certain and b_certain else "active peering; route data incomplete"))
+            index.route_cache[cache_key] = result
+            return result
+    if index.tgw_vpcs.intersection((a_vpc, b_vpc)):
+        result = ("assumed_flagged", "possible via unmodeled Transit Gateway")
+    else:
+        result = ("blocked", "no modeled cross-VPC path")
+    index.route_cache[cache_key] = result
+    return result
 
 def _protocol_matches(rule_protocol, requested):
     rule = str(rule_protocol if rule_protocol is not None else "-1").lower()
@@ -881,18 +1078,28 @@ def _rule_matches(rule, port_range):
             _port_overlap(port_range[0], port_range[1], *_rule_ports(rule)))
 
 
-def _sg_ids(node):
+def _sg_ids(node, index=None):
+    node_id = _value(node, "id")
+    if index is not None and node_id in index.sg_ids_cache:
+        return index.sg_ids_cache[node_id]
     data = _node_data(node)
-    ids = _value(data, "sg_ids", _value(data, "security_groups", [])) or []
-    return sorted({str(item) for item in ids if item})
+    ids = tuple(sorted({str(item) for item in (_value(data, "sg_ids", _value(data, "security_groups", [])) or []) if item}))
+    if index is not None:
+        index.sg_ids_cache[node_id] = ids
+    return ids
 
 
-def _sg_rules(node, graph, key):
+def _sg_rules(node, graph, key, index=None):
+    index = _graph_index(graph, index)
+    cache_key = (_value(node, "id"), key)
+    if cache_key in index.sg_rules_cache:
+        return index.sg_rules_cache[cache_key]
     result = []
-    for sg_id in _sg_ids(node):
-        sg = _graph_node(graph, sg_id)
-        if sg is not None:
-            result.append((sg, _node_data(sg).get(key, []) or []))
+    for sg_id in _sg_ids(node, index):
+        rules = index.sg_rules.get(sg_id, {}).get(key, [])
+        if rules:
+            result.append((index.nodes.get(sg_id), rules))
+    index.sg_rules_cache[cache_key] = result
     return result
 
 
@@ -904,14 +1111,18 @@ def _rule_scope(rule, peer_sg_ids, peer_cidr, sg_reference_key):
                 any(_cidr_covers(cidr, peer_cidr) for cidr in ranges))
 
 
-def sg_allows_ab(a_node, b_node, graph, port_range):
+def sg_allows_ab(a_node, b_node, graph, port_range, index=None):
     """Evaluate directional SG egress from A and ingress to B."""
-    a_sgs, b_sgs = _sg_ids(a_node), _sg_ids(b_node)
-    a_subnets, b_subnets = _resource_subnets(a_node, graph), _resource_subnets(b_node, graph)
-    a_cidr = _subnet_cidr(a_subnets[0], graph) if a_subnets else None
-    b_cidr = _subnet_cidr(b_subnets[0], graph) if b_subnets else None
-    egress = [rule for _, rules in _sg_rules(a_node, graph, "egress_rules") for rule in rules]
-    ingress = [rule for _, rules in _sg_rules(b_node, graph, "rules") for rule in rules]
+    index = _graph_index(graph, index)
+    cache_key = (_value(a_node, "id"), _value(b_node, "id"), tuple(port_range))
+    if cache_key in index.sg_allow_cache:
+        return index.sg_allow_cache[cache_key]
+    a_sgs, b_sgs = _sg_ids(a_node, index), _sg_ids(b_node, index)
+    a_subnets, b_subnets = _resource_subnets(a_node, graph, index), _resource_subnets(b_node, graph, index)
+    a_cidr = _subnet_cidr(a_subnets[0], graph, index) if a_subnets else None
+    b_cidr = _subnet_cidr(b_subnets[0], graph, index) if b_subnets else None
+    egress = [rule for _, rules in _sg_rules(a_node, graph, "egress_rules", index) for rule in rules]
+    ingress = [rule for _, rules in _sg_rules(b_node, graph, "rules", index) for rule in rules]
     if not egress:
         egress_ok, egress_real = True, False
     else:
@@ -922,12 +1133,14 @@ def sg_allows_ab(a_node, b_node, graph, port_range):
     ingress_ok = any(_rule_matches(rule, port_range) and
                      _rule_scope(rule, a_sgs, a_cidr, "source_sg_ids")
                      for rule in ingress)
-    return egress_ok and ingress_ok, "high" if egress_real and ingress_ok else "assumed"
+    result = (egress_ok and ingress_ok, "high" if egress_real and ingress_ok else "assumed")
+    index.sg_allow_cache[cache_key] = result
+    return result
 
 
-def _nacl_subnets(subnet_id, graph):
-    return [_graph_node(graph, _value(edge, "dst", _value(edge, "to"))) for edge in _graph_edges(graph)
-            if _value(edge, "src", _value(edge, "from")) == subnet_id and _is_relationship(edge, "protected_by")]
+def _nacl_subnets(subnet_id, graph, index=None):
+    index = _graph_index(graph, index)
+    return [index.nodes[acl_id] for acl_id in index.nacls.get(subnet_id, ()) if acl_id in index.nodes]
 
 
 def _cidr_covers(cidr, opposite_cidr):
@@ -941,54 +1154,42 @@ def _cidr_covers(cidr, opposite_cidr):
         return False
 
 
-def _nacl_denies(entries, opposite_cidr, port_range, egress):
-    """Return whether the first applicable NACL entry is a clear DENY."""
-    applicable = []
-    for entry in sorted(entries, key=lambda item: _value(item, "rule_number", 10**9)):
-        if bool(_value(entry, "egress", False)) != egress:
-            continue
-        if not _cidr_covers(_value(entry, "cidr_block"), opposite_cidr):
-            continue
-        if not _protocol_matches(_value(entry, "protocol", "-1"), port_range[2]):
-            continue
-        if not _port_overlap(port_range[0], port_range[1], *_rule_ports(entry)):
-            continue
-        applicable.append(entry)
-    if not applicable:
-        return False
-    return str(_value(applicable[0], "rule_action", "")).lower() == "deny"
-
-
-def nacl_internal_ok(a_node, b_node, graph, port_range):
-    a_subnets, b_subnets = _resource_subnets(a_node, graph), _resource_subnets(b_node, graph)
+def nacl_internal_ok(a_node, b_node, graph, port_range, index=None):
+    index = _graph_index(graph, index)
+    cache_key = (_value(a_node, "id"), _value(b_node, "id"), tuple(port_range))
+    if cache_key in index.nacl_ok_cache:
+        return index.nacl_ok_cache[cache_key]
+    a_subnets, b_subnets = _resource_subnets(a_node, graph, index), _resource_subnets(b_node, graph, index)
     if not a_subnets or not b_subnets:
-        return True, "assumed"
-    a_cidr, b_cidr = _subnet_cidr(a_subnets[0], graph), _subnet_cidr(b_subnets[0], graph)
-    a_acls = [acl for subnet in a_subnets for acl in _nacl_subnets(subnet, graph) if acl]
-    b_acls = [acl for subnet in b_subnets for acl in _nacl_subnets(subnet, graph) if acl]
-    for acl in b_acls:
-        if _nacl_denies(_node_data(acl).get("entries", []) or [], a_cidr, port_range, egress=False):
-            return False, "high"
-    for acl in a_acls:
-        if _nacl_denies(_node_data(acl).get("entries", []) or [], b_cidr, port_range, egress=True):
-            return False, "high"
-    return True, "high" if a_acls or b_acls else "assumed"
+        result = (True, "assumed"); index.nacl_ok_cache[cache_key] = result; return result
+    if set(a_subnets) & set(b_subnets):
+        result = (True, "high"); index.nacl_ok_cache[cache_key] = result; return result
+    lo, hi, protocol = port_range; saw_data = False
+    for a_subnet in a_subnets:
+        for b_subnet in b_subnets:
+            a_cidr, b_cidr = _subnet_cidr(a_subnet, graph, index), _subnet_cidr(b_subnet, graph, index)
+            a_entries = _nacl_entries_for_subnet(a_subnet, graph, index); b_entries = _nacl_entries_for_subnet(b_subnet, graph, index)
+            saw_data = saw_data or bool(a_entries or b_entries)
+            checks = (_nacl_allowed_intervals(b_entries, False, [a_cidr], protocol, lo, hi), _nacl_allowed_intervals(a_entries, True, [b_cidr], protocol, lo, hi), _nacl_allowed_intervals(b_entries, True, [a_cidr], protocol, 1024, 65535), _nacl_allowed_intervals(a_entries, False, [b_cidr], protocol, 1024, 65535))
+            if all(checks):
+                result = (True, "high" if saw_data else "assumed"); index.nacl_ok_cache[cache_key] = result; return result
+    result = (False, "high" if saw_data else "assumed"); index.nacl_ok_cache[cache_key] = result; return result
 
-
-def internal_reachable(a_node, b_node, graph):
-    ingress = [rule for _, rules in _sg_rules(b_node, graph, "rules") for rule in rules]
+def internal_reachable(a_node, b_node, graph, index=None):
+    index = _graph_index(graph, index)
+    ingress = [rule for _, rules in _sg_rules(b_node, graph, "rules", index) for rule in rules]
     results = []
-    route_status, route_reason = route_between(a_node, b_node, graph)
+    route_status, route_reason = route_between(a_node, b_node, graph, index)
     if not ingress or route_status == "blocked":
         return results
     for rule in sorted(ingress, key=lambda item: (str(_value(item, "from_port")), str(_value(item, "to_port")), str(_value(item, "protocol", "-1")), str(item))):
         from_port, to_port = _rule_ports(rule)
         ports = [0, 65535] if from_port is None or to_port is None else [int(from_port), int(to_port)]
         port_range = (ports[0], ports[1], _value(rule, "protocol", "-1"))
-        allowed, sg_confidence = sg_allows_ab(a_node, b_node, graph, port_range)
+        allowed, sg_confidence = sg_allows_ab(a_node, b_node, graph, port_range, index)
         if not allowed:
             continue
-        nacl_ok, nacl_confidence = nacl_internal_ok(a_node, b_node, graph, port_range)
+        nacl_ok, nacl_confidence = nacl_internal_ok(a_node, b_node, graph, port_range, index)
         if not nacl_ok:
             continue
         confidence = "high" if route_status == "routed_high" and sg_confidence == "high" and nacl_confidence == "high" else "assumed"
@@ -1034,6 +1235,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
     Returns:
         Graph object with nodes and edges, providing query methods for traversal
     """
+    iam_classifier.begin_build()
     nodes = []
     edges = []
     
@@ -1104,7 +1306,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 nodes.append({
                     'id': role_id,
                     'type': 'iam_role',
-                    'label': f"IAM Role: {actual_role_name}",
+                    'label': "IAM Role",
                     'metadata': {'arn': actual_role_arn, 'source': 'instance_profile'}
                 })
             edges.append({
@@ -1151,6 +1353,8 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             })
     
     # ── INTERNET REACHABILITY ─────────────────────────────────────
+    # SQS nodes are emitted in the service-resource section below.
+
     # Evaluate against route-table and NACL relationships without using the
     # legacy is_public/public_subnet_ids approximation.
     snapshot_nodes = list(nodes)
@@ -1174,10 +1378,19 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         nacl_id = _value(nacl, 'id')
         entries = [_value(entry, 'model_dump', lambda: entry)() if hasattr(entry, 'model_dump') else entry for entry in (_value(nacl, 'entries', []) or [])]
         if nacl_id not in known_ids:
-            snapshot_nodes.append({'id': nacl_id, 'type': 'network_acl', 'label': f'Network ACL: {nacl_id}', 'base': {'entries': entries}})
+            snapshot_nodes.append({'id': nacl_id, 'type': 'network_acl', 'label': f'Network ACL: {nacl_id}', 'base': {'entries': entries, 'is_default': _value(nacl, 'is_default', False), 'vpc_id': _value(nacl, 'vpc_id')}})
             known_ids.add(nacl_id)
         for subnet_id in _value(nacl, 'associated_subnet_ids', []) or []:
             snapshot_edges.append({'from': subnet_id, 'to': nacl_id, 'relationship': 'protected_by'})
+    explicit_nacl_subnets = {subnet_id for nacl in infrastructure.vpc.nacls for subnet_id in (_value(nacl, 'associated_subnet_ids', []) or [])}
+    defaults = {}
+    for nacl in infrastructure.vpc.nacls:
+        if _value(nacl, 'is_default', False):
+            defaults.setdefault(_value(nacl, 'vpc_id'), _value(nacl, 'id'))
+    for subnet in infrastructure.vpc.subnets:
+        subnet_id, vpc_id = _value(subnet, 'id'), _value(subnet, 'vpc_id')
+        if subnet_id not in explicit_nacl_subnets and vpc_id in defaults:
+            snapshot_edges.append({'from': subnet_id, 'to': defaults[vpc_id], 'relationship': 'protected_by'})
     reachability_graph = Graph(snapshot_nodes, snapshot_edges)
     internet_node_added = False
     sg_evidence = {}
@@ -1360,7 +1573,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 nodes.append({
                     'id': role_id,
                     'type': 'iam_role',
-                    'label': f"IAM Role: {role_name}",
+                    'label': "IAM Role",
                     'metadata': {
                         'arn': role_arn
                     }
@@ -1426,7 +1639,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 nodes.append({
                     'id': role_id,
                     'type': 'iam_role',
-                    'label': f"IAM Role: {role_name}",
+                    'label': "IAM Role",
                     'metadata': {'arn': role_arn, 'source': 'ecs_task'}
                 })
             edges.append({
@@ -1931,7 +2144,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             nodes.append({
                 'id': role_id,
                 'type': 'iam_role',
-                'label': f"IAM Role: {role_name}",
+                'label': "IAM Role",
                 'metadata': {
                     'arn': role_arn,
                     'has_admin': has_admin,
@@ -2128,36 +2341,73 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
     # Additive internal reachability edges are evaluated only after the full
     # topology is available; existing edge order and algorithms remain intact.
     reachability_graph = Graph(nodes=nodes, edges=edges)
+    graph_index = _GraphIndex(reachability_graph)
     eligible = []
     for node in reachability_graph.nodes:
         resource_type = node.resource_type
         data = _node_data(node)
-        if resource_type == 'ec2_instance' and _sg_ids(node) and _resource_subnets(node, reachability_graph):
+        if resource_type == 'ec2_instance' and _sg_ids(node) and _resource_subnets(node, reachability_graph, graph_index):
             eligible.append(node)
-        elif resource_type == 'rds_instance' and _sg_ids(node) and _resource_subnets(node, reachability_graph):
+        elif resource_type == 'rds_instance' and _sg_ids(node) and _resource_subnets(node, reachability_graph, graph_index):
             eligible.append(node)
-        elif resource_type == 'lambda_function' and _sg_ids(node) and _resource_subnets(node, reachability_graph):
+        elif resource_type == 'lambda_function' and _sg_ids(node) and _resource_subnets(node, reachability_graph, graph_index):
             eligible.append(node)
     eligible.sort(key=lambda node: node.id)
     existing_can_reach = {(edge['from'], edge['to']) for edge in edges
                           if _is_relationship(edge, RelationshipType.CAN_REACH.value)}
-    for source in eligible:
-        for target in eligible:
-            if source.id == target.id or (source.id, target.id) in existing_can_reach:
+    # Resources with identical security/topology inputs have identical
+    # directional reachability behavior. Evaluate each ordered class pair once,
+    # then expand to members; classes are never merged directionlessly.
+    classes = {}
+    for node in eligible:
+        class_key = (node.resource_type, tuple(_sg_ids(node, graph_index)), tuple(_resource_subnets(node, reachability_graph, graph_index)), _resource_vpc(node, reachability_graph, graph_index))
+        classes.setdefault(class_key, []).append(node)
+    ordered_classes = [sorted(classes[key], key=lambda node: node.id) for key in sorted(classes, key=str)]
+    internal_reachability_budget_exceeded = False
+    internal_reachability_edges = 0
+    for source_members in ordered_classes:
+        for target_members in ordered_classes:
+            if internal_reachability_budget_exceeded:
+                break
+            source = source_members[0]
+            target = target_members[0]
+            if source_members is target_members:
+                if len(source_members) < 2:
+                    continue
+                target = target_members[1]
+            evidence = internal_reachable(source, target, reachability_graph, graph_index)
+            if not evidence:
                 continue
-            evidence = internal_reachable(source, target, reachability_graph)
-            if evidence:
-                # A pair gets one stable edge even when several target ingress
-                # rules independently provide evidence.
-                item = min(evidence, key=lambda value: (
-                    tuple(value.get("ports", [])), value.get("reason", ""),
-                    value.get("confidence", ""), bool(value.get("flagged", False))))
-                edges.append({'from': source.id, 'to': target.id,
-                              'relationship': RelationshipType.CAN_REACH,
-                              'attrs': {key: item[key] for key in ("ports", "reason", "confidence", "flagged")}})
-                existing_can_reach.add((source.id, target.id))
+            item = min(evidence, key=lambda value: (
+                tuple(value.get("ports", [])), value.get("reason", ""),
+                value.get("confidence", ""), bool(value.get("flagged", False))))
+            attrs = {key: item[key] for key in ("ports", "reason", "confidence", "flagged")}
+            for source_member in source_members:
+                if internal_reachability_budget_exceeded:
+                    break
+                for target_member in target_members:
+                    if source_member.id == target_member.id:
+                        continue
+                    if (source_member.id, target_member.id) in existing_can_reach:
+                        continue
+                    edges.append({'from': source_member.id, 'to': target_member.id,
+                                  'relationship': RelationshipType.CAN_REACH,
+                                  'attrs': attrs})
+                    existing_can_reach.add((source_member.id, target_member.id))
+                    internal_reachability_edges += 1
+                    if internal_reachability_edges >= INTERNAL_REACH_EDGE_BUDGET:
+                        internal_reachability_budget_exceeded = True
+                        break
 
-    return Graph(nodes=nodes, edges=edges)
+    warnings = []
+    if iam_classifier.access_levels_unavailable():
+        warnings.append({"kind": "iam_access_levels_unavailable"})
+    if internal_reachability_budget_exceeded:
+        warnings.append({
+            "kind": "internal_reachability_budget_exceeded",
+            "budget": INTERNAL_REACH_EDGE_BUDGET,
+        })
+    return Graph(nodes=nodes, edges=edges, warnings=warnings)
 
 
 SLICE_CATEGORIES = {
@@ -2438,13 +2688,13 @@ def bfs_from_internet(graph: Graph) -> dict:
                 queue.append(neighbor)
 
     edges = []
-    for nid in visited:
+    for nid in sorted(visited):
         for edge in filter_traversable_edges(graph._edges_by_source.get(nid, [])):
             if edge['to'] in visited:
                 edges.append(edge)
 
     return {
-        'nodes': [graph._node_index[nid] for nid in visited if nid in graph._node_index],
+        'nodes': [graph._node_index[nid] for nid in sorted(visited) if nid in graph._node_index],
         'edges': edges,
         'category': 'attack_surface',
         'layers': layers,
@@ -2506,7 +2756,7 @@ def get_simulation_slice(graph: Graph, category: str) -> dict:
                     edges.append(edge)
 
         return {
-            'nodes': [graph._node_index[nid] for nid in node_ids if nid in graph._node_index],
+            'nodes': [graph._node_index[nid] for nid in sorted(node_ids) if nid in graph._node_index],
             'edges': edges,
             'category': category,
             'layers': layers,
@@ -2522,13 +2772,13 @@ def get_simulation_slice(graph: Graph, category: str) -> dict:
             node_ids = set(list(graph._node_index.keys())[:50])
 
     edges = []
-    for nid in node_ids:
+    for nid in sorted(node_ids):
         for edge in graph._edges_by_source.get(nid, []):
             if edge['to'] in node_ids:
                 edges.append(edge)
 
     return {
-        'nodes': [graph._node_index[nid] for nid in node_ids if nid in graph._node_index],
+        'nodes': [graph._node_index[nid] for nid in sorted(node_ids) if nid in graph._node_index],
         'edges': edges,
         'category': category,
         'layers': {},

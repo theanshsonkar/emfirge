@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Mapping
 from enum import Enum
 from typing import Any
@@ -10,11 +11,44 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app import cost
-from app.egraph import build_graph, get_internet_reachable_set
+from app.egraph import INTERNAL_REACH_EDGE_BUDGET, build_graph, get_internet_reachable_set
 from app.exposure import Exposure, compute_exposures
 from ipaddress import ip_network
 from app.rules import find_toxic_combos, run_all_checks
 from app.scoring import score_branch
+
+
+def graph_warning_strings(warnings: list[Any]) -> list[str]:
+    """Convert graph data-loss diagnostics to stable, agent-safe warnings."""
+    counts = Counter()
+    duplicate_discarded = 0
+    budget = None
+    for warning in warnings:
+        if not isinstance(warning, Mapping):
+            continue
+        kind = warning.get("kind")
+        if kind == "duplicate_node_id":
+            counts[kind] += 1
+            duplicate_discarded += int(warning.get("discarded", 0))
+        elif kind == "dangling_edge_dropped":
+            counts[kind] += 1
+        elif kind == "internal_reachability_budget_exceeded":
+            budget = warning.get("budget", INTERNAL_REACH_EDGE_BUDGET)
+        elif kind == "iam_access_levels_unavailable":
+            counts[kind] += 1
+    result = []
+    if counts["duplicate_node_id"]:
+        result.append(
+            f"graph_duplicate_node_ids:count={counts['duplicate_node_id']}:"
+            f"discarded={duplicate_discarded}"
+        )
+    if counts["dangling_edge_dropped"]:
+        result.append(f"graph_dangling_edges_dropped:count={counts['dangling_edge_dropped']}")
+    if budget is not None:
+        result.append(f"graph_internal_reachability_truncated:budget={budget}")
+    if counts["iam_access_levels_unavailable"]:
+        result.append("graph_iam_access_levels_unavailable")
+    return result
 
 
 class DiffResult(BaseModel):
@@ -293,7 +327,7 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
         for infra in (base_infra, branch_infra)
         for item in (_value(infra, "warnings", []) or [])
         if str(item).strip()
-    })
+    } | set(graph_warning_strings(base_graph.warnings)) | set(graph_warning_strings(branch_graph.warnings)))
     if collection_warnings:
         coverage_warnings.append(
             f"source snapshot has {len(collection_warnings)} collection warning(s); "

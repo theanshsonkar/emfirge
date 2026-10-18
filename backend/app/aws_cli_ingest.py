@@ -253,6 +253,12 @@ def _parse_command(command: str, command_no: int) -> list[dict[str, Any]]:
                     raise ValueError(f"Command {command_no}: cannot read files or URLs; pass literal values instead.")
                 params.setdefault(key, item)
             i += 1; continue
+        if lookup == "ingress" and operation in {"CreateNetworkAclEntry", "ReplaceNetworkAclEntry"}:
+            if eq:
+                raise ValueError(f"Command {command_no}: boolean option --ingress takes no value")
+            params["Egress"] = False
+            i += 1
+            continue
         if lookup not in by_cli:
             raise ValueError(f"Command {command_no}: unknown option --{raw_name}")
         member_name, member = by_cli[lookup]
@@ -268,7 +274,13 @@ def _parse_command(command: str, command_no: int) -> list[dict[str, Any]]:
             if i >= len(core): raise ValueError(f"Command {command_no}: --{lookup} requires a value")
             value = core[i]
         if member.type_name in {"structure", "map"} or (member.type_name == "list" and member.member.type_name in {"structure", "map"}):
-            params[member_name] = _json_value(command_no, f"--{lookup}", value)
+            if operation in {"CreateNetworkAclEntry", "ReplaceNetworkAclEntry"} and member_name == "PortRange" and not value.startswith(("{", "[")):
+                parts = dict(item.split("=", 1) for item in value.split(",") if "=" in item)
+                if set(parts) != {"From", "To"}:
+                    raise ValueError(f"Command {command_no}: invalid value for --{lookup}.")
+                params[member_name] = {key: int(item) for key, item in parts.items()}
+            else:
+                params[member_name] = _json_value(command_no, f"--{lookup}", value)
         elif member.type_name == "list":
             values = [value]
             while i + 1 < len(core) and not core[i + 1].startswith("--"):
