@@ -141,7 +141,11 @@ EDGE_SCHEMAS = {
     RelationshipType.PEERED_WITH: frozenset({("vpc_peering_connection", "vpc")} ),
     RelationshipType.can_access: frozenset({("iam_role", t) for t in ("s3_bucket", "rds_instance", "lambda_function", "secretsmanager_secret", "dynamodb_table", "sqs_queue")} ),
     RelationshipType.CAN_ASSUME: frozenset({("iam_role", "iam_role")} ),
-    RelationshipType.CAN_REACH: frozenset({("ec2_instance", "rds_instance"), ("rds_instance", "ec2_instance"), ("lambda_function", "rds_instance"), ("rds_instance", "lambda_function"), ("lambda_function", "ec2_instance"), ("ec2_instance", "lambda_function")} ),
+    RelationshipType.CAN_REACH: frozenset({
+        (source, target)
+        for source in ("ec2_instance", "rds_instance", "lambda_function")
+        for target in ("ec2_instance", "rds_instance", "lambda_function")
+    }),
     RelationshipType.UNKNOWN: frozenset(),
 }
 

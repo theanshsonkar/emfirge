@@ -8,7 +8,7 @@ from typing import get_args, get_origin, Union
 
 import pytest
 
-from app.egraph import build_graph, get_internet_reachable_set
+from app.egraph import INTERNAL_REACH_EDGE_BUDGET, build_graph, get_internet_reachable_set
 from app.graph_schema import validate_graph
 from app.models import (
     AWSInfrastructure, EC2Data, EC2Instance, IAMData, RolePolicy, S3Data,
@@ -201,7 +201,8 @@ def test_L30_huge_account_stays_within_bounds():
     validate_started = time.perf_counter()
     assert validate_graph(graph) == []
     assert len(graph.nodes) <= 1700
-    assert len(graph.edges) <= 4000
+    assert len(graph.edges) <= INTERNAL_REACH_EDGE_BUDGET + 4000
+    assert any(warning.get("kind") == "internal_reachability_budget_exceeded" for warning in graph.warnings)
     reachable_started = time.perf_counter()
     get_internet_reachable_set(graph)
     reachable_seconds = time.perf_counter() - reachable_started

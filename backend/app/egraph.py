@@ -24,6 +24,7 @@ from app.iam_escalation import matching_paths
 
 
 GRAPH_SCHEMA_VERSION = 1
+INTERNAL_REACH_EDGE_BUDGET = 50_000
 
 
 _ACCESS_LEVEL_ORDER = {
@@ -1233,19 +1234,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             })
     
     # ── INTERNET REACHABILITY ─────────────────────────────────────
-    # SQS queues
-    for queue in infrastructure.sqs.queues:
-        queue_name = _value(queue, 'name')
-        nodes.append({
-            'id': queue_name,
-            'type': 'sqs_queue',
-            'label': f"SQS Queue: {queue_name}",
-            'metadata': {
-                'arn': _value(queue, 'arn'),
-                'encrypted': _value(queue, 'encrypted', False),
-                'is_public': _value(queue, 'is_public', False),
-            },
-        })
+    # SQS nodes are emitted in the service-resource section below.
 
     # Evaluate against route-table and NACL relationships without using the
     # legacy is_public/public_subnet_ids approximation.
@@ -2235,11 +2224,6 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             eligible.append(node)
         elif resource_type == 'lambda_function' and _sg_ids(node) and _resource_subnets(node, reachability_graph, graph_index):
             eligible.append(node)
-    allowed_internal_pairs = {
-        ('ec2_instance', 'rds_instance'), ('rds_instance', 'ec2_instance'),
-        ('lambda_function', 'rds_instance'), ('rds_instance', 'lambda_function'),
-        ('lambda_function', 'ec2_instance'), ('ec2_instance', 'lambda_function'),
-    }
     eligible.sort(key=lambda node: node.id)
     existing_can_reach = {(edge['from'], edge['to']) for edge in edges
                           if _is_relationship(edge, RelationshipType.CAN_REACH.value)}
@@ -2250,17 +2234,19 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
     for node in eligible:
         class_key = (node.resource_type, tuple(_sg_ids(node)), tuple(_resource_subnets(node, reachability_graph, graph_index)), _resource_vpc(node, reachability_graph, graph_index))
         classes.setdefault(class_key, []).append(node)
-    ordered_classes = [classes[key] for key in sorted(classes, key=str)]
+    ordered_classes = [sorted(classes[key], key=lambda node: node.id) for key in sorted(classes, key=str)]
+    internal_reachability_budget_exceeded = False
+    internal_reachability_edges = 0
     for source_members in ordered_classes:
         for target_members in ordered_classes:
+            if internal_reachability_budget_exceeded:
+                break
             source = source_members[0]
             target = target_members[0]
             if source_members is target_members:
                 if len(source_members) < 2:
                     continue
                 target = target_members[1]
-            if len(eligible) > 100 and (source.resource_type, target.resource_type) not in allowed_internal_pairs:
-                continue
             evidence = internal_reachable(source, target, reachability_graph, graph_index)
             if not evidence:
                 continue
@@ -2269,6 +2255,8 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 value.get("confidence", ""), bool(value.get("flagged", False))))
             attrs = {key: item[key] for key in ("ports", "reason", "confidence", "flagged")}
             for source_member in source_members:
+                if internal_reachability_budget_exceeded:
+                    break
                 for target_member in target_members:
                     if source_member.id == target_member.id:
                         continue
@@ -2278,8 +2266,18 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                                   'relationship': RelationshipType.CAN_REACH,
                                   'attrs': attrs})
                     existing_can_reach.add((source_member.id, target_member.id))
+                    internal_reachability_edges += 1
+                    if internal_reachability_edges >= INTERNAL_REACH_EDGE_BUDGET:
+                        internal_reachability_budget_exceeded = True
+                        break
 
-    return Graph(nodes=nodes, edges=edges)
+    warnings = []
+    if internal_reachability_budget_exceeded:
+        warnings.append({
+            "kind": "internal_reachability_budget_exceeded",
+            "budget": INTERNAL_REACH_EDGE_BUDGET,
+        })
+    return Graph(nodes=nodes, edges=edges, warnings=warnings)
 
 
 SLICE_CATEGORIES = {

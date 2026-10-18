@@ -85,7 +85,7 @@ from unittest.mock import Mock
 import pytest
 
 from app.diffing import DiffResult
-from app.models import AWSInfrastructure, EC2Data, ElasticIP, VPCData, VPCSubnet
+from app.models import AWSInfrastructure, EC2Data, ElasticIP, SecurityGroup, VPCData, VPCSubnet
 from app.verdict import combined_verdict
 
 
@@ -100,6 +100,18 @@ def test_collection_warnings_are_visible_in_agent_verdict():
     assert any("source snapshot has 1 collection warning" in item for item in result.coverage_warnings)
     assert "DEGRADED" in result.summary
 
+
+
+def test_graph_duplicate_warning_is_visible_and_clean_graph_is_silent():
+    duplicate = SecurityGroup(id="sg-duplicate", name="duplicate")
+    account = AWSInfrastructure(
+        region="us-east-1",
+        ec2=EC2Data(security_groups=[duplicate, duplicate.model_copy(deep=True)]),
+    )
+    result = combined_verdict(account, account, run_scanners=False)
+    assert any(item.startswith("graph_duplicate_node_ids:") for item in result.collection_warnings)
+    clean = combined_verdict(AWSInfrastructure(region="us-east-1"), AWSInfrastructure(region="us-east-1"), run_scanners=False)
+    assert not any(item.startswith("graph_") for item in clean.collection_warnings)
 
 @pytest.fixture
 def infra():

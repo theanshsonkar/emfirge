@@ -45,6 +45,7 @@ from app.aws_api_ingest import translate_api_calls, validate_change_regions
 from app.aws_cli_ingest import parse_cli_commands
 from app.cfn_ingest import convert_change_set
 from app.verdict import CombinedVerdict, combined_verdict
+from app.diffing import graph_warning_strings
 from app import branches, identifiers
 from app.in_use_evidence import EvidenceRequest, EvidenceEstimate, build_estimate, read_evidence, SOURCES, WINDOW_DAYS
 from app.database import Project, SupabaseIdentity
@@ -3690,7 +3691,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
 
         # Build local warnings list — starts with collector warnings (skipped services),
         # backend failures (Gemini, S3, DB) are appended below
-        warnings = list(infrastructure.warnings)
+        warnings = list(infrastructure.warnings) + graph_warning_strings(graph.warnings)
 
         # STEP 4 — Get AI explanation from Gemini (skipped in raw mode for MCP callers)
         if _is_raw_mode(request, raw):
