@@ -230,7 +230,10 @@ class Node(BaseModel, MappingABC):
         return tuple((key, self[key]) for key in self._SHIM_KEYS)
 
     def as_legacy_dict(self) -> Dict[str, Any]:
-        return {"id": self.id, "type": self.resource_type, "label": self.label, "metadata": dict(self.metadata)}
+        label = self.label
+        if ":" in label:
+            label = self.resource_type.replace("_", " ").title()
+        return {"id": self.id, "type": self.resource_type, "label": label, "metadata": dict(self.metadata)}
 
 
 class Edge(BaseModel):
@@ -290,15 +293,42 @@ class Graph:
     Provides query methods to traverse and analyze the infrastructure graph.
     """
     
-    def __init__(self, nodes: List[Node | Dict[str, Any]], edges: List[Edge | Dict[str, Any]]):
+    def __init__(self, nodes: List[Node | Dict[str, Any]], edges: List[Edge | Dict[str, Any]], warnings: Optional[List[Any]] = None):
         """Initialize the graph and normalize legacy dictionaries to typed models."""
         normalized_nodes = [node if isinstance(node, Node) else Node.model_validate(node) for node in nodes]
         normalized_edges = [edge if isinstance(edge, Edge) else Edge.model_validate(edge) for edge in edges]
+        self.warnings: List[Any] = list(warnings or [])
 
-        # Graph order must depend only on graph content, not collector input order.
-        self.nodes: List[Node] = sorted(normalized_nodes, key=lambda node: node.id)
+        # Resolve duplicate IDs by canonical content, never collector order.
+        candidates_by_id: Dict[str, List[Node]] = {}
+        for node in normalized_nodes:
+            candidates_by_id.setdefault(node.id, []).append(node)
+        unique_nodes: List[Node] = []
+        for node_id, candidates in candidates_by_id.items():
+            ordered = sorted(candidates, key=lambda node: json.dumps(node.model_dump(mode="json"), sort_keys=True, separators=(",", ":")))
+            unique_nodes.append(ordered[0])
+            if len(ordered) > 1:
+                self.warnings.append({
+                    "kind": "duplicate_node_id",
+                    "node_id": node_id,
+                    "discarded": len(ordered) - 1,
+                })
+
+        self.nodes: List[Node] = sorted(unique_nodes, key=lambda node: node.id)
+        node_ids = {node.id for node in self.nodes}
+        kept_edges = []
+        for edge in normalized_edges:
+            if edge.src in node_ids and edge.dst in node_ids:
+                kept_edges.append(edge)
+            else:
+                self.warnings.append({
+                    "kind": "dangling_edge_dropped",
+                    "from": edge.src,
+                    "to": edge.dst,
+                    "relationship": edge.relationship.value,
+                })
         self.edges: List[Edge] = sorted(
-            normalized_edges,
+            kept_edges,
             key=lambda edge: (
                 edge.src,
                 edge.dst,
@@ -1156,7 +1186,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 nodes.append({
                     'id': role_id,
                     'type': 'iam_role',
-                    'label': f"IAM Role: {actual_role_name}",
+                    'label': "IAM Role",
                     'metadata': {'arn': actual_role_arn, 'source': 'instance_profile'}
                 })
             edges.append({
@@ -1196,14 +1226,27 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         
         # Edge: Security Group -> Instance (attached_to)
         for instance_id in attached_to:
-            if any(node['id'] == instance_id for node in nodes):
-                edges.append({
-                    'from': sg_id,
-                    'to': instance_id,
-                    'relationship': 'attached_to_instance'
-                })
+            edges.append({
+                'from': sg_id,
+                'to': instance_id,
+                'relationship': 'attached_to_instance'
+            })
     
     # ── INTERNET REACHABILITY ─────────────────────────────────────
+    # SQS queues
+    for queue in infrastructure.sqs.queues:
+        queue_name = _value(queue, 'name')
+        nodes.append({
+            'id': queue_name,
+            'type': 'sqs_queue',
+            'label': f"SQS Queue: {queue_name}",
+            'metadata': {
+                'arn': _value(queue, 'arn'),
+                'encrypted': _value(queue, 'encrypted', False),
+                'is_public': _value(queue, 'is_public', False),
+            },
+        })
+
     # Evaluate against route-table and NACL relationships without using the
     # legacy is_public/public_subnet_ids approximation.
     snapshot_nodes = list(nodes)
@@ -1413,7 +1456,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 nodes.append({
                     'id': role_id,
                     'type': 'iam_role',
-                    'label': f"IAM Role: {role_name}",
+                    'label': "IAM Role",
                     'metadata': {
                         'arn': role_arn
                     }
@@ -1479,7 +1522,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 nodes.append({
                     'id': role_id,
                     'type': 'iam_role',
-                    'label': f"IAM Role: {role_name}",
+                    'label': "IAM Role",
                     'metadata': {'arn': role_arn, 'source': 'ecs_task'}
                 })
             edges.append({
@@ -1522,12 +1565,11 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         
         # Edge: Subnet -> Resources (EC2, Lambda, etc.)
         for resource_id in resources:
-            if any(node['id'] == resource_id for node in nodes):
-                edges.append({
-                    'from': subnet_id,
-                    'to': resource_id,
-                    'relationship': 'contains_resource'
-                })
+            edges.append({
+                'from': subnet_id,
+                'to': resource_id,
+                'relationship': 'contains_resource'
+            })
     
     # Route tables and network boundary nodes
     for route_table in infrastructure.vpc.route_tables:
@@ -1985,7 +2027,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             nodes.append({
                 'id': role_id,
                 'type': 'iam_role',
-                'label': f"IAM Role: {role_name}",
+                'label': "IAM Role",
                 'metadata': {
                     'arn': role_arn,
                     'has_admin': has_admin,
@@ -2193,6 +2235,11 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             eligible.append(node)
         elif resource_type == 'lambda_function' and _sg_ids(node) and _resource_subnets(node, reachability_graph, graph_index):
             eligible.append(node)
+    allowed_internal_pairs = {
+        ('ec2_instance', 'rds_instance'), ('rds_instance', 'ec2_instance'),
+        ('lambda_function', 'rds_instance'), ('rds_instance', 'lambda_function'),
+        ('lambda_function', 'ec2_instance'), ('ec2_instance', 'lambda_function'),
+    }
     eligible.sort(key=lambda node: node.id)
     existing_can_reach = {(edge['from'], edge['to']) for edge in edges
                           if _is_relationship(edge, RelationshipType.CAN_REACH.value)}
@@ -2212,6 +2259,8 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 if len(source_members) < 2:
                     continue
                 target = target_members[1]
+            if len(eligible) > 100 and (source.resource_type, target.resource_type) not in allowed_internal_pairs:
+                continue
             evidence = internal_reachable(source, target, reachability_graph, graph_index)
             if not evidence:
                 continue
@@ -2230,13 +2279,6 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                                   'attrs': attrs})
                     existing_can_reach.add((source_member.id, target_member.id))
 
-    unique_nodes = {}
-    for node in nodes:
-        unique_nodes.setdefault(_value(node, 'id'), node)
-    nodes = list(unique_nodes.values())
-    node_ids = set(unique_nodes)
-    edges = [edge for edge in edges
-             if _value(edge, 'from') in node_ids and _value(edge, 'to') in node_ids]
     return Graph(nodes=nodes, edges=edges)
 
 

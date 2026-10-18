@@ -167,12 +167,20 @@ def test_L30_duplicate_security_group_ids_have_unique_nodes():
 
 
 def _huge_snapshot() -> AWSInfrastructure:
-    sg_count, subnet_count, role_count = 30, 20, 20
-    sgs = [SecurityGroup(id=f"sg-huge-{i}", name=f"huge-{i}") for i in range(sg_count)]
+    sg_count, subnet_count, role_count, instance_count, bucket_count = 200, 100, 100, 1000, 200
+    sgs = [SecurityGroup(id=f"sg-huge-{i}", name=f"huge-{i}",
+                         rules=[{"protocol": "tcp", "from_port": 443, "to_port": 443,
+                                 "ip_ranges": ["10.0.0.0/8"]}]) for i in range(sg_count)]
     subnets = [VPCSubnet(id=f"subnet-huge-{i}", vpc_id="vpc-huge", cidr=f"10.{i // 256}.{i % 256}.0/24") for i in range(subnet_count)]
-    instances = [EC2Instance(id=f"i-huge-{i}", type="t3.micro", state="running", subnet_id=subnets[i % subnet_count].id, sg_ids=[sgs[(2*i) % sg_count].id, sgs[(2*i+1) % sg_count].id]) for i in range(30)]
+    instances = []
+    for i in range(instance_count):
+        shared = [sgs[(2 * i) % 20].id, sgs[(2 * i + 1) % 20].id]
+        unique = [sgs[20 + (i % 180)].id] if i % 5 == 0 else []
+        instances.append(EC2Instance(id=f"i-huge-{i}", type="t3.micro", state="running",
+                                     subnet_id=subnets[i % subnet_count].id,
+                                     sg_ids=shared + unique))
     roles = [RolePolicy(role_name=f"HugeRole{i}", role_arn=f"arn:aws:iam::000000000000:role/HugeRole{i}") for i in range(role_count)]
-    buckets = [S3Bucket(name=f"huge-bucket-{i}") for i in range(30)]
+    buckets = [S3Bucket(name=f"huge-bucket-{i}") for i in range(bucket_count)]
     return AWSInfrastructure(
         region="us-east-1",
         ec2=EC2Data(instances=instances, security_groups=sgs),
@@ -192,8 +200,8 @@ def test_L30_huge_account_stays_within_bounds():
     tracemalloc.stop()
     validate_started = time.perf_counter()
     assert validate_graph(graph) == []
-    assert len(graph.nodes) <= 700
-    assert len(graph.edges) <= 1500
+    assert len(graph.nodes) <= 1700
+    assert len(graph.edges) <= 4000
     reachable_started = time.perf_counter()
     get_internet_reachable_set(graph)
     reachable_seconds = time.perf_counter() - reachable_started

@@ -57,6 +57,6 @@ def build_coverage_infrastructure() -> AWSInfrastructure:
         ),
         api_gateway=APIGatewayData(apis=[APIGatewayInstance(id="api-0cov0001", name="coverage", api_type="REST", endpoint_type="REGIONAL", auth_type="IAM")]),
         elasticache=ElastiCacheData(clusters=[ElastiCacheCluster(id="cache-0cov0001", engine="redis", node_type="cache.t3.micro", vpc_id=VPC_ID, sg_ids=[SG_ID])]),
-        sqs=SQSData(queues=[SQSQueue(url="https://sqs.us-east-1.amazonaws.com/000000000000/coverage", arn="arn:aws:sqs:us-east-1:000000000000:coverage", name="coverage")]),
+        sqs=SQSData(queues=[SQSQueue(url="https://sqs.us-east-1.amazonaws.com/000000000000/coverage-queue", arn="arn:aws:sqs:us-east-1:000000000000:coverage-queue", name="coverage-queue")]),
         dynamodb=DynamoDBData(tables=[DynamoDBTable(name="coverage", arn="arn:aws:dynamodb:us-east-1:000000000000:table/coverage", pitr_enabled=True)]),
     )
