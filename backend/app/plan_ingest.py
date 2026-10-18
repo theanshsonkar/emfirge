@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+import copy
 
 from app.mutations import Change
 from app.aws_api_ingest import remove_security_group_rule
@@ -18,10 +19,7 @@ def is_aws_provider(provider_name: Any) -> bool:
     return provider_name.strip().rstrip("/").rsplit("/", 1)[-1].lower() in _AWS_PROVIDER_TYPES
 
 
-_UNSEEN_TERRAFORM_TYPES = frozenset({
-    "aws_network_acl", "aws_network_acl_rule", "aws_network_acl_association",
-    "aws_default_network_acl", "aws_default_security_group",
-})
+_UNSEEN_TERRAFORM_TYPES = frozenset({"aws_default_security_group"})
 _TERRAFORM_RULE_TYPES = frozenset({
     "aws_vpc_security_group_ingress_rule", "aws_vpc_security_group_egress_rule",
     "aws_security_group_rule",
@@ -207,7 +205,123 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
     return fields
 
 
-def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[str, Any] | None = None, config_resources: dict[str, dict] | None = None, created_ids: dict[str, str] | None = None) -> tuple[list[Change], dict | None]:
+def _nacl_defaults() -> list[dict]:
+    return [{"rule_number": 32767, "protocol": "-1", "rule_action": "deny", "egress": egress,
+             "cidr_block": "0.0.0.0/0", "ipv6_cidr_block": None, "port_from": None, "port_to": None}
+            for egress in (False, True)]
+
+
+def _nacl_entry(value: dict, egress: bool) -> dict:
+    return {"rule_number": value.get("rule_number", value.get("rule_no")),
+            "protocol": str(value.get("protocol", "-1")),
+            "rule_action": value.get("rule_action", value.get("action", "deny")),
+            "egress": egress, "cidr_block": value.get("cidr_block"),
+            "ipv6_cidr_block": value.get("ipv6_cidr_block"),
+            "port_from": value.get("from_port"), "port_to": value.get("to_port")}
+
+
+def _nacl_inline(after: dict, *, authoritative: bool = False) -> list[dict]:
+    entries = []
+    for name, egress in (("ingress", False), ("egress", True)):
+        for value in after.get(name, []) or []:
+            if isinstance(value, dict):
+                entries.append(_nacl_entry(value, egress))
+    if not entries and not authoritative:
+        return _nacl_defaults()
+    if authoritative:
+        entries.extend(_nacl_defaults())
+    return entries
+
+
+def _nacl_value(item: dict, field: str, unknown: list[dict], value: dict) -> Any:
+    change = item.get("change") or {}
+    if field in (change.get("after_unknown") or {}):
+        unknown.append({"address": item.get("address", ""), "field": field,
+                        "reason": "unknown Terraform value"})
+        return None
+    return value.get(field)
+
+
+def _nacl_changes(item: dict, nacls: dict[str, Any], config_resources: dict[str, dict],
+                  created_ids: dict[str, str], unknown: list[dict], acl_counter: list[int]) -> tuple[list[Change], dict | None]:
+    change = item.get("change") or {}; actions = change.get("actions", []); address = item.get("address", "")
+    typ = item.get("type", ""); before = change.get("before") or {}; after = change.get("after") or {}
+    value = before if actions == ["delete"] else after
+    if typ == "aws_network_acl_rule":
+        acl_id = _nacl_value(item, "network_acl_id", unknown, value)
+        if acl_id is None:
+            for reference in ((config_resources.get(address, {}).get("expressions") or {}).get("network_acl_id", {}).get("references", []) or []):
+                if reference in created_ids:
+                    acl_id = created_ids[reference]
+                    unknown[:] = [entry for entry in unknown if not (entry.get("address") == address and entry.get("field") == "network_acl_id")]
+                    break
+        if not acl_id or str(acl_id) not in nacls:
+            return [], {"address": address, "type": typ, "actions": actions, "provider_name": "aws",
+                         "outside_view": False, "unseen": True, "detail": "network ACL id not in snapshot"}
+        acl_id = str(acl_id); current = copy.deepcopy(nacls[acl_id].get("entries", []))
+        def key(entry): return (entry.get("rule_number"), entry.get("egress"))
+        old = _nacl_entry(before, bool(before.get("egress", False)))
+        new = _nacl_entry(after, bool(after.get("egress", False)))
+        if actions == ["delete"]:
+            current = [entry for entry in current if key(entry) != key(old)]
+        else:
+            current = [entry for entry in current if key(entry) != key(old if actions != ["create"] else new)]
+            current.append(new)
+        nacls[acl_id]["entries"] = current
+        return [Change(op="modify", resource_type="network_acl", resource_id=acl_id, fields={"entries": current})], None
+    if typ == "aws_network_acl_association":
+        subnet = _nacl_value(item, "subnet_id", unknown, value)
+        target = _nacl_value(item, "network_acl_id", unknown, value)
+        if target is None:
+            for reference in ((config_resources.get(address, {}).get("expressions") or {}).get("network_acl_id", {}).get("references", []) or []):
+                if reference in created_ids:
+                    target = created_ids[reference]
+                    unknown[:] = [entry for entry in unknown if not (entry.get("address") == address and entry.get("field") == "network_acl_id")]
+                    break
+        if not subnet or not target:
+            return [], {"address": address, "type": typ, "actions": actions, "provider_name": "aws", "outside_view": False, "unseen": True, "detail": "association value unknown"}
+        subnet, target = str(subnet), str(target)
+        if actions == ["delete"]:
+            vpc_id = next((a.get("vpc_id") for a in nacls.values() if subnet in a.get("associated_subnet_ids", [])), None)
+            target = next((aid for aid, a in nacls.items() if a.get("vpc_id") == vpc_id and a.get("is_default")), None)
+        if not target or target not in nacls:
+            return [], {"address": address, "type": typ, "actions": actions, "provider_name": "aws", "outside_view": False, "unseen": True, "detail": "network ACL association target not in snapshot"}
+        associated = list(nacls[target].get("associated_subnet_ids", []));
+        if subnet not in associated: associated.append(subnet)
+        nacls[target]["associated_subnet_ids"] = associated
+        return [Change(op="modify", resource_type="network_acl", resource_id=target, fields={"associated_subnet_ids": associated})], None
+    if typ == "aws_network_acl":
+        if actions == ["delete"]:
+            acl_id = before.get("id") or before.get("network_acl_id")
+            if not acl_id or str(acl_id) not in nacls:
+                return [], {"address": address, "type": typ, "actions": actions, "provider_name": "aws", "outside_view": False, "unseen": True, "detail": "network ACL id not in snapshot"}
+            return [Change(op="delete", resource_type="network_acl", resource_id=str(acl_id))], None
+        acl_id = after.get("id")
+        if not acl_id:
+            acl_counter[0] += 1; acl_id = f"acl-new-{acl_counter[0]}"; created_ids[address] = acl_id; created_ids[address + ".id"] = acl_id
+        acl_id = str(acl_id)
+        vpc_id = after.get("vpc_id")
+        if not vpc_id or "vpc_id" in (change.get("after_unknown") or {}):
+            return [], {"address": address, "type": typ, "actions": actions, "provider_name": "aws", "outside_view": False, "unseen": True, "detail": "VPC id unknown"}
+        fields = {"vpc_id": vpc_id}
+        if actions == ["create"] or "ingress" in after or "egress" in after:
+            fields["entries"] = _nacl_inline(after)
+        if "subnet_ids" in after: fields["associated_subnet_ids"] = after.get("subnet_ids") or []
+        nacls[acl_id] = {"id": acl_id, "vpc_id": vpc_id, "entries": fields.get("entries", _nacl_defaults()), "associated_subnet_ids": fields.get("associated_subnet_ids", [])}
+        return [Change(op="add" if actions == ["create"] else "modify", resource_type="network_acl", resource_id=acl_id, fields=fields if actions == ["create"] else {k: v for k, v in fields.items() if k != "vpc_id"})], None
+    if typ == "aws_default_network_acl":
+        acl_id = after.get("default_network_acl_id") or before.get("default_network_acl_id")
+        if not acl_id or str(acl_id) not in nacls:
+            return [], {"address": address, "type": typ, "actions": actions, "provider_name": "aws", "outside_view": False, "unseen": True, "detail": "default network ACL id not in snapshot"}
+        fields = {}
+        if "ingress" in after or "egress" in after: fields["entries"] = _nacl_inline(after, authoritative=True)
+        if "subnet_ids" in after: fields["associated_subnet_ids"] = after.get("subnet_ids") or []
+        if not fields: return [], None
+        return [Change(op="modify", resource_type="network_acl", resource_id=str(acl_id), fields=fields)], None
+    return [], None
+
+
+def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[str, Any] | None = None, config_resources: dict[str, dict] | None = None, created_ids: dict[str, str] | None = None, nacls: dict[str, Any] | None = None, acl_counter: list[int] | None = None) -> tuple[list[Change], dict | None]:
     if item.get("mode", "managed") != "managed":
         return [], None
     address = item.get("address", "")
@@ -219,6 +333,8 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
     if not is_aws_provider(provider_name):
         return [], {"address": address, "type": typ, "actions": actions,
                      "provider_name": provider_name, "outside_view": True}
+    if typ in {"aws_network_acl", "aws_network_acl_rule", "aws_network_acl_association", "aws_default_network_acl"}:
+        return _nacl_changes(item, nacls or {}, config_resources or {}, created_ids or {}, unknown_fields, acl_counter or [0])
     if typ in _UNSEEN_TERRAFORM_TYPES:
         return [], {"address": address, "type": typ, "actions": actions,
                      "provider_name": provider_name if isinstance(provider_name, str) else None,
@@ -262,7 +378,7 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
     return result, None
 
 
-def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None) -> dict[str, Any]:
+def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dict[str, Any] | None = None) -> dict[str, Any]:
     if not isinstance(plan, dict):
         raise ValueError("Terraform plan must be a JSON object")
     if not isinstance(plan.get("format_version"), str) or not plan["format_version"].startswith("1."):
@@ -272,11 +388,14 @@ def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None) -> dict[st
     unknown_fields: list[dict] = []
     unmodeled: list[dict] = []
     sg_rules = sg_rules if sg_rules is not None else {}
+    nacls = nacls if nacls is not None else {}
+    nacls = {key: (value.model_dump() if hasattr(value, "model_dump") else copy.deepcopy(value)) for key, value in nacls.items()}
     config_resources = {
         resource.get("address"): resource for resource in ((plan.get("configuration") or {}).get("root_module") or {}).get("resources", [])
         if isinstance(resource, dict) and isinstance(resource.get("address"), str)
     }
     created_ids = {}
+    acl_counter = [0]
     for resource in plan["resource_changes"]:
         if isinstance(resource, dict) and resource.get("type") == "aws_security_group":
             after = (resource.get("change") or {}).get("after") or {}
@@ -295,7 +414,8 @@ def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None) -> dict[st
                 or not actions or not all(isinstance(action, str) for action in actions)):
             raise ValueError("Terraform plan change actions must be a non-empty list of strings")
         changes, unsupported = _translate_item(item, unknown_fields, sg_rules=sg_rules,
-                                                 config_resources=config_resources, created_ids=created_ids)
+                                                 config_resources=config_resources, created_ids=created_ids,
+                                                 nacls=nacls, acl_counter=acl_counter)
         if unsupported:
             unmodeled.append(unsupported)
         for change in changes:

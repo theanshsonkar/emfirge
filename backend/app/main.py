@@ -1658,7 +1658,7 @@ def _terraform_translator(branch_id: str, document):
         group.id: {"rules": copy.deepcopy(group.rules), "egress_rules": copy.deepcopy(group.egress_rules)}
         for group in state.ec2.security_groups
     }
-    return translate_plan(document, sg_rules=sg_rule_map)
+    return translate_plan(document, sg_rules=sg_rule_map, nacls={acl.id: acl for acl in state.vpc.nacls})
 
 
 @app.post('/branches/{branch_id}/plans/terraform', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
@@ -1705,7 +1705,9 @@ def _cfn_translator(branch_id: str, document):
         branch = branches.get_branch(branch_id)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    api_document, extras = convert_change_set(document)
+    state = branches.rebuild_branch_state(branch)
+    nacl_snapshot = {acl.id: acl for acl in state.vpc.nacls}
+    api_document, extras = convert_change_set(document, nacls=nacl_snapshot)
     if api_document["calls"]:
         state = branches.rebuild_branch_state(branch)
         validate_change_regions(api_document["calls"], state.region, document_region)

@@ -160,9 +160,7 @@ def test_unresolvable_or_missing_rule_parent_blocks_unseen_change(plan_client, a
     assert any(reason["code"] == "unseen_change" and reason["message"].startswith("Emfirge can't see this: ") for reason in reasons)
 
 
-@pytest.mark.parametrize(("typ", "actions"), [(typ, actions) for typ in (
-    "aws_network_acl", "aws_network_acl_rule", "aws_network_acl_association",
-    "aws_default_network_acl", "aws_default_security_group") for actions in ((["create"]), (["update"]), (["delete"]))])
+@pytest.mark.parametrize(("typ", "actions"), [("aws_default_security_group", actions) for actions in (["create"], ["update"], ["delete"])])
 def test_unread_terraform_network_types_block_unseen_change(plan_client, typ, actions):
     branch_id, _, response = _post(plan_client, _plan(_item(f"{typ}.x", typ, actions, before={}, after={})))
     assert response.status_code == 200, response.text
