@@ -1,9 +1,20 @@
+
+
 // HTTP client. Override base URL with EMFIRGE_BASE_URL.
 // X-MCP header tells the backend to skip its AI summary (host LLM does that).
 
 import { redactDeep } from "./tokenize.js";
 import { getAccessToken, forceExpire } from "./auth/session.js";
 import { startLogin } from "./auth/login.js";
+
+export function extractNextStep(text: string): string | null {
+  try {
+    const body = JSON.parse(text) as { next_step?: unknown };
+    return typeof body?.next_step === "string" && body.next_step.trim() ? body.next_step : null;
+  } catch {
+    return null;
+  }
+}
 
 let authWaitTimeoutMs = 120_000;
 
@@ -50,7 +61,7 @@ function shouldRetrySignIn(): boolean {
 
 export class BackendHttpError extends Error {
   constructor(public readonly status: number, public readonly body: unknown, path: string, detail?: string) {
-    super(`Backend ${status} on ${path}${detail ? `: ${detail}` : ""}`);
+    super(String(redactDeep(`Backend ${status} on ${path}${detail ? `: ${detail}` : ""}`)));
     this.name = "BackendHttpError";
   }
 }
@@ -102,10 +113,14 @@ export async function backendCall<T = unknown>(
       const text = await res.text();
 
       const detail = extractDetail(text);
+      const nextStep = extractNextStep(text);
+      const surfacedDetail = nextStep
+        ? [detail, nextStep].filter((value): value is string => Boolean(value)).join(" ")
+        : detail;
       if (res.status === 409) {
         let parsedBody: unknown = text;
         try { parsedBody = JSON.parse(text); } catch { /* preserve raw body */ }
-        throw new BackendHttpError(res.status, parsedBody, path, detail ?? undefined);
+        throw new BackendHttpError(res.status, parsedBody, path, surfacedDetail ?? undefined);
       }
 
       if (res.status === 429) {
@@ -129,7 +144,7 @@ export async function backendCall<T = unknown>(
         throw new Error(`${hint}${suffix}`);
       }
 
-      throw new Error(`Backend ${res.status} on ${path}: ${detail ?? text.slice(0, 300)}`);
+      throw new Error(String(redactDeep(`Backend ${res.status} on ${path}: ${surfacedDetail ?? text.slice(0, 300)}`)));
     }
 
     return (await res.json()) as T;

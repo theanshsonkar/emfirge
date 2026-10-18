@@ -260,10 +260,54 @@ def _resource_id(item: Any) -> str:
     return _text(item.get("id", item.get("resource_id", ""))) if isinstance(item, Mapping) else _text(_value(item, "id", ""))
 
 
+def _resource_ids(values: Any) -> list[str]:
+    """Normalize attributable resource ids deterministically."""
+    if values is None:
+        return []
+    if isinstance(values, (str, bytes)):
+        values = [values]
+    result: set[str] = set()
+    for value in values:
+        if isinstance(value, Mapping):
+            value = value.get("resource_id", value.get("resource", value.get("id", "")))
+        else:
+            value = _value(value, "resource_id", _value(value, "id", value))
+        value = _text(value)
+        if value:
+            result.add(value)
+    return sorted(result)
+
+
+def _edge_resource_ids(items: Any) -> list[str]:
+    ids: list[str] = []
+    for item in items or []:
+        ids.extend(_resource_ids([_value(item, "from"), _value(item, "to")]))
+    return _resource_ids(ids)
+
+
+def _deletion_resource_ids(items: Any) -> list[str]:
+    ids: list[str] = []
+    for item in items or []:
+        ids.extend(_resource_ids([_value(item, "removed_resource", {})]))
+        ids.extend(_resource_ids(_value(item, "surviving_related_resources", []) or []))
+    return _resource_ids(ids)
+
+
 def _reason(level: str, code: str, message: str, resources: list[str] | None = None) -> dict[str, Any]:
     reason: dict[str, Any] = {"level": level, "code": code, "message": message}
     if resources:
-        reason["resources"] = resources
+        unique = []
+        seen = set()
+        for resource in resources:
+            resource = _text(resource)
+            if resource and resource not in seen:
+                seen.add(resource)
+                unique.append(resource)
+        if unique:
+            total = len(unique)
+            reason["resources"] = unique[:50]
+            if total > 50:
+                reason["resources_total"] = total
     return reason
 
 
@@ -288,48 +332,36 @@ def _plan_reasons(plans: list[Mapping[str, Any]] | None) -> list[dict[str, str]]
             actions = item.get("actions", []) if isinstance(item, Mapping) else []
             provider_name = item.get("provider_name") if isinstance(item, Mapping) else None
             source_label = "AWS API call" if isinstance(item, Mapping) and item.get("source") == "aws_api" else "Terraform plan"
+            address = item.get("address") if isinstance(item, Mapping) else None
+            addresses = _resource_ids([address])
             if item.get("stateless_replace"):
                 suffix = "; its DNS name will change, so clients that use the old name will break" if item.get("type") in {"aws_lb", "aws_alb"} else ""
                 reasons.append(_reason(
                     "warn", "stateless_replace",
-                    f"Terraform plan replaces {item.get('type')} without changing its network or security settings{suffix}",
+                    f"Terraform plan replaces {item.get('type')} without changing its network or security settings{suffix}", addresses,
                 ))
             elif item.get("unseen"):
                 detail = item.get("detail") or ("cannot tell which security group this rule belongs to" if item.get("unresolvable_parent")
                           else f"{item.get('type')} changes network access and Emfirge does not read it yet")
-                reasons.append(_reason(
-                    "block", "unseen_change", f"Emfirge can't see this: {detail}",
-                ))
+                reasons.append(_reason("block", "unseen_change", f"Emfirge can't see this: {detail}", addresses))
             elif not is_aws_provider(provider_name):
-                reasons.append(_reason(
-                    "warn", "outside_view",
-                    f"{source_label} changes resources outside what Emfirge can see",
-                ))
+                reasons.append(_reason("warn", "outside_view", f"{source_label} changes resources outside what Emfirge can see", addresses))
             elif "delete" in actions:
-                reasons.append(_reason(
-                    "block", "unmodeled_delete",
-                    f"{source_label} deletes or replaces an AWS resource type Emfirge does not model",
-                ))
+                reasons.append(_reason("block", "unmodeled_delete", f"{source_label} deletes or replaces an AWS resource type Emfirge does not model", addresses))
             elif item.get("risk") == "risky" and source_label == "AWS API call":
                 operation = item.get("type", "AWS API call").split(".", 1)[-1]
-                reasons.append(_reason(
-                    "block", "unmodeled_risky_change",
-                    f"Unmodeled AWS API call {operation} can remove access or protections; blocked until Emfirge models it.",
-                ))
+                reasons.append(_reason("block", "unmodeled_risky_change", f"Unmodeled AWS API call {operation} can remove access or protections; blocked until Emfirge models it.", addresses))
             else:
-                reasons.append(_reason(
-                    "warn", "unmodeled_change", f"{source_label} contains unmodeled resources",
-                ))
+                reasons.append(_reason("warn", "unmodeled_change", f"{source_label} contains unmodeled resources", addresses))
         rejected = plan.get("rejected") or []
+        rejected_addresses = _resource_ids(item.get("address") for item in rejected if isinstance(item, Mapping))
         if any(not isinstance(item, Mapping) or "op" not in item or item.get("op") == "delete" for item in rejected):
-            reasons.append(_reason(
-                "block", "plan_delete_rejected",
-                "A Terraform plan deletion could not be applied to the branch, so its impact was not evaluated",
-            ))
+            reasons.append(_reason("block", "plan_delete_rejected", "A Terraform plan deletion could not be applied to the branch, so its impact was not evaluated", rejected_addresses))
         elif any(item.get("op") != "delete" for item in rejected if isinstance(item, Mapping)):
-            reasons.append(_reason("warn", "plan_change_rejected", "Terraform plan changes were rejected"))
+            reasons.append(_reason("warn", "plan_change_rejected", "Terraform plan changes were rejected", rejected_addresses))
         if plan.get("unknown_fields"):
-            reasons.append(_reason("warn", "unknown_plan_values", "Terraform plan contains unknown or unsupported values"))
+            unknown_addresses = _resource_ids(item.get("address") for item in plan.get("unknown_fields", []) if isinstance(item, Mapping))
+            reasons.append(_reason("warn", "unknown_plan_values", "Terraform plan contains unknown or unsupported values", unknown_addresses))
     return reasons
 
 
@@ -465,13 +497,41 @@ def combined_verdict(
     data_lost = [item.model_dump() for item in deletion.data_lost]
     recovered_deleted = [item.resource_id for item in deletion.recovery_points]
     deleted_stores = {item["resource_id"] for item in data_lost} | set(recovered_deleted)
+    ledger = deletion_ledger(branch_infra)
+    deleted_resource_ids = _resource_ids(item.get("resource_id") for item in ledger)
+    deleted_role_ids = _resource_ids(
+        item.get("resource_id") for item in ledger if item.get("resource_type") == "iam_role"
+    )
     no_recovery = data_lost
     deletion_relationships = [item for item in deletion.impacts if item.relation != "deleted_with"]
+    cloudtrail_unknown_ids = _resource_ids(
+        _value(item, "resource_id") for item in deletion.in_use_evidence
+        if _value(item, "source") == "cloudtrail_events"
+        and _value(item, "status") in {"denied", "error", "incomplete", "unknown"}
+    )
+    cloudwatch_used_ids = _resource_ids(
+        _value(item, "resource_id") for item in deletion.in_use_evidence
+        if _value(item, "source") == "cloudwatch_metrics"
+        and _value(item, "status") == "ok" and _value(item, "used") is True
+    )
+    cloudtrail_recent_ids = _resource_ids(
+        _value(item, "resource_id") for item in deletion.in_use_evidence
+        if _value(item, "source") == "cloudtrail_events"
+        and _value(item, "status") == "ok"
+        and (parse_iso(_value(item, "last_event_at")) is not None)
+        and (observed_at := parse_iso(_value(item, "observed_at"))) is not None
+        and observed_at - timedelta(days=delete_lens.RECENT_USE_DAYS) <= parse_iso(_value(item, "last_event_at")) <= observed_at
+    )
+    removed_recovery_point_ids = _resource_ids(
+        item.get("resource_id") for item in ledger
+        if item.get("resource_type") in {"rds_snapshot", "ebs_snapshot"}
+    )
+    no_recovery = data_lost
     deleted_role_dependency = bool(diff.lost_dependencies)
 
     reasons: list[dict[str, str]] = []
     if introduced_critical:
-        reasons.append(_reason("block", "introduced_critical_finding", "Introduced Critical finding"))
+        reasons.append(_reason("block", "introduced_critical_finding", "Introduced Critical finding", _resource_ids(item.get("resource") for item in introduced_critical)))
     broad_access_findings = [
         item for item in diff.added_findings
         if _text(_value(item, "rule_id")) == "EMFIRGE-IAM-008"
@@ -508,21 +568,21 @@ def combined_verdict(
             resources=resources,
         ))
     if active_critical_exposure:
-        reasons.append(_reason("block", "introduced_critical_exposure", "Introduced Critical exposure"))
+        reasons.append(_reason("block", "introduced_critical_exposure", "Introduced Critical exposure", _resource_ids(item.get("resource_id") for item in active_critical_exposure)))
     if introduces_privilege_escalation:
-        reasons.append(_reason("block", "privilege_escalation", "Privilege escalation was introduced"))
+        reasons.append(_reason("block", "privilege_escalation", "Privilege escalation was introduced", _resource_ids(introduced_escalating_roles)))
     if deleted_role_usage_unknown(base_infra, branch_infra):
-        reasons.append(_reason("block", "usage_unknown", "Deleted IAM role usage could not be verified"))
+        reasons.append(_reason("block", "usage_unknown", "Deleted IAM role usage could not be verified", deleted_role_ids))
     if recently_used_deleted(base_infra, branch_infra):
-        reasons.append(_reason("block", "recently_used", "Deleted IAM role was recently used"))
+        reasons.append(_reason("block", "recently_used", "Deleted IAM role was recently used", deleted_role_ids))
     if any(
         _value(item, "source") == "cloudtrail_events"
         and _value(item, "status") in {"denied", "error", "incomplete", "unknown"}
         for item in deletion.in_use_evidence
     ):
-        reasons.append(_reason("block", "usage_unknown", "CloudTrail usage could not be verified for a deleted resource"))
+        reasons.append(_reason("block", "usage_unknown", "CloudTrail usage could not be verified for a deleted resource", cloudtrail_unknown_ids))
     if any(_value(item, "source") == "cloudwatch_metrics" and _value(item, "status") == "ok" and _value(item, "used") is True for item in deletion.in_use_evidence):
-        reasons.append(_reason("block", "recently_used", "CloudWatch metrics show a deleted resource was used in the last 90 days"))
+        reasons.append(_reason("block", "recently_used", "CloudWatch metrics show a deleted resource was used in the last 90 days", cloudwatch_used_ids))
     if any(
         _value(item, "source") == "cloudtrail_events"
         and _value(item, "status") == "ok"
@@ -531,13 +591,13 @@ def combined_verdict(
         and observed_at - timedelta(days=delete_lens.RECENT_USE_DAYS) <= parse_iso(_value(item, "last_event_at")) <= observed_at
         for item in deletion.in_use_evidence
     ):
-        reasons.append(_reason("warn", "recent_activity", "CloudTrail shows recent changes to a deleted resource"))
+        reasons.append(_reason("warn", "recent_activity", "CloudTrail shows recent changes to a deleted resource", cloudtrail_recent_ids))
     if no_recovery:
-        reasons.append(_reason("block", "data_store_deleted_no_recovery_point", "Deleted data store has no recovery point"))
+        reasons.append(_reason("block", "data_store_deleted_no_recovery_point", "Deleted data store has no recovery point", _resource_ids(item.get("resource_id") for item in no_recovery)))
     if recovered_deleted:
-        reasons.append(_reason("warn", "data_store_deleted_with_recovery_point", "Deleted data store has a surviving recovery point"))
+        reasons.append(_reason("warn", "data_store_deleted_with_recovery_point", "Deleted data store has a surviving recovery point", _resource_ids(recovered_deleted)))
     if data_lost and any(item.resource_id not in {x.resource_id for x in deletion.data_lost} for item in deletion.recovery_points):
-        reasons.append(_reason("warn", "recovery_point_removed", "A recovery point was removed"))
+        reasons.append(_reason("warn", "recovery_point_removed", "A recovery point was removed", removed_recovery_point_ids))
     recovery_removed = any(
         item.get("resource_type") in {"rds_snapshot", "ebs_snapshot"}
         and any(str(_value(s, "id")) == str(item.get("resource_id")) for s in _value(_value(base_infra, "rds", {}), "rds_snapshots", []) + _value(_value(base_infra, "ec2", {}), "ebs_snapshots", []))
@@ -555,27 +615,27 @@ def combined_verdict(
         if _value(old, "name") == _value(new, "name")
     )
     if recovery_removed:
-        reasons.append(_reason("warn", "recovery_point_removed", "A recovery point was removed"))
+        reasons.append(_reason("warn", "recovery_point_removed", "A recovery point was removed", removed_recovery_point_ids))
     if deleted_base_reachable(base_infra, branch_infra):
-        reasons.append(_reason("warn", "lost_ingress", "Internet ingress resource was deleted"))
+        reasons.append(_reason("warn", "lost_ingress", "Internet ingress resource was deleted", _resource_ids(diff.no_longer_internet_reachable)))
     if introduced_other:
-        reasons.append(_reason("warn", "introduced_finding", "Introduced finding"))
+        reasons.append(_reason("warn", "introduced_finding", "Introduced finding", _resource_ids(item.get("resource") for item in introduced_other)))
     if latent_exposure:
-        reasons.append(_reason("warn", "latent_exposure", "Latent exposure"))
+        reasons.append(_reason("warn", "latent_exposure", "Latent exposure", _resource_ids(item.get("resource_id") for item in latent_exposure)))
     if warn_exposures and not latent_exposure:
-        reasons.append(_reason("warn", "new_exposure", "New exposure"))
+        reasons.append(_reason("warn", "new_exposure", "New exposure", _resource_ids(item.get("resource_id") for item in warn_exposures)))
     if diff.newly_internet_reachable:
-        reasons.append(_reason("warn", "newly_internet_reachable", "A resource is newly internet reachable"))
+        reasons.append(_reason("warn", "newly_internet_reachable", "A resource is newly internet reachable", _resource_ids(diff.newly_internet_reachable)))
     if diff.no_longer_internet_reachable and not deleted_base_reachable(base_infra, branch_infra):
-        reasons.append(_reason("warn", "lost_ingress", "Internet ingress is no longer reachable"))
+        reasons.append(_reason("warn", "lost_ingress", "Internet ingress is no longer reachable", _resource_ids(diff.no_longer_internet_reachable)))
     if diff.lost_dependencies:
-        reasons.append(_reason("warn", "lost_dependency", "A dependency was removed"))
+        reasons.append(_reason("warn", "lost_dependency", "A dependency was removed", _edge_resource_ids(diff.lost_dependencies)))
     if diff.lost_connectivity:
-        reasons.append(_reason("warn", "lost_connectivity", "Connectivity was removed"))
+        reasons.append(_reason("warn", "lost_connectivity", "Connectivity was removed", _edge_resource_ids(diff.lost_connectivity)))
     if deletion_relationships:
-        reasons.append(_reason("warn", "deletion_impact", "A deletion has downstream impact"))
+        reasons.append(_reason("warn", "deletion_impact", "A deletion has downstream impact", _deletion_resource_ids(diff.deletion_impacts)))
     if introduced_capacity_breaches:
-        reasons.append(_reason("warn", "capacity", f"Capacity breach in resource_id={introduced_capacity_breaches[0].get('scope', '')}"))
+        reasons.append(_reason("warn", "capacity", f"Capacity breach in resource_id={introduced_capacity_breaches[0].get('scope', '')}", _resource_ids(item.get("scope") for item in introduced_capacity_breaches)))
     plan_reasons = _plan_reasons(plans)
     reasons.extend(plan_reasons)
     if any(item.get("unmodeled") for item in plans or []):

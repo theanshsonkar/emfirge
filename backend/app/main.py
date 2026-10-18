@@ -1979,14 +1979,21 @@ def typed_handback_endpoint(branch_id: str, request: Request):
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail='Not found') from exc
     if branches.list_plans(branch_id):
-        return JSONResponse(status_code=409, content={'error': 'branch_has_plan_receipts'})
+        return JSONResponse(status_code=409, content={
+            'error': 'branch_has_plan_receipts',
+            'next_step': 'This branch was built from a submitted plan. Hand back that original plan (terraform/aws-api/aws-cli) instead, or create a new branch from the base analysis and apply typed changes only.',
+        })
     if not branch.changes:
         return JSONResponse(status_code=409, content={'error': 'no_changes'})
     try:
         branch, result, revision = _current_handback_state(branch_id)
         calls = build_api_calls(branch.base, branch.changes)
     except UnmappableChanges as exc:
-        return JSONResponse(status_code=422, content={'error': 'unmappable_changes', 'changes': exc.changes})
+        return JSONResponse(status_code=422, content={
+            'error': 'unmappable_changes',
+            'changes': exc.changes,
+            'next_step': 'These changes have no AWS API equivalent yet, so nothing was handed back. Roll the branch back to before them (or discard and recreate the branch without them) and hand back again, or apply them by hand outside Emfirge.',
+        })
     verdict = result.verdict
     digest = canonical_sha256(calls)
     return {'branch_id': branch_id, 'kind': 'aws-api-calls', 'calls': calls,
@@ -2013,7 +2020,11 @@ def verify_typed_handback_endpoint(branch_id: str, payload: dict, request: Reque
     except branches.BranchNotFoundError:
         raise HTTPException(status_code=404, detail='Not found')
     except UnmappableChanges as exc:
-        return JSONResponse(status_code=422, content={'error': 'unmappable_changes', 'changes': exc.changes})
+        return JSONResponse(status_code=422, content={
+            'error': 'unmappable_changes',
+            'changes': exc.changes,
+            'next_step': 'These changes have no AWS API equivalent yet, so nothing was handed back. Roll the branch back to before them (or discard and recreate the branch without them) and hand back again, or apply them by hand outside Emfirge.',
+        })
     expected_hash = canonical_sha256(expected_calls)
     if payload['input_sha256'] != expected_hash:
         return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'input_hash_mismatch'})

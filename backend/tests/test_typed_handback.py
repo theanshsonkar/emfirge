@@ -116,7 +116,7 @@ def test_empty_and_plan_branches_conflict(typed_client):
     raw = (Path(__file__).parent / "incidents/fixtures/datatalks_destroy_plan.json").read_bytes()
     assert typed_client.post(f"/branches/{bid}/plans/terraform", content=raw).status_code == 200
     response = typed_client.get(f"/branches/{bid}/handback")
-    assert response.status_code == 409 and response.json() == {"error": "branch_has_plan_receipts"}
+    assert response.status_code == 409 and response.json() == {"error": "branch_has_plan_receipts", "next_step": "This branch was built from a submitted plan. Hand back that original plan (terraform/aws-api/aws-cli) instead, or create a new branch from the base analysis and apply typed changes only."}
 
 
 def test_typed_handback_is_stable_and_verifies_conflicts(typed_client):
