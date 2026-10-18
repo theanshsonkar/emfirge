@@ -1716,7 +1716,17 @@ def _aws_translator(branch_id: str, document, cli: bool = False):
             association_id = acl_id.split(":", 1)[1]
             return next((acl for acl in nacl_map.values() if association_id in acl.association_ids), None)
         return None
-    translated = translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get, nacls=nacl_lookup)
+    translated = translate_api_calls(
+        document,
+        resolve_role_arn=role_arns.get,
+        sg_rules=sg_rule_map.get,
+        nacls=nacl_lookup,
+        # These are the rebuilt base-plus-changes snapshot used by the typed
+        # route and verdict.  IAM/IMDS API translation must never inspect only
+        # the immutable base or guess when this state is unavailable.
+        role_policies=state.iam.role_policies,
+        ec2_instances=state.ec2.instances,
+    )
     validate_change_regions(document["calls"], state.region)
     return translated
 

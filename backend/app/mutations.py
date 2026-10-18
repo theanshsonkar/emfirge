@@ -13,6 +13,8 @@ from app.cidr import is_internet_cidr
 
 from app.models import (
     AccessStatement,
+    PolicyDocumentRecord,
+    merge_policy_statements,
     AWSInfrastructure,
     EBSSnapshot,
     EBSVolume,
@@ -116,6 +118,7 @@ _MUTATION_NESTED_TYPES = {
     ("security_group", "rules"): list[SecurityGroupRuleChange],
     ("security_group", "egress_rules"): list[SecurityGroupRuleChange],
     ("iam_role_policy", "access_statements"): list[AccessStatementChange],
+    ("iam_role_policy", "policy_documents"): list[PolicyDocumentRecord],
     ("route_table", "routes"): list[RouteChange],
     ("network_acl", "entries"): list[NACLEntryChange],
 }
@@ -214,9 +217,9 @@ _MUTATION_CAPABILITIES = {
             "operations": ["modify"],
             "kind": "complete_field_replacement",
             "fields": [],
-            "required_fields": ["access_statements"],
-            "allowed_fields": ["access_statements"],
-            "message": "Replace the complete normalized statement list for one existing collected role identified by role ARN",
+            "required_fields": [],
+            "allowed_fields": ["access_statements", "policy_documents"],
+            "message": "Replace complete normalized statements, optionally retaining the recorded policy-document breakdown for one existing collected role identified by role ARN",
         },),
     },
     "network_acl": {
@@ -620,14 +623,23 @@ def _replace_iam_role_policy_statements(
     )
     required_fields = set(constraint["required_fields"])
     allowed_fields = set(constraint["allowed_fields"])
-    if set(change.fields) != required_fields or required_fields != allowed_fields:
-        raise ValueError(
-            f"iam_role_policy modify requires only {', '.join(sorted(required_fields))}"
-        )
-    replacement_field = next(iter(required_fields))
-    statements = change.fields[replacement_field]
-    if not isinstance(statements, list):
-        raise ValueError("access_statements must be a list replacing the complete normalized statement set")
+    if set(change.fields) - {"access_statements", "policy_documents"} or ("access_statements" not in change.fields and "policy_documents" not in change.fields):
+        raise ValueError("iam_role_policy modify requires only access_statements and/or policy_documents")
+    if "policy_documents" in change.fields:
+        if not isinstance(change.fields["policy_documents"], list):
+            raise ValueError("policy_documents must be a list")
+        records = [PolicyDocumentRecord.model_validate(item) for item in change.fields["policy_documents"]]
+        derived = merge_policy_statements(records)
+        if "access_statements" in change.fields:
+            supplied = [AccessStatementChange.model_validate(item) for item in change.fields["access_statements"]]
+            if [item.model_dump() for item in supplied] != [item.model_dump() for item in derived]:
+                raise ValueError("access_statements must equal merge_policy_statements(policy_documents)")
+        statements = derived
+    else:
+        if not isinstance(change.fields["access_statements"], list):
+            raise ValueError("access_statements must be a list")
+        statements = [AccessStatementChange.model_validate(item) for item in change.fields["access_statements"]]
+        records = None
 
     matches = [policy for policy in infra.iam.role_policies if policy.role_arn == change.resource_id]
     if not matches:
@@ -637,9 +649,10 @@ def _replace_iam_role_policy_statements(
 
     policy = matches[0]
     policy.access_statements = [
-        AccessStatement.model_validate(AccessStatementChange.model_validate(statement).model_dump())
+        AccessStatement.model_validate(statement.model_dump() if hasattr(statement, "model_dump") else statement)
         for statement in statements
     ]
+    policy.policy_documents = records
     # Do not let stale collector summaries override an empty/replaced statement
     # set in egraph.build_graph's legacy fallback path.
     policy.has_admin = False

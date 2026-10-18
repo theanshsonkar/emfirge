@@ -19,7 +19,7 @@ from app.models import (
     DynamoDBData, DynamoDBTable,
     EBSVolume, EBSSnapshot, ElasticIP, Route, RouteTable, NACLEntry, NetworkACL, NetworkInterface,
     VPCPeeringConnection, TransitGatewayAttachment, VPNGateway, InterfaceEndpoint, BlockDevice,
-    RDSSnapshot
+    RDSSnapshot, PolicyDocumentRecord, merge_policy_statements, AccessStatement
 )
 from datetime import datetime, timezone
 
@@ -1170,7 +1170,8 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                         role.get('AssumeRolePolicyDocument'), role_arn
                     )
 
-                    def parse_access_document(doc):
+                    policy_documents = []
+                    def parse_access_document(doc, document_statements=None):
                         """Normalize untrusted IAM policy input without failing collection."""
                         nonlocal has_admin
                         if isinstance(doc, str):
@@ -1196,34 +1197,25 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                             resource_key = 'NotResource' if 'NotResource' in stmt else 'Resource'
                             actions = stmt.get(action_key, [])
                             resources = stmt.get(resource_key, [])
-                            if isinstance(actions, str):
-                                actions = [actions]
-                            if isinstance(resources, str):
-                                resources = [resources]
-                            if not isinstance(actions, list) or not isinstance(resources, list):
-                                continue
+                            if isinstance(actions, str): actions = [actions]
+                            if isinstance(resources, str): resources = [resources]
+                            if not isinstance(actions, list) or not isinstance(resources, list): continue
                             actions = [value for value in actions if isinstance(value, str)]
                             resources = [value for value in resources if isinstance(value, str)]
-                            if not actions and not resources:
-                                continue
-                            from app.models import AccessStatement
-                            access_statements.append(AccessStatement(
-                                effect=effect,
-                                actions=list(dict.fromkeys(actions)),
+                            if not actions and not resources: continue
+                            statement = AccessStatement(
+                                effect=effect, actions=list(dict.fromkeys(actions)),
                                 resources=list(dict.fromkeys(resources)),
                                 is_not_action=action_key == 'NotAction',
                                 is_not_resource=resource_key == 'NotResource',
-                                has_condition=bool(stmt.get('Condition')),
-                            ))
-                            if effect != 'allow':
-                                continue
-                            if '*' in actions and '*' in resources:
-                                has_admin = True
+                                has_condition=bool(stmt.get('Condition')))
+                            access_statements.append(statement)
+                            if document_statements is not None: document_statements.append(statement.model_copy(deep=True))
+                            if effect != 'allow': continue
+                            if '*' in actions and '*' in resources: has_admin = True
                             for res in resources:
-                                if any(svc in res for svc in [':s3:', ':rds:', ':lambda:', ':secretsmanager:', ':dynamodb:']):
-                                    accessible_resources.append(res)
-                                elif res == '*':
-                                    accessible_resources.append('*')
+                                if any(svc in res for svc in [':s3:', ':rds:', ':lambda:', ':secretsmanager:', ':dynamodb:']): accessible_resources.append(res)
+                                elif res == '*': accessible_resources.append('*')
 
                     # Check attached managed policies
                     try:
@@ -1243,7 +1235,9 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                                     PolicyArn=policy_arn,
                                     VersionId=version_id
                                 )
-                                parse_access_document(version['PolicyVersion']['Document'])
+                                document_statements = []
+                                parse_access_document(version['PolicyVersion']['Document'], document_statements)
+                                policy_documents.append(PolicyDocumentRecord(name=policy['PolicyName'], kind='managed', arn=policy_arn, statements=document_statements))
                             except ClientError:
                                 pass
                             except Exception:
@@ -1269,7 +1263,9 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                             policy_names_list.append(pol_name)
                             try:
                                 pol_doc_resp = iam.get_role_policy(RoleName=role_name, PolicyName=pol_name)
-                                parse_access_document(pol_doc_resp.get('PolicyDocument', {}))
+                                document_statements = []
+                                parse_access_document(pol_doc_resp.get('PolicyDocument', {}), document_statements)
+                                policy_documents.append(PolicyDocumentRecord(name=pol_name, kind='inline', arn=None, statements=document_statements))
                             except Exception:
                                 pass
                     except ClientError as e:
@@ -1278,6 +1274,8 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                     except Exception:
                         pass
 
+                    policy_documents.sort(key=lambda item: (item.kind, item.name, item.arn or ''))
+                    access_statements = merge_policy_statements(policy_documents)
                     # Record useful access data or trust metadata. Trust-only roles
                     # are required for graph identity relationships.
                     if (has_admin or accessible_resources or access_statements or trusted_role_arns or
@@ -1289,6 +1287,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                             accessible_resources=list(dict.fromkeys(accessible_resources)),
                             has_admin=has_admin,
                             access_statements=list(access_statements),
+                            policy_documents=list(policy_documents),
                             policy_names=policy_names_list,
                             trusted_role_arns=trusted_role_arns,
                             trusted_services=trusted_services,

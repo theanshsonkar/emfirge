@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, PrivateAttr
 from typing import Dict, List, Optional, Literal, Union
+import json
 
 # ── INPUT MODEL ───────────────────────────────────────────────────
 class AWSCredentials(BaseModel):
@@ -223,13 +224,40 @@ class AccessStatement(BaseModel):
     has_condition: bool = False
 
 
+class PolicyDocumentRecord(BaseModel):
+    """One normalized inline or managed IAM policy document."""
+    name: str
+    kind: Literal['inline', 'managed']
+    arn: Optional[str] = None
+    statements: List[AccessStatement] = Field(default_factory=list)
+
+
+def merge_policy_statements(records: List[PolicyDocumentRecord]) -> List[AccessStatement]:
+    """Merge records in order, removing identical normalized statements stably."""
+    result: List[AccessStatement] = []
+    seen = set()
+    for record in records:
+        for statement in record.statements:
+            key = json.dumps(statement.model_dump(mode='json'), sort_keys=True, separators=(',', ':'))
+            if key not in seen:
+                seen.add(key)
+                result.append(statement.model_copy(deep=True))
+    return result
+
+
 class RolePolicy(BaseModel):
-    """Parsed IAM role policy data for graph edge creation."""
+    """Parsed IAM role policy data for graph edge creation.
+
+    When policy_documents is present, access_statements is exactly the stable
+    merge/deduplication of every record's statements in record order.
+    None means the policy breakdown was not recorded in an older snapshot.
+    """
     role_name: str
     role_arn: str
     accessible_resources: List[str] = []  # Resource ARNs from Allow statements
     has_admin: bool = False               # True if Action:* Resource:*
     access_statements: List[AccessStatement] = Field(default_factory=list)
+    policy_documents: Optional[List[PolicyDocumentRecord]] = None
     last_used_at: Optional[str] = None
     policy_names: List[str] = []          # attached/inline policy names (for display)
     trusted_role_arns: List[str] = []     # role/user ARNs trusted by the role
