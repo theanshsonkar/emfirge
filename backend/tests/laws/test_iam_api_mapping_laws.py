@@ -1,5 +1,5 @@
 from tests.test_plan_ingest import plan_client  # noqa: F401
-from tests.laws.test_broad_data_access_laws import _infra, _role
+from tests.laws.test_broad_data_access_laws import _infra, _role as broad_role, _graph as broad_graph
 import json
 import boto3
 import pytest
@@ -176,8 +176,10 @@ def test_L46i_moto_roundtrip_matches_collector_and_adapter():
 
 
 def test_L46j_w1a_w1b_api_verdict_matches_typed_route(plan_client, monkeypatch):
-    base = _infra(public=True, role=_role("s3:GetObject", "arn:aws:s3:::app-logs/*"))
+    base = _infra(public=True, role=broad_role(action="s3:GetObject", resource="arn:aws:s3:::app-logs/*"))
     monkeypatch.setattr("app.main.get_infrastructure_for_analysis", lambda _id: base)
+    monkeypatch.setattr("app.verdict.build_graph", broad_graph)
+    monkeypatch.setattr("app.diffing.build_graph_pair", lambda before, after: (broad_graph(before), broad_graph(after)))
     base_statements = [{"effect": "Allow", "actions": ["s3:GetObject"],
                         "resources": ["arn:aws:s3:::app-logs/*"],
                         "is_not_action": False, "is_not_resource": False,
@@ -187,17 +189,18 @@ def test_L46j_w1a_w1b_api_verdict_matches_typed_route(plan_client, monkeypatch):
         api_branch = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "w1-api"}).json()["branch_id"]
         typed_branch = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "w1-typed"}).json()["branch_id"]
         api_body = _iam_doc("PutRolePolicy", {
-            "RoleName": "DlAppRole", "PolicyName": "web-policy",
+            "RoleName": "OrdersRole", "PolicyName": "web-policy",
             "PolicyDocument": {"Statement": policy_statement},
         })
         api_response = plan_client.post(f"/branches/{api_branch}/plans/aws-api", json=api_body)
         assert api_response.status_code == 200, api_response.text
+        assert api_response.json()["applied"], api_response.json()
         typed_statements = base_statements + [{"effect": "allow", "actions": policy_statement["Action"] if isinstance(policy_statement["Action"], list) else [policy_statement["Action"]],
                                                 "resources": policy_statement["Resource"] if isinstance(policy_statement["Resource"], list) else [policy_statement["Resource"]],
                                                 "is_not_action": False, "is_not_resource": False, "has_condition": False}]
         typed_response = plan_client.post(f"/branches/{typed_branch}/changes", json={
             "op": "modify", "resource_type": "iam_role_policy",
-            "resource_id": ROLE_ARN,
+            "resource_id": "arn:aws:iam::123:role/OrdersRole",
             "fields": {"access_statements": typed_statements},
         })
         assert typed_response.status_code == 200, typed_response.text
