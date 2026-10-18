@@ -1023,14 +1023,14 @@ class TestRunAllChecksWithGraph:
             ),
             vpc=VPCData(
                 total_vpcs=1,
-                subnets=[VPCSubnet(id="subnet-priv", vpc_id="vpc-001", resources=["i-private"], is_public=True)],
+                subnets=[VPCSubnet(id="subnet-priv", vpc_id="vpc-001", resources=["i-private"], is_public=False)],
                 internet_gateways=["igw-public"],
-                public_subnet_ids=["subnet-priv"],
+                public_subnet_ids=[],
                 route_tables=[RouteTable(
-                    id="rtb-public",
+                    id="rtb-private",
                     vpc_id="vpc-001",
                     associated_subnet_ids=["subnet-priv"],
-                    routes=[Route(destination_cidr="0.0.0.0/0", target_type="internet_gateway", target_id="igw-public")],
+                    routes=[],
                 )],
                 nacls=[NetworkACL(
                     id="acl-public",

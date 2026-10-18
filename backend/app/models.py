@@ -44,6 +44,7 @@ class NACLEntry(BaseModel):
     rule_action: str
     egress: bool
     cidr_block: Optional[str] = None
+    ipv6_cidr_block: Optional[str] = None
     port_from: Optional[int] = None
     port_to: Optional[int] = None
 

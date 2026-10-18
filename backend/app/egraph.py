@@ -737,40 +737,82 @@ def _port_overlap(request_from, request_to, entry_from, entry_to):
         return True
 
 
+def _nacl_protocol(value):
+    return {"tcp": "6", "udp": "17", "icmp": "1", "icmpv6": "58", "all": "-1"}.get(str(value if value is not None else "-1").lower(), str(value if value is not None else "-1").lower())
+
+
+def _nacl_allowed_intervals(entries, egress: bool, peer_cidrs: list[str], protocol, port_from, port_to):
+    """Return port intervals whose first applicable NACL rule allows them."""
+    lo, hi = (0 if port_from is None else int(port_from)), (65535 if port_to is None else int(port_to))
+    if not entries:
+        return [(lo, hi)]
+    wanted = _nacl_protocol(protocol)
+    direction_entries = [entry for entry in entries if bool(_value(entry, "egress", False)) == egress]
+    if not direction_entries:
+        return [(lo, hi)]
+    relevant = []
+    boundaries = {lo, hi + 1}
+    internet_peer = any(is_internet_cidr(cidr) for cidr in peer_cidrs if cidr)
+    for entry in sorted(entries, key=lambda item: _value(item, "rule_number", 10**9)):
+        if bool(_value(entry, "egress", False)) != egress:
+            continue
+        entry_protocol = _nacl_protocol(_value(entry, "protocol", "-1"))
+        if entry_protocol not in {"-1", wanted}:
+            continue
+        cidrs = [_value(entry, "cidr_block"), _value(entry, "ipv6_cidr_block")]
+        def applies(cidr):
+            if not cidr:
+                return False
+            if internet_peer:
+                try:
+                    return is_internet_cidr(cidr) and ipaddress.ip_network(cidr, strict=False).version == ipaddress.ip_network(peer_cidrs[0], strict=False).version
+                except (ValueError, TypeError):
+                    return False
+            return any(_cidr_covers(cidr, peer) for peer in peer_cidrs)
+        if not any(applies(cidr) for cidr in cidrs):
+            continue
+        entry_lo = 0 if _value(entry, "port_from") is None or entry_protocol in {"-1", "1", "58"} else int(_value(entry, "port_from"))
+        entry_hi = 65535 if _value(entry, "port_to") is None or entry_protocol in {"-1", "1", "58"} else int(_value(entry, "port_to"))
+        if entry_hi < lo or entry_lo > hi:
+            continue
+        relevant.append((entry, entry_lo, entry_hi))
+        boundaries.add(max(lo, entry_lo)); boundaries.add(min(hi + 1, entry_hi + 1))
+    allowed = []
+    points = sorted(boundaries)
+    for start, end in zip(points, points[1:]):
+        if start >= end:
+            continue
+        match = next((item for item in relevant if item[1] <= start <= item[2]), None)
+        if match and str(_value(match[0], "rule_action", "")).lower() == "allow":
+            allowed.append((start, end - 1))
+    merged = []
+    for interval in allowed:
+        if merged and merged[-1][1] + 1 >= interval[0]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], interval[1]))
+        else:
+            merged.append(interval)
+    return merged
+
+
+def _nacl_entries_for_subnet(subnet_id, graph, index=None):
+    return [entry for acl in _nacl_subnets(subnet_id, graph, index) for entry in (_node_data(acl).get("entries", []) or [])]
+
+
 def nacl_allows_inbound(subnet_id, port_from, port_to, protocol, graph) -> tuple[bool, str]:
-    """Evaluate associated inbound NACL entries using AWS first-match ordering."""
-    acl_edges = [edge for edge in _graph_edges(graph)
-                 if _value(edge, "src", _value(edge, "from")) == subnet_id
-                 and _is_relationship(edge, "PROTECTED_BY")]
+    index = _graph_index(graph)
+    acl_edges = [edge for edge in _graph_edges(graph) if _value(edge, "src", _value(edge, "from")) == subnet_id and _is_relationship(edge, "PROTECTED_BY")]
     if not acl_edges:
         return True, "assumed"
-    entries = []
-    for edge_index, edge in enumerate(acl_edges):
-        acl = _graph_node(graph, _value(edge, "dst", _value(edge, "to")))
-        data = _value(acl, "base", {}) if acl else {}
-        raw_entries = _value(data, "entries") if data else None
-        if raw_entries is None and acl:
-            raw_entries = _value(_value(acl, "metadata", {}) or {}, "entries")
-        if isinstance(raw_entries, (list, tuple)):
-            entries.extend((edge_index, item) for item in raw_entries)
-    def sort_key(pair):
-        number = _value(pair[1], "rule_number", 10**9)
-        return (number if isinstance(number, (int, float)) else 10**9, pair[0])
-    entries.sort(key=sort_key)
-    wanted_protocol = str(protocol or "-1").lower()
-    wanted_protocol = {"tcp": "6", "udp": "17", "icmp": "1"}.get(wanted_protocol, wanted_protocol)
-    for _, entry in entries:
-        if _value(entry, "egress", None) is not False:
-            continue
-        if not is_internet_cidr(_value(entry, "cidr_block")):
-            continue
-        entry_protocol = str(_value(entry, "protocol", "-1")).lower()
-        if entry_protocol not in {"-1", "all", wanted_protocol}:
-            continue
-        if not _port_overlap(port_from, port_to, _value(entry, "port_from"), _value(entry, "port_to")):
-            continue
-        return str(_value(entry, "rule_action", "")).lower() == "allow", "high"
-    return False, "high"
+    entries = _nacl_entries_for_subnet(subnet_id, graph, index)
+    inbound_v4 = _nacl_allowed_intervals(entries, False, ["0.0.0.0/0"], protocol, port_from, port_to)
+    inbound_v6 = _nacl_allowed_intervals(entries, False, ["::/0"], protocol, port_from, port_to)
+    egress_v4 = _nacl_allowed_intervals(entries, True, ["0.0.0.0/0"], protocol, 1024, 65535)
+    egress_v6 = _nacl_allowed_intervals(entries, True, ["::/0"], protocol, 1024, 65535)
+    inbound = inbound_v4 or inbound_v6
+    egress = egress_v4 or egress_v6
+    has_inbound = any(not bool(_value(entry, "egress", False)) for entry in entries)
+    has_egress = any(bool(_value(entry, "egress", False)) for entry in entries)
+    return bool(inbound and egress), "high" if has_inbound and has_egress else "assumed"
 
 
 def internet_ingress(resource_node, subnet_id, sg_list, graph) -> list[dict]:
@@ -801,6 +843,7 @@ def internet_ingress(resource_node, subnet_id, sg_list, graph) -> list[dict]:
             rules = _value(_value(sg, "metadata", {}) or {}, "rules")
         for rule in rules if isinstance(rules, (list, tuple)) else []:
             ranges = _value(rule, "ip_ranges", []) or []
+            ranges = list(ranges) + list(_value(rule, "ipv6_ranges", []) or [])
             public = next((str(cidr) for cidr in ranges if is_internet_cidr(cidr)), None)
             if public is None:
                 continue
@@ -1064,24 +1107,6 @@ def _cidr_covers(cidr, opposite_cidr):
         return False
 
 
-def _nacl_denies(entries, opposite_cidr, port_range, egress):
-    """Return whether the first applicable NACL entry is a clear DENY."""
-    applicable = []
-    for entry in sorted(entries, key=lambda item: _value(item, "rule_number", 10**9)):
-        if bool(_value(entry, "egress", False)) != egress:
-            continue
-        if not _cidr_covers(_value(entry, "cidr_block"), opposite_cidr):
-            continue
-        if not _protocol_matches(_value(entry, "protocol", "-1"), port_range[2]):
-            continue
-        if not _port_overlap(port_range[0], port_range[1], *_rule_ports(entry)):
-            continue
-        applicable.append(entry)
-    if not applicable:
-        return False
-    return str(_value(applicable[0], "rule_action", "")).lower() == "deny"
-
-
 def nacl_internal_ok(a_node, b_node, graph, port_range, index=None):
     index = _graph_index(graph, index)
     cache_key = (_value(a_node, "id"), _value(b_node, "id"), tuple(port_range))
@@ -1089,26 +1114,19 @@ def nacl_internal_ok(a_node, b_node, graph, port_range, index=None):
         return index.nacl_ok_cache[cache_key]
     a_subnets, b_subnets = _resource_subnets(a_node, graph, index), _resource_subnets(b_node, graph, index)
     if not a_subnets or not b_subnets:
-        result = (True, "assumed")
-        index.nacl_ok_cache[cache_key] = result
-        return result
-    a_cidr, b_cidr = _subnet_cidr(a_subnets[0], graph, index), _subnet_cidr(b_subnets[0], graph, index)
-    a_acls = [acl for subnet in a_subnets for acl in _nacl_subnets(subnet, graph, index) if acl]
-    b_acls = [acl for subnet in b_subnets for acl in _nacl_subnets(subnet, graph, index) if acl]
-    for acl in b_acls:
-        if _nacl_denies(_node_data(acl).get("entries", []) or [], a_cidr, port_range, egress=False):
-            result = (False, "high")
-            index.nacl_ok_cache[cache_key] = result
-            return result
-    for acl in a_acls:
-        if _nacl_denies(_node_data(acl).get("entries", []) or [], b_cidr, port_range, egress=True):
-            result = (False, "high")
-            index.nacl_ok_cache[cache_key] = result
-            return result
-    result = (True, "high" if a_acls or b_acls else "assumed")
-    index.nacl_ok_cache[cache_key] = result
-    return result
-
+        result = (True, "assumed"); index.nacl_ok_cache[cache_key] = result; return result
+    if set(a_subnets) & set(b_subnets):
+        result = (True, "high"); index.nacl_ok_cache[cache_key] = result; return result
+    lo, hi, protocol = port_range; saw_data = False
+    for a_subnet in a_subnets:
+        for b_subnet in b_subnets:
+            a_cidr, b_cidr = _subnet_cidr(a_subnet, graph, index), _subnet_cidr(b_subnet, graph, index)
+            a_entries = _nacl_entries_for_subnet(a_subnet, graph, index); b_entries = _nacl_entries_for_subnet(b_subnet, graph, index)
+            saw_data = saw_data or bool(a_entries or b_entries)
+            checks = (_nacl_allowed_intervals(b_entries, False, [a_cidr], protocol, lo, hi), _nacl_allowed_intervals(a_entries, True, [b_cidr], protocol, lo, hi), _nacl_allowed_intervals(b_entries, True, [a_cidr], protocol, 1024, 65535), _nacl_allowed_intervals(a_entries, False, [b_cidr], protocol, 1024, 65535))
+            if all(checks):
+                result = (True, "high" if saw_data else "assumed"); index.nacl_ok_cache[cache_key] = result; return result
+    result = (False, "high" if saw_data else "assumed"); index.nacl_ok_cache[cache_key] = result; return result
 
 def internal_reachable(a_node, b_node, graph, index=None):
     index = _graph_index(graph, index)
@@ -1312,10 +1330,19 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         nacl_id = _value(nacl, 'id')
         entries = [_value(entry, 'model_dump', lambda: entry)() if hasattr(entry, 'model_dump') else entry for entry in (_value(nacl, 'entries', []) or [])]
         if nacl_id not in known_ids:
-            snapshot_nodes.append({'id': nacl_id, 'type': 'network_acl', 'label': f'Network ACL: {nacl_id}', 'base': {'entries': entries}})
+            snapshot_nodes.append({'id': nacl_id, 'type': 'network_acl', 'label': f'Network ACL: {nacl_id}', 'base': {'entries': entries, 'is_default': _value(nacl, 'is_default', False), 'vpc_id': _value(nacl, 'vpc_id')}})
             known_ids.add(nacl_id)
         for subnet_id in _value(nacl, 'associated_subnet_ids', []) or []:
             snapshot_edges.append({'from': subnet_id, 'to': nacl_id, 'relationship': 'protected_by'})
+    explicit_nacl_subnets = {subnet_id for nacl in infrastructure.vpc.nacls for subnet_id in (_value(nacl, 'associated_subnet_ids', []) or [])}
+    defaults = {}
+    for nacl in infrastructure.vpc.nacls:
+        if _value(nacl, 'is_default', False):
+            defaults.setdefault(_value(nacl, 'vpc_id'), _value(nacl, 'id'))
+    for subnet in infrastructure.vpc.subnets:
+        subnet_id, vpc_id = _value(subnet, 'id'), _value(subnet, 'vpc_id')
+        if subnet_id not in explicit_nacl_subnets and vpc_id in defaults:
+            snapshot_edges.append({'from': subnet_id, 'to': defaults[vpc_id], 'relationship': 'protected_by'})
     reachability_graph = Graph(snapshot_nodes, snapshot_edges)
     internet_node_added = False
     sg_evidence = {}

@@ -13,22 +13,6 @@
       "directed": true,
       "dst": "db-10-001",
       "relationship": "can_reach",
-      "src": "i-10-000",
-      "weight": 3
-    },
-    {
-      "attrs": {
-        "confidence": "high",
-        "flagged": false,
-        "ports": [
-          0,
-          65535
-        ],
-        "reason": "active peering + SG allow + NACL allow"
-      },
-      "directed": true,
-      "dst": "db-10-001",
-      "relationship": "can_reach",
       "src": "i-10-006",
       "weight": 3
     },
@@ -43,9 +27,57 @@
         "reason": "active peering + SG allow + NACL allow"
       },
       "directed": true,
-      "dst": "fn-10-005",
+      "dst": "fn-10-002",
       "relationship": "can_reach",
-      "src": "db-10-004",
+      "src": "db-10-001",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-10-002",
+      "relationship": "can_reach",
+      "src": "db-10-007",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-10-008",
+      "relationship": "can_reach",
+      "src": "db-10-001",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          0,
+          65535
+        ],
+        "reason": "active peering + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-10-003",
+      "relationship": "can_reach",
+      "src": "fn-10-002",
       "weight": 3
     },
     {
@@ -107,9 +139,9 @@
         "reason": "same-VPC local + SG allow + NACL allow"
       },
       "directed": true,
-      "dst": "db-10-001",
+      "dst": "fn-10-002",
       "relationship": "can_reach",
-      "src": "db-10-007",
+      "src": "fn-10-008",
       "weight": 3
     },
     {
@@ -123,25 +155,9 @@
         "reason": "same-VPC local + SG allow + NACL allow"
       },
       "directed": true,
-      "dst": "i-10-006",
+      "dst": "fn-10-008",
       "relationship": "can_reach",
-      "src": "i-10-000",
-      "weight": 3
-    },
-    {
-      "attrs": {
-        "confidence": "high",
-        "flagged": false,
-        "ports": [
-          0,
-          65535
-        ],
-        "reason": "same-VPC local + SG allow + NACL allow"
-      },
-      "directed": true,
-      "dst": "i-10-009",
-      "relationship": "can_reach",
-      "src": "i-10-003",
+      "src": "fn-10-002",
       "weight": 3
     },
     {
@@ -155,9 +171,25 @@
         "reason": "same-VPC local + SG allow + NACL allow"
       },
       "directed": true,
-      "dst": "fn-10-005",
+      "dst": "db-10-004",
       "relationship": "can_reach",
-      "src": "i-10-003",
+      "src": "fn-10-008",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-10-002",
+      "relationship": "can_reach",
+      "src": "i-10-006",
       "weight": 3
     },
     {
@@ -187,9 +219,57 @@
         "reason": "same-VPC local + SG allow + NACL allow"
       },
       "directed": true,
-      "dst": "i-10-006",
+      "dst": "fn-10-008",
+      "relationship": "can_reach",
+      "src": "i-10-000",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "fn-10-008",
+      "relationship": "can_reach",
+      "src": "i-10-006",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-10-000",
       "relationship": "can_reach",
       "src": "db-10-004",
+      "weight": 3
+    },
+    {
+      "attrs": {
+        "confidence": "high",
+        "flagged": false,
+        "ports": [
+          22,
+          22
+        ],
+        "reason": "same-VPC local + SG allow + NACL allow"
+      },
+      "directed": true,
+      "dst": "i-10-003",
+      "relationship": "can_reach",
+      "src": "db-10-007",
       "weight": 3
     },
     {
@@ -206,22 +286,6 @@
       "dst": "i-10-009",
       "relationship": "can_reach",
       "src": "db-10-001",
-      "weight": 3
-    },
-    {
-      "attrs": {
-        "confidence": "high",
-        "flagged": false,
-        "ports": [
-          22,
-          22
-        ],
-        "reason": "same-VPC local + SG allow + NACL allow"
-      },
-      "directed": true,
-      "dst": "i-10-009",
-      "relationship": "can_reach",
-      "src": "db-10-007",
       "weight": 3
     },
     {
@@ -1258,6 +1322,7 @@
           {
             "cidr_block": "10.0.0.0/8",
             "egress": false,
+            "ipv6_cidr_block": null,
             "port_from": 0,
             "port_to": 65535,
             "protocol": "-1",
@@ -1267,6 +1332,7 @@
           {
             "cidr_block": "10.0.0.0/8",
             "egress": false,
+            "ipv6_cidr_block": null,
             "port_from": 0,
             "port_to": 65535,
             "protocol": "-1",
@@ -1276,6 +1342,7 @@
           {
             "cidr_block": "0.0.0.0/0",
             "egress": true,
+            "ipv6_cidr_block": null,
             "port_from": 0,
             "port_to": 65535,
             "protocol": "-1",
@@ -1302,6 +1369,7 @@
           {
             "cidr_block": "10.0.0.0/8",
             "egress": false,
+            "ipv6_cidr_block": null,
             "port_from": 0,
             "port_to": 65535,
             "protocol": "-1",
@@ -1311,6 +1379,7 @@
           {
             "cidr_block": "10.0.0.0/8",
             "egress": false,
+            "ipv6_cidr_block": null,
             "port_from": 0,
             "port_to": 65535,
             "protocol": "-1",
@@ -1320,6 +1389,7 @@
           {
             "cidr_block": "0.0.0.0/0",
             "egress": true,
+            "ipv6_cidr_block": null,
             "port_from": 0,
             "port_to": 65535,
             "protocol": "-1",
@@ -1346,6 +1416,7 @@
           {
             "cidr_block": "10.0.0.0/8",
             "egress": false,
+            "ipv6_cidr_block": null,
             "port_from": 0,
             "port_to": 65535,
             "protocol": "-1",
@@ -1355,6 +1426,7 @@
           {
             "cidr_block": "0.0.0.0/0",
             "egress": true,
+            "ipv6_cidr_block": null,
             "port_from": 0,
             "port_to": 65535,
             "protocol": "-1",
@@ -1381,6 +1453,7 @@
           {
             "cidr_block": "10.0.0.0/8",
             "egress": false,
+            "ipv6_cidr_block": null,
             "port_from": 0,
             "port_to": 65535,
             "protocol": "-1",
@@ -1390,6 +1463,7 @@
           {
             "cidr_block": "0.0.0.0/0",
             "egress": true,
+            "ipv6_cidr_block": null,
             "port_from": 0,
             "port_to": 65535,
             "protocol": "-1",
