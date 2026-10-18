@@ -34,6 +34,7 @@ def _resource(state: AWSInfrastructure, typ: str, ident: str):
         "ebs_snapshot": state.ec2.ebs_snapshots,
         "rds_snapshot": state.rds.rds_snapshots,
         "route_table": state.vpc.route_tables,
+        "network_acl": state.vpc.nacls,
     }
     items = collections.get(typ, [])
     key = "name" if typ in {"s3_bucket", "lambda_function"} else "id"
@@ -88,7 +89,7 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
     # All mapped operations are based on an existing resource.  Check this
     # before the individual handlers so their lookups cannot leak StopIteration
     # or attribute errors for a missing resource.
-    if typ in {"security_group", "ec2_instance", "rds_instance", "s3_bucket", "lambda_function", "ebs_volume", "ebs_snapshot", "rds_snapshot", "route_table"}:
+    if typ in {"security_group", "ec2_instance", "rds_instance", "s3_bucket", "lambda_function", "ebs_volume", "ebs_snapshot", "rds_snapshot", "route_table", "network_acl"}:
         try:
             existing = _resource(before, typ, ident)
         except Exception:
@@ -165,6 +166,44 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
             elif field in {"subnet_ids", "sg_ids"}: params["VpcConfig"] = {"SubnetIds": target.subnet_ids, "SecurityGroupIds": target.sg_ids}
             else: err(f"field_not_mapped: {field}")
         return [call("lambda", "UpdateFunctionConfiguration", params)] if not errors else [], errors
+    if typ == "network_acl" and op == "modify":
+        old = _resource(before, typ, ident); new = _resource(after, typ, ident); result = []
+        if "entries" in fields:
+            old_entries = {(x.rule_number, x.egress): x for x in old.entries}; new_entries = {(x.rule_number, x.egress): x for x in new.entries}
+            def entry_params(entry):
+                p = {"NetworkAclId": ident, "RuleNumber": entry.rule_number, "Protocol": entry.protocol, "RuleAction": entry.rule_action, "Egress": entry.egress}
+                if entry.cidr_block: p["CidrBlock"] = entry.cidr_block
+                if entry.ipv6_cidr_block: p["Ipv6CidrBlock"] = entry.ipv6_cidr_block
+                if entry.port_from is not None: p["PortRange"] = {"From": entry.port_from, "To": entry.port_to}
+                return p
+            def check_default(entry):
+                if entry.rule_number == 32767:
+                    err("default_rule_not_modifiable")
+                    return True
+                return False
+            for key in sorted(new_entries.keys() - old_entries.keys()):
+                if not check_default(new_entries[key]): result.append(call("ec2", "CreateNetworkAclEntry", entry_params(new_entries[key])))
+            for key in sorted(old_entries.keys() - new_entries.keys()):
+                if key[0] != 32767: result.append(call("ec2", "DeleteNetworkAclEntry", {"NetworkAclId": ident, "RuleNumber": key[0], "Egress": key[1]}))
+                else: err("default_rule_not_modifiable")
+            for key in sorted(old_entries.keys() & new_entries.keys()):
+                if _rule_key(old_entries[key]) != _rule_key(new_entries[key]) and not check_default(new_entries[key]):
+                    result.append(call("ec2", "ReplaceNetworkAclEntry", entry_params(new_entries[key])))
+        if "associated_subnet_ids" in fields:
+            removed = set(old.associated_subnet_ids) - set(new.associated_subnet_ids)
+            added = set(new.associated_subnet_ids) - set(old.associated_subnet_ids)
+            for subnet in added:
+                association_id = next((association_id for acl in before.vpc.nacls for association_id, associated_subnet in acl.association_ids.items() if associated_subnet == subnet), None)
+                if association_id is None: err("association_id_unknown")
+                else: result.append(call("ec2", "ReplaceNetworkAclAssociation", {"AssociationId": association_id, "NetworkAclId": ident}))
+            after_subnets = {subnet for acl in after.vpc.nacls for subnet in acl.associated_subnet_ids}
+            for subnet in removed:
+                if subnet not in after_subnets: err("subnet_without_network_acl")
+        unknown = set(fields) - {"entries", "associated_subnet_ids"}
+        for field in sorted(unknown): err(f"field_not_mapped: {field}")
+        return result, errors
+    if typ == "network_acl" and op == "delete":
+        return [call("ec2", "DeleteNetworkAcl", {"NetworkAclId": ident})], errors
     if typ == "route_table" and op == "modify" and set(fields) == {"routes"}:
         old = {x.destination_cidr:x for x in _resource(before, typ, ident).routes}; new={x.destination_cidr:x for x in _resource(after, typ, ident).routes}; result=[]
         def base(route): return {"RouteTableId":ident, ("DestinationIpv6CidrBlock" if ":" in route.destination_cidr else "DestinationCidrBlock"):route.destination_cidr}
@@ -189,7 +228,7 @@ def build_api_calls(base: AWSInfrastructure, changes: list[Change]) -> list[dict
     errors: list[dict] = []
     for index, change in enumerate(changes):
         try:
-            if change.op != "add" and change.resource_type in {"security_group", "ec2_instance", "rds_instance", "s3_bucket", "lambda_function", "ebs_volume", "ebs_snapshot", "rds_snapshot", "route_table"}:
+            if change.op != "add" and change.resource_type in {"security_group", "ec2_instance", "rds_instance", "s3_bucket", "lambda_function", "ebs_volume", "ebs_snapshot", "rds_snapshot", "route_table", "network_acl"}:
                 try:
                     found = _resource(state, change.resource_type, change.resource_id)
                 except Exception:

@@ -76,7 +76,7 @@ _UNSEEN_EC2_OPERATIONS = frozenset({
 })
 
 
-def _unmodeled(address: str, service: str, operation: str) -> dict[str, Any]:
+def _unmodeled(address: str, service: str, operation: str, detail: str | None = None) -> dict[str, Any]:
     if operation.startswith(_DELETE_PREFIXES):
         actions = ["delete"]
         risk = None
@@ -88,12 +88,13 @@ def _unmodeled(address: str, service: str, operation: str) -> dict[str, Any]:
         risk = None
     result = {"address": address, "type": f"{service}.{operation}", "actions": actions,
               "provider_name": "aws", "outside_view": False, "source": "aws_api"}
-    if operation in _UNSEEN_EC2_OPERATIONS:
-        result["unseen"] = True
     if risk is not None:
         result["risk"] = risk
+    if operation in _UNSEEN_EC2_OPERATIONS:
+        result["unseen"] = True
+    if detail is not None:
+        result["detail"] = detail
     return result
-
 
 def _permission_list(parameters: dict[str, Any]) -> list[dict[str, Any]]:
     if "IpPermissions" in parameters:
@@ -175,6 +176,7 @@ def _security_group_change(address, operation, parameters, working, sg_rules, un
 def translate_api_calls(
     doc: Any, resolve_role_arn: Callable[[str], str | None] | None = None,
     sg_rules: Callable[[str], list[dict] | None] | None = None,
+    nacls: Callable[[str], Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(doc, dict) or doc.get("format") != "aws-api-calls/1":
         raise _invalid()
@@ -186,6 +188,7 @@ def translate_api_calls(
     unmodeled: list[dict[str, Any]] = []
     unknown_fields: list[dict[str, Any]] = []
     working: dict[str, list[dict]] = {}
+    working_nacls: dict[str, Any] = {}
     for index, call in enumerate(calls):
         if not isinstance(call, dict):
             raise _invalid()
@@ -201,15 +204,76 @@ def translate_api_calls(
         lower_service = service.lower()
         if lower_service == "ec2" and operation in {"AuthorizeSecurityGroupIngress", "RevokeSecurityGroupIngress", "AuthorizeSecurityGroupEgress", "RevokeSecurityGroupEgress"}:
             if "GroupId" not in parameters:
-                unmodeled.append(_unmodeled(address, lower_service, operation))
-                continue
+                unmodeled.append(_unmodeled(address, lower_service, operation)); continue
             if not _valid_string(parameters.get("GroupId")):
                 raise _invalid()
             change = _security_group_change(address, operation, parameters, working, sg_rules, unknown_fields)
             if change:
-                changes.append(change)
-                addresses.append(address)
+                changes.append(change); addresses.append(address)
             continue
+        if lower_service == "ec2" and operation in {"CreateNetworkAcl", "DeleteNetworkAcl", "CreateNetworkAclEntry", "ReplaceNetworkAclEntry", "DeleteNetworkAclEntry", "ReplaceNetworkAclAssociation"}:
+            acl_id = parameters.get("NetworkAclId")
+            if operation == "CreateNetworkAcl":
+                vpc_id = parameters.get("VpcId")
+                if not _valid_string(vpc_id):
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "missing VpcId")); continue
+                acl_id = f"acl-new-{sum(1 for key in working_nacls if key.startswith('acl-new-')) + 1}"
+                working_nacls[acl_id] = {"id": acl_id, "vpc_id": vpc_id, "entries": [], "associated_subnet_ids": [], "association_ids": {}}
+                changes.append(Change(op="add", resource_type="network_acl", resource_id=acl_id, fields={"vpc_id": vpc_id}))
+                addresses.append(address); continue
+            if operation == "ReplaceNetworkAclAssociation":
+                association_id = parameters.get("AssociationId")
+                target_id = parameters.get("NetworkAclId")
+                if not _valid_string(association_id) or not _valid_string(target_id):
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "missing association parameters")); continue
+                subnet_id = None
+                for cached in working_nacls.values():
+                    subnet_id = cached.get("association_ids", {}).get(association_id)
+                    if subnet_id: break
+                if subnet_id is None and nacls is not None:
+                    source = nacls(f"association:{association_id}")
+                    if source is not None:
+                        subnet_id = getattr(source, "association_ids", {}).get(association_id) if not isinstance(source, dict) else source.get("association_ids", {}).get(association_id)
+                if subnet_id is None:
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "association id not in snapshot")); continue
+                target = working_nacls.setdefault(target_id, copy.deepcopy(nacls(target_id)) if nacls and nacls(target_id) is not None else {})
+                if not target:
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "network ACL id not in snapshot")); continue
+                assoc = list(target.get("associated_subnet_ids", []) if isinstance(target, dict) else target.associated_subnet_ids)
+                if subnet_id not in assoc: assoc.append(subnet_id)
+                changes.append(Change(op="modify", resource_type="network_acl", resource_id=target_id, fields={"associated_subnet_ids": assoc}))
+                addresses.append(address); continue
+            if not _valid_string(acl_id):
+                unmodeled.append(_unmodeled(address, lower_service, operation, "missing NetworkAclId")); continue
+            if acl_id not in working_nacls:
+                source = nacls(acl_id) if nacls else None
+                if source is None:
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "network ACL id not in snapshot")); continue
+                working_nacls[acl_id] = copy.deepcopy(source.model_dump() if hasattr(source, "model_dump") else source)
+            current = working_nacls[acl_id]
+            if operation == "DeleteNetworkAcl":
+                changes.append(Change(op="delete", resource_type="network_acl", resource_id=acl_id)); addresses.append(address); continue
+            entry = {"rule_number": parameters.get("RuleNumber"), "protocol": parameters.get("Protocol"), "rule_action": parameters.get("RuleAction"), "egress": parameters.get("Egress", False), "cidr_block": parameters.get("CidrBlock"), "ipv6_cidr_block": parameters.get("Ipv6CidrBlock"), "port_from": (parameters.get("PortRange") or {}).get("From"), "port_to": (parameters.get("PortRange") or {}).get("To")}
+            if (not isinstance(entry["rule_number"], int) or isinstance(entry["rule_number"], bool)
+                    or not 1 <= entry["rule_number"] <= 32766
+                    or (operation != "DeleteNetworkAclEntry" and (not _valid_string(entry["protocol"])
+                        or entry["rule_action"] not in {"allow", "deny"}))):
+                unmodeled.append(_unmodeled(address, lower_service, operation, "invalid network ACL entry")); continue
+            entries = current.setdefault("entries", [])
+            match = next((i for i, item in enumerate(entries) if item.get("rule_number") == entry["rule_number"] and item.get("egress") == entry["egress"]), None)
+            if operation == "CreateNetworkAclEntry":
+                if match is not None:
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "rule number already exists")); continue
+                entries.append(entry)
+            elif operation == "ReplaceNetworkAclEntry":
+                if match is None:
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "entry not in snapshot")); continue
+                entries[match] = entry
+            else:
+                if match is None:
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "entry not in snapshot")); continue
+                entries.pop(match)
+            changes.append(Change(op="modify", resource_type="network_acl", resource_id=acl_id, fields={"entries": copy.deepcopy(entries)})); addresses.append(address); continue
         if lower_service == "rds" and operation == "ModifyDBInstance":
             _validate_identifier(operation, parameters, "DBInstanceIdentifier")
             mapped_fields = {"BackupRetentionPeriod": ("backup_retention_days", int), "DeletionProtection": ("deletion_protection", bool),

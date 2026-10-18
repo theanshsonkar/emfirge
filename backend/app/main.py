@@ -1684,7 +1684,15 @@ def _aws_translator(branch_id: str, document, cli: bool = False):
     }
     if cli:
         document = parse_cli_commands(document)
-    translated = translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get)
+    nacl_map = {acl.id: copy.deepcopy(acl) for acl in state.vpc.nacls}
+    def nacl_lookup(acl_id):
+        if acl_id in nacl_map:
+            return nacl_map[acl_id]
+        if acl_id.startswith("association:"):
+            association_id = acl_id.split(":", 1)[1]
+            return next((acl for acl in nacl_map.values() if association_id in acl.association_ids), None)
+        return None
+    translated = translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get, nacls=nacl_lookup)
     validate_change_regions(document["calls"], state.region)
     return translated
 

@@ -1980,6 +1980,11 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
                         for association in acl.get('Associations', [])
                         if association.get('SubnetId')
                     ],
+                    association_ids={
+                        association['NetworkAclAssociationId']: association['SubnetId']
+                        for association in acl.get('Associations', [])
+                        if association.get('NetworkAclAssociationId') and association.get('SubnetId')
+                    },
                     entries=entries,
                 ))
         except ClientError as e:

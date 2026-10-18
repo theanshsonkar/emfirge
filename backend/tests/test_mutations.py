@@ -249,6 +249,7 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
             "arn:aws:iam::000000000000:role/Capability", "role_arn", {},
         ),
         "route_table": ("rt-capability", "id", {"vpc_id": "vpc-capability"}),
+        "network_acl": ("acl-capability", "id", {"vpc_id": "vpc-capability"}),
     }
     collection_names = {
         "ec2_instance": ("ec2", "instances"),
@@ -257,6 +258,7 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
         "s3_bucket": ("s3", "buckets"),
         "lambda_function": ("lambda_data", "functions"),
         "route_table": ("vpc", "route_tables"),
+        "network_acl": ("vpc", "nacls"),
     }
 
     for resource_type, operations in advertised.items():

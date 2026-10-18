@@ -13,7 +13,7 @@ import pytest
 from moto import mock_aws
 
 from app.aws_collector import collect_ec2, collect_lambda, collect_rds, collect_s3, collect_vpc
-from app.models import AWSInfrastructure
+from app.models import AWSInfrastructure, NACLEntry
 from app.mutations import Change, apply_changes
 from app.typed_handback import build_api_calls
 
@@ -51,6 +51,7 @@ def _resource(state, typ, ident):
         "s3_bucket": state.s3.buckets,
         "lambda_function": state.lambda_data.functions,
         "route_table": state.vpc.route_tables,
+        "network_acl": state.vpc.nacls,
     }
     key = "name" if typ in {"s3_bucket", "lambda_function"} else "id"
     return next((x for x in groups[typ] if getattr(x, key) == ident), None)
@@ -182,6 +183,16 @@ def test_route_table_modify_roundtrip():
     current = collect(); local = _resource(current, "route_table", rt).routes[0].destination_cidr
     fields["routes"][0]["destination_cidr"] = local
     _roundtrip(current, Change(op="modify", resource_type="route_table", resource_id=rt, fields=fields), collect, "route_table", rt, ["routes"])
+
+
+def test_network_acl_entry_modify_roundtrip():
+    ec2 = _client("ec2"); vpc = _vpc(); acl = ec2.create_network_acl(VpcId=vpc)["NetworkAcl"]["NetworkAclId"]
+    def collect(): return _base(_collect(collect_vpc), "vpc")
+    base = collect(); current = _resource(base, "network_acl", acl)
+    entry = NACLEntry(rule_number=100, protocol="tcp", rule_action="allow", egress=False,
+                      cidr_block="10.0.0.0/8", port_from=443, port_to=443)
+    _roundtrip(base, Change(op="modify", resource_type="network_acl", resource_id=acl,
+                            fields={"entries": [x.model_dump() for x in current.entries] + [entry.model_dump()]}), collect, "network_acl", acl, ["entries"])
 
 
 def test_tampered_handback_call_is_detected():

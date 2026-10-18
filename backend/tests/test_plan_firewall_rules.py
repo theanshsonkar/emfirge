@@ -170,17 +170,6 @@ def test_unread_terraform_network_types_block_unseen_change(plan_client, typ, ac
     assert any(reason["code"] == "unseen_change" and reason["message"].startswith("Emfirge can't see this: ") for reason in reasons)
 
 
-@pytest.mark.parametrize("operation", ["CreateNetworkAcl", "DeleteNetworkAcl", "CreateNetworkAclEntry",
-    "ReplaceNetworkAclEntry", "DeleteNetworkAclEntry", "ReplaceNetworkAclAssociation"])
-def test_unread_aws_api_network_operations_block_unseen_change(plan_client, operation):
-    branch_id = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "api-firewall"}).json()["branch_id"]
-    response = plan_client.post(f"/branches/{branch_id}/plans/aws-api", json={
-        "format": "aws-api-calls/1", "calls": [{"service": "ec2", "operation": operation, "parameters": {}}]})
-    assert response.status_code == 200, response.text
-    reasons = _verdict(plan_client, branch_id)["reasons"]
-    assert any(reason["code"] == "unseen_change" and reason["message"].startswith("Emfirge can't see this: ") for reason in reasons)
-
-
 @pytest.mark.parametrize("typ", ["AWS::EC2::NetworkAclEntry", "AWS::EC2::SecurityGroupEgress"])
 def test_unread_cloudformation_network_types_block_unseen_change(plan_client, typ):
     branch_id, _, response = post_cfn(plan_client, [resource("Add", typ)])
