@@ -49,7 +49,7 @@ class CombinedVerdict(BaseModel):
     no_longer_internet_reachable: list[str] = Field(default_factory=list)
     newly_exposed: list[dict[str, Any]] = Field(default_factory=list)
     no_longer_exposed: list[dict[str, Any]] = Field(default_factory=list)
-    reasons: list[dict[str, str]] = Field(default_factory=list)
+    reasons: list[dict[str, Any]] = Field(default_factory=list)
     plans: list[dict[str, str]] = Field(default_factory=list)
     # These are modeled ingress paths lost in the branch, not proof of an outage.
     possible_service_impacts: list[str] = Field(default_factory=list)
@@ -256,8 +256,11 @@ def _resource_id(item: Any) -> str:
     return _text(item.get("id", item.get("resource_id", ""))) if isinstance(item, Mapping) else _text(_value(item, "id", ""))
 
 
-def _reason(level: str, code: str, message: str) -> dict[str, str]:
-    return {"level": level, "code": code, "message": message}
+def _reason(level: str, code: str, message: str, resources: list[str] | None = None) -> dict[str, Any]:
+    reason: dict[str, Any] = {"level": level, "code": code, "message": message}
+    if resources:
+        reason["resources"] = resources
+    return reason
 
 
 def _serialize_limit_finding(finding: Any) -> dict[str, Any]:
@@ -465,6 +468,29 @@ def combined_verdict(
     reasons: list[dict[str, str]] = []
     if introduced_critical:
         reasons.append(_reason("block", "introduced_critical_finding", "Introduced Critical finding"))
+    broad_access_findings = [
+        item for item in diff.added_findings
+        if _text(_value(item, "rule_id")) == "EMFIRGE-IAM-008"
+    ]
+    # Native diff findings are deliberately reduced to a stable wire shape;
+    # recover the role from the branch graph for the explainable resource list.
+    broad_branch_graph = _comparison_graphs(base_infra, branch_infra)[1] if broad_access_findings else None
+    for finding in sorted(broad_access_findings, key=lambda item: (_text(_value(item, "resource_id")), _text(_value(item, "severity")))):
+        metadata = _value(finding, "metadata", {}) or {}
+        compute_id = _text(_value(finding, "resource_id"))
+        role_id = _text(metadata.get("role_id"))
+        if not role_id and broad_branch_graph is not None:
+            role_nodes = broad_branch_graph.get_outbound(compute_id, "uses_iam_role") + broad_branch_graph.get_outbound(compute_id, "USES_ROLE")
+            if role_nodes:
+                role_id = sorted(_text(_value(node, "id")) for node in role_nodes)[0]
+        action = _text(metadata.get("matched_action_pattern"))
+        resource = _text(metadata.get("matched_resource_pattern"))
+        level = "block" if _severity(_value(finding, "severity")) == "critical" else "warn"
+        reasons.append(_reason(
+            level, "internet_to_broad_data_access",
+            f"Internet can reach a {_text(_value(finding, 'resource_type'))} whose role can read data broadly ({action} on {resource})",
+            resources=[compute_id, role_id],
+        ))
     if active_critical_exposure:
         reasons.append(_reason("block", "introduced_critical_exposure", "Introduced Critical exposure"))
     if introduces_privilege_escalation:

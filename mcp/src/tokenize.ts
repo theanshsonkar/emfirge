@@ -386,6 +386,7 @@ const IDENTIFIER_KEYS = new Set([
   "resource_ids",
   "from",
   "to",
+  "resources",
   "source",
   "target",
 ]);

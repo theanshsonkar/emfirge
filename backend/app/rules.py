@@ -1,3 +1,5 @@
+import fnmatch
+import re
 from app.models import AWSInfrastructure, RiskFinding, ToxicCombo
 from app.cidr import is_internet_cidr
 from app.iam_escalation import matching_paths
@@ -883,6 +885,96 @@ def check_rds_log_exports(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     return None
 
 # ── IAM RULES ─────────────────────────────────────────────────────
+
+DATA_READ_ACTIONS = (
+    's3:GetObject', 's3:ListBucket', 'dynamodb:GetItem', 'dynamodb:Query',
+    'dynamodb:Scan', 'secretsmanager:GetSecretValue', 'rds-data:ExecuteStatement',
+    'ssm:GetParameter', 'ssm:GetParameters', 'kms:Decrypt',
+)
+_COMPUTE_TYPES = ('ec2_instance', 'lambda_function', 'ecs_tasks')
+
+
+def _service_wide_resource(pattern: str) -> bool:
+    if pattern == '*':
+        return True
+    parts = pattern.split(':', 5)
+    if len(parts) != 6 or not parts[0].lower() == 'arn':
+        return False
+    if parts[2] == '*':
+        return True
+    resource = parts[5]
+    if parts[2].lower() == 's3' and re.fullmatch(r'[A-Za-z0-9.-]+/\*', resource):
+        return False
+    return resource in {'*', '*/*'} or bool(re.fullmatch(r'[A-Za-z0-9-]+[/:]\*', resource))
+
+
+def _broad_statement(statement):
+    effect = statement.get('effect', '') if isinstance(statement, dict) else statement.effect
+    actions = statement.get('actions', []) if isinstance(statement, dict) else statement.actions
+    resources = statement.get('resources', []) if isinstance(statement, dict) else statement.resources
+    is_not_action = statement.get('is_not_action', False) if isinstance(statement, dict) else statement.is_not_action
+    is_not_resource = statement.get('is_not_resource', False) if isinstance(statement, dict) else statement.is_not_resource
+    if effect.lower() != 'allow':
+        return None
+    action_matches = [pattern for pattern in actions if any(fnmatch.fnmatchcase(data.lower(), pattern.lower()) for data in DATA_READ_ACTIONS)]
+    if is_not_action:
+        action_matches = sorted(actions) or ['NotAction']
+    if not action_matches:
+        return None
+    resource_matches = [pattern for pattern in resources if _service_wide_resource(pattern)]
+    if is_not_resource:
+        resource_matches = sorted(resources) or ['NotResource']
+    if not resource_matches:
+        return None
+    services = sorted({pattern.split(':', 1)[0].lower() for pattern in action_matches if ':' in pattern and pattern.lower() != 'notaction'})
+    return action_matches, resource_matches, services
+
+
+def check_internet_to_broad_data_access(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> List[RiskFinding]:
+    if not graph:
+        return []
+    reachable = ctx.reachable if ctx else get_internet_reachable_set(graph)
+    role_policies = {str((role.get('role_name') if isinstance(role, dict) else role.role_name)): role for role in infra.iam.role_policies}
+    role_policies.update({str((role.get('role_arn') if isinstance(role, dict) else role.role_arn)): role for role in infra.iam.role_policies})
+    findings = []
+    for compute in sorted((node for node in graph.nodes if node['type'] in _COMPUTE_TYPES and node['id'] in reachable), key=lambda node: (node['type'], node['id'])):
+        role_nodes = graph.get_outbound(compute['id'], 'uses_iam_role') + graph.get_outbound(compute['id'], 'USES_ROLE')
+        for role_node in sorted(role_nodes, key=lambda node: node['id']):
+            role_id = role_node['id']
+            role = role_policies.get(role_id) or role_policies.get(str(role_node.get('metadata', {}).get('role_name', '')))
+            if role is None and role_id.startswith('iam-role-'):
+                role = role_policies.get(role_id[len('iam-role-'):])
+            if role is None:
+                continue
+            statements = role.get('access_statements', []) if isinstance(role, dict) else role.access_statements
+            matches = [(statement, _broad_statement(statement)) for statement in statements]
+            matches = [(statement, match) for statement, match in matches if match]
+            if not matches:
+                continue
+            matches.sort(key=lambda item: (bool(item[0].get('has_condition', False) if isinstance(item[0], dict) else item[0].has_condition), item[1][0], item[1][1]))
+            statement, (action_matches, resource_matches, services) = matches[0]
+            all_conditioned = all((item.get('has_condition', False) if isinstance(item, dict) else item.has_condition) for item, _ in matches)
+            metadata = {
+                'role_id': role_id,
+                'matched_action_pattern': action_matches[0],
+                'matched_resource_pattern': resource_matches[0],
+                'data_services_matched': services,
+            }
+            severity = 'high' if all_conditioned else 'critical'
+            if all_conditioned:
+                metadata['condition_not_evaluated'] = True
+            finding = RiskFinding(
+                rule_id='EMFIRGE-IAM-008', category='Security', severity=severity,
+                raw_severity=severity, confidence='HIGH',
+                issue='Internet-reachable resource has broad data access',
+                recommendation='Restrict the compute resource role to the minimum data actions and resources required.',
+                aws_service='IAM', resource_id=compute['id'], resource_type=compute['type'],
+                region=infra.region,
+            )
+            object.__setattr__(finding, 'metadata', metadata)
+            findings.append(finding)
+    return findings
+
 
 def check_root_access_keys(infra: AWSInfrastructure) -> Optional[RiskFinding]:
     # Root access keys = if leaked, attacker has full control of entire AWS account
@@ -2175,6 +2267,7 @@ def run_all_checks(infrastructure: AWSInfrastructure, graph: Optional[Graph] = N
     
     # List-return rules with graph (List[RiskFinding])
     list_checks_with_graph = [
+        check_internet_to_broad_data_access,
         check_public_s3_context_aware,
         check_iam_high_risk_users,
         check_imdsv1_enabled,
