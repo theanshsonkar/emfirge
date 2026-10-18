@@ -203,7 +203,7 @@ export async function listBranchesHandler(args: ListBranchesArgs) {
   }
   const queryString = query.toString();
   const result = await backendCall("GET", `/branches${queryString ? `?${queryString}` : ""}`);
-  return ok(result);
+  return ok(Array.isArray(result) ? { branches: result, count: result.length } : result);
 }
 
 export const compareBranchesSchema = {

@@ -24,8 +24,10 @@ async function getExternalId(): Promise<string> {
   let project: ProjectResponse | undefined;
   try {
     project = await backendCall<ProjectResponse>("GET", "/project");
-  } catch {
-    // Self-host deployments may not expose the hosted project endpoint.
+  } catch (error) {
+    // Preserve backend diagnostics when hosted project lookup fails; self-hosted
+    // installations can still use EMFIRGE_EXTERNAL_ID below.
+    if (!process.env.EMFIRGE_EXTERNAL_ID) throw error;
   }
   const externalId = project?.external_id || process.env.EMFIRGE_EXTERNAL_ID;
   if (!externalId) throw new Error(NO_EXTERNAL_ID);

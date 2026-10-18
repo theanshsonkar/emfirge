@@ -16,7 +16,8 @@ import { fileURLToPath } from "node:url";
 import { existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 
 import { getBaseUrl } from "./client.js";
-import { privacyMode, redactDeep } from "./tokenize.js";
+import { privacyMode } from "./tokenize.js";
+import { formatToolError } from "./tool-error.js";
 
 import { setupSchema, setupZodObject, setupHandler } from "./tools/setup.js";
 import { loginSchema, loginZodObject, loginHandler, logoutSchema, logoutZodObject, logoutHandler } from "./tools/login.js";
@@ -352,7 +353,7 @@ const tools: ToolRegistration[] = [
   {
     name: "emfirge_list_branches",
     description:
-      "List isolated infrastructure branches, optionally filtered by their base analysis ID.",
+      "List isolated infrastructure branches, optionally filtered by their base analysis ID. Returns an object with a branches array and count.",
     schema: listBranchesSchema as Record<string, z.ZodTypeAny>,
     zodObject: listBranchesZodObject as z.ZodObject<z.ZodRawShape>,
     handler: listBranchesHandler,
@@ -441,9 +442,9 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const args = tool.zodObject.parse(req.params.arguments ?? {});
     return await tool.handler(args);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = formatToolError(e);
     return {
-      content: [{ type: "text" as const, text: `Error: ${String(redactDeep(message))}` }],
+      content: [{ type: "text" as const, text: message }],
       isError: true,
     };
   }
