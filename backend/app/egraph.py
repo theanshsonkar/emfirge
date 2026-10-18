@@ -842,6 +842,14 @@ class _GraphIndex:
         self.sg_rules = {}
         self.peerings = {}
         self.tgw_vpcs = set()
+        # Pure reachability memoization; scoped to this graph build.
+        self.resource_subnets_cache = {}
+        self.resource_vpc_cache = {}
+        self.sg_ids_cache = {}
+        self.sg_rules_cache = {}
+        self.route_cache = {}
+        self.sg_allow_cache = {}
+        self.nacl_ok_cache = {}
         edges = _graph_edges(graph)
         for node_id, node in self.nodes.items():
             data = _node_data(node)
@@ -895,7 +903,12 @@ def _graph_index(graph, index=None):
 
 def _resource_subnets(node, graph, index=None):
     index = _graph_index(graph, index)
-    return sorted(index.resource_subnets.get(_value(node, "id"), ()))
+    node_id = _value(node, "id")
+    cached = index.resource_subnets_cache.get(node_id)
+    if cached is None:
+        cached = tuple(sorted(index.resource_subnets.get(node_id, ())))
+        index.resource_subnets_cache[node_id] = cached
+    return list(cached)
 
 
 def _subnet_vpc(subnet_id, graph, index=None):
@@ -910,8 +923,11 @@ def _subnet_cidr(subnet_id, graph, index=None):
 
 def _resource_vpc(node, graph, index=None):
     index = _graph_index(graph, index)
-    subnets = _resource_subnets(node, graph, index)
-    return _subnet_vpc(subnets[0], graph, index) if subnets else None
+    node_id = _value(node, "id")
+    if node_id not in index.resource_vpc_cache:
+        subnets = _resource_subnets(node, graph, index)
+        index.resource_vpc_cache[node_id] = _subnet_vpc(subnets[0], graph, index) if subnets else None
+    return index.resource_vpc_cache[node_id]
 
 
 def _route_table_ids_for_subnet(subnet_id, graph, index=None):
@@ -922,11 +938,18 @@ def _route_table_ids_for_subnet(subnet_id, graph, index=None):
 def route_between(a_node, b_node, graph, index=None):
     """Classify the modeled or conservatively assumed route between resources."""
     index = _graph_index(graph, index)
+    cache_key = (_value(a_node, "id"), _value(b_node, "id"))
+    if cache_key in index.route_cache:
+        return index.route_cache[cache_key]
     a_vpc, b_vpc = _resource_vpc(a_node, graph, index), _resource_vpc(b_node, graph, index)
     if not a_vpc or not b_vpc:
-        return "assumed_flagged", "placement unknown"
+        result = ("assumed_flagged", "placement unknown")
+        index.route_cache[cache_key] = result
+        return result
     if a_vpc == b_vpc:
-        return "routed_high", "same-VPC local"
+        result = ("routed_high", "same-VPC local")
+        index.route_cache[cache_key] = result
+        return result
     pair = frozenset((a_vpc, b_vpc))
     for peering_id in index.peerings.get(pair, ()):
         sides_ok = True
@@ -939,10 +962,15 @@ def route_between(a_node, b_node, graph, index=None):
                 sides_ok = False
                 break
         if sides_ok:
-            return "routed_high", "active peering"
+            result = ("routed_high", "active peering")
+            index.route_cache[cache_key] = result
+            return result
     if index.tgw_vpcs.intersection((a_vpc, b_vpc)):
-        return "assumed_flagged", "possible via unmodeled Transit Gateway"
-    return "blocked", "no modeled cross-VPC path"
+        result = ("assumed_flagged", "possible via unmodeled Transit Gateway")
+    else:
+        result = ("blocked", "no modeled cross-VPC path")
+    index.route_cache[cache_key] = result
+    return result
 
 def _protocol_matches(rule_protocol, requested):
     rule = str(rule_protocol if rule_protocol is not None else "-1").lower()
@@ -960,19 +988,28 @@ def _rule_matches(rule, port_range):
             _port_overlap(port_range[0], port_range[1], *_rule_ports(rule)))
 
 
-def _sg_ids(node):
+def _sg_ids(node, index=None):
+    node_id = _value(node, "id")
+    if index is not None and node_id in index.sg_ids_cache:
+        return index.sg_ids_cache[node_id]
     data = _node_data(node)
-    ids = _value(data, "sg_ids", _value(data, "security_groups", [])) or []
-    return sorted({str(item) for item in ids if item})
+    ids = tuple(sorted({str(item) for item in (_value(data, "sg_ids", _value(data, "security_groups", [])) or []) if item}))
+    if index is not None:
+        index.sg_ids_cache[node_id] = ids
+    return ids
 
 
 def _sg_rules(node, graph, key, index=None):
     index = _graph_index(graph, index)
+    cache_key = (_value(node, "id"), key)
+    if cache_key in index.sg_rules_cache:
+        return index.sg_rules_cache[cache_key]
     result = []
-    for sg_id in _sg_ids(node):
+    for sg_id in _sg_ids(node, index):
         rules = index.sg_rules.get(sg_id, {}).get(key, [])
         if rules:
             result.append((index.nodes.get(sg_id), rules))
+    index.sg_rules_cache[cache_key] = result
     return result
 
 
@@ -987,7 +1024,10 @@ def _rule_scope(rule, peer_sg_ids, peer_cidr, sg_reference_key):
 def sg_allows_ab(a_node, b_node, graph, port_range, index=None):
     """Evaluate directional SG egress from A and ingress to B."""
     index = _graph_index(graph, index)
-    a_sgs, b_sgs = _sg_ids(a_node), _sg_ids(b_node)
+    cache_key = (_value(a_node, "id"), _value(b_node, "id"), tuple(port_range))
+    if cache_key in index.sg_allow_cache:
+        return index.sg_allow_cache[cache_key]
+    a_sgs, b_sgs = _sg_ids(a_node, index), _sg_ids(b_node, index)
     a_subnets, b_subnets = _resource_subnets(a_node, graph, index), _resource_subnets(b_node, graph, index)
     a_cidr = _subnet_cidr(a_subnets[0], graph, index) if a_subnets else None
     b_cidr = _subnet_cidr(b_subnets[0], graph, index) if b_subnets else None
@@ -1003,7 +1043,9 @@ def sg_allows_ab(a_node, b_node, graph, port_range, index=None):
     ingress_ok = any(_rule_matches(rule, port_range) and
                      _rule_scope(rule, a_sgs, a_cidr, "source_sg_ids")
                      for rule in ingress)
-    return egress_ok and ingress_ok, "high" if egress_real and ingress_ok else "assumed"
+    result = (egress_ok and ingress_ok, "high" if egress_real and ingress_ok else "assumed")
+    index.sg_allow_cache[cache_key] = result
+    return result
 
 
 def _nacl_subnets(subnet_id, graph, index=None):
@@ -1042,19 +1084,30 @@ def _nacl_denies(entries, opposite_cidr, port_range, egress):
 
 def nacl_internal_ok(a_node, b_node, graph, port_range, index=None):
     index = _graph_index(graph, index)
+    cache_key = (_value(a_node, "id"), _value(b_node, "id"), tuple(port_range))
+    if cache_key in index.nacl_ok_cache:
+        return index.nacl_ok_cache[cache_key]
     a_subnets, b_subnets = _resource_subnets(a_node, graph, index), _resource_subnets(b_node, graph, index)
     if not a_subnets or not b_subnets:
-        return True, "assumed"
+        result = (True, "assumed")
+        index.nacl_ok_cache[cache_key] = result
+        return result
     a_cidr, b_cidr = _subnet_cidr(a_subnets[0], graph, index), _subnet_cidr(b_subnets[0], graph, index)
     a_acls = [acl for subnet in a_subnets for acl in _nacl_subnets(subnet, graph, index) if acl]
     b_acls = [acl for subnet in b_subnets for acl in _nacl_subnets(subnet, graph, index) if acl]
     for acl in b_acls:
         if _nacl_denies(_node_data(acl).get("entries", []) or [], a_cidr, port_range, egress=False):
-            return False, "high"
+            result = (False, "high")
+            index.nacl_ok_cache[cache_key] = result
+            return result
     for acl in a_acls:
         if _nacl_denies(_node_data(acl).get("entries", []) or [], b_cidr, port_range, egress=True):
-            return False, "high"
-    return True, "high" if a_acls or b_acls else "assumed"
+            result = (False, "high")
+            index.nacl_ok_cache[cache_key] = result
+            return result
+    result = (True, "high" if a_acls or b_acls else "assumed")
+    index.nacl_ok_cache[cache_key] = result
+    return result
 
 
 def internal_reachable(a_node, b_node, graph, index=None):
@@ -2232,7 +2285,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
     # then expand to members; classes are never merged directionlessly.
     classes = {}
     for node in eligible:
-        class_key = (node.resource_type, tuple(_sg_ids(node)), tuple(_resource_subnets(node, reachability_graph, graph_index)), _resource_vpc(node, reachability_graph, graph_index))
+        class_key = (node.resource_type, tuple(_sg_ids(node, graph_index)), tuple(_resource_subnets(node, reachability_graph, graph_index)), _resource_vpc(node, reachability_graph, graph_index))
         classes.setdefault(class_key, []).append(node)
     ordered_classes = [sorted(classes[key], key=lambda node: node.id) for key in sorted(classes, key=str)]
     internal_reachability_budget_exceeded = False

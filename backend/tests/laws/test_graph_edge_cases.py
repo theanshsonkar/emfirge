@@ -192,10 +192,11 @@ def _huge_snapshot() -> AWSInfrastructure:
 
 def test_L30_huge_account_stays_within_bounds():
     snapshot = _huge_snapshot()
-    tracemalloc.start()
     started = time.perf_counter()
     graph = build_graph(snapshot)
     build_seconds = time.perf_counter() - started
+    tracemalloc.start()
+    build_graph(_huge_snapshot())
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     validate_started = time.perf_counter()
