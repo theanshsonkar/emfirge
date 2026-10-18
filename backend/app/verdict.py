@@ -281,8 +281,14 @@ def _plan_reasons(plans: list[Mapping[str, Any]] | None) -> list[dict[str, str]]
             actions = item.get("actions", []) if isinstance(item, Mapping) else []
             provider_name = item.get("provider_name") if isinstance(item, Mapping) else None
             source_label = "AWS API call" if isinstance(item, Mapping) and item.get("source") == "aws_api" else "Terraform plan"
-            if item.get("unseen"):
-                detail = ("cannot tell which security group this rule belongs to" if item.get("unresolvable_parent")
+            if item.get("stateless_replace"):
+                suffix = "; its DNS name will change, so clients that use the old name will break" if item.get("type") in {"aws_lb", "aws_alb"} else ""
+                reasons.append(_reason(
+                    "warn", "stateless_replace",
+                    f"Terraform plan replaces {item.get('type')} without changing its network or security settings{suffix}",
+                ))
+            elif item.get("unseen"):
+                detail = item.get("detail") or ("cannot tell which security group this rule belongs to" if item.get("unresolvable_parent")
                           else f"{item.get('type')} changes network access and Emfirge does not read it yet")
                 reasons.append(_reason(
                     "block", "unseen_change", f"Emfirge can't see this: {detail}",

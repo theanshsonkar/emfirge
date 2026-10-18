@@ -19,7 +19,25 @@ def is_aws_provider(provider_name: Any) -> bool:
     return provider_name.strip().rstrip("/").rsplit("/", 1)[-1].lower() in _AWS_PROVIDER_TYPES
 
 
-_UNSEEN_TERRAFORM_TYPES = frozenset({"aws_default_security_group"})
+_UNSEEN_TERRAFORM_TYPES = frozenset({
+    "aws_default_security_group", "aws_snapshot_create_volume_permission", "aws_ami_launch_permission",
+    "aws_ebs_snapshot_block_public_access", "aws_ec2_image_block_public_access",
+})
+_SNAPSHOT_SHARING_TYPES = frozenset({"aws_db_snapshot", "aws_db_cluster_snapshot"})
+_LB_SECURITY_FIELDS = {
+    "aws_lb": ("internal", "load_balancer_type", "security_groups", "subnets", "subnet_mapping", "ip_address_type"),
+    "aws_alb": ("internal", "load_balancer_type", "security_groups", "subnets", "subnet_mapping", "ip_address_type"),
+    "aws_lb_listener": ("port", "protocol", "ssl_policy", "certificate_arn", "default_action"),
+    "aws_alb_listener": ("port", "protocol", "ssl_policy", "certificate_arn", "default_action"),
+    "aws_lb_listener_rule": ("action", "condition", "listener_arn"),
+    "aws_alb_listener_rule": ("action", "condition", "listener_arn"),
+    "aws_lb_listener_certificate": ("certificate_arn", "listener_arn"),
+    "aws_alb_listener_certificate": ("certificate_arn", "listener_arn"),
+    "aws_lb_target_group": ("port", "protocol", "target_type", "vpc_id"),
+    "aws_alb_target_group": ("port", "protocol", "target_type", "vpc_id"),
+    "aws_lb_target_group_attachment": ("target_group_arn", "target_id", "port"),
+    "aws_alb_target_group_attachment": ("target_group_arn", "target_id", "port"),
+}
 _TERRAFORM_RULE_TYPES = frozenset({
     "aws_vpc_security_group_ingress_rule", "aws_vpc_security_group_egress_rule",
     "aws_security_group_rule",
@@ -338,7 +356,25 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
     if typ in _UNSEEN_TERRAFORM_TYPES:
         return [], {"address": address, "type": typ, "actions": actions,
                      "provider_name": provider_name if isinstance(provider_name, str) else None,
-                     "outside_view": False, "unseen": True}
+                     "outside_view": False, "unseen": True,
+                     "detail": "snapshot or image sharing can share with other AWS accounts or the public, and Emfirge does not read sharing yet"}
+    if typ in _SNAPSHOT_SHARING_TYPES:
+        change = item.get("change") or {}
+        before, after = change.get("before") or {}, change.get("after") or {}
+        unknown = change.get("after_unknown") or {}
+        if "shared_accounts" in unknown or (after.get("shared_accounts") and after.get("shared_accounts") != before.get("shared_accounts")):
+            return [], {"address": address, "type": typ, "actions": actions,
+                         "provider_name": provider_name if isinstance(provider_name, str) else None,
+                         "outside_view": False, "unseen": True,
+                         "detail": "snapshot or image sharing can share with other AWS accounts or the public, and Emfirge does not read sharing yet"}
+    if typ in _LB_SECURITY_FIELDS and actions in (["delete", "create"], ["create", "delete"]):
+        change = item.get("change") or {}
+        before, after = change.get("before") or {}, change.get("after") or {}
+        unknown = change.get("after_unknown") or {}
+        if all(field not in unknown and before.get(field) == after.get(field) for field in _LB_SECURITY_FIELDS[typ]):
+            return [], {"address": address, "type": typ, "actions": actions,
+                         "provider_name": provider_name if isinstance(provider_name, str) else None,
+                         "outside_view": False, "stateless_replace": True}
     if typ in _TERRAFORM_RULE_TYPES:
         return _rule_change(item, sg_rules or {}, config_resources or {}, created_ids or {}, unknown_fields)
     if typ not in _RESOURCE_MAP:

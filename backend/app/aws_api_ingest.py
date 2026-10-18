@@ -76,6 +76,20 @@ _UNSEEN_EC2_OPERATIONS = frozenset({
 })
 
 
+def _sharing_unseen(service: str, operation: str, parameters: dict[str, Any]) -> bool:
+    if service == "ec2" and operation == "ModifySnapshotAttribute":
+        return parameters.get("Attribute") == "createVolumePermission" or any(
+            key in parameters for key in ("CreateVolumePermission", "UserIds", "GroupNames")
+        )
+    if service == "ec2" and operation == "ModifyImageAttribute":
+        return parameters.get("Attribute") == "launchPermission" or any(
+            key in parameters for key in ("LaunchPermission", "UserIds", "UserGroups", "OrganizationArns", "OrganizationalUnitArns")
+        )
+    if service == "ec2" and operation in {"DisableSnapshotBlockPublicAccess", "DisableImageBlockPublicAccess"}:
+        return True
+    return service == "rds" and operation in {"ModifyDBSnapshotAttribute", "ModifyDBClusterSnapshotAttribute"} and str(parameters.get("AttributeName", "")).lower() == "restore"
+
+
 def _unmodeled(address: str, service: str, operation: str, detail: str | None = None) -> dict[str, Any]:
     if operation.startswith(_DELETE_PREFIXES):
         actions = ["delete"]
@@ -202,6 +216,12 @@ def translate_api_calls(
         if parameters.get("DryRun") is True or operation.startswith(_READ_ONLY_PREFIXES):
             continue
         lower_service = service.lower()
+        if _sharing_unseen(lower_service, operation, parameters):
+            item = _unmodeled(address, lower_service, operation)
+            item["unseen"] = True
+            item["detail"] = f"{operation} can share a snapshot or image with other AWS accounts or the public, and Emfirge does not read sharing yet"
+            unmodeled.append(item)
+            continue
         if lower_service == "ec2" and operation in {"AuthorizeSecurityGroupIngress", "RevokeSecurityGroupIngress", "AuthorizeSecurityGroupEgress", "RevokeSecurityGroupEgress"}:
             if "GroupId" not in parameters:
                 unmodeled.append(_unmodeled(address, lower_service, operation)); continue
