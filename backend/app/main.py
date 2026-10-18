@@ -3599,7 +3599,8 @@ def list_feedback(limit: int = 50, key: str = None):
 
 @app.post('/analyze', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    assumed_credentials = assume_customer_role(credentials.role_arn, caller, db)
+    from app.demo_seed import is_demo_arn
+    assumed_credentials = None if is_demo_arn(credentials.role_arn) else assume_customer_role(credentials.role_arn, caller, db)
     start_time = time.time()
 
     # AGENTOPS SESSION START
@@ -3943,7 +3944,8 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
 @app.post('/analyze/stream', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 async def analyze_stream(credentials: AWSCredentials, request: Request, raw: bool = False, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     # Authorize before constructing the streaming response so failures are HTTP errors.
-    assumed_credentials = assume_customer_role(credentials.role_arn, caller, db)
+    from app.demo_seed import is_demo_arn
+    assumed_credentials = None if is_demo_arn(credentials.role_arn) else assume_customer_role(credentials.role_arn, caller, db)
     """
     SSE streaming version of /analyze. Sends progress events as each collector
     completes, then emits the full AnalysisResponse as the final event.

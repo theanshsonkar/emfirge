@@ -3,7 +3,7 @@ import re
 import secrets
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 
@@ -11,12 +11,27 @@ from app.auth import Caller
 from app.database import AccountBinding, AccountBindingEvent
 
 ROLE_RE = re.compile(r'^arn:aws(-[a-z]+)*:iam::(\d{12}):role/[\w+=,.@/-]+$')
-FORBIDDEN_DETAIL = "Emfirge could not access this AWS account. Make sure the role trusts Emfirge with your project's ExternalId. Roles made with the old shared ExternalId must be redeployed from emfirge_setup."
+DENIED_DETAIL = "Emfirge could not access this AWS account (class: trust_or_external_id). AWS refused to let Emfirge assume the role. Usually the role's trust policy does not trust Emfirge, or its ExternalId does not match your project's ExternalId; AWS does not say which. Roles made with the old shared ExternalId must be redeployed from emfirge_setup."
 UNSAFE_DETAIL = 'This role accepts any ExternalId, so it is unsafe. Redeploy the template from emfirge_setup.'
+_FAILURE_HINTS = {
+    'sts_throttled': 'AWS STS is throttling requests.',
+    'emfirge_credentials': "This is a problem with the Emfirge server's own AWS credentials, not your role.",
+    'sts_region_disabled': 'AWS STS is disabled in the region the Emfirge server uses.',
+    'sts_unreachable': 'The Emfirge server could not reach AWS STS.',
+    'aws_error': 'AWS returned an unexpected error.',
+    'internal_error': 'An internal error happened.',
+}
 
 
 def _forbidden() -> HTTPException:
-    return HTTPException(status_code=403, detail=FORBIDDEN_DETAIL)
+    return HTTPException(status_code=403, detail=DENIED_DETAIL)
+
+
+def _assume_failure(kind: str) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail=f"Emfirge could not assume the role, but not because of a trust or ExternalId mismatch (class: {kind}). {_FAILURE_HINTS[kind]} Try again later.",
+    )
 
 
 def _sts_client():
@@ -42,8 +57,21 @@ def assume_customer_role(role_arn: str, caller: Caller, db) -> dict:
     sts = _sts_client()
     try:
         assumed = _assume(sts, role_arn, caller.external_id)
+    except ClientError as exc:
+        code = exc.response.get('Error', {}).get('Code')
+        if code == 'AccessDenied':
+            raise _forbidden()
+        if code in {'Throttling', 'ThrottlingException'}:
+            raise _assume_failure('sts_throttled')
+        if code in {'ExpiredToken', 'ExpiredTokenException', 'InvalidClientTokenId', 'SignatureDoesNotMatch', 'UnrecognizedClientException'}:
+            raise _assume_failure('emfirge_credentials')
+        if code == 'RegionDisabledException':
+            raise _assume_failure('sts_region_disabled')
+        raise _assume_failure('aws_error')
+    except BotoCoreError:
+        raise _assume_failure('sts_unreachable')
     except Exception:
-        raise _forbidden()
+        raise _assume_failure('internal_error')
     if caller.mode == 'self-host' or binding is not None:
         return assumed['Credentials']
     try:
