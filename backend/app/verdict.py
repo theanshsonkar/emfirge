@@ -147,7 +147,7 @@ def _graph_escalation_details(base_infra: AWSInfrastructure, branch_infra: AWSIn
 def _native_finding(finding: Any) -> dict[str, Any]:
     rule_id = _text(_value(finding, "rule_id"))
     resource = _text(_value(finding, "resource_id"))
-    return {
+    result = {
         "source": "native",
         "check_id": rule_id,
         "resource": resource,
@@ -156,6 +156,10 @@ def _native_finding(finding: Any) -> dict[str, Any]:
         "rule_id": rule_id,
         "resource_id": resource,
     }
+    metadata = _value(finding, "metadata", None)
+    if metadata:
+        result["metadata"] = metadata
+    return result
 
 
 def _sort_finding(item: Mapping[str, Any]) -> tuple[str, ...]:
@@ -486,10 +490,22 @@ def combined_verdict(
         action = _text(metadata.get("matched_action_pattern"))
         resource = _text(metadata.get("matched_resource_pattern"))
         level = "block" if _severity(_value(finding, "severity")) == "critical" else "warn"
+        message = f"Internet can reach a {_text(_value(finding, 'resource_type'))} whose role can read data broadly ({action} on {resource})"
+        resources = [compute_id, role_id]
+        matched_buckets = metadata.get("matched_buckets") or []
+        if matched_buckets:
+            bucket_ids = []
+            for bucket in matched_buckets:
+                bucket_id = broad_branch_graph.node_id_for("s3_bucket", bucket) if broad_branch_graph is not None else None
+                bucket_ids.append(bucket_id or bucket)
+            resources += bucket_ids
+            shown_bucket_ids = bucket_ids[:10]
+            if len(bucket_ids) > 10:
+                shown_bucket_ids.append(f"and {len(bucket_ids) - 10} more")
+            message += f": {compute_id} -> {role_id} -> {', '.join(shown_bucket_ids)}"
         reasons.append(_reason(
-            level, "internet_to_broad_data_access",
-            f"Internet can reach a {_text(_value(finding, 'resource_type'))} whose role can read data broadly ({action} on {resource})",
-            resources=[compute_id, role_id],
+            level, "internet_to_broad_data_access", message,
+            resources=resources,
         ))
     if active_critical_exposure:
         reasons.append(_reason("block", "introduced_critical_exposure", "Introduced Critical exposure"))

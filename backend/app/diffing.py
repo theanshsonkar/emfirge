@@ -295,6 +295,7 @@ def _flatten_findings(findings: dict) -> dict[tuple[str, str], dict]:
                 "rule_id": rule_id,
                 "resource_id": resource_id,
                 "severity": _finding_field(finding, "severity"),
+                "metadata": _value(finding, "metadata", {}) or {},
             })
     return flattened
 

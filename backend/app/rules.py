@@ -908,6 +908,73 @@ def _service_wide_resource(pattern: str) -> bool:
     return resource in {'*', '*/*'} or bool(re.fullmatch(r'[A-Za-z0-9-]+[/:]\*', resource))
 
 
+def _s3_glob_covers_bucket(resource_part: str, bucket: str) -> bool:
+    """Return whether an IAM S3 resource glob names this bucket or one of its keys."""
+    def advance(states, char):
+        result = set()
+        for position in states:
+            if position >= len(resource_part):
+                continue
+            token = resource_part[position]
+            if token == '*':
+                result.add(position)
+            elif token == '?' or token == char:
+                result.add(position + 1)
+        return result
+
+    def closure(states):
+        result = set(states)
+        pending = list(states)
+        while pending:
+            position = pending.pop()
+            if position < len(resource_part) and resource_part[position] == '*' and position + 1 not in result:
+                result.add(position + 1)
+                pending.append(position + 1)
+        return result
+
+    states = closure({0})
+    for char in bucket:
+        states = closure(advance(states, char))
+        if not states:
+            return False
+    if len(resource_part) in states:
+        return True
+    states = closure(advance(states, '/'))
+    return bool(states)
+
+
+def _s3_name_wildcard(resource_part):
+    return '*' in resource_part.split('/', 1)[0] or '?' in resource_part.split('/', 1)[0]
+
+
+def _wildcard_bucket_statement(statement, bucket_names):
+    effect = statement.get('effect', '') if isinstance(statement, dict) else statement.effect
+    actions = statement.get('actions', []) if isinstance(statement, dict) else statement.actions
+    resources = statement.get('resources', []) if isinstance(statement, dict) else statement.resources
+    is_not_action = statement.get('is_not_action', False) if isinstance(statement, dict) else statement.is_not_action
+    is_not_resource = statement.get('is_not_resource', False) if isinstance(statement, dict) else statement.is_not_resource
+    if effect.lower() != 'allow' or is_not_action or is_not_resource:
+        return None
+    action_matches = [pattern for pattern in actions if any(
+        data.startswith('s3:') and fnmatch.fnmatchcase(data.lower(), pattern.lower())
+        for data in DATA_READ_ACTIONS
+    )]
+    if not action_matches:
+        return None
+    bucket_names = set(bucket_names)
+    for resource in resources:
+        parts = resource.split(':', 5)
+        if len(parts) != 6 or parts[0].lower() != 'arn' or parts[2].lower() != 's3':
+            continue
+        resource_part = parts[5]
+        if _service_wide_resource(resource) or not _s3_name_wildcard(resource_part):
+            continue
+        matched = sorted(bucket for bucket in bucket_names if _s3_glob_covers_bucket(resource_part, bucket))
+        if matched:
+            return action_matches, [resource], ['s3'], matched
+    return None
+
+
 def _broad_statement(statement):
     effect = statement.get('effect', '') if isinstance(statement, dict) else statement.effect
     actions = statement.get('actions', []) if isinstance(statement, dict) else statement.actions
@@ -949,10 +1016,23 @@ def check_internet_to_broad_data_access(infra: AWSInfrastructure, graph: Optiona
             statements = role.get('access_statements', []) if isinstance(role, dict) else role.access_statements
             matches = [(statement, _broad_statement(statement)) for statement in statements]
             matches = [(statement, match) for statement, match in matches if match]
-            if not matches:
-                continue
+            service_matches = matches
+            bucket_names = []
+            s3_data = infra.get('s3') if isinstance(infra, dict) else getattr(infra, 's3', None)
+            if s3_data:
+                buckets = s3_data.get('buckets', []) if isinstance(s3_data, dict) else s3_data.buckets
+                bucket_names = [bucket.get('name') if isinstance(bucket, dict) else bucket.name for bucket in buckets]
+            if service_matches:
+                matches = service_matches
+            else:
+                wildcard_matches = [(statement, _wildcard_bucket_statement(statement, bucket_names)) for statement in statements]
+                wildcard_matches = [(statement, match) for statement, match in wildcard_matches if match]
+                if not wildcard_matches:
+                    continue
+                matches = wildcard_matches
             matches.sort(key=lambda item: (bool(item[0].get('has_condition', False) if isinstance(item[0], dict) else item[0].has_condition), item[1][0], item[1][1]))
-            statement, (action_matches, resource_matches, services) = matches[0]
+            statement, selected_match = matches[0]
+            action_matches, resource_matches, services = selected_match[:3]
             all_conditioned = all((item.get('has_condition', False) if isinstance(item, dict) else item.has_condition) for item, _ in matches)
             metadata = {
                 'role_id': role_id,
@@ -960,6 +1040,8 @@ def check_internet_to_broad_data_access(infra: AWSInfrastructure, graph: Optiona
                 'matched_resource_pattern': resource_matches[0],
                 'data_services_matched': services,
             }
+            if not service_matches:
+                metadata['matched_buckets'] = sorted({bucket for _, match in matches for bucket in match[3]})
             severity = 'high' if all_conditioned else 'critical'
             if all_conditioned:
                 metadata['condition_not_evaluated'] = True

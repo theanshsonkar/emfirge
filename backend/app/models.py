@@ -541,6 +541,7 @@ class RiskFinding(BaseModel):
     blast_radius: Optional[int] = 0
     mitre_technique_id: Optional[str] = None
     mitre_technique_name: Optional[str] = None
+    metadata: Dict[str, object] = Field(default_factory=dict)
 
 # ── PRIORITY ACTION MODEL ─────────────────────────────────────────
 # One item in the AI-generated prioritized action plan (01-05)
