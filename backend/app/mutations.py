@@ -286,6 +286,13 @@ def mutation_capabilities() -> MutationCapabilities:
     )
 
 
+class TargetNotFound(ValueError):
+    def __init__(self, resource_type: str, resource_id: str):
+        self.resource_type = resource_type
+        self.resource_id = resource_id
+        super().__init__(f"Target not found: {resource_type}")
+
+
 class Change(BaseModel):
     op: str
     resource_type: str
@@ -521,7 +528,7 @@ def _delete(
     collection = _collection(infra, resource_type)
     index = next((i for i, item in enumerate(collection) if _identity(resource_type, item) == resource_id), None)
     if index is None:
-        raise ValueError(f"Target not found: {resource_type}")
+        raise TargetNotFound(resource_type, resource_id)
     target = collection[index]
     if resource_type == "network_acl":
         if target.associated_subnet_ids:
@@ -643,7 +650,7 @@ def _replace_iam_role_policy_statements(
 
     matches = [policy for policy in infra.iam.role_policies if policy.role_arn == change.resource_id]
     if not matches:
-        raise ValueError("Target not found: iam_role_policy")
+        raise TargetNotFound("iam_role_policy", change.resource_id)
     if len(matches) != 1:
         raise ValueError("IAM role policy target is ambiguous; role ARN must identify exactly one collected role")
 
@@ -670,7 +677,7 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
         raise ValueError("routes must be a list replacing the complete normalized route set")
     matches = [table for table in infra.vpc.route_tables if table.id == change.resource_id]
     if not matches:
-        raise ValueError("Target not found: route_table")
+        raise TargetNotFound("route_table", change.resource_id)
     if len(matches) != 1:
         raise ValueError("Route table target is ambiguous; ID must identify exactly one collected route table")
     normalized = [Route.model_validate(route) for route in routes]
@@ -714,7 +721,7 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
 def _replace_network_acl(infra: AWSInfrastructure, change: Change) -> None:
     matches = [acl for acl in infra.vpc.nacls if acl.id == change.resource_id]
     if not matches:
-        raise ValueError("Target not found: network_acl")
+        raise TargetNotFound("network_acl", change.resource_id)
     if set(change.fields) - {"entries", "associated_subnet_ids"}:
         raise ValueError("network_acl modify allows only entries and associated_subnet_ids")
     acl = matches[0]
@@ -852,7 +859,7 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
             None,
         )
         if index is None:
-            raise ValueError(f"Target not found: {resource_type}")
+            raise TargetNotFound(resource_type, change.resource_id)
         target = collection[index]
         updated_data = target.model_dump()
         updated_data.update(change.fields)

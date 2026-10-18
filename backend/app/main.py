@@ -17,6 +17,7 @@ import tempfile
 import hashlib
 import copy
 import logging
+import math
 from datetime import datetime, date, timezone
 from collections import defaultdict
 from dotenv import load_dotenv
@@ -157,14 +158,22 @@ _BRANCH_WINDOW = 60
 
 
 def _check_branch_rate_limit(ip: str) -> None:
-    """Raise HTTP 429 after 30 branch requests per IP in one minute."""
+    """Raise HTTP 429 after the configured branch requests per minute."""
     now = time.time()
+    try:
+        limit = int(os.environ["EMFIRGE_BRANCH_RATE_LIMIT"])
+        if limit < 1:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        limit = _BRANCH_LIMIT
     window_start = now - _BRANCH_WINDOW
     _branch_request_log[ip] = [t for t in _branch_request_log[ip] if t > window_start]
-    if len(_branch_request_log[ip]) >= _BRANCH_LIMIT:
+    if len(_branch_request_log[ip]) >= limit:
+        retry_after = max(1, math.ceil(_branch_request_log[ip][0] + _BRANCH_WINDOW - now))
         raise HTTPException(
             status_code=429,
-            detail='Rate limit reached. Please wait a moment before making more branch requests.',
+            detail=f"Rate limit reached: {limit} branch requests per minute. Retry in {retry_after} s.",
+            headers={"Retry-After": str(retry_after)},
         )
     _branch_request_log[ip].append(now)
 
@@ -2041,7 +2050,10 @@ def verify_typed_handback_endpoint(branch_id: str, payload: dict, request: Reque
 def branch_diff_endpoint(branch_id: str, request: Request):
     _check_branch_rate_limit(_branch_request_ip(request))
     try:
-        return branches.get_branch_diff(branch_id)
+        diff = branches.get_branch_diff(branch_id)
+        if isinstance(diff, dict):
+            return {**diff, "status": branches.get_branch(branch_id).status}
+        return diff.model_copy(update={"status": branches.get_branch(branch_id).status})
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -2070,7 +2082,7 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
     if evidence:
         verdict_kwargs["evidence"] = evidence
     result = combined_verdict(branch.base, rebuilt, **verdict_kwargs)
-    return result.model_copy(update={"branch_revision": branches.branch_revision(branch),
+    return result.model_copy(update={"branch_revision": branches.branch_revision(branch), "status": branch.status,
         "plans": [{"plan_id": item["plan_id"], "input_sha256": item["input_sha256"]} for item in plans]})
 
 

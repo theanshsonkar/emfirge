@@ -74,3 +74,35 @@ def test_recovery_point_removed_names_snapshot_not_other_deletion(monkeypatch):
     reason = _reason_by(result, "recovery_point_removed")
     assert reason["resources"] == ["snap-dl-root"]
     assert "db-dl-reports" not in reason["resources"]
+
+
+def test_reason_messages_contain_no_resource_ids(monkeypatch):
+    # Capacity retains its pre-existing resource_id=... message for compatibility.
+    verdicts = [
+        _verdict(_infra(), _infra(public=True, role=_role("arn:aws:s3:::cust-apps-*")), monkeypatch),
+        combined_verdict(
+            load_synthetic_base("delete"),
+            apply_change(load_synthetic_base("delete"), Change(
+                op="delete", resource_type="rds_instance", resource_id="db-dl-prod",
+                fields={"skip_final_snapshot": True},
+            )),
+            run_scanners=False,
+        ),
+    ]
+    deleted_role_base = load_synthetic_base("delete", {"collection": {"iam_role_last_used": "denied"}})
+    deleted_role_branch = apply_change(deleted_role_base, Change(
+        op="delete", resource_type="iam_role",
+        resource_id="arn:aws:iam::000000000000:role/DlAppRole", fields={},
+    ))
+    verdicts.append(combined_verdict(deleted_role_base, deleted_role_branch, run_scanners=False))
+    snapshot_base = load_synthetic_base("delete")
+    snapshot_branch = apply_change(snapshot_base, Change(
+        op="delete", resource_type="ebs_snapshot", resource_id="snap-dl-root", fields={},
+    ))
+    verdicts.append(combined_verdict(snapshot_base, snapshot_branch, run_scanners=False))
+    verdicts.append(_verdict(_infra(), _infra(public=True), monkeypatch))
+    for result in verdicts:
+        for reason in result.reasons:
+            if reason["code"] == "capacity":
+                continue
+            assert not any(resource_id in reason["message"] for resource_id in reason.get("resources", [])), reason

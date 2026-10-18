@@ -270,7 +270,8 @@ def create_branch(base_infra: AWSInfrastructure | dict, name: str,
             if open_count >= MAX_OPEN_BRANCHES_PER_BASE:
                 raise BranchLimitError(
                     f"Open branch limit ({MAX_OPEN_BRANCHES_PER_BASE}) reached for "
-                    f"base_analysis_id={base_analysis_id!r}; currently {open_count} open branches"
+                    f"base_analysis_id={base_analysis_id!r}; currently {open_count} open branches. "
+                    "Discard branches you no longer need (list them first), then try again."
                 )
         branch_id = str(uuid.uuid4())
         session.add(BranchLog(
@@ -363,7 +364,8 @@ def fork_branch(
             if open_count >= MAX_OPEN_BRANCHES_PER_BASE:
                 raise BranchLimitError(
                     f"Open branch limit ({MAX_OPEN_BRANCHES_PER_BASE}) reached for "
-                    f"base_analysis_id={base_analysis_id!r}; currently {open_count} open branches"
+                    f"base_analysis_id={base_analysis_id!r}; currently {open_count} open branches. "
+                    "Discard branches you no longer need (list them first), then try again."
                 )
 
         child_id = str(uuid.uuid4())

@@ -134,8 +134,8 @@ def test_W1c_typed_wildcard_blocks_and_names_path(resource, monkeypatch):
     assert finding["metadata"]["matched_buckets"] == ["cust-apps-a", "cust-apps-b"]
     reason = _reason(result)
     assert reason["resources"] == ["i-orders", "iam-role-OrdersRole", "cust-apps-a", "cust-apps-b"]
-    assert "payroll" not in reason["resources"] and "payroll" not in reason["message"]
-    assert "i-orders -> iam-role-OrdersRole -> " in reason["message"]
+    assert "-> role -> 2 buckets" in reason["message"]
+    assert not any(identifier in reason["message"] for identifier in ("i-orders", "iam-role-OrdersRole", "cust-apps-a", "cust-apps-b", "payroll"))
 
 
 def test_W1c_wildcard_matching_no_bucket_no_finding(monkeypatch):
@@ -189,8 +189,8 @@ def test_W1c_message_caps_bucket_list(monkeypatch):
     result = _verdict(base, branch, monkeypatch)
     reason = _reason(result)
     assert len(reason["resources"]) == 17
-    assert " and 5 more" in reason["message"]
-    assert "cust-apps-14" not in reason["message"]
+    assert "-> role -> 15 buckets" in reason["message"]
+    assert "cust-apps-" not in reason["message"]
 
 
 def test_W1c_native_findings_without_metadata_have_no_metadata_key(plan_client):

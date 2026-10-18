@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import functools
+import ipaddress
 import json
 import re
 import shlex
@@ -23,6 +24,88 @@ def _service_model(name: str):
         return botocore.session.get_session().get_service_model(name)
     except Exception as exc:
         raise ValueError(f"Unknown AWS service: {name}") from exc
+
+
+def _security_group_shorthand(command_no: int, core: list[str], operation: str) -> list[str]:
+    """Translate the two supported EC2 ingress shorthand forms to JSON."""
+    if operation not in {"AuthorizeSecurityGroupIngress", "RevokeSecurityGroupIngress"}:
+        return core
+    names = {"protocol", "port", "cidr", "source-group", "group-owner"}
+    present = {token[2:].split("=", 1)[0] for token in core[3:] if token.startswith("--")}
+    shorthand = present & names
+    if not shorthand:
+        return core
+    if "ip-permissions" in present:
+        raise ValueError(f"Command {command_no}: use either --ip-permissions or --protocol/--port/--cidr/--source-group, not both")
+    values: dict[str, str] = {}
+    retained = core[:3]
+    i = 3
+    while i < len(core):
+        token = core[i]
+        raw, equals, value = token[2:].partition("=")
+        if raw not in names:
+            retained.append(token)
+            i += 1
+            continue
+        if not equals:
+            i += 1
+            if i >= len(core):
+                raise ValueError(f"Command {command_no}: --{raw} requires a value")
+            value = core[i]
+        if raw in values:
+            raise ValueError(f"Command {command_no}: duplicate option --{raw}")
+        values[raw] = value
+        i += 1
+    protocol = values.get("protocol")
+    if protocol is None and {"port", "cidr", "source-group"} & set(values):
+        raise ValueError(f"Command {command_no}: --protocol is required")
+    if protocol is None:
+        return core
+    protocol = "-1" if protocol in {"all", "-1"} else protocol
+    permission: dict[str, Any] = {"IpProtocol": protocol}
+    port = values.get("port")
+    if protocol != "-1":
+        if port is None:
+            if protocol in {"tcp", "udp"}: permission.update(FromPort=0, ToPort=65535)
+        else:
+            try:
+                if protocol == "icmp":
+                    if port == "-1": parsed = (-1, -1)
+                    elif "-" in port:
+                        left, right = port.split("-", 1)
+                        parsed = (int(left), int(right))
+                    else: parsed = (int(port), -1)
+                    if parsed[0] < -1 or parsed[1] < -1 or parsed[0] > 255 or parsed[1] > 255:
+                        raise ValueError
+                elif protocol in {"tcp", "udp"}:
+                    if "-" in port:
+                        left, right = port.split("-", 1)
+                        parsed = (int(left), int(right))
+                    else: parsed = (int(port), int(port))
+                    if min(parsed) < 0 or max(parsed) > 65535 or parsed[0] > parsed[1]: raise ValueError
+                else:
+                    parsed = None
+                if parsed is not None: permission.update(FromPort=parsed[0], ToPort=parsed[1])
+            except (TypeError, ValueError):
+                raise ValueError(f"Command {command_no}: invalid --port {port}")
+    cidr, source = values.get("cidr"), values.get("source-group")
+    if (cidr is None) == (source is None):
+        raise ValueError(f"Command {command_no}: give exactly one of --cidr or --source-group")
+    if cidr is not None:
+        if "group-owner" in values:
+            raise ValueError(f"Command {command_no}: --group-owner cannot be used with --cidr")
+        try:
+            network = ipaddress.ip_network(cidr, strict=False)
+            if network.version != 4: raise ValueError
+        except ValueError:
+            raise ValueError(f"Command {command_no}: --cidr must be an IPv4 CIDR; use --ip-permissions with Ipv6Ranges for IPv6")
+        permission["IpRanges"] = [{"CidrIp": cidr}]
+    else:
+        pair = {"GroupId": source} if source.startswith("sg-") else {"GroupName": source}
+        if "group-owner" in values: pair["UserId"] = values["group-owner"]
+        permission["UserIdGroupPairs"] = [pair]
+    retained.extend(["--ip-permissions", json.dumps([permission], separators=(",", ":"))])
+    return retained
 
 
 @functools.lru_cache(maxsize=None)
@@ -229,6 +312,7 @@ def _parse_command(command: str, command_no: int) -> list[dict[str, Any]]:
         raise ValueError(f"Command {command_no}: unknown AWS operation: {operation_token}")
     model = _service_model(service)
     shape = model.operation_model(operation).input_shape
+    core = _security_group_shorthand(command_no, core, operation)
     members = shape.members if shape else {}
     by_cli = {xform_name(name, '-'): (name, member) for name, member in members.items()}
     params: dict[str, Any] = {}
