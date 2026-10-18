@@ -10,36 +10,43 @@ const TEMPLATE_URL =
   process.env.EMFIRGE_TEMPLATE_URL ??
   "https://emfirge-reports.s3.ap-south-1.amazonaws.com/cloudformation/iam-role.yaml";
 
-const TRUSTED_ACCOUNT = process.env.EMFIRGE_TRUSTED_ACCOUNT_ID ?? "000000000000";
 const NO_EXTERNAL_ID =
   "No ExternalId yet. Run emfirge_login to sign in (or set EMFIRGE_API_KEY). Self-host: set EMFIRGE_EXTERNAL_ID on the server and here.";
+const NO_TRUSTED_ACCOUNT =
+  "Trusted AWS account is unknown. Set EMFIRGE_TRUSTED_ACCOUNT_ID or configure the backend to return trusted_account_id.";
 
 type ProjectResponse = {
   mode?: "hosted" | "self-host";
   project?: string;
   external_id?: string | null;
+  trusted_account_id?: string | null;
 };
 
-async function getExternalId(): Promise<string> {
-  let project: ProjectResponse | undefined;
+async function getProject(): Promise<ProjectResponse | undefined> {
   try {
-    project = await backendCall<ProjectResponse>("GET", "/project");
+    return await backendCall<ProjectResponse>("GET", "/project");
   } catch (error) {
-    // Preserve backend diagnostics when hosted project lookup fails; self-hosted
-    // installations can still use EMFIRGE_EXTERNAL_ID below.
     if (!process.env.EMFIRGE_EXTERNAL_ID) throw error;
+    return undefined;
   }
+}
+
+async function getExternalId(project?: ProjectResponse): Promise<string> {
   const externalId = project?.external_id || process.env.EMFIRGE_EXTERNAL_ID;
   if (!externalId) throw new Error(NO_EXTERNAL_ID);
   return externalId;
 }
 
 export async function setupHandler(_args: Record<string, never>) {
-  const externalId = await getExternalId();
+  const project = await getProject();
+  const externalId = await getExternalId(project);
+  const trustedAccount = project?.trusted_account_id || process.env.EMFIRGE_TRUSTED_ACCOUNT_ID;
+  if (!trustedAccount) throw new Error(NO_TRUSTED_ACCOUNT);
   const cfUrl =
     `https://console.aws.amazon.com/cloudformation/home#/stacks/quickcreate?` +
     `templateURL=${encodeURIComponent(TEMPLATE_URL)}` +
     `&stackName=EmfirgeReadOnlyStack` +
+    `&param_TrustedAccountId=${encodeURIComponent(trustedAccount)}` +
     `&param_ExternalId=${encodeURIComponent(externalId)}`;
 
   // IMPORTANT: This text is engineered for cross-client rendering.
@@ -51,6 +58,7 @@ export async function setupHandler(_args: Record<string, never>) {
   const text = [
     `Deploy URL: ${cfUrl}`,
     `Your ExternalId: ${externalId}`,
+    `Trusted AWS account: ${trustedAccount}`,
     "",
     "(Note to assistant: paste the URL above verbatim in your reply. " +
       "Users on CLI clients — Claude Code, Codex, Kiro CLI — do not see tool output by default.)",
@@ -62,7 +70,7 @@ export async function setupHandler(_args: Record<string, never>) {
     "4. Paste the RoleArn back here and the scan will run.",
     "",
     "Background (relay only if asked):",
-    `- Trusts AWS account ${TRUSTED_ACCOUNT}, ExternalId "${externalId}".`,
+    `- Trusts AWS account ${trustedAccount}, ExternalId "${externalId}".`,
     "- Roles made with the old shared ExternalId must be redeployed with your project ExternalId.",
     "- Read-only: AWS-managed SecurityAudit policy + a handful of extra read perms. No write access of any kind.",
     "- Instantly revocable — deleting the CloudFormation stack removes the role.",

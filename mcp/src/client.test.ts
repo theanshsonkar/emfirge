@@ -76,9 +76,45 @@ test("real findings handler plus index error wrapper preserves slashes", async (
 });
 
 test("setup_help sends GET /project and includes response field", async () => {
-  stub(200, { external_id: "ext-123", project: "p1" });
+  stub(200, { external_id: "ext-123", project: "p1", trusted_account_id: "222222222222" });
   const out = await setup.setupHandler({});
-  assert.equal(calls[0].method, "GET"); assert.equal(calls[0].url, "http://stub.invalid/api/project"); assert.match(out.content[0].text, /ext-123/);
+  assert.equal(calls[0].method, "GET"); assert.equal(calls[0].url, "http://stub.invalid/api/project");
+  assert.match(out.content[0].text, /ext-123/);
+  assert.match(out.content[0].text, /param_TrustedAccountId=222222222222/);
+  assert.match(out.content[0].text, /param_ExternalId=ext-123/);
+  assert.match(out.content[0].text, /Trusts AWS account 222222222222/i);
+});
+test("setup_help uses the project trusted account in the deploy link", async () => {
+  stub(200, { external_id: "ext-123", project: "p1", trusted_account_id: "222222222222" });
+  const out = await setup.setupHandler({});
+  assert.match(out.content[0].text, /param_TrustedAccountId=222222222222/);
+});
+test("setup_help falls back to the call-time trusted account environment", async () => {
+  const old = process.env.EMFIRGE_TRUSTED_ACCOUNT_ID;
+  process.env.EMFIRGE_TRUSTED_ACCOUNT_ID = "444444444444";
+  try {
+    stub(200, { external_id: "ext-123", project: "p1" });
+    const out = await setup.setupHandler({});
+    assert.match(out.content[0].text, /param_TrustedAccountId=444444444444/);
+  } finally {
+    if (old === undefined) delete process.env.EMFIRGE_TRUSTED_ACCOUNT_ID;
+    else process.env.EMFIRGE_TRUSTED_ACCOUNT_ID = old;
+  }
+});
+test("setup_help errors without a trusted account", async () => {
+  const old = process.env.EMFIRGE_TRUSTED_ACCOUNT_ID;
+  delete process.env.EMFIRGE_TRUSTED_ACCOUNT_ID;
+  try {
+    stub(200, { external_id: "ext-123", project: "p1" });
+    await assert.rejects(() => setup.setupHandler({}), (error: Error) => {
+      assert.match(error.message, /trusted aws account/i);
+      assert.equal(error.message.includes("000000000000"), false);
+      return true;
+    });
+  } finally {
+    if (old === undefined) delete process.env.EMFIRGE_TRUSTED_ACCOUNT_ID;
+    else process.env.EMFIRGE_TRUSTED_ACCOUNT_ID = old;
+  }
 });
 test("scan sends POST stream body and includes response field", async () => {
   stub(200, { analysis_id: "a1", risk_score: 42 }, true);

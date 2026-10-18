@@ -8,7 +8,6 @@ Description: >
 Parameters:
   TrustedAccountId:
     Type: String
-    Default: '000000000000'
     Description: AWS account ID permitted to assume the read-only role
 
   ExternalId:
