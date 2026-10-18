@@ -257,7 +257,7 @@ class RolePolicy(BaseModel):
     accessible_resources: List[str] = []  # Resource ARNs from Allow statements
     has_admin: bool = False               # True if Action:* Resource:*
     access_statements: List[AccessStatement] = Field(default_factory=list)
-    policy_documents: Optional[List[PolicyDocumentRecord]] = None
+    policy_documents: Optional[List[PolicyDocumentRecord]] = Field(default=None, exclude_if=lambda value: value is None)
     last_used_at: Optional[str] = None
     policy_names: List[str] = []          # attached/inline policy names (for display)
     trusted_role_arns: List[str] = []     # role/user ARNs trusted by the role

@@ -1,7 +1,9 @@
 from tests.test_plan_ingest import plan_client  # noqa: F401
+from tests.laws.test_broad_data_access_laws import _infra, _role
 import json
-
+import boto3
 import pytest
+from moto import mock_aws
 
 from app.aws_api_ingest import translate_api_calls
 from app.models import (
@@ -134,5 +136,76 @@ def test_L46h_typed_policy_documents_must_match_and_statements_only_clear_record
     assert changed.iam.role_policies[0].policy_documents is None
 
 
-def test_L46i_moto_roundtrip_contract_is_explicit_about_optional_provider_ops():
-    pytest.skip("Moto IAM policy-document and IMDS mutation round-trip is provider-version dependent; covered by the dedicated handback suite when supported.")
+def test_L46i_moto_roundtrip_matches_collector_and_adapter():
+    region = "us-east-1"
+    creds = {"aws_access_key_id": "testing", "aws_secret_access_key": "testing", "aws_session_token": "testing"}
+    with mock_aws():
+        iam = boto3.client("iam", region_name=region, **creds)
+        ec2 = boto3.client("ec2", region_name=region, **creds)
+        trust = {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Principal": {"Service": "ec2.amazonaws.com"}, "Action": "sts:AssumeRole"}]}
+        role = iam.create_role(RoleName="AppRole", AssumeRolePolicyDocument=json.dumps(trust))["Role"]
+        vpc = ec2.create_vpc(CidrBlock="10.0.0.0/16")["Vpc"]["VpcId"]
+        subnet = ec2.create_subnet(VpcId=vpc, CidrBlock="10.0.1.0/24")["Subnet"]["SubnetId"]
+        sg = ec2.create_security_group(GroupName="app-sg", Description="app", VpcId=vpc)["GroupId"]
+        instance = ec2.run_instances(ImageId="ami-12345678", InstanceType="t3.micro", MinCount=1, MaxCount=1, SubnetId=subnet, SecurityGroupIds=[sg])["Instances"][0]
+        policy = {"Version": "2012-10-17", "Statement": [{"Effect": "Allow", "Action": "s3:*", "Resource": "*"}]}
+        calls = {"format": "aws-api-calls/1", "calls": [
+            {"service": "iam", "operation": "PutRolePolicy", "parameters": {"RoleName": "AppRole", "PolicyName": "inline", "PolicyDocument": json.dumps(policy)}},
+            {"service": "ec2", "operation": "ModifyInstanceMetadataOptions", "parameters": {"InstanceId": instance["InstanceId"], "HttpTokens": "optional"}},
+        ]}
+        warnings = []
+        from app.aws_collector import collect_ec2, collect_iam
+        from app.models import AWSInfrastructure
+        before_iam = collect_iam("testing", "testing", "testing", region, warnings)
+        before_ec2 = collect_ec2("testing", "testing", "testing", region, warnings)
+        collected_role = next(item for item in before_iam.role_policies if item.role_name == "AppRole")
+        collected_instance = next(item for item in before_ec2.instances if item.id == instance["InstanceId"])
+        predicted = translate_api_calls(calls, role_policies=[collected_role], ec2_instances=[collected_instance])
+        assert {change.resource_type for change in predicted["changes"]} == {"iam_role_policy"}
+        assert predicted["changes"][0].fields["policy_documents"]
+        iam.put_role_policy(RoleName="AppRole", PolicyName="inline", PolicyDocument=json.dumps(policy))
+        ec2.modify_instance_metadata_options(InstanceId=instance["InstanceId"], HttpTokens="optional")
+        after_iam = collect_iam("testing", "testing", "testing", region, warnings)
+        after_ec2 = collect_ec2("testing", "testing", "testing", region, warnings)
+        actual_role = next(item for item in after_iam.role_policies if item.role_name == "AppRole")
+        actual_instance = next(item for item in after_ec2.instances if item.id == instance["InstanceId"])
+        assert [item.model_dump(mode="json") for item in actual_role.access_statements] == [item for change in predicted["changes"] if change.resource_type == "iam_role_policy" for item in change.fields["access_statements"]]
+        assert [item.model_dump(mode="json") for item in actual_role.policy_documents] == [item for change in predicted["changes"] if change.resource_type == "iam_role_policy" for item in change.fields["policy_documents"]]
+        assert actual_instance.imdsv2_required is False
+
+
+
+def test_L46j_w1a_w1b_api_verdict_matches_typed_route(plan_client, monkeypatch):
+    base = _infra(public=True, role=_role("s3:GetObject", "arn:aws:s3:::app-logs/*"))
+    monkeypatch.setattr("app.main.get_infrastructure_for_analysis", lambda _id: base)
+    base_statements = [{"effect": "Allow", "actions": ["s3:GetObject"],
+                        "resources": ["arn:aws:s3:::app-logs/*"],
+                        "is_not_action": False, "is_not_resource": False,
+                        "has_condition": False}]
+
+    def compare_case(policy_statement, expected_verdict):
+        api_branch = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "w1-api"}).json()["branch_id"]
+        typed_branch = plan_client.post("/branches", json={"base_analysis_id": "delete", "name": "w1-typed"}).json()["branch_id"]
+        api_body = _iam_doc("PutRolePolicy", {
+            "RoleName": "DlAppRole", "PolicyName": "web-policy",
+            "PolicyDocument": {"Statement": policy_statement},
+        })
+        api_response = plan_client.post(f"/branches/{api_branch}/plans/aws-api", json=api_body)
+        assert api_response.status_code == 200, api_response.text
+        typed_statements = base_statements + [{"effect": "allow", "actions": policy_statement["Action"] if isinstance(policy_statement["Action"], list) else [policy_statement["Action"]],
+                                                "resources": policy_statement["Resource"] if isinstance(policy_statement["Resource"], list) else [policy_statement["Resource"]],
+                                                "is_not_action": False, "is_not_resource": False, "has_condition": False}]
+        typed_response = plan_client.post(f"/branches/{typed_branch}/changes", json={
+            "op": "modify", "resource_type": "iam_role_policy",
+            "resource_id": ROLE_ARN,
+            "fields": {"access_statements": typed_statements},
+        })
+        assert typed_response.status_code == 200, typed_response.text
+        api_verdict = plan_client.get(f"/branches/{api_branch}/verdict").json()
+        typed_verdict = plan_client.get(f"/branches/{typed_branch}/verdict").json()
+        assert api_verdict["verdict"] == typed_verdict["verdict"] == expected_verdict
+        assert {(item["code"], item["level"]) for item in api_verdict["reasons"]} == {(item["code"], item["level"]) for item in typed_verdict["reasons"]}
+
+    compare_case({"Effect": "Allow", "Action": ["s3:*"], "Resource": ["*"]}, "block")
+    compare_case({"Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject"],
+                  "Resource": ["arn:aws:s3:::app-logs/*"]}, "pass")

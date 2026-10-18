@@ -280,6 +280,9 @@ def translate_api_calls(
         if _sharing_unseen(lower_service, operation, parameters):
             item = _unmodeled(address, lower_service, operation)
             item["unseen"] = True
+            item["detail"] = f"{operation} can share a snapshot or image with other AWS accounts or the public, and Emfirge does not read sharing yet"
+            unmodeled.append(item)
+            continue
         if lower_service == "iam" and operation in {"PutRolePolicy", "DeleteRolePolicy", "AttachRolePolicy", "DetachRolePolicy"}:
             if role_policies is None:
                 item = _unmodeled(address, lower_service, operation, "IAM role policy state is unavailable")

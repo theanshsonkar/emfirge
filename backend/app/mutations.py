@@ -217,9 +217,9 @@ _MUTATION_CAPABILITIES = {
             "operations": ["modify"],
             "kind": "complete_field_replacement",
             "fields": [],
-            "required_fields": [],
-            "allowed_fields": ["access_statements", "policy_documents"],
-            "message": "Replace complete normalized statements, optionally retaining the recorded policy-document breakdown for one existing collected role identified by role ARN",
+            "required_fields": ["access_statements"],
+            "allowed_fields": ["access_statements"],
+            "message": "Replace the complete normalized statement list for one existing collected role identified by role ARN",
         },),
     },
     "network_acl": {
