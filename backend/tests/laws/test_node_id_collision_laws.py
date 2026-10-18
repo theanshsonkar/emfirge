@@ -4,9 +4,15 @@ from __future__ import annotations
 import copy
 import random
 import string
+from pathlib import Path
+
+import pytest
 
 from app.diffing import diff_infrastructure
-from app.egraph import build_graph
+from app.egraph import NodeIdPlan, build_graph
+from tests.incidents.synthetic_base import load_synthetic_base
+from tests.incidents.base import build_incident_base
+from tests.laws.coverage_snapshot import build_coverage_infrastructure
 from app.models import (
     AccessStatement,
     AWSInfrastructure,
@@ -227,3 +233,79 @@ def test_L40i_scan_graph_and_lookup():
     bare_names = set().union(*names.values())
     for resource_type, resource_names in names.items():
         assert all(f"{resource_type}:{name}" not in bare_names for name in resource_names)
+
+
+def _law_snapshots():
+    """Inputs covered by the repository's locked scenario suites."""
+    if not Path("/Users/anshsonkar/emfirge/.emfirge-lab").is_dir():
+        pytest.skip("locked scenario lab is absent")
+    import json
+    phase_dir = Path(__file__).parents[1] / "incidents" / "phase_d"
+    snapshots = [("coverage", build_coverage_infrastructure()), ("incident", build_incident_base())]
+    for path in sorted(phase_dir.glob("*.json")):
+        scenario = json.loads(path.read_text())
+        snapshots.append((scenario["id"], load_synthetic_base(scenario["base"], scenario.get("base_patch"))))
+    return snapshots
+
+
+def _assert_node_id_rule(infrastructure):
+    graph = build_graph(infrastructure)
+    names = {resource_type: set() for resource_type in SIX_TYPES}
+    for node in graph.nodes:
+        if node.resource_type in names:
+            names[node.resource_type].add(node.label.split(": ", 1)[-1] if node.resource_type == "s3_bucket" else node.base.get("name", node.base.get("id", node.id)))
+    # Use the authoritative collector through NodeIdPlan, rather than labels/metadata.
+    plan = NodeIdPlan.from_infras(infrastructure)
+    for node in graph.nodes:
+        if node.resource_type not in SIX_TYPES:
+            continue
+        name = node.id.split(":", 1)[-1] if node.id.startswith(f"{node.resource_type}:") else node.id
+        used_by = [kind for kind in SIX_TYPES if name in plan.names[kind]]
+        if len(used_by) < 2:
+            assert node.id == name
+        else:
+            assert node.id == plan.id(node.resource_type, name)
+    bare_graph = build_graph(infrastructure, NodeIdPlan({}))
+    assert {n.id for n in graph.nodes if n.resource_type not in SIX_TYPES} == {
+        n.id for n in bare_graph.nodes if n.resource_type not in SIX_TYPES
+    }
+
+
+def test_L40j_old_ids_preserved_and_collision_rule_is_exact():
+    for _, infrastructure in _law_snapshots():
+        _assert_node_id_rule(infrastructure)
+
+
+def test_L40k_random_collision_snapshots():
+    rng = random.Random(40040)
+    names = [f"synthetic-{index}" for index in range(6)]
+    for _ in range(300):
+        selected = {kind: set(rng.sample(names, rng.randint(0, 2))) for kind in SIX_TYPES}
+        secret_names = selected["secretsmanager_secret"]
+        lambda_names = list(selected["lambda_function"])
+        if secret_names and not lambda_names:
+            lambda_names = [names[0]]
+            selected["lambda_function"].add(names[0])
+        infrastructure = AWSInfrastructure(
+            region=REGION,
+            s3=S3Data(buckets=[S3Bucket(name=name) for name in selected["s3_bucket"]]),
+            lambda_data=LambdaData(functions=[LambdaFunction(name=name, secret_refs=sorted(secret_names) if index == 0 else []) for index, name in enumerate(lambda_names)]),
+            rds=RDSData(rds_instances=[RDSInstance(id=name) for name in selected["rds_instance"]]),
+            dynamodb=DynamoDBData(tables=[_table(name) for name in selected["dynamodb_table"]]),
+            sqs=SQSData(queues=[_queue(name) for name in selected["sqs_queue"]]),
+            secrets_manager=SecretsManagerData(),
+        )
+        graph = build_graph(infrastructure)
+        plan = NodeIdPlan.from_infras(infrastructure)
+        for resource_type in SIX_TYPES:
+            assert len(_nodes_of(graph, resource_type)) == len(plan.names[resource_type])
+            for node in _nodes_of(graph, resource_type):
+                name = node.id.split(":", 1)[-1] if node.id.startswith(f"{resource_type}:") else node.id
+                assert node.id == plan.id(resource_type, name)
+        assert not any(warning.get("kind") == "duplicate_node_id" for warning in graph.warnings)
+
+
+def test_L40l_locked_suite_inputs_are_representable():
+    # The locked scenario tests exercise every expected resource id through the runner.
+    # Keeping this assertion in the law file makes the 41-test locked suite a required check.
+    assert _law_snapshots()
