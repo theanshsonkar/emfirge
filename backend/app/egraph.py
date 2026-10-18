@@ -880,6 +880,7 @@ class _GraphIndex:
         self.subnet_vpc = {}
         self.subnet_cidr = {}
         self.route_tables = {}
+        self.main_route_tables = {}
         self.nacls = {}
         self.routes = {}
         self.sg_rules = {}
@@ -913,6 +914,10 @@ class _GraphIndex:
                 self.subnet_cidr[node_id] = _value(data, "cidr")
             if _value(node, "resource_type") == "route_table":
                 self.routes[node_id] = data.get("routes", []) or []
+                if _value(data, "is_main"):
+                    vpc_id = _value(data, "vpc_id")
+                    if vpc_id:
+                        self.main_route_tables.setdefault(vpc_id, []).append(node_id)
         for edge in edges:
             source = _value(edge, "src", _value(edge, "from"))
             target = _value(edge, "dst", _value(edge, "to"))
@@ -975,7 +980,55 @@ def _resource_vpc(node, graph, index=None):
 
 def _route_table_ids_for_subnet(subnet_id, graph, index=None):
     index = _graph_index(graph, index)
-    return sorted(index.route_tables.get(subnet_id, ()))
+    explicit = sorted(index.route_tables.get(subnet_id, ()))
+    if explicit:
+        return explicit
+    vpc_id = _subnet_vpc(subnet_id, graph, index)
+    return sorted(index.main_route_tables.get(vpc_id, ()))
+
+
+def _peering_route_matches(resource, peer_resource, peering_id, graph, index):
+    """Return (matches, certain), selecting the longest matching IPv4 route."""
+    resource_subnets = _resource_subnets(resource, graph, index)
+    peer_subnets = _resource_subnets(peer_resource, graph, index)
+    peer_networks = []
+    for subnet_id in peer_subnets:
+        try:
+            cidr = _subnet_cidr(subnet_id, graph, index)
+            network = ipaddress.ip_network(str(cidr), strict=False)
+            if network.version == 4:
+                peer_networks.append(network)
+        except (TypeError, ValueError):
+            continue
+    if not resource_subnets or not peer_networks:
+        # Preserve the previous conservative behavior when topology/CIDR data is incomplete.
+        return any(
+            str(_value(route, "target_type", "")).lower() == "vpc_peering" and
+            _value(route, "target_id") == peering_id
+            for subnet_id in resource_subnets
+            for table_id in _route_table_ids_for_subnet(subnet_id, graph, index)
+            for route in index.routes.get(table_id, ())
+        ), False
+
+    for subnet_id in resource_subnets:
+        routes = []
+        for table_id in _route_table_ids_for_subnet(subnet_id, graph, index):
+            for route in index.routes.get(table_id, ()):
+                try:
+                    network = ipaddress.ip_network(str(_value(route, "destination_cidr")), strict=False)
+                except (TypeError, ValueError):
+                    continue
+                if network.version == 4:
+                    routes.append((network.prefixlen, network, route))
+        for peer_network in peer_networks:
+            matching = [item for item in routes if peer_network.network_address in item[1]]
+            if matching:
+                _, _, route = max(matching, key=lambda item: item[0])
+                if (str(_value(route, "target_type", "")).lower() == "vpc_peering" and
+                        _value(route, "target_id") == peering_id):
+                    return True, True
+                break
+    return False, True
 
 
 def route_between(a_node, b_node, graph, index=None):
@@ -995,17 +1048,11 @@ def route_between(a_node, b_node, graph, index=None):
         return result
     pair = frozenset((a_vpc, b_vpc))
     for peering_id in index.peerings.get(pair, ()):
-        sides_ok = True
-        for resource in (a_node, b_node):
-            if not any(any(str(_value(route, "target_type", "")).lower() == "vpc_peering" and
-                           _value(route, "target_id") == peering_id
-                           for table_id in _route_table_ids_for_subnet(subnet_id, graph, index)
-                           for route in index.routes.get(table_id, ()))
-                         for subnet_id in _resource_subnets(resource, graph, index)):
-                sides_ok = False
-                break
-        if sides_ok:
-            result = ("routed_high", "active peering")
+        a_ok, a_certain = _peering_route_matches(a_node, b_node, peering_id, graph, index)
+        b_ok, b_certain = _peering_route_matches(b_node, a_node, peering_id, graph, index)
+        if a_ok and b_ok:
+            result = (("routed_high" if a_certain and b_certain else "assumed_flagged"),
+                      ("active peering" if a_certain and b_certain else "active peering; route data incomplete"))
             index.route_cache[cache_key] = result
             return result
     if index.tgw_vpcs.intersection((a_vpc, b_vpc)):
