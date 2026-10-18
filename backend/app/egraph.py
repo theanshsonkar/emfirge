@@ -1188,6 +1188,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
     Returns:
         Graph object with nodes and edges, providing query methods for traversal
     """
+    iam_classifier.begin_build()
     nodes = []
     edges = []
     
@@ -2352,6 +2353,8 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                         break
 
     warnings = []
+    if iam_classifier.access_levels_unavailable():
+        warnings.append({"kind": "iam_access_levels_unavailable"})
     if internal_reachability_budget_exceeded:
         warnings.append({
             "kind": "internal_reachability_budget_exceeded",

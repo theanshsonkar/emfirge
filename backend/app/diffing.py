@@ -34,6 +34,8 @@ def graph_warning_strings(warnings: list[Any]) -> list[str]:
             counts[kind] += 1
         elif kind == "internal_reachability_budget_exceeded":
             budget = warning.get("budget", INTERNAL_REACH_EDGE_BUDGET)
+        elif kind == "iam_access_levels_unavailable":
+            counts[kind] += 1
     result = []
     if counts["duplicate_node_id"]:
         result.append(
@@ -44,6 +46,8 @@ def graph_warning_strings(warnings: list[Any]) -> list[str]:
         result.append(f"graph_dangling_edges_dropped:count={counts['dangling_edge_dropped']}")
     if budget is not None:
         result.append(f"graph_internal_reachability_truncated:budget={budget}")
+    if counts["iam_access_levels_unavailable"]:
+        result.append("graph_iam_access_levels_unavailable")
     return result
 
 
