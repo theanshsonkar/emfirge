@@ -11,7 +11,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app import cost
-from app.egraph import INTERNAL_REACH_EDGE_BUDGET, build_graph, get_internet_reachable_set
+from app.egraph import INTERNAL_REACH_EDGE_BUDGET, build_graph_pair, get_internet_reachable_set
 from app.exposure import Exposure, compute_exposures
 from ipaddress import ip_network
 from app.rules import find_toxic_combos, run_all_checks
@@ -318,8 +318,7 @@ def _iam_policy_changed(base_infra: Any, branch_infra: Any) -> bool:
 
 def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     """Compare infrastructure snapshots without mutating either input."""
-    base_graph = build_graph(base_infra)
-    branch_graph = build_graph(branch_infra)
+    base_graph, branch_graph = build_graph_pair(base_infra, branch_infra)
     graph_diff = diff_graphs(base_graph, branch_graph)
     coverage_warnings = []
     collection_warnings = sorted({

@@ -2,7 +2,7 @@ from app.models import AWSInfrastructure, RiskFinding, ToxicCombo
 from app.cidr import is_internet_cidr
 from app.iam_escalation import matching_paths
 
-from app.egraph import Graph, find_orphaned_resources, get_internet_reachable_set, get_attack_path_to, is_traversable_relationship
+from app.egraph import Graph, PRIORITY, find_orphaned_resources, get_internet_reachable_set, get_attack_path_to, is_traversable_relationship
 from typing import List, Optional, Set
 from dataclasses import dataclass
 
@@ -572,10 +572,11 @@ def check_public_s3_context_aware(infra: AWSInfrastructure, graph: Optional[Grap
         # Check if bucket has CloudFront neighbor using graph
         has_cloudfront = False
         if graph:
-            bucket_node = graph.get_node(bucket)
+            bucket_id = graph.node_id_for('s3_bucket', bucket)
+            bucket_node = graph.get_node(bucket_id) if bucket_id else None
             if bucket_node:
                 # Check if there's a CloudFront distribution serving from this bucket
-                inbound = graph.get_inbound(bucket, relationship_type='serves_from_bucket')
+                inbound = graph.get_inbound(bucket_id, relationship_type='serves_from_bucket')
                 has_cloudfront = any(node['type'] == 'cloudfront_distribution' for node in inbound)
         
         # Check if this is likely a dev environment
@@ -583,7 +584,8 @@ def check_public_s3_context_aware(infra: AWSInfrastructure, graph: Optional[Grap
         
         # Confirm internet reachability before applying the dev-name downgrade.
         reachable = ctx.reachable if ctx else (get_internet_reachable_set(graph) if graph else set())
-        bucket_is_reachable = graph is not None and bucket in reachable
+        bucket_id = graph.node_id_for('s3_bucket', bucket) if graph else bucket
+        bucket_is_reachable = graph is not None and bucket_id in reachable
 
         # Determine severity and confidence based on CloudFront, naming patterns, and dev environment
         if has_cloudfront:
@@ -750,7 +752,8 @@ def check_rds_public(infra: AWSInfrastructure, graph: Optional[Graph] = None, ct
         if graph:
             # Check each RDS instance
             for rds_id in infra.rds.publicly_accessible:
-                rds_node = graph.get_node(rds_id)
+                rds_id_for_graph = graph.node_id_for('rds_instance', rds_id)
+                rds_node = graph.get_node(rds_id_for_graph) if rds_id_for_graph else None
                 if rds_node:
                     # Get security groups attached to this RDS instance
                     sg_ids = rds_node['metadata'].get('security_groups', [])
@@ -2255,7 +2258,9 @@ def run_all_checks(infrastructure: AWSInfrastructure, graph: Optional[Graph] = N
             resource_id = value.strip()
             if not resource_id:
                 continue
-            node = graph.get_node(resource_id) if graph else None
+            resource_type = getattr(finding, 'resource_type', None)
+            node_id = graph.node_id_for(resource_type, resource_id) if graph and resource_type in PRIORITY else resource_id
+            node = graph.get_node(node_id) if graph else None
             if node and node.get('type') == 'security_group':
                 attached = set(node.get('metadata', {}).get('attached_instances', []))
                 attached.update(

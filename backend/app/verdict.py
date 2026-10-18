@@ -11,7 +11,16 @@ from app import cost, limits, delete_lens
 from app.evidence_models import parse_iso
 from app.diffing import diff_infrastructure
 from app.delete_lens import DeletionLens, analyze_deletions, deleted_base_reachable, deleted_role_usage_unknown, recently_used_deleted
-from app.egraph import build_graph, get_internet_reachable_set
+from app.egraph import build_graph, build_graph_pair, get_internet_reachable_set
+
+_ORIGINAL_BUILD_GRAPH = build_graph
+
+
+def _comparison_graphs(base_infra, branch_infra):
+    # Preserve callers' test/mocking hook while production uses union-stable IDs.
+    if build_graph is not _ORIGINAL_BUILD_GRAPH:
+        return build_graph(base_infra), build_graph(branch_infra)
+    return build_graph_pair(base_infra, branch_infra)
 from app.iam_escalation import matching_paths
 from app.mutations import _MUTATION_CAPABILITIES, deletion_ledger
 from app.models import AWSInfrastructure
@@ -127,8 +136,7 @@ def _cost_details(base_infra: AWSInfrastructure, branch_infra: AWSInfrastructure
 
 def _graph_escalation_details(base_infra: AWSInfrastructure, branch_infra: AWSInfrastructure) -> tuple[set[str], set[str]]:
     try:
-        base_graph = build_graph(base_infra)
-        branch_graph = build_graph(branch_infra)
+        base_graph, branch_graph = _comparison_graphs(base_infra, branch_infra)
         base_escalating = _role_ids_with_privilege_escalation(base_graph)
         branch_escalating = _role_ids_with_privilege_escalation(branch_graph)
         return branch_escalating - base_escalating, set(get_internet_reachable_set(branch_graph))
