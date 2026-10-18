@@ -15,6 +15,9 @@ No AWS API calls are made when demo mode is active.
 # Demo ARN = arn:aws:iam::000000000000:role/EmfirgeReadOnly
 
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.models import (
     AWSInfrastructure,
@@ -146,7 +149,16 @@ def build_demo_infrastructure() -> AWSInfrastructure:
     )
 
 # ── DEMO CONSTANTS ────────────────────────────────────────────────
-DEMO_ACCOUNT_ID = os.getenv("DEMO_ACCOUNT_ID", "000000000000")
+_BUILTIN_DEMO_ACCOUNT_ID = "000000000000"
+
+def _demo_account_id(env_name: str) -> str:
+    configured = os.getenv(env_name)
+    if configured and configured != _BUILTIN_DEMO_ACCOUNT_ID:
+        logger.warning("Ignoring %s: demo ARNs are fixed to the built-in account", env_name)
+    return _BUILTIN_DEMO_ACCOUNT_ID
+
+
+DEMO_ACCOUNT_ID = _demo_account_id("DEMO_ACCOUNT_ID")
 DEMO_ROLE_ARN = f"arn:aws:iam::{DEMO_ACCOUNT_ID}:role/EmfirgeReadOnly"
 DEMO_REGION = "us-east-1"
 
@@ -154,7 +166,7 @@ DEMO_REGION = "us-east-1"
 # A second demo ARN whose seed is engineered to produce the best-looking
 # graph: multiple internet-facing compute nodes funnel through ONE
 # over-privileged IAM role (the chokepoint) that reaches 4 crown jewels.
-DEMO_ACCOUNT_ID_V2 = os.getenv("DEMO_ACCOUNT_ID_V2", "000000000000")
+DEMO_ACCOUNT_ID_V2 = _demo_account_id("DEMO_ACCOUNT_ID_V2")
 DEMO_ROLE_ARN_V2 = f"arn:aws:iam::{DEMO_ACCOUNT_ID_V2}:role/EmfirgeReadOnly"
 
 

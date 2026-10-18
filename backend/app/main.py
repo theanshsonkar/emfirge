@@ -1584,11 +1584,22 @@ def fork_branch_endpoint(branch_id: str, request: Request, payload: dict, caller
         raise HTTPException(status_code=422, detail='branch_revision must be a SHA-256 hex string')
     try:
         if expected_revision is None:
-            new_branch_id, num_changes = branches.fork_branch(branch_id, payload['name'])
+            fork_result = branches.fork_branch(branch_id, payload['name'])
         else:
-            new_branch_id, num_changes = branches.fork_branch(
+            fork_result = branches.fork_branch(
                 branch_id, payload['name'], expected_branch_revision=expected_revision,
             )
+        if hasattr(fork_result, 'plan_id_map'):
+            new_branch_id, num_changes = fork_result
+            plan_id_map = fork_result.plan_id_map
+            legacy_fork_result = False
+        elif len(fork_result) == 2:  # compatibility with older integrations/mocks
+            new_branch_id, num_changes = fork_result
+            plan_id_map = {}
+            legacy_fork_result = True
+        else:
+            new_branch_id, num_changes, plan_id_map = fork_result
+            legacy_fork_result = False
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except branches.BranchConflictError as exc:
@@ -1598,7 +1609,9 @@ def fork_branch_endpoint(branch_id: str, request: Request, payload: dict, caller
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     _record_branch_owner(new_branch_id, caller, db)
-    return {'branch_id': new_branch_id, 'num_changes': num_changes}
+    if legacy_fork_result:
+        return {'branch_id': new_branch_id, 'num_changes': num_changes}
+    return {'branch_id': new_branch_id, 'num_changes': num_changes, 'plan_id_map': plan_id_map}
 
 
 async def _ingest_plan_endpoint(

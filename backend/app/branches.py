@@ -25,6 +25,18 @@ from app.egraph import GRAPH_SCHEMA_VERSION, build_graph
 from app.models import AWSInfrastructure
 
 
+class ForkResult:
+    """Fork result preserving the historical two-value unpacking contract."""
+    def __init__(self, branch_id: str, num_changes: int, plan_id_map: dict[str, str]):
+        self.branch_id = branch_id
+        self.num_changes = num_changes
+        self.plan_id_map = plan_id_map
+
+    def __iter__(self):
+        yield self.branch_id
+        yield self.num_changes
+
+
 def save_plan(plan_id: str, branch_id: str, input_sha256: str, raw_input: str,
               branch_revision_after: str, rejected: list, unmodeled: list,
               unknown_fields: list) -> None:
@@ -305,7 +317,7 @@ def read_branch(branch_id: str) -> BranchDetail:
 
 def fork_branch(
     branch_id: str, name: str, expected_branch_revision: Optional[str] = None,
-) -> tuple[str, int]:
+) -> ForkResult:
     """Atomically copy an open branch's base and change log into a new branch."""
     # base_analysis_id is immutable. Resolve it before opening the write
     # transaction so the lock is acquired before that transaction's snapshot.
@@ -363,7 +375,21 @@ def fork_branch(
             changes_json=changes_json,
             status="open",
         ))
-        return child_id, len(json.loads(changes_json))
+        plan_id_map = {}
+        for parent_plan in session.query(PlanLog).filter(PlanLog.branch_id == branch_id).all():
+            child_plan_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{child_id}:{parent_plan.plan_id}"))
+            session.add(PlanLog(
+                plan_id=child_plan_id,
+                branch_id=child_id,
+                input_sha256=parent_plan.input_sha256,
+                raw_input=parent_plan.raw_input,
+                branch_revision_after=parent_plan.branch_revision_after,
+                rejected_json=parent_plan.rejected_json,
+                unmodeled_json=parent_plan.unmodeled_json,
+                unknown_fields_json=parent_plan.unknown_fields_json,
+            ))
+            plan_id_map[parent_plan.plan_id] = child_plan_id
+        return ForkResult(child_id, len(json.loads(changes_json)), plan_id_map)
 
     return _with_session(operation)
 
@@ -389,6 +415,7 @@ def apply_change_to_branch(branch_id: str, change: Change | dict) -> Branch:
                 and change_model.branch_revision != branch_revision(persisted_branch)):
             raise BranchConflictError("Branch revision is stale; reload the branch and retry")
         base = AWSInfrastructure.model_validate(json.loads(row.base_infra_json))
+
         # Validate the candidate against the persisted state in this transaction.
         # API-side preflight is useful for early errors, but direct callers
         # must not be able to store an unrebuildable branch.
@@ -442,6 +469,7 @@ def rollback_last(
             ).update({BranchLog.changes_json: next_json}, synchronize_session=False)
             if updated != 1:
                 raise BranchConflictError("Branch changed during rollback; reload it and retry")
+            _prune_plan_receipts(session, row, changes)
             session.expire(row)
         elif expected_branch_revision is not None:
             confirmed = session.query(BranchLog).filter(
@@ -495,10 +523,27 @@ def rollback_to_change_count(
         ).update({BranchLog.changes_json: next_json}, synchronize_session=False)
         if updated != 1:
             raise BranchConflictError("Branch changed during rollback; reload it and retry")
+        _prune_plan_receipts(session, row, changes[:target_change_count])
         session.expire(row)
         return _decode(row)
 
     return _with_session(operation)
+
+
+def _prune_plan_receipts(session, row: BranchLog, changes: list[dict]) -> None:
+    """Remove receipts whose recorded revision is no longer reachable."""
+    base = AWSInfrastructure.model_validate(json.loads(row.base_infra_json))
+    revisions = set()
+    for count in range(len(changes) + 1):
+        prefix = [Change.model_validate(item) for item in changes[:count]]
+        revisions.add(branch_revision(Branch(
+            branch_id=row.branch_id, name=row.name, base=base, changes=prefix,
+            status=row.status, base_analysis_id=row.base_analysis_id,
+        )))
+    session.query(PlanLog).filter(
+        PlanLog.branch_id == row.branch_id,
+        ~PlanLog.branch_revision_after.in_(revisions),
+    ).delete(synchronize_session=False)
 
 
 def discard_branch(
