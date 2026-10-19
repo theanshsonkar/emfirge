@@ -73,6 +73,22 @@ class CostDelta(BaseModel):
     currency: Literal["USD"] = "USD"
 
 
+class CostSide(BaseModel):
+    known_monthly_usd: float
+    unknown_count: int
+    status: Literal["estimated", "partial", "n/a"]
+    currency: Literal["USD"] = "USD"
+
+
+class CostChange(BaseModel):
+    resource_id: str
+    resource_type: str
+    before_monthly_usd: Optional[float]
+    after_monthly_usd: Optional[float]
+    before_basis: Optional[str]
+    after_basis: Optional[str]
+
+
 def _record(resource_id: str, resource_type: str, monthly_usd: Optional[float], basis: CostBasis) -> ResourceCost:
     return ResourceCost(
         resource_id=str(resource_id),
@@ -248,23 +264,21 @@ def _unknown_reason(resource: ResourceCost) -> str:
     return "price is not embedded"
 
 
-def cost_delta(base: AWSInfrastructure, branch: AWSInfrastructure) -> CostDelta:
-    """Return a typed delta for resources whose cost-relevant state changed."""
-    base_estimate = estimate_monthly_cost(base)
-    branch_estimate = estimate_monthly_cost(branch)
+def _changed_resource_pairs(base_estimate: CostEstimate, branch_estimate: CostEstimate) -> list[tuple[ResourceCost | None, ResourceCost | None]]:
     base_by_key = {(item.resource_type, item.resource_id): item for item in base_estimate.resources}
     branch_by_key = {(item.resource_type, item.resource_id): item for item in branch_estimate.resources}
     changed: list[tuple[ResourceCost | None, ResourceCost | None]] = []
     for key in sorted(base_by_key.keys() | branch_by_key.keys()):
         before = base_by_key.get(key)
         after = branch_by_key.get(key)
-        if before is None or after is None or (
-            before.monthly_usd != after.monthly_usd or before.basis != after.basis
-        ):
+        if before is None or after is None or before.monthly_usd != after.monthly_usd or before.basis != after.basis:
             changed.append((before, after))
+    return changed
 
-    cost_bearing = [(before, after) for before, after in changed
-                    if (before or after).basis != "free"]
+
+def _delta_from_estimates(base_estimate: CostEstimate, branch_estimate: CostEstimate) -> CostDelta:
+    changed = _changed_resource_pairs(base_estimate, branch_estimate)
+    cost_bearing = [(before, after) for before, after in changed if (before or after).basis != "free"]
     unknown = [(before, after) for before, after in cost_bearing
                if (before is not None and before.monthly_usd is None)
                or (after is not None and after.monthly_usd is None)]
@@ -280,14 +294,41 @@ def cost_delta(base: AWSInfrastructure, branch: AWSInfrastructure) -> CostDelta:
         return CostDelta(value=0.0, status="n/a", reason="no changed cost-bearing resources",
                          unknown_count=0, known_provisioned_delta=None)
     if unknown:
-        return CostDelta(
-            value=None, status="unknown",
-            reason=f"{len(unknown)} changed resources have usage-based or unavailable prices",
-            unknown_count=len(unknown),
-            known_provisioned_delta=known_delta if priced else None,
-        )
-    return CostDelta(
-        value=known_delta, status="estimated",
-        reason="embedded AWS us-east-1 on-demand/list-price snapshot",
-        unknown_count=0, known_provisioned_delta=known_delta,
-    )
+        return CostDelta(value=None, status="unknown",
+                         reason=f"{len(unknown)} changed resources have usage-based or unavailable prices",
+                         unknown_count=len(unknown), known_provisioned_delta=known_delta if priced else None)
+    return CostDelta(value=known_delta, status="estimated",
+                     reason="embedded AWS us-east-1 on-demand/list-price snapshot",
+                     unknown_count=0, known_provisioned_delta=known_delta)
+
+
+def _cost_side(estimate: CostEstimate) -> CostSide:
+    known = round(sum(item.monthly_usd for item in estimate.resources if item.monthly_usd is not None), 2)
+    unknown_count = sum(item.monthly_usd is None and item.basis != "free" for item in estimate.resources)
+    has_cost_basis = any(item.basis != "free" for item in estimate.resources)
+    status = "n/a" if not has_cost_basis else ("partial" if unknown_count > 0 else "estimated")
+    return CostSide(known_monthly_usd=known, unknown_count=unknown_count, status=status)
+
+
+def cost_delta(base: AWSInfrastructure, branch: AWSInfrastructure) -> CostDelta:
+    """Return a typed delta for resources whose cost-relevant state changed."""
+    return _delta_from_estimates(estimate_monthly_cost(base), estimate_monthly_cost(branch))
+
+
+def cost_sides(base: AWSInfrastructure, branch: AWSInfrastructure) -> tuple[CostSide, CostSide, list[CostChange], CostDelta]:
+    base_estimate = estimate_monthly_cost(base)
+    branch_estimate = estimate_monthly_cost(branch)
+    changes = []
+    for before, after in _changed_resource_pairs(base_estimate, branch_estimate):
+        if all(item.basis == "free" for item in (before, after) if item is not None):
+            continue
+        item = before or after
+        changes.append(CostChange(
+            resource_id=item.resource_id, resource_type=item.resource_type,
+            before_monthly_usd=before.monthly_usd if before else None,
+            after_monthly_usd=after.monthly_usd if after else None,
+            before_basis=before.basis if before else None,
+            after_basis=after.basis if after else None,
+        ))
+    changes.sort(key=lambda item: (item.resource_type, item.resource_id))
+    return _cost_side(base_estimate), _cost_side(branch_estimate), changes, _delta_from_estimates(base_estimate, branch_estimate)

@@ -70,6 +70,12 @@ class CombinedVerdict(BaseModel):
     coverage_warnings: List[str] = Field(default_factory=list)
     collection_warnings: List[str] = Field(default_factory=list)
     cost_delta: dict[str, Any] = Field(default_factory=dict)
+    resources_added: list[dict] = Field(default_factory=list)
+    resources_removed: list[dict] = Field(default_factory=list)
+    resources_modified: list[dict] = Field(default_factory=list)
+    cost_before: dict = Field(default_factory=dict)
+    cost_after: dict = Field(default_factory=dict)
+    cost_changes: list[dict] = Field(default_factory=list)
     cost_delta_monthly_usd: float | None = None
     cost_unknown_notes: List[str] = Field(default_factory=list)
     introduces_privilege_escalation: bool = False
@@ -709,6 +715,12 @@ def combined_verdict(
         score_after=diff.score_after,
         score_delta=diff.score_delta,
         cost_delta=cost_delta,
+        resources_added=diff.resources_added,
+        resources_removed=diff.resources_removed,
+        resources_modified=diff.resources_modified,
+        cost_before=diff.cost_before,
+        cost_after=diff.cost_after,
+        cost_changes=diff.cost_changes,
         newly_internet_reachable=sorted(diff.newly_internet_reachable),
         no_longer_internet_reachable=sorted(diff.no_longer_internet_reachable),
         newly_exposed=diff.newly_exposed,

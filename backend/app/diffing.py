@@ -57,6 +57,12 @@ class DiffResult(BaseModel):
     added_nodes: list[str] = Field(default_factory=list)
     removed_nodes: list[str] = Field(default_factory=list)
     modified_nodes: list[str] = Field(default_factory=list)
+    resources_added: list[dict] = Field(default_factory=list)
+    resources_removed: list[dict] = Field(default_factory=list)
+    resources_modified: list[dict] = Field(default_factory=list)
+    cost_before: dict = Field(default_factory=dict)
+    cost_after: dict = Field(default_factory=dict)
+    cost_changes: list[dict] = Field(default_factory=list)
     added_edges: list[dict] = Field(default_factory=list)
     removed_edges: list[dict] = Field(default_factory=list)
     deletion_impacts: list[dict] = Field(default_factory=list)
@@ -130,6 +136,44 @@ def modeled_state_unchanged(before: Any, after: Any) -> bool:
     return _canonical_json(before) == _canonical_json(after)
 
 
+def _node_layers(node: Any) -> tuple[str, dict[str, Any]]:
+    resource_type = str(_value(node, "resource_type", _value(node, "type", "")))
+    layers: dict[str, Any] = {}
+    for field in _LAYER_FIELDS:
+        value = _value(node, field)
+        if value is not None:
+            layers[field] = value
+    if "base" not in layers:
+        metadata = _value(node, "metadata")
+        if metadata is not None:
+            layers["base"] = metadata
+    return resource_type, layers
+
+
+def _resource_detail(node: Any) -> dict[str, Any]:
+    return {"id": str(_value(node, "id", "")), "resource_type": str(_value(node, "resource_type", _value(node, "type", "")))}
+
+
+def _changed_node_fields(before: Any, after: Any) -> list[str]:
+    before_type, before_layers = _node_layers(before)
+    after_type, after_layers = _node_layers(after)
+    changed = ["resource_type"] if before_type != after_type else []
+    for layer in _LAYER_FIELDS:
+        left, right = before_layers.get(layer), after_layers.get(layer)
+        if _canonical_json(left) == _canonical_json(right):
+            continue
+        if isinstance(left, Mapping) and isinstance(right, Mapping):
+            changed.extend(f"{layer}.{key}" for key in sorted(set(left) | set(right), key=str)
+                           if _canonical_json(left.get(key)) != _canonical_json(right.get(key)))
+        else:
+            changed.append(layer)
+    return sorted(set(changed))
+
+
+def _modified_detail(before: Any, after: Any) -> dict[str, Any]:
+    return {**_resource_detail(after), "changed": _changed_node_fields(before, after)}
+
+
 def _node_structure(node: Any) -> tuple[str, str]:
     """Return only the resource type and normalized layered node data.
 
@@ -174,13 +218,19 @@ def diff_graphs(base_graph: Any, branch_graph: Any) -> dict:
     base_edges = {_edge_identity(edge) for edge in (base_graph.edges if base_graph else [])}
     branch_edges = {_edge_identity(edge) for edge in (branch_graph.edges if branch_graph else [])}
 
+    added_ids = sorted(branch_ids - base_ids)
+    removed_ids = sorted(base_ids - branch_ids)
+    modified_ids = sorted(
+        node_id for node_id in base_ids & branch_ids
+        if _node_structure(base_nodes[node_id]) != _node_structure(branch_nodes[node_id])
+    )
     return {
-        "added_nodes": sorted(branch_ids - base_ids),
-        "removed_nodes": sorted(base_ids - branch_ids),
-        "modified_nodes": sorted(
-            node_id for node_id in base_ids & branch_ids
-            if _node_structure(base_nodes[node_id]) != _node_structure(branch_nodes[node_id])
-        ),
+        "added_nodes": added_ids,
+        "removed_nodes": removed_ids,
+        "modified_nodes": modified_ids,
+        "resources_added": [_resource_detail(branch_nodes[node_id]) for node_id in added_ids],
+        "resources_removed": [_resource_detail(base_nodes[node_id]) for node_id in removed_ids],
+        "resources_modified": [_modified_detail(base_nodes[node_id], branch_nodes[node_id]) for node_id in modified_ids],
         "added_edges": [_edge_dict(edge) for edge in sorted(branch_edges - base_edges)],
         "removed_edges": [_edge_dict(edge) for edge in sorted(base_edges - branch_edges)],
     }
@@ -380,10 +430,14 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     branch_reachable = get_internet_reachable_set(branch_graph)
     newly_exposed, no_longer_exposed = _exposure_deltas(base_infra, branch_infra, base_graph, branch_graph)
 
+    cost_before, cost_after, cost_changes, delta = cost.cost_sides(base_infra, branch_infra)
     return DiffResult(
         **graph_diff,
-        cost_delta=(delta := cost.cost_delta(base_infra, branch_infra)).model_dump(mode="json"),
+        cost_delta=delta.model_dump(mode="json"),
         cost_delta_monthly_usd=delta.value,
+        cost_before=cost_before.model_dump(mode="json"),
+        cost_after=cost_after.model_dump(mode="json"),
+        cost_changes=[item.model_dump(mode="json") for item in cost_changes],
         lost_dependencies=lost_dependencies,
         lost_connectivity=lost_connectivity,
         deletion_impacts=deletion_impacts,
