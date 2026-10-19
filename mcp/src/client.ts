@@ -170,6 +170,20 @@ export function getBaseUrl(): string {
 export function extractDetail(text: string): string | null {
   try {
     const j = JSON.parse(text) as { detail?: unknown };
+    if (j && typeof j === "object" && Array.isArray(j.detail)) {
+      const issues = j.detail.filter(
+        (item): item is { loc: unknown[]; msg: string } =>
+          Boolean(item && typeof item === "object" && Array.isArray((item as any).loc) && typeof (item as any).msg === "string"),
+      );
+      if (issues.length > 0) {
+        const shown = issues.slice(0, 5).map((item) => {
+          const loc = item.loc[0] === "body" ? item.loc.slice(1) : item.loc;
+          return `${loc.join(".")}: ${item.msg}`;
+        });
+        const remaining = issues.length - shown.length;
+        return `${shown.join("; ")}${remaining > 0 ? ` (+${remaining} more)` : ""}`;
+      }
+    }
     if (j && typeof j === "object" && typeof j.detail === "string" && j.detail.trim()) return j.detail;
     if (j && typeof j === "object" && j.detail !== undefined && j.detail !== null) {
       return JSON.stringify(j.detail).slice(0, 500);
