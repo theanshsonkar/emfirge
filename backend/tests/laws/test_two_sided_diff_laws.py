@@ -192,7 +192,12 @@ def test_L47_api_branch_diff_and_verdict_show_two_sides(monkeypatch):
         assert len(body["resources_added"]) == 1
         assert body["resources_added"][0]["resource_type"] == "ec2_instance"
         added_id = body["resources_added"][0]["id"]
-        assert added_id in body["added_nodes"]
+        if endpoint == "diff":
+            diff_body = body
+            assert added_id in diff_body["added_nodes"]
+        else:
+            verdict_body = body
+            assert verdict_body["resources_added"] == diff_body["resources_added"]
         assert body["cost_after"]["known_monthly_usd"] > body["cost_before"]["known_monthly_usd"]
         assert any(
             item["before_basis"] is None and item["after_monthly_usd"] > 0
