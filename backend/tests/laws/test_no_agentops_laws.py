@@ -1,6 +1,7 @@
 import ast
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -9,6 +10,18 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 BACKEND = ROOT / "backend"
+
+
+def _requirement_names(text: str) -> set[str]:
+    names = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("-"):
+            continue
+        package = re.split(r"[=<>~!\[;\s]", line, maxsplit=1)[0].strip().lower()
+        if package:
+            names.add(package)
+    return names
 
 
 def test_no_app_module_imports_agentops():
@@ -38,13 +51,11 @@ def test_agentops_not_in_requirements():
         if ".venv" not in path.parts and "node_modules" not in path.parts
     ]
     assert files
+    names = set()
     for path in files:
-        for line in path.read_text().splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            package = line.split("=<>~![; ", 1)[0].strip().lower()
-            assert package != "agentops", f"AgentOps requirement in {path}"
+        names.update(_requirement_names(path.read_text()))
+    assert "agentops" not in names
+    assert "fastapi" in names
 
 
 def test_importing_app_main_makes_no_outbound_call():
