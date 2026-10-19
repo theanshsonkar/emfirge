@@ -22,9 +22,6 @@ from datetime import datetime, date, timezone
 from collections import defaultdict
 from dotenv import load_dotenv
 
-# AGENTOPS IMPORT
-import agentops
-
 from app.models import (
     AWSCredentials, AnalysisResponse,
     RemediationInsightRequest, RemediationInsightResponse,
@@ -319,13 +316,6 @@ def _lookup_resource_name(resource_id: str, resource_type: str) -> Optional[str]
     except Exception as e:
         print(f"[_lookup_resource_name] Error: {e}")
         return None
-
-# AGENTOPS INIT — runs once when server starts
-try:
-    agentops.init(os.getenv('AGENTOPS_API_KEY'))
-except Exception as _agentops_err:
-    logger.warning(f'AgentOps init failed (non-fatal): {_agentops_err}')
-
 
 # Raw mode = caller is an LLM host (MCP, etc.) so we skip Gemini/Claude calls.
 # The host renders the response itself, no need to spend tokens here.
@@ -3661,13 +3651,6 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
     assumed_credentials = None if is_demo_arn(credentials.role_arn) else assume_customer_role(credentials.role_arn, caller, db)
     start_time = time.time()
 
-    # AGENTOPS SESSION START
-    session = None
-    try:
-        session = agentops.start_session()
-    except Exception:
-        pass
-
     try:
         # ── RATE LIMITING — DAILY_SCAN_LIMIT scans per day per AWS account ──────
         # Extract account ID from role ARN — no extra API call needed
@@ -3683,7 +3666,6 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
             if account_id not in WHITELISTED_ACCOUNTS:
                 scan_count = get_scan_count_today(account_id)
                 if scan_count >= DAILY_SCAN_LIMIT:
-                    if session: session.end_session(end_state='Fail')
                     raise HTTPException(
                         status_code=429,
                         detail=f'Rate limit reached. Your AWS account has used {scan_count}/{DAILY_SCAN_LIMIT} free scans today. Limit resets at midnight UTC.'
@@ -3879,9 +3861,6 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
         elif db_result == -1:
             warnings.append('Scan result could not be saved to database. Graph will not be available for this scan.')
 
-        # AGENTOPS SESSION END
-        if session: session.end_session(end_state='Success')
-
         # STEP 6.5 — Drift detection (never fails the scan)
         try:
             if db_result and db_result != -1:
@@ -3968,22 +3947,18 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
         )
 
     except ValueError as e:
-        if session: session.end_session(end_state='Fail')
         raise HTTPException(status_code=400, detail=str(e))
 
     except HTTPException:
-        if session: session.end_session(end_state='Fail')
         raise
 
     except NoCredentialsError:
-        if session: session.end_session(end_state='Fail')
         raise HTTPException(
             status_code=400,
             detail='AWS credentials not found. Please check your server configuration.'
         )
 
     except ClientError as e:
-        if session: session.end_session(end_state='Fail')
         error_code = e.response['Error']['Code']
         if error_code == 'AccessDenied':
             raise HTTPException(status_code=400, detail='Could not assume the IAM role. Make sure you deployed the Emfirge CloudFormation stack correctly.')
@@ -3991,7 +3966,6 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
             raise HTTPException(status_code=400, detail='AWS request failed')
 
     except Exception as e:
-        if session: session.end_session(end_state='Fail')
         raise HTTPException(status_code=500, detail='Internal server error')
 
 

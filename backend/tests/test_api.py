@@ -233,26 +233,22 @@ class TestAnalyzeEndpoint:
 
     def test_analyze_rate_limited_at_5_scans(self):
         with patch("app.main.get_scan_count_today", return_value=5):
-            with patch("app.main.agentops") as mock_ao:
-                mock_ao.start_session.return_value = MagicMock()
-                mock_ao.init = MagicMock()
-                resp = client.post("/analyze", json={
-                    "role_arn": "arn:aws:iam::123456789012:role/EmfirgeRole",
-                    "region": "us-east-1",
-                })
-                assert resp.status_code == 429
-                assert "5" in resp.json()["detail"]
+            resp = client.post("/analyze", json={
+                "role_arn": "arn:aws:iam::123456789012:role/EmfirgeRole",
+                "region": "us-east-1",
+            })
+            assert resp.status_code == 429
+            assert "5" in resp.json()["detail"]
 
     def test_analyze_invalid_role_arn_returns_400(self):
         from app.aws_collector import collect_infrastructure
         with patch("app.main.get_scan_count_today", return_value=0):
             with patch("app.main.collect_infrastructure", side_effect=ValueError("Could not assume the IAM role")):
-                with patch("app.main.agentops"):
-                    resp = client.post("/analyze", json={
-                        "role_arn": "arn:aws:iam::123456789012:role/BadRole",
-                        "region": "us-east-1",
-                    })
-                    assert resp.status_code == 400
+                resp = client.post("/analyze", json={
+                    "role_arn": "arn:aws:iam::123456789012:role/BadRole",
+                    "region": "us-east-1",
+                })
+                assert resp.status_code == 400
 
     def test_analyze_full_flow_mocked(self):
         """Full scan flow with all external calls mocked — verifies response shape."""
@@ -273,21 +269,20 @@ class TestAnalyzeEndpoint:
                         with patch("app.main.get_report_url", return_value="https://s3.example.com/report"):
                             with patch("app.main.save_analysis", return_value=1):
                                 with patch("app.main.get_previous_scan_for_account", return_value={}):
-                                    with patch("app.main.agentops"):
-                                        resp = client.post("/analyze", json={
-                                            "role_arn": "arn:aws:iam::123456789012:role/EmfirgeRole",
-                                            "region": "us-east-1",
-                                        })
-                                        assert resp.status_code == 200
-                                        data = resp.json()
-                                        # Verify all required response fields
-                                        required_fields = [
-                                            "analysis_id", "overall_risk_score", "overall_risk_level",
-                                            "security_score", "critical_risks", "moderate_risks",
-                                            "ai_summary", "warnings", "scan_duration_seconds",
-                                        ]
-                                        for field in required_fields:
-                                            assert field in data, f"Missing field: {field}"
+                                    resp = client.post("/analyze", json={
+                                        "role_arn": "arn:aws:iam::123456789012:role/EmfirgeRole",
+                                        "region": "us-east-1",
+                                    })
+                                    assert resp.status_code == 200
+                                    data = resp.json()
+                                    # Verify all required response fields
+                                    required_fields = [
+                                        "analysis_id", "overall_risk_score", "overall_risk_level",
+                                        "security_score", "critical_risks", "moderate_risks",
+                                        "ai_summary", "warnings", "scan_duration_seconds",
+                                    ]
+                                    for field in required_fields:
+                                        assert field in data, f"Missing field: {field}"
 
     def test_analyze_s3_failure_surfaces_warning(self):
         from app.models import AWSInfrastructure
@@ -300,15 +295,14 @@ class TestAnalyzeEndpoint:
                     with patch("app.main.save_report", side_effect=Exception("S3 down")):
                         with patch("app.main.save_analysis", return_value=1):
                             with patch("app.main.get_previous_scan_for_account", return_value={}):
-                                with patch("app.main.agentops"):
-                                    resp = client.post("/analyze", json={
-                                        "role_arn": "arn:aws:iam::123456789012:role/EmfirgeRole",
-                                        "region": "us-east-1",
-                                    })
-                                    assert resp.status_code == 200
-                                    data = resp.json()
-                                    # S3 failure should surface in warnings, not crash
-                                    assert any("S3" in w for w in data["warnings"])
+                                resp = client.post("/analyze", json={
+                                    "role_arn": "arn:aws:iam::123456789012:role/EmfirgeRole",
+                                    "region": "us-east-1",
+                                })
+                                assert resp.status_code == 200
+                                data = resp.json()
+                                # S3 failure should surface in warnings, not crash
+                                assert any("S3" in w for w in data["warnings"])
 
 
 # ── ANALYZE STREAM (SSE) ENDPOINT ─────────────────────────────────

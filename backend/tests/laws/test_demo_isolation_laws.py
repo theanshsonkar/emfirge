@@ -71,7 +71,6 @@ def test_L42b_demo_does_not_touch_real_account_data(demo_client, monkeypatch):
     monkeypatch.setattr(main, "generate_explanation", lambda *a, **k: {"ai_summary": "demo", "recommended_improvements": [], "priority_actions": [], "latency_ms": 0})
     monkeypatch.setattr(main, "save_report", lambda *a, **k: "demo-report")
     monkeypatch.setattr(main, "get_report_url", lambda *a, **k: "demo-url")
-    monkeypatch.setattr(main, "agentops", MagicMock())
     for arn in (demo_seed.DEMO_ROLE_ARN, demo_seed.DEMO_ROLE_ARN_V2):
         for endpoint in ("/analyze", "/analyze/stream"):
             response = client.post(endpoint, json={"role_arn": arn, "region": "us-east-1"})

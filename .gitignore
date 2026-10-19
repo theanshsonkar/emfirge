@@ -33,7 +33,6 @@ Thumbs.db
 
 # Logs
 *.log
-agentops.log
 
 # Build artifacts
 *.db
