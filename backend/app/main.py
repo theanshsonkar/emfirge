@@ -269,8 +269,10 @@ def _branch_summary(branch) -> dict:
     }
 
 
-def _branch_request_ip(request: Request) -> str:
-    return request.client.host if request.client else 'unknown'
+def _branch_rate_key(request: Request, caller: Caller | None) -> str:
+    if caller is not None and getattr(caller, 'project_id', None):
+        return f'project:{caller.project_id}'
+    return f"ip:{request.client.host if request.client else 'unknown'}"
 
 
 def _lookup_resource_name(resource_id: str, resource_type: str) -> Optional[str]:
@@ -1531,7 +1533,7 @@ resource "aws_vpc_security_group_ingress_rule" "fix_ssh" {{
 
 @app.post('/branches/compare', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def compare_branches_endpoint(payload: dict, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     branch_ids = payload.get('branch_ids') if isinstance(payload, dict) else None
     if not isinstance(branch_ids, list) or not all(isinstance(item, str) for item in branch_ids):
         raise HTTPException(status_code=422, detail='branch_ids must be a list of strings')
@@ -1546,7 +1548,7 @@ def compare_branches_endpoint(payload: dict, request: Request, caller: Caller = 
 
 @app.post('/branches', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def create_branch_endpoint(payload: dict, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     if not isinstance(payload, dict) or not isinstance(payload.get('base_analysis_id'), str) or not isinstance(payload.get('name'), str):
         raise HTTPException(status_code=422, detail='base_analysis_id and name are required strings')
     if caller.mode == 'hosted':
@@ -1565,24 +1567,24 @@ def create_branch_endpoint(payload: dict, request: Request, caller: Caller = Dep
 
 @app.get('/branches', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def list_branches_endpoint(request: Request, base_analysis_id: Optional[str] = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     return [_branch_summary(branch) for branch in branches.list_branches(base_analysis_id)
             if _branch_is_visible(branch.branch_id, caller, db)]
 
 
 @app.get('/branches/capabilities', response_model=MutationCapabilities,
          dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def branch_capabilities_endpoint(request: Request):
+def branch_capabilities_endpoint(request: Request, caller: Caller = Depends(get_caller)):
     """List supported branch mutation resource types, operations, and constraints."""
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     return mutation_capabilities()
 
 
 @app.get('/branches/{branch_id}', response_model=branches.BranchDetail,
          dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def get_branch_endpoint(branch_id: str, request: Request):
+def get_branch_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
     """Read branch metadata and ordered changes without returning its base snapshot."""
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     try:
         return branches.read_branch(branch_id)
     except branches.BranchNotFoundError as exc:
@@ -1591,7 +1593,7 @@ def get_branch_endpoint(branch_id: str, request: Request):
 
 @app.post('/branches/{branch_id}/fork', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def fork_branch_endpoint(branch_id: str, request: Request, payload: dict, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     if not isinstance(payload, dict) or not isinstance(payload.get('name'), str) or not payload['name'].strip():
         raise HTTPException(status_code=422, detail='name is required and must be a non-empty string')
     if set(payload) - {'name', 'branch_revision'}:
@@ -1640,8 +1642,9 @@ async def _ingest_plan_endpoint(
     translate,
     invalid_detail: str,
     preserve_value_errors: bool = False,
+    caller: Caller = Depends(get_caller),
 ):
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     raw = await request.body()
     digest = hashlib.sha256(raw).hexdigest()
     try:
@@ -1695,9 +1698,10 @@ def _terraform_translator(branch_id: str, document):
 
 
 @app.post('/branches/{branch_id}/plans/terraform', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-async def terraform_plan_endpoint(branch_id: str, request: Request):
+async def terraform_plan_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
     return await _ingest_plan_endpoint(
         branch_id, request, lambda document: _terraform_translator(branch_id, document), 'Invalid Terraform plan JSON schema',
+        caller=caller,
     )
 
 
@@ -1764,26 +1768,26 @@ def _cfn_translator(branch_id: str, document):
 
 
 @app.post('/branches/{branch_id}/plans/cloudformation', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-async def cloudformation_plan_endpoint(branch_id: str, request: Request):
+async def cloudformation_plan_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
     return await _ingest_plan_endpoint(
         branch_id, request, lambda document: _cfn_translator(branch_id, document),
-        'Invalid CloudFormation change set document', preserve_value_errors=True,
+        'Invalid CloudFormation change set document', preserve_value_errors=True, caller=caller,
     )
 
 
 @app.post('/branches/{branch_id}/plans/aws-api', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-async def aws_api_plan_endpoint(branch_id: str, request: Request):
+async def aws_api_plan_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
     return await _ingest_plan_endpoint(
         branch_id, request, lambda document: _aws_translator(branch_id, document),
-        'Invalid AWS API calls document', preserve_value_errors=True,
+        'Invalid AWS API calls document', preserve_value_errors=True, caller=caller,
     )
 
 
 @app.post('/branches/{branch_id}/plans/aws-cli', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-async def aws_cli_plan_endpoint(branch_id: str, request: Request):
+async def aws_cli_plan_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
     return await _ingest_plan_endpoint(
         branch_id, request, lambda document: _aws_translator(branch_id, document, cli=True), 'Invalid AWS CLI commands document',
-        preserve_value_errors=True,
+        preserve_value_errors=True, caller=caller,
     )
 
 
@@ -1803,8 +1807,8 @@ def _scanned_account_id(analysis_id: str) -> str | None:
 
 
 @app.get('/branches/{branch_id}/in-use-evidence/estimate', response_model=EvidenceEstimate, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def in_use_evidence_estimate(branch_id: str, request: Request, sources: str = 'cloudtrail_events,cloudwatch_metrics'):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def in_use_evidence_estimate(branch_id: str, request: Request, caller: Caller = Depends(get_caller), sources: str = 'cloudtrail_events,cloudwatch_metrics'):
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     requested = [item.strip() for item in sources.split(',') if item.strip()]
     if not requested or len(set(requested)) != len(requested) or any(item not in SOURCES for item in requested):
         raise HTTPException(status_code=422, detail='Invalid evidence sources')
@@ -1829,7 +1833,7 @@ def _evidence_validation_detail(exc: ValidationError) -> list[dict]:
 
 @app.post('/branches/{branch_id}/in-use-evidence', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 async def collect_in_use_evidence(branch_id: str, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     try:
         body = json.loads(await request.body())
     except (ValueError, UnicodeDecodeError):
@@ -1869,8 +1873,8 @@ def _collect_in_use_evidence(branch_id: str, payload: EvidenceRequest, caller: C
     branches.save_evidence(branch_id, estimate.estimate_id, records)
     return {'estimate_id': estimate.estimate_id, 'observed_at': now.isoformat().replace('+00:00', 'Z'), 'window_days': WINDOW_DAYS, 'records': [record.model_dump(mode='json') for record in records]}
 @app.post('/branches/{branch_id}/changes', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def add_branch_change_endpoint(branch_id: str, change: Change, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def add_branch_change_endpoint(branch_id: str, change: Change, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     try:
         current_branch = branches.get_branch(branch_id)
         if current_branch.status != 'open':
@@ -1919,8 +1923,8 @@ def _current_handback_state(branch_id: str):
 
 
 @app.get('/branches/{branch_id}/plans/{plan_id}/handback', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def plan_handback_endpoint(branch_id: str, plan_id: str, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def plan_handback_endpoint(branch_id: str, plan_id: str, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     plan = branches.get_plan(plan_id)
     if plan is None or plan['branch_id'] != branch_id:
         raise HTTPException(status_code=404, detail='Not found')
@@ -1948,8 +1952,8 @@ def plan_handback_endpoint(branch_id: str, plan_id: str, request: Request):
 
 
 @app.post('/handback/verify', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def verify_handback_endpoint(payload: dict, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def verify_handback_endpoint(payload: dict, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     if not isinstance(payload, dict):
         raise HTTPException(status_code=422, detail='Request body must be an object')
     required = ('plan_id', 'plan_text', 'verdict_id', 'base_analysis_id', 'branch_revision')
@@ -1981,8 +1985,8 @@ def verify_handback_endpoint(payload: dict, request: Request):
 
 
 @app.get('/branches/{branch_id}/handback', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def typed_handback_endpoint(branch_id: str, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def typed_handback_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     try:
         branch = branches.get_branch(branch_id)
     except branches.BranchNotFoundError as exc:
@@ -2012,8 +2016,8 @@ def typed_handback_endpoint(branch_id: str, request: Request):
 
 
 @app.post('/branches/{branch_id}/handback/verify', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def verify_typed_handback_endpoint(branch_id: str, payload: dict, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def verify_typed_handback_endpoint(branch_id: str, payload: dict, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     required = ('calls', 'input_sha256', 'base_analysis_id', 'branch_revision', 'verdict_id')
     if not isinstance(payload, dict) or any(field not in payload for field in required):
         raise HTTPException(status_code=422, detail='Missing handback fields')
@@ -2047,8 +2051,8 @@ def verify_typed_handback_endpoint(branch_id: str, payload: dict, request: Reque
     return {'ok': True, 'verdict': result.verdict, 'verdict_id': verdict_id}
 
 @app.get('/branches/{branch_id}/diff', response_model=DiffResult, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def branch_diff_endpoint(branch_id: str, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def branch_diff_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     try:
         diff = branches.get_branch_diff(branch_id)
         if isinstance(diff, dict):
@@ -2059,8 +2063,8 @@ def branch_diff_endpoint(branch_id: str, request: Request):
 
 
 @app.get('/branches/{branch_id}/verdict', response_model=CombinedVerdict, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def branch_verdict_endpoint(branch_id: str, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def branch_verdict_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     try:
         branch = branches.get_branch(branch_id)
         rebuilt = branches.rebuild_branch_state(branch)
@@ -2087,8 +2091,8 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
 
 
 @app.post('/branches/{branch_id}/rollback', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def rollback_branch_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def rollback_branch_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller), payload: Optional[dict] = None):
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     payload = payload or {}
     if not isinstance(payload, dict) or set(payload) - {'expected_change_count', 'branch_revision'}:
         raise HTTPException(status_code=422, detail='Only expected_change_count and branch_revision are supported')
@@ -2119,8 +2123,8 @@ def rollback_branch_endpoint(branch_id: str, request: Request, payload: Optional
 
 
 @app.post('/branches/{branch_id}/rollback-to-count', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def rollback_branch_to_count_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def rollback_branch_to_count_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller), payload: Optional[dict] = None):
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     if not isinstance(payload, dict) or set(payload) - {'target_change_count', 'branch_revision'}:
         raise HTTPException(
             status_code=422,
@@ -2151,8 +2155,8 @@ def rollback_branch_to_count_endpoint(branch_id: str, request: Request, payload:
 
 
 @app.post('/branches/{branch_id}/discard', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def discard_branch_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def discard_branch_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller), payload: Optional[dict] = None):
+    _check_branch_rate_limit(_branch_rate_key(request, caller))
     if payload is None:
         payload = {}
     if not isinstance(payload, dict):
