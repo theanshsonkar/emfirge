@@ -8,7 +8,7 @@ import json
 from typing import Any, Dict, Iterable, Literal, Type, get_args
 from ipaddress import ip_network
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError, field_validator, model_validator
 from app.cidr import is_internet_cidr
 
 from app.models import (
@@ -70,6 +70,13 @@ class SecurityGroupRuleChange(_StrictModel):
             except ValueError as exc:
                 raise ValueError("must contain valid CIDR strings") from exc
         return values
+    @model_validator(mode="after")
+    def validate_rule(self) -> "SecurityGroupRuleChange":
+        if (self.protocol in {"tcp", "udp", "6", "17"}
+                and self.from_port is not None and self.to_port is not None
+                and self.from_port > self.to_port):
+            raise ValueError("from_port must be less than or equal to to_port")
+        return self
 
 
 class AccessStatementChange(_StrictModel):
@@ -342,6 +349,10 @@ def _validate_change(change: Change) -> None:
         raise ValueError(f"{change.resource_type} supports {', '.join(sorted(capability['operations']))} only")
     if not isinstance(change.fields, dict):
         raise ValueError("Change fields must be a dictionary")
+    if change.resource_type == "ec2_instance" and change.op in {"add", "modify"}:
+        state = change.fields.get("state")
+        if state is not None and state not in {"pending", "running", "shutting-down", "terminated", "stopping", "stopped"}:
+            raise ValueError("state must be one of pending, running, shutting-down, terminated, stopping, stopped")
     _validate_change_fields(change)
     for constraint in capability["constraints"]:
         if constraint["kind"] == "derived_field" and change.op in constraint["operations"]:
@@ -546,8 +557,8 @@ def _delete(
         )})
         if users:
             raise ValueError("Security group is still in use; model detaching or replacing it before deletion")
-    if resource_type == "ebs_volume" and target.attached_to is not None and not implicit:
-        raise ValueError("ebs_volume.attached_to: volume is in use")
+        if resource_type == "ebs_volume" and target.attached_to is not None and not implicit:
+            raise ValueError("ebs_volume.attached_to: volume is in use")
     if resource_type == "rds_instance":
         if target.deletion_protection is True:
             raise ValueError("rds_instance.deletion_protection: deletion is protected")
@@ -613,6 +624,47 @@ def _delete(
         for values in (infra.lambda_data.functions_with_admin_role, infra.lambda_data.functions_with_outdated_runtime,
                        infra.lambda_data.functions_with_no_timeout):
             _remove_value(values, resource_id)
+
+
+def _normalized_sg_rule(rule: Any) -> tuple:
+    """Return the modeled identity of a security-group rule."""
+    if isinstance(rule, BaseModel):
+        rule = rule.model_dump()
+    rule = rule or {}
+    return (
+        str(rule.get("protocol", "")),
+        rule.get("from_port"),
+        rule.get("to_port"),
+        tuple(sorted(set(rule.get("ip_ranges") or []))),
+        tuple(sorted(set(rule.get("source_sg_ids") or []))),
+        tuple(sorted(set(rule.get("dest_sg_ids") or []))),
+    )
+
+
+def _validate_security_group_rules(result: AWSInfrastructure, change: Change) -> None:
+    """Permit an unmodeled source-less rule only when replaying one already present."""
+    if change.resource_type != "security_group" or change.op not in {"add", "modify"}:
+        return
+    target = next(
+        (group for group in result.ec2.security_groups if group.id == change.resource_id),
+        None,
+    ) if change.op == "modify" else None
+    for field in ("rules", "egress_rules"):
+        supplied = change.fields.get(field)
+        if not isinstance(supplied, list):
+            continue
+        existing = (getattr(target, field, []) if target is not None else []) or []
+        existing_keys = {_normalized_sg_rule(rule) for rule in existing}
+        for index, rule in enumerate(supplied):
+            if not isinstance(rule, dict):
+                continue
+            if rule.get("ip_ranges") or rule.get("source_sg_ids") or rule.get("dest_sg_ids"):
+                continue
+            if _normalized_sg_rule(rule) not in existing_keys:
+                raise ValueError(
+                    f"security_group.{field}[{index}]: a new rule needs a source "
+                    "(ip_ranges, source_sg_ids or dest_sg_ids) (source is required)"
+                )
 
 
 def _replace_iam_role_policy_statements(
@@ -805,6 +857,22 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     _validate_change(change)
     result = _fresh(infra)
     resource_type = change.resource_type
+    _validate_security_group_rules(result, change)
+    if resource_type == "ec2_instance" and change.op in {"add", "modify"}:
+        sg_ids = change.fields.get("sg_ids", [])
+        if sg_ids and result.ec2.security_groups:
+            known_sg_ids = {group.id for group in result.ec2.security_groups}
+            missing = next((sg_id for sg_id in sg_ids if sg_id not in known_sg_ids), None)
+            if missing is not None:
+                raise TargetNotFound("security_group", str(missing))
+        subnet_id = change.fields.get("subnet_id")
+        if subnet_id and result.vpc.subnets:
+            known_subnet_ids = {
+                str(subnet.get("id", "")) if isinstance(subnet, dict) else str(subnet.id)
+                for subnet in result.vpc.subnets
+            }
+            if subnet_id not in known_subnet_ids:
+                raise TargetNotFound("subnet", str(subnet_id))
     if resource_type == "iam_role_policy":
         _replace_iam_role_policy_statements(result, change)
         return result
@@ -860,6 +928,8 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         )
         if index is None:
             raise TargetNotFound(resource_type, change.resource_id)
+        if not change.fields:
+            raise ValueError("modify needs at least one field")
         target = collection[index]
         updated_data = target.model_dump()
         updated_data.update(change.fields)

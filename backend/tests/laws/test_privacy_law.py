@@ -23,10 +23,14 @@ MARKER = st.builds(lambda value: "mk" + value, st.text(alphabet=HEX, min_size=10
 ACCOUNT = st.text(alphabet="0123456789", min_size=12, max_size=12)
 PORT = st.sampled_from([22, 80, 443, 5432, 3389, 8080])
 CIDR = st.sampled_from(["0.0.0.0/0", "10.0.0.0/8", "203.0.113.7/32"])
-RULES = st.lists(st.fixed_dictionaries({
-    "protocol": st.just("tcp"), "from_port": PORT, "to_port": PORT,
-    "ip_ranges": st.lists(CIDR, min_size=1, max_size=1),
-}), max_size=2)
+RULES = st.lists(st.builds(
+    lambda ports, ip_ranges: {
+        "protocol": "tcp", "from_port": ports[0], "to_port": ports[1],
+        "ip_ranges": ip_ranges,
+    },
+    ports=st.tuples(PORT, PORT).map(lambda ports: tuple(sorted(ports))),
+    ip_ranges=st.lists(CIDR, min_size=1, max_size=1),
+), max_size=2)
 OPS = st.lists(st.one_of(
     st.just("sg"), st.just("bucket"), st.just("unknown"), st.just("malformed"),
     st.just("iam"), st.just("simulate"),

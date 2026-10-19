@@ -40,7 +40,7 @@ from app.models import (
 from app.diffing import DiffResult
 from app.cidr import is_internet_cidr
 from app.mutations import Change, MutationCapabilities, apply_change, mutation_capabilities
-from app.trusted_account import trusted_account_id
+from app.trusted_account import verified_trusted_account_id
 from app.typed_handback import UnmappableChanges, build_api_calls, canonical_sha256
 from app.plan_ingest import translate_plan
 from app.aws_api_ingest import translate_api_calls, validate_change_regions
@@ -488,7 +488,7 @@ def history(limit: int = 10, account_id: str = None, caller: Caller = Depends(ge
 
 @app.get('/project')
 def project_info(caller: Caller = Depends(get_caller)):
-    account_id = trusted_account_id()
+    account_id = verified_trusted_account_id()
     if caller.mode == 'hosted':
         return {
             'mode': 'hosted',

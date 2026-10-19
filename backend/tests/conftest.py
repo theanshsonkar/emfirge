@@ -26,6 +26,25 @@ from app.models import (
 )
 
 
+@pytest.fixture(autouse=True)
+def no_real_trusted_account_sts(monkeypatch):
+    """Tests must not contact AWS; tests needing STS explicitly override this."""
+    from app import trusted_account
+
+    trusted_account._cached_account_id = None
+    original_boto3 = trusted_account.boto3
+    class _NoAwsBoto3:
+        @staticmethod
+        def client(*args, **kwargs):
+            from moto.core.models import MockAWS
+            if MockAWS._mocks_active:
+                return original_boto3.client(*args, **kwargs)
+            raise RuntimeError("STS disabled in tests")
+    monkeypatch.setattr(trusted_account, "boto3", _NoAwsBoto3)
+    yield
+    trusted_account._cached_account_id = None
+
+
 @pytest.fixture
 def shared_test_db(monkeypatch):
     """Use one thread-safe in-memory database for each targeted test."""
