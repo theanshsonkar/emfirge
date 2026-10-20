@@ -548,11 +548,26 @@ def combined_verdict(
                 and (not _value(instance, "subnet_id") or not (_value(instance, "sg_ids", []) or []))):
             unspecified_ids.append(instance_id)
     if unspecified_ids:
-        coverage_warnings.append("unspecified_change_fields")
+        if "unspecified_change_fields" not in coverage_warnings:
+            coverage_warnings.append("unspecified_change_fields")
         reasons.append(_reason(
             "warn", "unspecified_values",
             "A change leaves network placement unspecified; AWS would pick defaults Emfirge cannot predict",
             unspecified_ids,
+        ))
+    unspecified_snapshot_ids = [
+        _text(_value(item, "id")) for item in (_value(_value(branch_infra, "rds", {}), "rds_snapshots", []) or [])
+        if _text(_value(item, "id")) not in {
+            _text(_value(base_item, "id")) for base_item in (_value(_value(base_infra, "rds", {}), "rds_snapshots", []) or [])
+        } and not _value(item, "db_instance_id")
+    ]
+    if unspecified_snapshot_ids:
+        if "unspecified_change_fields" not in coverage_warnings:
+            coverage_warnings.append("unspecified_change_fields")
+        reasons.append(_reason(
+            "warn", "unspecified_values",
+            "A change leaves a snapshot source database unspecified; Emfirge cannot tell which database it protects",
+            unspecified_snapshot_ids,
         ))
     if introduced_critical:
         reasons.append(_reason("block", "introduced_critical_finding", "Introduced Critical finding", _resource_ids(item.get("resource") for item in introduced_critical)))

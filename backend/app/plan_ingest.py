@@ -399,8 +399,14 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         result.append(Change(op="delete", resource_type=resource, resource_id=str(resource_id or ""), fields=options))
     if actions == ["create"] or actions in (["delete", "create"], ["create", "delete"]):
         fields = _fields(typ, change, address, unknown_fields)
-        if resource in {"lambda_function", "s3_bucket", "ebs_volume", "ebs_snapshot", "rds_snapshot", "iam_role"}:
+        if resource in {"lambda_function", "s3_bucket", "ebs_volume", "ebs_snapshot", "iam_role"}:
             fields = {}
+        elif resource == "rds_snapshot":
+            db_identifier = (after or {}).get("db_instance_identifier")
+            if "db_instance_identifier" not in (change.get("after_unknown") or {}) and isinstance(db_identifier, str):
+                fields = {"db_instance_id": db_identifier}
+            else:
+                fields = {}
         result.append(Change(op="add", resource_type=resource, resource_id=str((after or {}).get(id_key, resource_id) or ""), fields=fields))
     elif actions == ["update"]:
         fields = _fields(typ, change, address, unknown_fields, update=True)

@@ -172,6 +172,13 @@ def _strict_validate_field(resource_type: str, field: str, value: Any, annotatio
 def _validate_change_fields(change: Change) -> None:
     if change.op not in {"add", "modify"}:
         return
+    if change.resource_type == "rds_snapshot" and change.op == "add":
+        unknown = set(change.fields) - {"db_instance_id"}
+        if unknown:
+            raise ValueError("rds_snapshot add fields: unknown schema field")
+        if "db_instance_id" in change.fields:
+            _strict_validate_field("rds_snapshot", "db_instance_id", change.fields["db_instance_id"], str)
+        return
     if change.resource_type in {"iam_role_policy", "route_table"}:
         annotations = {field: type_ for (resource, field), type_ in _MUTATION_NESTED_TYPES.items() if resource == change.resource_type}
     else:
@@ -215,7 +222,7 @@ _MUTATION_CAPABILITIES = {
     "lambda_function": {"model": LambdaFunction, "operations": _CRUD_OPERATIONS, "constraints": ()},
     "ebs_volume": {"model": EBSVolume, "operations": _DELETE_ONLY, "constraints": ()},
     "ebs_snapshot": {"model": EBSSnapshot, "operations": _DELETE_ONLY, "constraints": ()},
-    "rds_snapshot": {"model": RDSSnapshot, "operations": _DELETE_ONLY, "constraints": ()},
+    "rds_snapshot": {"model": RDSSnapshot, "operations": frozenset({"add", "delete"}), "constraints": ()},
     "iam_role": {"model": None, "operations": _DELETE_ONLY, "constraints": ()},
     "iam_role_policy": {
         "model": None,
@@ -873,6 +880,12 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
             }
             if subnet_id not in known_subnet_ids:
                 raise TargetNotFound("subnet", str(subnet_id))
+    if resource_type == "rds_snapshot" and change.op == "add":
+        db_instance_id = change.fields.get("db_instance_id")
+        if db_instance_id is not None and not any(item.id == db_instance_id for item in result.rds.rds_instances):
+            raise TargetNotFound("rds_instance", str(db_instance_id))
+        if change.resource_id and any(item.id == change.resource_id for item in result.rds.rds_snapshots):
+            raise ValueError("Target already exists: rds_snapshot")
     if resource_type == "iam_role_policy":
         _replace_iam_role_policy_statements(result, change)
         return result
@@ -904,8 +917,15 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     model_type = _model_for(resource_type)
 
     if change.op == "add":
-        data = _resource_data(result, change)
-        resource = model_type.model_validate(data)
+        if resource_type == "rds_snapshot":
+            data = dict(change.fields)
+            data.update({"snapshot_type": "manual", "status": "available"})
+            identity = change.resource_id or _auto_id(result, change)
+            data["id"] = identity
+            resource = model_type.model_validate(data)
+        else:
+            data = _resource_data(result, change)
+            resource = model_type.model_validate(data)
         if any(_identity(resource_type, item) == _identity(resource_type, resource) for item in _collection(result, resource_type)):
             raise ValueError(f"Target already exists: {resource_type}")
         _collection(result, resource_type).append(resource)

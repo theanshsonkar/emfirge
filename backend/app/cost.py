@@ -208,6 +208,11 @@ def estimate_monthly_cost(infra: AWSInfrastructure) -> CostEstimate:
             instance.id, "rds_instance", None, "price-unavailable",
         ))
 
+    for snapshot in infra.rds.rds_snapshots:
+        resources.append(_record(
+            snapshot.id, "rds_snapshot", None, "usage-based-unknown",
+        ))
+
     for user in infra.iam.iam_users:
         resources.append(_record(
             user.username, "iam_user", None, "free",

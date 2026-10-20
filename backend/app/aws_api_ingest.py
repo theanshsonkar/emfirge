@@ -450,6 +450,18 @@ def translate_api_calls(
                 changes.append(Change(op="modify", resource_type="rds_instance", resource_id=parameters["DBInstanceIdentifier"], fields=fields))
                 addresses.append(address)
             continue
+        if lower_service == "rds" and operation == "CreateDBSnapshot":
+            if not _valid_string(parameters.get("DBSnapshotIdentifier")):
+                unmodeled.append(_unmodeled(address, lower_service, operation))
+                continue
+            if not _valid_string(parameters.get("DBInstanceIdentifier")):
+                raise _invalid()
+            for field in parameters:
+                if field not in {"DBSnapshotIdentifier", "DBInstanceIdentifier", "Tags"}:
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            changes.append(Change(op="add", resource_type="rds_snapshot", resource_id=parameters["DBSnapshotIdentifier"], fields={"db_instance_id": parameters["DBInstanceIdentifier"]}))
+            addresses.append(address)
+            continue
         mapped = _MAPPED.get((lower_service, operation))
         if mapped is None:
             unmodeled.append(_unmodeled(address, lower_service, operation))

@@ -84,6 +84,12 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
     def call(service, operation, params):
         return {"change_index": index, "service": service, "operation": operation, "params": params}
     if op == "add":
+        if typ == "rds_snapshot":
+            db_instance_id = fields.get("db_instance_id")
+            if not isinstance(db_instance_id, str) or not db_instance_id:
+                err("error")
+                return [], errors
+            return [call("rds", "CreateDBSnapshot", {"DBSnapshotIdentifier": ident, "DBInstanceIdentifier": db_instance_id})], errors
         err("operation_not_mapped")
         return [], errors
     # All mapped operations are based on an existing resource.  Check this
