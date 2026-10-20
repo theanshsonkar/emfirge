@@ -264,6 +264,7 @@ class RolePolicy(BaseModel):
     trusted_services: List[str] = []      # AWS services trusted by the role
     trust_allows_external: bool = False  # trust includes external/account-wide principals
     trust_has_conditions: bool = False   # qualifying trust statement has conditions
+    trust_external_unrestricted: bool = Field(default=False, exclude_if=lambda value: value is False)
 
 class IAMData(BaseModel):
     root_has_access_keys: bool = False

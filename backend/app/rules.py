@@ -1074,6 +1074,23 @@ def check_root_access_keys(infra: AWSInfrastructure) -> Optional[RiskFinding]:
         )
     return None
 
+def check_iam_external_trust(infra: AWSInfrastructure, ctx: Optional['GraphContext'] = None) -> List[RiskFinding]:
+    findings = []
+    for role in infra.iam.role_policies:
+        external = role.trust_allows_external if not isinstance(role, dict) else role.get('trust_allows_external', False)
+        unrestricted = role.trust_external_unrestricted if not isinstance(role, dict) else role.get('trust_external_unrestricted', False)
+        external = external or unrestricted
+        conditioned = role.trust_has_conditions if not isinstance(role, dict) else role.get('trust_has_conditions', False)
+        if not external: continue
+        severity = 'Critical' if unrestricted or not conditioned else 'High'
+        findings.append(RiskFinding(
+            rule_id='EMFIRGE-IAM-009', category='Security', severity=severity, raw_severity=severity,
+            confidence='HIGH', issue='Role trust policy lets an outside principal assume it',
+            recommendation='Restrict the role trust policy to approved principals and use narrowly scoped conditions.',
+            aws_service='IAM', resource_id=role.role_arn if not isinstance(role, dict) else role.get('role_arn'),
+            resource_type='iam_role', region='global'))
+    return findings
+
 def check_iam_escalation_paths(infra: AWSInfrastructure, ctx: Optional['GraphContext'] = None) -> List[RiskFinding]:
     findings = []
     for role in infra.iam.role_policies:
@@ -2345,6 +2362,7 @@ def run_all_checks(infrastructure: AWSInfrastructure, graph: Optional[Graph] = N
         check_users_without_mfa,
         check_lambda_no_vpc,
         check_iam_escalation_paths,
+        check_iam_external_trust,
     ]
     
     # List-return rules with graph (List[RiskFinding])

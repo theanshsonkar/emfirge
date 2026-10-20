@@ -888,15 +888,16 @@ def _parse_role_trust_policy(document, role_arn):
 
         qualifying_actions = {
             'sts:assumerole', 'sts:assumerolewithsaml',
-            'sts:assumerolewithwebidentity', '*',
+            'sts:assumerolewithwebidentity', '*', 'sts:*',
         }
+        import fnmatch
         for statement in statements:
             if not isinstance(statement, dict):
                 continue
             if str(statement.get('Effect', '')).lower() != 'allow':
                 continue
             actions = principal_values(statement.get('Action', []))
-            if not any(str(action).lower() in qualifying_actions for action in actions):
+            if not any(fnmatch.fnmatchcase(target, str(action).lower()) for action in actions for target in qualifying_actions):
                 continue
             if 'Condition' in statement:
                 trust_has_conditions = True
@@ -1169,6 +1170,8 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                      trust_has_conditions) = _parse_role_trust_policy(
                         role.get('AssumeRolePolicyDocument'), role_arn
                     )
+                    from app.trust_policy import external_trust
+                    trust_external_unrestricted = external_trust(role.get('AssumeRolePolicyDocument'), role_arn)[1]
 
                     policy_documents = []
                     def parse_access_document(doc, document_statements=None):
@@ -1293,6 +1296,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                             trusted_services=trusted_services,
                             trust_allows_external=trust_allows_external,
                             trust_has_conditions=trust_has_conditions,
+                            trust_external_unrestricted=trust_external_unrestricted,
                             last_used_at=role_last_used.get(role_name),
                         ))
 

@@ -236,8 +236,6 @@ def _security_group_change(address, operation, parameters, working, sg_rules, un
     field = "egress_rules" if egress else "rules"
     return Change(op="modify", resource_type="security_group", resource_id=group_id,
                   fields={field: copy.deepcopy(current)})
-
-
 def translate_api_calls(
     doc: Any, resolve_role_arn: Callable[[str], str | None] | None = None,
     sg_rules: Callable[[str], list[dict] | None] | None = None,
@@ -283,6 +281,39 @@ def translate_api_calls(
             item["detail"] = f"{operation} can share a snapshot or image with other AWS accounts or the public, and Emfirge does not read sharing yet"
             unmodeled.append(item)
             continue
+        if lower_service == "iam" and operation in {"CreateRole", "UpdateAssumeRolePolicy", "CreateUser"}:
+            if operation == "CreateRole":
+                role_name = parameters.get("RoleName")
+                if not _valid_string(role_name):
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "missing RoleName")); continue
+                document = parameters.get("AssumeRolePolicyDocument")
+                try:
+                    if isinstance(document, str): document = json.loads(document)
+                    if not isinstance(document, dict): raise ValueError
+                except Exception as exc: raise _invalid() from exc
+                for field in parameters:
+                    if field not in {"RoleName", "AssumeRolePolicyDocument", "Tags"}:
+                        unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+                changes.append(Change(op="add", resource_type="iam_role", resource_id=role_name, fields={"trust_policy": document})); addresses.append(address); continue
+            if operation == "UpdateAssumeRolePolicy":
+                role_name, document = parameters.get("RoleName"), parameters.get("PolicyDocument")
+                if not _valid_string(role_name):
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "missing RoleName")); continue
+                try:
+                    if isinstance(document, str): document = json.loads(document)
+                    if not isinstance(document, dict): raise ValueError
+                except Exception as exc: raise _invalid() from exc
+                for field in parameters:
+                    if field not in {"RoleName", "PolicyDocument"}:
+                        unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+                changes.append(Change(op="modify", resource_type="iam_role", resource_id=role_name, fields={"trust_policy": document})); addresses.append(address); continue
+            user_name = parameters.get("UserName")
+            if not _valid_string(user_name):
+                unmodeled.append(_unmodeled(address, lower_service, operation, "missing UserName")); continue
+            for field in parameters:
+                if field not in {"UserName", "Tags"}:
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            changes.append(Change(op="add", resource_type="iam_user", resource_id=user_name, fields={})); addresses.append(address); continue
         if lower_service == "iam" and operation in {"PutRolePolicy", "DeleteRolePolicy", "AttachRolePolicy", "DetachRolePolicy"}:
             if role_policies is None:
                 item = _unmodeled(address, lower_service, operation, "IAM role policy state is unavailable")

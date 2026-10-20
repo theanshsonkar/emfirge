@@ -569,6 +569,11 @@ def combined_verdict(
             "A change leaves a snapshot source database unspecified; Emfirge cannot tell which database it protects",
             unspecified_snapshot_ids,
         ))
+    base_role_ids = {_text(_value(item, 'role_arn')) for item in (_value(_value(base_infra, 'iam', {}), 'role_policies', []) or [])}
+    unspecified_role_ids = [_text(_value(item, 'role_arn')) for item in (_value(_value(branch_infra, 'iam', {}), 'role_policies', []) or []) if _text(_value(item, 'role_arn')) not in base_role_ids and not _value(item, 'trust_external_unrestricted') and not _value(item, 'trust_allows_external') and not _value(item, 'trust_has_conditions')]
+    if unspecified_role_ids:
+        if 'unspecified_change_fields' not in coverage_warnings: coverage_warnings.append('unspecified_change_fields')
+        reasons.append(_reason('warn', 'unspecified_values', 'A change leaves a role trust policy unspecified; Emfirge cannot tell who can assume it', unspecified_role_ids))
     if introduced_critical:
         reasons.append(_reason("block", "introduced_critical_finding", "Introduced Critical finding", _resource_ids(item.get("resource") for item in introduced_critical)))
     broad_access_findings = [

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 import copy
+import json
 
 from app.mutations import Change
 from app.aws_api_ingest import remove_security_group_rule
@@ -52,7 +53,8 @@ _RESOURCE_MAP = {
     "aws_ebs_volume": ("ebs_volume", "id"),
     "aws_ebs_snapshot": ("ebs_snapshot", "id"),
     "aws_db_snapshot": ("rds_snapshot", "db_snapshot_identifier"),
-    "aws_iam_role": ("iam_role", "arn"),
+    "aws_iam_role": ("iam_role", "name"),
+    "aws_iam_user": ("iam_user", "name"),
 }
 _DELETE_ORDER = ["ec2_instance", "lambda_function", "rds_instance", "ebs_volume",
                  "ebs_snapshot", "rds_snapshot", "s3_bucket", "security_group", "iam_role"]
@@ -213,6 +215,18 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
             continue
         if source in after:
             fields[target] = after[source]
+    if resource == "aws_iam_role":
+        if "assume_role_policy" in (change.get("after_unknown") or {}):
+            _unknown(change, address, "assume_role_policy", unknown)
+        else:
+            policy = after.get("assume_role_policy")
+            if policy is not None and (not update or policy != (change.get("before") or {}).get("assume_role_policy")):
+                try:
+                    fields["trust_policy"] = json.loads(policy) if isinstance(policy, str) else policy
+                except (TypeError, ValueError):
+                    unknown.append({"address": address, "field": "assume_role_policy", "reason": "invalid JSON"})
+    if resource == "aws_iam_user":
+        return fields
     if resource == "aws_instance":
         if "metadata_options" in after and not update and not _unknown(change, address, "metadata_options", unknown):
             metadata = after.get("metadata_options") or {}
@@ -399,7 +413,7 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         result.append(Change(op="delete", resource_type=resource, resource_id=str(resource_id or ""), fields=options))
     if actions == ["create"] or actions in (["delete", "create"], ["create", "delete"]):
         fields = _fields(typ, change, address, unknown_fields)
-        if resource in {"lambda_function", "s3_bucket", "ebs_volume", "ebs_snapshot", "iam_role"}:
+        if resource in {"lambda_function", "s3_bucket", "ebs_volume", "ebs_snapshot"}:
             fields = {}
         elif resource == "rds_snapshot":
             db_identifier = (after or {}).get("db_instance_identifier")
@@ -410,7 +424,7 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         result.append(Change(op="add", resource_type=resource, resource_id=str((after or {}).get(id_key, resource_id) or ""), fields=fields))
     elif actions == ["update"]:
         fields = _fields(typ, change, address, unknown_fields, update=True)
-        supported = {"aws_security_group": {"ingress"}, "aws_db_instance": {"backup_retention_period", "deletion_protection"}}
+        supported = {"aws_security_group": {"ingress"}, "aws_db_instance": {"backup_retention_period", "deletion_protection"}, "aws_iam_role": {"assume_role_policy"}}
         for field in (change.get("before", {}) or {}):
             if (change.get("before") or {}).get(field) != (after or {}).get(field) and field not in supported.get(typ, set()):
                 if field not in (change.get("after_unknown") or {}):

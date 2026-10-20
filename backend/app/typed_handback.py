@@ -90,6 +90,28 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
                 err("error")
                 return [], errors
             return [call("rds", "CreateDBSnapshot", {"DBSnapshotIdentifier": ident, "DBInstanceIdentifier": db_instance_id})], errors
+        if typ == "iam_role":
+            document = fields.get("trust_policy")
+            if not isinstance(document, dict):
+                err("error")
+                return [], errors
+            name = ident.rsplit("/", 1)[-1]
+            return [call("iam", "CreateRole", {"RoleName": name, "AssumeRolePolicyDocument": json.dumps(document, sort_keys=True)})], errors
+        if typ == "iam_user":
+            if fields.get("has_console_access") is True:
+                err("operation_not_mapped")
+                return [], errors
+            return [call("iam", "CreateUser", {"UserName": ident})], errors
+        err("operation_not_mapped")
+        return [], errors
+    if typ == "iam_role" and op == "modify":
+        document = fields.get("trust_policy")
+        if not isinstance(document, dict):
+            err("error")
+            return [], errors
+        name = ident.rsplit("/", 1)[-1]
+        return [call("iam", "UpdateAssumeRolePolicy", {"RoleName": name, "PolicyDocument": json.dumps(document, sort_keys=True)})], errors
+    if typ == "iam_user":
         err("operation_not_mapped")
         return [], errors
     # All mapped operations are based on an existing resource.  Check this

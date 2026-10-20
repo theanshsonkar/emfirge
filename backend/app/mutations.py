@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 from typing import Any, Dict, Iterable, Literal, Type, get_args
 from ipaddress import ip_network
 
@@ -28,6 +29,8 @@ from app.models import (
     SecurityGroup,
     NetworkACL,
     NACLEntry,
+    IAMUser,
+    RolePolicy,
 )
 
 
@@ -130,6 +133,22 @@ _MUTATION_NESTED_TYPES = {
     ("network_acl", "entries"): list[NACLEntryChange],
 }
 
+def _trust_document(value: Any) -> dict:
+    if isinstance(value, str):
+        try: value = json.loads(value)
+        except Exception as exc: raise ValueError('iam_role.trust_policy must be a JSON object') from exc
+    if not isinstance(value, dict) or 'Statement' not in value:
+        raise ValueError('iam_role.trust_policy must be an object with Statement')
+    return value
+
+def _role_arn(infra: AWSInfrastructure, resource_id: str) -> str:
+    if resource_id.startswith('arn:aws:iam::'):
+        if not re.fullmatch(r'arn:aws:iam::\d{12}:role/[\w+=,.@/-]+', resource_id): raise ValueError('malformed role ARN')
+        return resource_id
+    accounts = {p.role_arn.split(':')[4] for p in infra.iam.role_policies if p.role_arn.startswith('arn:') and len(p.role_arn.split(':')) > 4}
+    if len(accounts) != 1: raise ValueError('pass the full role ARN')
+    return f'arn:aws:iam::{next(iter(accounts))}:role/{resource_id}'
+
 
 def _loc_text(loc: tuple[Any, ...]) -> str:
     result = ""
@@ -179,6 +198,16 @@ def _validate_change_fields(change: Change) -> None:
         if "db_instance_id" in change.fields:
             _strict_validate_field("rds_snapshot", "db_instance_id", change.fields["db_instance_id"], str)
         return
+    if change.resource_type == 'iam_role':
+        allowed = {'trust_policy'}
+        if set(change.fields) - allowed: raise ValueError('iam_role fields: unknown schema field')
+        if 'trust_policy' in change.fields: _trust_document(change.fields['trust_policy'])
+        if change.op == 'modify' and set(change.fields) != allowed: raise ValueError('iam_role modify requires exactly trust_policy')
+        return
+    if change.resource_type == 'iam_user':
+        if set(change.fields) - {'has_console_access'}: raise ValueError('iam_user fields: unknown schema field')
+        if 'has_console_access' in change.fields: _strict_validate_field('iam_user', 'has_console_access', change.fields['has_console_access'], bool)
+        return
     if change.resource_type in {"iam_role_policy", "route_table"}:
         annotations = {field: type_ for (resource, field), type_ in _MUTATION_NESTED_TYPES.items() if resource == change.resource_type}
     else:
@@ -223,7 +252,8 @@ _MUTATION_CAPABILITIES = {
     "ebs_volume": {"model": EBSVolume, "operations": _DELETE_ONLY, "constraints": ()},
     "ebs_snapshot": {"model": EBSSnapshot, "operations": _DELETE_ONLY, "constraints": ()},
     "rds_snapshot": {"model": RDSSnapshot, "operations": frozenset({"add", "delete"}), "constraints": ()},
-    "iam_role": {"model": None, "operations": _DELETE_ONLY, "constraints": ()},
+    "iam_role": {"model": None, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "iam_user": {"model": IAMUser, "operations": frozenset({"add"}), "constraints": ()},
     "iam_role_policy": {
         "model": None,
         "operations": frozenset({"modify"}),
@@ -392,6 +422,8 @@ def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
         return infra.vpc.nacls
     if resource_type == "iam_role":
         return infra.iam.role_policies
+    if resource_type == "iam_user":
+        return infra.iam.iam_users
     return infra.lambda_data.functions
 
 
@@ -400,6 +432,8 @@ def _identity(resource_type: str, resource: BaseModel) -> str:
         return resource.name
     if resource_type == "iam_role":
         return resource.role_arn
+    if resource_type == "iam_user":
+        return resource.username
     return resource.id
 
 
@@ -886,6 +920,32 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
             raise TargetNotFound("rds_instance", str(db_instance_id))
         if change.resource_id and any(item.id == change.resource_id for item in result.rds.rds_snapshots):
             raise ValueError("Target already exists: rds_snapshot")
+    if resource_type == 'iam_role' and change.op in {'add', 'modify'}:
+        from app.aws_collector import _parse_role_trust_policy
+        from app.trust_policy import external_trust
+        target_id = _role_arn(result, change.resource_id) if change.op == 'add' else change.resource_id
+        if change.op == 'modify':
+            target = next((p for p in result.iam.role_policies if p.role_arn == target_id or p.role_name == target_id), None)
+            if target is None: raise TargetNotFound('iam_role', change.resource_id)
+            target_id = target.role_arn
+            document = _trust_document(change.fields['trust_policy'])
+            target.trusted_role_arns, target.trusted_services, target.trust_allows_external, target.trust_has_conditions = _parse_role_trust_policy(document, target_id)
+            target.trust_external_unrestricted = external_trust(document, target_id)[1]
+            return result
+        if any(p.role_arn == target_id for p in result.iam.role_policies): raise ValueError('Target already exists: iam_role')
+        document = _trust_document(change.fields['trust_policy']) if 'trust_policy' in change.fields else None
+        trusted_roles, services, allows, conditions = _parse_role_trust_policy(document or {}, target_id)
+        name = target_id.split(':role/', 1)[-1].rsplit('/', 1)[-1]
+        result.iam.role_policies.append(RolePolicy(role_name=name, role_arn=target_id, trusted_role_arns=trusted_roles, trusted_services=services, trust_allows_external=allows, trust_has_conditions=conditions, trust_external_unrestricted=external_trust(document or {}, target_id)[1] if document else False))
+        return result
+    if resource_type == 'iam_user' and change.op == 'add':
+        username = change.resource_id
+        if not username: raise ValueError('iam_user resource_id must not be empty')
+        if any(u.username == username for u in result.iam.iam_users): raise ValueError('Target already exists: iam_user')
+        console = change.fields.get('has_console_access', False)
+        result.iam.iam_users.append(IAMUser(username=username, has_console_access=console))
+        if console: _append_unique(result.iam.users_without_mfa, username)
+        return result
     if resource_type == "iam_role_policy":
         _replace_iam_role_policy_statements(result, change)
         return result

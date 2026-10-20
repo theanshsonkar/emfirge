@@ -29,7 +29,11 @@ def _base():
 
 def _add_samples(base):
     samples = {}
+    samples['iam_role'] = Change(op='add', resource_type='iam_role', resource_id='arn:aws:iam::000000000000:role/law-add', fields={'trust_policy': {'Statement': [{'Effect': 'Allow', 'Principal': {'Service': 'ec2.amazonaws.com'}, 'Action': 'sts:AssumeRole'}]}})
+    samples['iam_user'] = Change(op='add', resource_type='iam_user', resource_id='law-user-add', fields={})
     for resource_type, capability in _MUTATION_CAPABILITIES.items():
+        if resource_type in {'iam_role', 'iam_user'}:
+            continue
         if "add" not in capability["operations"]:
             continue
         collection = _collection(base, resource_type)
@@ -71,7 +75,10 @@ def test_every_addable_type_appears_in_resources_added():
         change = samples[capability.resource_type]
         branch = apply_change(base, change)
         result = diff_infrastructure(base, branch)
-        assert any(item["resource_type"] == change.resource_type and item["id"] == change.resource_id for item in result.resources_added)
+        expected_id = f"iam-role-{change.resource_id.rsplit('/', 1)[-1]}" if change.resource_type == "iam_role" else change.resource_id
+        assert any(item["resource_type"] == change.resource_type and item["id"] == expected_id for item in result.resources_added)
+        if change.resource_type == "iam_user":
+            assert sum(item['resource_type'] == 'iam_user' and item['id'] == 'law-user-add' for item in result.resources_added) == 1
         assert not any(item["resource_type"] == change.resource_type and item["id"] == change.resource_id for item in result.resources_removed)
 
 
@@ -85,7 +92,8 @@ def test_every_deletable_type_appears_in_resources_removed():
         change = samples[capability.resource_type]
         branch = apply_change(base, change)
         result = diff_infrastructure(base, branch)
-        assert any(item["resource_type"] == change.resource_type and (item["id"] == change.resource_id or change.resource_type == "iam_role") for item in result.resources_removed)
+        expected_id = f"iam-role-{change.resource_id.rsplit('/', 1)[-1]}" if change.resource_type == "iam_role" else change.resource_id
+        assert any(item["resource_type"] == change.resource_type and item["id"] == expected_id for item in result.resources_removed)
         assert not any(item["resource_type"] == change.resource_type and item["id"] == change.resource_id for item in result.resources_added)
 
 
@@ -97,7 +105,7 @@ def test_model_only_types_are_exactly_mutable_types_without_graph_nodes():
     }
     from app.diffing import MODEL_ONLY_TYPES
     assert MODEL_ONLY_TYPES == expected
-    assert MODEL_ONLY_TYPES == {"rds_snapshot", "ebs_snapshot"}
+    assert MODEL_ONLY_TYPES == {"rds_snapshot", "ebs_snapshot", "iam_user"}
 
 
 def test_rds_snapshot_symmetry():
