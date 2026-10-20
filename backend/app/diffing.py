@@ -13,9 +13,19 @@ from pydantic import BaseModel, Field
 from app import cost
 from app.egraph import INTERNAL_REACH_EDGE_BUDGET, build_graph_pair, get_internet_reachable_set
 from app.exposure import Exposure, compute_exposures
+from app.graph_schema import NODE_SCHEMAS
+from app.mutations import _MUTATION_CAPABILITIES, _collection, _identity
 from ipaddress import ip_network
 from app.rules import find_toxic_combos, run_all_checks
 from app.scoring import score_branch
+
+
+# Mutable model collections not represented by concrete graph node schemas.
+MODEL_ONLY_TYPES = frozenset(
+    resource_type
+    for resource_type, capability in _MUTATION_CAPABILITIES.items()
+    if capability["model"] is not None and resource_type not in NODE_SCHEMAS
+)
 
 
 def graph_warning_strings(warnings: list[Any]) -> list[str]:
@@ -368,10 +378,39 @@ def _iam_policy_changed(base_infra: Any, branch_infra: Any) -> bool:
     return policies(base_infra) != policies(branch_infra)
 
 
+def _model_only_diff(base_infra: Any, branch_infra: Any) -> tuple[list[dict], list[dict], list[dict]]:
+    """Diff mutable model collections that have no graph node representation."""
+    added: list[dict] = []
+    removed: list[dict] = []
+    modified: list[dict] = []
+    for resource_type in sorted(MODEL_ONLY_TYPES):
+        base_items = {_identity(resource_type, item): item for item in _collection(base_infra, resource_type)}
+        branch_items = {_identity(resource_type, item): item for item in _collection(branch_infra, resource_type)}
+        for resource_id in sorted(set(branch_items) - set(base_items)):
+            added.append({"id": str(resource_id), "resource_type": resource_type})
+        for resource_id in sorted(set(base_items) - set(branch_items)):
+            removed.append({"id": str(resource_id), "resource_type": resource_type})
+        for resource_id in sorted(set(base_items) & set(branch_items)):
+            before = _canonical_value(base_items[resource_id].model_dump())
+            after = _canonical_value(branch_items[resource_id].model_dump())
+            if before == after:
+                continue
+            changed = sorted(
+                key for key in set(before) | set(after)
+                if _canonical_json(before.get(key)) != _canonical_json(after.get(key))
+            )
+            modified.append({"id": str(resource_id), "resource_type": resource_type, "changed": changed})
+    return added, removed, modified
+
+
 def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     """Compare infrastructure snapshots without mutating either input."""
     base_graph, branch_graph = build_graph_pair(base_infra, branch_infra)
     graph_diff = diff_graphs(base_graph, branch_graph)
+    model_added, model_removed, model_modified = _model_only_diff(base_infra, branch_infra)
+    graph_diff["resources_added"] = sorted(graph_diff["resources_added"] + model_added, key=lambda item: (item["resource_type"], item["id"]))
+    graph_diff["resources_removed"] = sorted(graph_diff["resources_removed"] + model_removed, key=lambda item: (item["resource_type"], item["id"]))
+    graph_diff["resources_modified"] = sorted(graph_diff["resources_modified"] + model_modified, key=lambda item: (item["resource_type"], item["id"]))
     coverage_warnings = []
     collection_warnings = sorted({
         str(item).strip()
