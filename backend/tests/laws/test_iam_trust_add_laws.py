@@ -75,12 +75,9 @@ def test_parser_agreement_small_bruteforce():
             actual = external_trust(doc, ROLE)[0]
             if actual != expected:
                 disagreements.append((doc, actual, expected))
-    with open('/Users/anshsonkar/emfirge/.scratch/t2_disagree.txt', 'w') as output:
-        for doc, actual, expected in disagreements:
-            output.write(f'{doc!r} actual={actual!r} parser={expected!r}\n')
     # Plain-string principals other than '*' are not valid IAM grammar.
     remaining = [item for item in disagreements if not any(isinstance(statement.get('Principal'), str) and statement.get('Principal') != '*' for statement in item[0]['Statement'])]
-    assert remaining == []
+    assert remaining == [], f'first 3 disagreements: {remaining[:3]}'
 
 def test_rule_severity():
     def check(**kw):
