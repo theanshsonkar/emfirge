@@ -638,6 +638,7 @@
 .doc-article :is(p,td,li) code {font-family:var(--font-geist-mono);font-size:.86em;background:var(--docs-panel-2);border-radius:4px;padding:2px 5px;color:var(--docs-text);overflow-wrap:break-word;}
 .doc-note {display:flex;align-items:flex-start;gap:11px;border:1px solid var(--docs-border);background:var(--docs-panel);padding:16px 18px;border-radius:8px;margin-top:21px;color:var(--docs-muted);}
 .doc-note>svg {flex-shrink:0;margin-top:3px;}
+.soon-badge {display:inline-block;font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;line-height:1;padding:3px 7px;border:1px solid var(--docs-border);border-radius:999px;background:var(--docs-panel);color:var(--docs-muted);vertical-align:middle;margin-right:6px;white-space:nowrap;}
 .doc-note p {font-size:12px;line-height:1.85;overflow-wrap:break-word;}
 .doc-table-wrap {margin-top:24px;overflow-x:auto;border:1px solid var(--docs-border);border-radius:8px;}
 .doc-table-wrap table {width:100%;border-collapse:collapse;font-size:12px;line-height:1.8;}
