@@ -10,6 +10,8 @@ judged by **lenses** that show what the change would actually do.
 
 [Get started][quickstart] · [Docs][docs] · [npm][npm]
 
+<sub>Built by <a href="https://github.com/theanshsonkar">Ansh Sonkar</a></sub>
+
 </div>
 
 ---
@@ -132,6 +134,14 @@ The live `GET /branches/capabilities` endpoint is the authoritative list. Anythi
 | [`iam-role.yaml`](iam-role.yaml) | The read-only customer role | AGPL-3.0 |
 
 </details>
+
+## Built by
+
+Emfirge is designed and built by **Ansh Sonkar** ([@theanshsonkar](https://github.com/theanshsonkar)): the engine, the branch model, the lenses and the MCP.
+
+Building with AI agents on AWS, or want to talk about Emfirge? Email **[ansh@emfirge.cloud](mailto:ansh@emfirge.cloud)**.
+
+---
 
 [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Privacy](PRIVACY.md)
 
