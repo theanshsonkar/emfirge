@@ -4,7 +4,7 @@
 
 **The harness between your AI agent and your AWS cloud: branch, diff, verdict — with privacy-first masking.**
 
-Version **0.2.6** · Apache-2.0
+Version **0.2.9** · Apache-2.0
 
 </div>
 
@@ -36,7 +36,7 @@ Ask your assistant to scan with a read-only role. This is an example placeholder
 Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 ```
 
-## Tools (20)
+## Tools (24)
 
 ### Analyze
 
@@ -61,13 +61,15 @@ Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 - `emfirge_list_branches` — list branches, optionally filtered by base analysis ID.
 - `emfirge_get_branch` — read branch metadata and its ordered normalized change log without returning the base infrastructure snapshot.
 - `emfirge_fork_branch` — create an independent open branch from an open branch's current base and ordered changes.
-- `emfirge_fork_branch` — fork an open branch into an independent branch with the same base and ordered changes.
 - `emfirge_compare_branches` — compare branch models and rank outcomes safest-first.
 - `emfirge_in_use_evidence` — estimate and, after explicit approval, read usage evidence for resources a branch deletes.
 
-### Setup
+### Account and setup
 
 - `emfirge_setup_help` — return a CloudFormation deploy URL for a read-only IAM role.
+- `emfirge_login` — sign in to Emfirge with GitHub or Google in your browser.
+- `emfirge_logout` — sign out of Emfirge on this device.
+- `emfirge_link_project` — link your saved browser sign-in to an existing API-key project.
 
 ## Privacy
 
