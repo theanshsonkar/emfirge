@@ -2,108 +2,140 @@
 
 # 🛡️ Emfirge
 
-## Git branch for your cloud.
+### Give your agent a branch of your cloud.
 
-Emfirge is the harness between AI agents and your cloud. Your agent gets a branch — a Git-style copy of a model of your live AWS — tries changes there, and gets back a diff and a pass / warn / block verdict before anything touches production. Emfirge is read-only and never applies changes. Security is the first lens; cost and limits signals are early lenses.
+AI agents are starting to change real infrastructure.<br>
+Emfirge is the **harness** that lets them try first, on a **branch** of your live AWS,<br>
+judged by **lenses** that show what the change would actually do.
 
-[Get started][quickstart] · [Read the docs][docs] · [npm][npm]
-
-**MCP version: 0.2.3**
+[Get started][quickstart] · [Docs][docs] · [npm][npm]
 
 </div>
 
-| Capability | What it provides |
-|---|---|
-| Graph analysis | Connected resource context rather than isolated checks. |
-| Attack paths | Routes from public-facing resources toward internal resources and chokepoints. |
-| Modeled branches | Isolated add, modify, and delete changes with diff, verdict, rollback, and comparison. |
-| Privacy modes | Local `strict`, `balanced`, and `off` tokenization controls for MCP results. |
+---
 
-## Install
+## Your agent wants to "clean up unused databases"
+
+Without Emfirge, it calls `DeleteDBInstance` and you learn from your on-call channel what that database was for.
+
+With Emfirge, the agent does it on a branch first:
+
+```text
+you    ▸ Clean up the unused databases in us-east-1.
+
+agent  ▸ I tried it on a branch first. Verdict: BLOCK
+
+         ✗ recently_used
+           CloudWatch metrics show a deleted resource was used in the last 90 days
+           → orders-db
+
+         ✗ data_store_deleted_no_recovery_point
+           Deleted data store has no recovery point
+           → orders-db
+
+         Branch #2, deleting only legacy-reports-db, passes.
+         Want the exact API call for that one?
+```
+
+Nothing touched production. The agent changed its plan, and the hand-back it gives you is bound by hash to the verdict it passed.
+
+<sub>Simplified output. The reason codes and messages are the engine's real ones.</sub>
+
+---
+
+## Three layers
+
+### 🧰 The harness: the product
+Where the agent works, what it may see, what it gets back, and what it can't skip.
+- **Read-only, always.** Emfirge never writes to your cloud. You or your pipeline apply the approved change.
+- **Private by default.** AWS identifiers are tokenized on your machine before the LLM sees them.
+- **No silent passes.** A change Emfirge can't model can't `pass`. A missing check is reported, not hidden.
+
+### 🌿 The branch: the engine
+A Git-style copy of a model of your live AWS: a base snapshot plus an ordered list of changes.
+- **Git-style operations.** Fork, roll back, compare and discard, like you would with code.
+- **Many ways in.** Feed it typed changes, a Terraform plan, a CloudFormation change set, AWS API calls or AWS CLI commands. The same change gives the same answer whichever way it comes in.
+- **A two-sided diff.** See what was added and removed, what became reachable from the internet, and the cost before and after.
+
+### 🔍 Lenses: what gets measured
+Each lens judges the branch from one angle, and together they produce a single `pass` / `warn` / `block`.
+
+| | Lens | Asks |
+|---|---|---|
+| ✅ | **Security** | Does this expose something, or open a privilege-escalation path? |
+| ✅ | **Dependencies** | What breaks if this is removed? Is it still in use? Can it be recovered? |
+| ✅ | **Compliance** | Which CIS and SOC 2 controls flip? |
+| 🟡 | **Cost** | What does it cost before and after? (early: a fixed price table) |
+| 🟡 | **Limits** | Will it hit an AWS quota? (early: AWS default quotas) |
+| 🔜 | **Yours** | Bring your own evaluator, run against the same branch contract. |
+
+---
+
+## Try it
 
 ```bash
 npx @emfirge/mcp install
 ```
 
-Then ask your assistant to scan using a read-only role and region. Example placeholder only:
+Then tell your assistant:
 
 ```text
-Scan with arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
+Help me set up Emfirge, then scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 ```
 
-The account ID above is intentionally non-existent example data. Use your own role when running a real scan.
+The account ID is a placeholder. Setup gives you a one-click CloudFormation link for a read-only role, and you can delete the stack any time to revoke access.
 
-## The 18 MCP tools
+The installer sets up Claude Desktop, Claude Code, Cursor, VS Code, Kiro, Cline, Continue and Codex, and you can configure any other MCP client by hand. You can also use the [API](https://emfirge.cloud/docs) or the [branch CLI](backend/BRANCH-CLI.md). See all the tools in the [MCP README][mcp-readme].
 
-### Analyze
+---
 
-| Tool | Purpose |
-|---|---|
-| `emfirge_scan` | Scan an AWS account and return risk score, finding counts, and `analysis_id`. |
-| `emfirge_get_findings` | Return findings for a scan, optionally filtered by severity. |
-| `emfirge_attack_paths` | Return internet-to-resource paths, chokepoints, and orphaned resources. |
-| `emfirge_simulate_breach` | Walk a natural-language scenario through entry, pivot, impact, and blast radius. |
-| `emfirge_verify_fix` | Simulate a supported finding fix and return score and finding deltas. |
-| `emfirge_check_compliance` | Return CIS AWS Foundations 1.5 or SOC 2 per-control status. |
+## Built to be trusted
 
-### Branch
+Every behaviour of the engine is pinned by a numbered **law**, a property test that must always hold. There are 47 so far, for example:
 
-| Tool | Purpose |
-|---|---|
-| `emfirge_create_branch` | Create an isolated branch from a completed analysis. |
-| `emfirge_apply_change` | Apply an add, modify, or delete change to the branch model, not AWS. |
-| `emfirge_branch_diff` | Compare the branch model with its base analysis. |
-| `emfirge_branch_verdict` | Return advisory `block`, `warn`, or `pass` results and coverage details. |
-| `emfirge_rollback_branch` | Remove the most recent modeled change. |
-| `emfirge_rollback_branch_to_count` | Truncate a branch to a selected existing change count. |
-| `emfirge_discard_branch` | Discard an isolated branch. |
-| `emfirge_list_branches` | List branches, optionally by base analysis. |
-| `emfirge_compare_branches` | Compare branches and rank modeled outcomes safest-first. |
+> **L1:** an empty branch scores exactly like the live scan.<br>
+> **L7:** the same snapshot and changes always give the same verdict.<br>
+> **L9:** your identifiers never appear in free-text output.<br>
+> **L12:** evidence can make a verdict stricter, never looser.<br>
+> **L21:** a Terraform security-group rule and the equivalent AWS API call get the same verdict.
 
-### Setup
+The checks come from public sources rather than hand-written lists: [pathfinding.cloud](https://pathfinding.cloud) escalation paths, policy_sentry IAM data, and AWS schemas. Every CI run publishes a scorecard.
 
-| Tool | Purpose |
-|---|---|
-| `emfirge_setup_help` | Return a CloudFormation deploy URL for a read-only IAM role. |
+**What Emfirge does not claim:** a branch is a model of your cloud, so a `pass` is evidence, not a guarantee. If any part of the check was skipped, the verdict says so. Today Emfirge is a safe workspace, not a gate that blocks a live apply.
 
-## Privacy
+---
 
-The MCP supports `strict` (default), `balanced`, and `off` modes. In `strict`, recognized AWS identifiers are tokenized locally before results reach the LLM; the mapping stays on the local machine. The backend receives the data needed to perform the requested analysis. Credentials in presigned report URLs are scrubbed before URLs are returned. Review outputs under your own data-handling policy.
+<details>
+<summary><b>What changes can a branch model today?</b></summary>
 
-```bash
-npx @emfirge/mcp privacy
-npx @emfirge/mcp privacy strict|balanced|off
-```
+| Resource type | Add | Modify | Delete |
+|---|:-:|:-:|:-:|
+| EC2 instance, security group, RDS instance, S3 bucket, Lambda function, network ACL | ✅ | ✅ | ✅ |
+| IAM role (including trust policy) | ✅ | ✅ | ✅ |
+| IAM user | ✅ | | |
+| RDS snapshot | ✅ | | ✅ |
+| EBS volume, EBS snapshot | | | ✅ |
+| IAM role policy, route table | | ✅ | |
 
-## Typical flow
+The live `GET /branches/capabilities` endpoint is the authoritative list. Anything not modeled degrades the verdict rather than passing.
 
-```text
-read-only scan → fork graph → apply modeled change → diff → re-run lenses → advisory verdict
-```
+</details>
 
-A non-empty `coverage_warnings` field means the verdict is degraded and must not be described as complete coverage. A `pass` is not a guarantee of safety or application connectivity.
+<details>
+<summary><b>Repository layout and licenses</b></summary>
 
-## Manual MCP configuration
+| Path | What it is | License |
+|---|---|---|
+| [`backend/`](backend) | The engine: collector, graph, branches, input adapters, lenses, verdict, hand-back | AGPL-3.0 |
+| [`mcp/`](mcp) | `@emfirge/mcp`, the MCP server and CLI | Apache-2.0 |
+| [`site/`](site) | Docs at [emfirge.cloud/docs][docs] | AGPL-3.0 |
+| [`iam-role.yaml`](iam-role.yaml) | The read-only customer role | AGPL-3.0 |
 
-```json
-{
-  "mcpServers": {
-    "emfirge": {
-      "command": "npx",
-      "args": ["-y", "@emfirge/mcp"],
-      "env": { "EMFIRGE_PRIVACY": "strict" }
-    }
-  }
-}
-```
+</details>
 
-See the [MCP README][mcp-readme] and [documentation][docs] for usage details.
-
-## License
-
-The MCP package is licensed under Apache-2.0. The engine is licensed under AGPL-3.0.
+[Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) · [Privacy](PRIVACY.md)
 
 [docs]: https://emfirge.cloud/docs
 [quickstart]: https://emfirge.cloud/docs/quickstart
 [npm]: https://www.npmjs.com/package/@emfirge/mcp
-[mcp-readme]: https://github.com/theanshsonkar/emfirge/tree/main/mcp
+[mcp-readme]: mcp/README.md
