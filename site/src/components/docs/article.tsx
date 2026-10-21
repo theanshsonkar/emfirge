@@ -4,7 +4,7 @@ import { CodeBlock } from "./code-block";
 import { documents, SOURCE_URL, type Doc } from "./content";
 
 function Inline({text}:{text:string}) {
- return <>{text.split(/(`[^`]+`|\[[^\]]+\]\([^)]+\))/g).map((part,i)=>{if(part.startsWith("`"))return <code key={i}>{part.slice(1,-1)}</code>;const link=part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);return link?<Link key={i} href={link[2]}>{link[1]}</Link>:part;})}</>;
+ return <>{text.split(/(`[^`]+`|\[[^\]]+\]\([^)]+\)|\{soon\})/g).map((part,i)=>{if(part==="{soon}")return <span key={i} className="soon-badge">Coming soon</span>;if(part.startsWith("`"))return <code key={i}>{part.slice(1,-1)}</code>;const link=part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);return link?<Link key={i} href={link[2]}>{link[1]}</Link>:part;})}</>;
 }
 export function DocArticle({doc}:{doc:Doc}){
  const index=documents.findIndex(d=>d.slug===doc.slug),previous=documents[index-1],next=documents[index+1];

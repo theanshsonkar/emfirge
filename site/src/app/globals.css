@@ -527,6 +527,13 @@
 .nav-group li a {display:block;padding:6px 11px;margin:2px 0;font-size:12.5px;line-height:1.6;color:var(--docs-muted);border-radius:6px;}
 .nav-group li a:hover {color:var(--docs-text);background:var(--docs-panel);}
 .nav-group li a.active {background:var(--docs-panel-2);color:var(--docs-text);font-weight:500;}
+.nav-group-toggle {display:flex;align-items:center;gap:7px;width:calc(100% - 10px);margin:0 0 8px 10px;padding:0;font-size:12px;font-weight:600;color:var(--docs-text);background:none;border:0;cursor:pointer;text-align:left;}
+.nav-group-toggle:hover .nav-group-chevron {color:var(--docs-text);}
+.nav-group-toggle:focus-visible {outline:2px solid var(--docs-border);outline-offset:3px;border-radius:4px;}
+.nav-group-count {font-size:10.5px;font-weight:500;color:var(--docs-muted);border:1px solid var(--docs-border);border-radius:999px;padding:0 6px;line-height:16px;}
+.nav-group-chevron {margin-left:auto;margin-right:11px;color:var(--docs-muted);transition:transform .15s ease;}
+.nav-group-toggle[aria-expanded="true"] .nav-group-chevron {transform:rotate(90deg);}
+.nav-group-collapsible ul[hidden] {display:none;}
 .sidebar-bottom {border-top:1px solid var(--docs-border);padding:21px 7px 3px;display:flex;align-items:center;gap:10px;color:var(--docs-muted);}
 .sidebar-bottom strong {display:block;font-size:11px;font-weight:500;color:var(--docs-text);}
 .sidebar-bottom span {display:block;font-size:10px;margin-top:2px;}
@@ -638,6 +645,7 @@
 .doc-article :is(p,td,li) code {font-family:var(--font-geist-mono);font-size:.86em;background:var(--docs-panel-2);border-radius:4px;padding:2px 5px;color:var(--docs-text);overflow-wrap:break-word;}
 .doc-note {display:flex;align-items:flex-start;gap:11px;border:1px solid var(--docs-border);background:var(--docs-panel);padding:16px 18px;border-radius:8px;margin-top:21px;color:var(--docs-muted);}
 .doc-note>svg {flex-shrink:0;margin-top:3px;}
+.soon-badge {display:inline-block;font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;line-height:1;padding:3px 7px;border:1px solid var(--docs-border);border-radius:999px;background:var(--docs-panel);color:var(--docs-muted);vertical-align:middle;margin-right:6px;white-space:nowrap;}
 .doc-note p {font-size:12px;line-height:1.85;overflow-wrap:break-word;}
 .doc-table-wrap {margin-top:24px;overflow-x:auto;border:1px solid var(--docs-border);border-radius:8px;}
 .doc-table-wrap table {width:100%;border-collapse:collapse;font-size:12px;line-height:1.8;}
