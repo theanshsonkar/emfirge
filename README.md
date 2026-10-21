@@ -87,7 +87,7 @@ Help me set up Emfirge, then scan arn:aws:iam::123456789012:role/EmfirgeReadOnly
 
 The account ID is a placeholder. Setup gives you a one-click CloudFormation link for a read-only role, and you can delete the stack any time to revoke access.
 
-The installer sets up Claude Desktop, Claude Code, Cursor, VS Code, Kiro, Cline, Continue and Codex, and you can configure any other MCP client by hand. You can also use the [API](https://emfirge.cloud/docs) or the [branch CLI](backend/BRANCH-CLI.md). See all the tools in the [MCP README][mcp-readme].
+The installer sets up Claude Desktop, Claude Code, Cursor, Kiro, Cline, Continue and Codex, and you can configure any other MCP client by hand. You can also use the [API](https://emfirge.cloud/docs) or the [branch CLI](backend/BRANCH-CLI.md). See all the tools in the [MCP README][mcp-readme].
 
 ---
 
