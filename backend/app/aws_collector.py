@@ -862,10 +862,24 @@ def collect_rds(key, secret, token, region, warnings) -> RDSData:
             if not db.get('EnabledCloudwatchLogsExports', []):
                 without_log_exports.append(name)
             
+            # The primary's subnet: the group subnet in the instance's AZ.
+            subnet_id = None
+            try:
+                az = db.get('AvailabilityZone')
+                for subnet in (db.get('DBSubnetGroup') or {}).get('Subnets', []) or []:
+                    if az and (subnet.get('SubnetAvailabilityZone') or {}).get('Name') == az:
+                        subnet_id = subnet.get('SubnetIdentifier')
+                        break
+            except (AttributeError, TypeError):
+                subnet_id = None
+            port = (db.get('Endpoint') or {}).get('Port')
+
             # Add to relationship tracking
             rds_instances.append({
                 'id': name,
                 'sg_ids': sg_ids,
+                'subnet_id': subnet_id,
+                'port': port,
                 'publicly_accessible': is_public,
                 'encrypted': is_encrypted,
                 'engine': db.get('Engine'),

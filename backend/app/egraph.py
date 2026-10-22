@@ -21,6 +21,7 @@ from app.cidr import INTERNET_CIDRS, is_internet_cidr
 from app.models import AWSInfrastructure
 import app.iam_classifier as iam_classifier
 from app.iam_escalation import matching_paths
+from app.rds_ports import ports_cover, rds_port
 
 
 GRAPH_SCHEMA_VERSION = 1
@@ -1458,10 +1459,15 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
     sg_evidence = {}
     instance_evidence = {}
     instance_by_id = {_value(instance, 'id'): instance for instance in infrastructure.ec2.instances}
+    rds_names = {_value(rds, 'id') for rds in infrastructure.rds.rds_instances}
     for sg in infrastructure.ec2.security_groups:
         sg_id = _value(sg, 'id')
         attached_to = _value(sg, 'attached_to', []) or []
         for instance_id in attached_to:
+            if instance_id not in instance_by_id and instance_id in rds_names:
+                # attached_to is the EC2 back-reference; RDS is judged below
+                # with its own publicly_accessible, subnet and port.
+                continue
             instance = instance_by_id.get(instance_id)
             subnet_id = _value(instance, 'subnet_id') if instance is not None else None
             resource_node = _graph_node(reachability_graph, instance_id) or {'id': instance_id}
@@ -1474,11 +1480,27 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
             if sg_evidence_for_sg:
                 chosen_sg = sorted(sg_evidence_for_sg, key=lambda item: (str(item['ports']), item['reason'], item['confidence']))[0]
                 sg_evidence[sg_id] = min((sg_evidence.get(sg_id), chosen_sg), key=lambda item: (str(item['ports']), item['reason'], item['confidence'])) if sg_id in sg_evidence else chosen_sg
+    # Publicly accessible RDS instances: a public endpoint, a public-subnet
+    # route, and an SG/NACL path that admits the database port.
+    rds_evidence = {}
+    for rds in infrastructure.rds.rds_instances:
+        if not _value(rds, 'publicly_accessible', False):
+            continue
+        rds_name = _value(rds, 'id')
+        rds_node_id = id_plan.id('rds_instance', rds_name)
+        db_port = rds_port(rds)
+        resource_node = _graph_node(reachability_graph, rds_node_id) or {'id': rds_node_id, 'type': 'rds_instance'}
+        evidence = [item for item in internet_ingress(resource_node, _value(rds, 'subnet_id'), list(_value(rds, 'sg_ids', []) or []), reachability_graph)
+                    if ports_cover(item['ports'], db_port)]
+        if evidence:
+            rds_evidence[rds_node_id] = sorted(evidence, key=lambda item: (str(item['ports']), item['reason'], item['confidence']))[0]
+    if (instance_evidence or sg_evidence or rds_evidence) and not internet_node_added:
+        nodes.append({'id': 'INTERNET', 'type': 'internet', 'label': 'Internet', 'metadata': {'is_virtual': True}})
+        internet_node_added = True
     for instance_id, evidence in sorted(instance_evidence.items()):
-        if not internet_node_added:
-            nodes.append({'id': 'INTERNET', 'type': 'internet', 'label': 'Internet', 'metadata': {'is_virtual': True}})
-            internet_node_added = True
         edges.append({'from': 'INTERNET', 'to': instance_id, 'relationship': 'REACHES_VIA_SG', 'attrs': evidence})
+    for rds_node_id, evidence in sorted(rds_evidence.items()):
+        edges.append({'from': 'INTERNET', 'to': rds_node_id, 'relationship': 'REACHES_VIA_SG', 'attrs': evidence})
     for sg_id, evidence in sorted(sg_evidence.items()):
         edges.append({'from': 'INTERNET', 'to': sg_id, 'relationship': 'REACHES', 'attrs': evidence})
 

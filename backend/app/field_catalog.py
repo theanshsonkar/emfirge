@@ -74,6 +74,7 @@ CATALOG: dict[str, dict[str, Source]] = {
         "publicly_accessible": Aws("rds", "CreateDBInstance", "PubliclyAccessible"),
         "encrypted": Aws("rds", "CreateDBInstance", "StorageEncrypted"),
         "engine": Aws("rds", "CreateDBInstance", "Engine"),
+        "port": Aws("rds", "CreateDBInstance", "Port"),
         "backup_retention_days": Aws("rds", "CreateDBInstance", "BackupRetentionPeriod"),
         "deletion_protection": Aws("rds", "CreateDBInstance", "DeletionProtection"),
         "tags": _TAGS,

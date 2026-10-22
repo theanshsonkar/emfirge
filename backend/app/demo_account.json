@@ -207,6 +207,7 @@
         "encrypted": true,
         "engine": null,
         "id": "demo-postgres",
+        "port": null,
         "publicly_accessible": false,
         "sg_ids": [
           "sg-demo-db"

@@ -85,6 +85,7 @@ class RDSInstance(BaseModel):
     publicly_accessible: bool = False
     encrypted: bool = False
     engine: Optional[str] = None
+    port: Optional[int] = None  # None = not collected
     backup_retention_days: Optional[int] = None
     deletion_protection: Optional[bool] = None
     tags: Optional[Dict[str, str]] = None  # None = not collected
