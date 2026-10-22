@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Callable
+import json
 
 from app.mutations import Change
 from app.aws_collector import build_security_group_rule
@@ -76,6 +77,20 @@ _UNSEEN_EC2_OPERATIONS = frozenset({
 })
 
 
+def _sharing_unseen(service: str, operation: str, parameters: dict[str, Any]) -> bool:
+    if service == "ec2" and operation == "ModifySnapshotAttribute":
+        return parameters.get("Attribute") == "createVolumePermission" or any(
+            key in parameters for key in ("CreateVolumePermission", "UserIds", "GroupNames")
+        )
+    if service == "ec2" and operation == "ModifyImageAttribute":
+        return parameters.get("Attribute") == "launchPermission" or any(
+            key in parameters for key in ("LaunchPermission", "UserIds", "UserGroups", "OrganizationArns", "OrganizationalUnitArns")
+        )
+    if service == "ec2" and operation in {"DisableSnapshotBlockPublicAccess", "DisableImageBlockPublicAccess"}:
+        return True
+    return service == "rds" and operation in {"ModifyDBSnapshotAttribute", "ModifyDBClusterSnapshotAttribute"} and str(parameters.get("AttributeName", "")).lower() == "restore"
+
+
 def _unmodeled(address: str, service: str, operation: str, detail: str | None = None) -> dict[str, Any]:
     if operation.startswith(_DELETE_PREFIXES):
         actions = ["delete"]
@@ -108,6 +123,56 @@ def _permission_list(parameters: dict[str, Any]) -> list[dict[str, Any]]:
             legacy["IpRanges"] = [{"CidrIp": legacy.pop("CidrIp")}]
         return [legacy]
     raise _invalid()
+
+
+def _policy_statements(document: Any) -> list:
+    if isinstance(document, str):
+        import urllib.parse
+        document = json.loads(urllib.parse.unquote(document))
+    if not isinstance(document, dict):
+        raise _invalid()
+    rows = document.get("Statement", [])
+    if isinstance(rows, dict): rows = [rows]
+    if not isinstance(rows, list): raise _invalid()
+    from app.models import AccessStatement
+    result = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("Effect"), str): continue
+        ak = "NotAction" if "NotAction" in row else "Action"
+        rk = "NotResource" if "NotResource" in row else "Resource"
+        actions, resources = row.get(ak, []), row.get(rk, [])
+        if isinstance(actions, str): actions = [actions]
+        if isinstance(resources, str): resources = [resources]
+        if not isinstance(actions, list) or not isinstance(resources, list): continue
+        actions = list(dict.fromkeys(x for x in actions if isinstance(x, str)))
+        resources = list(dict.fromkeys(x for x in resources if isinstance(x, str)))
+        if actions or resources:
+            result.append(AccessStatement(effect=row["Effect"].lower(), actions=actions, resources=resources,
+                is_not_action=ak == "NotAction", is_not_resource=rk == "NotResource",
+                has_condition=bool(row.get("Condition"))))
+    return result
+
+
+def _role_value(role: Any, field: str, default=None):
+    return role.get(field, default) if isinstance(role, dict) else getattr(role, field, default)
+
+
+def _statement_dicts(statements: list) -> list[dict]:
+    return [item.model_dump(mode="json") if hasattr(item, "model_dump") else copy.deepcopy(item) for item in statements]
+
+
+def _role_change(role: Any, records: list, address: str):
+    from app.models import PolicyDocumentRecord, merge_policy_statements
+    normalized = [item.model_dump(mode="json") if hasattr(item, "model_dump") else copy.deepcopy(item) for item in records]
+    statements = merge_policy_statements([
+        item if isinstance(item, PolicyDocumentRecord) else PolicyDocumentRecord.model_validate(item)
+        for item in records
+    ])
+    role["policy_documents"] = copy.deepcopy(normalized)
+    role["access_statements"] = statements
+    return Change(op="modify", resource_type="iam_role_policy", resource_id=role["role_arn"],
+                  fields={"policy_documents": [item.model_dump(mode="json") if hasattr(item, "model_dump") else item for item in records],
+                          "access_statements": _statement_dicts(statements)})
 
 
 def _validate_permission(permission: dict[str, Any]) -> None:
@@ -171,12 +236,12 @@ def _security_group_change(address, operation, parameters, working, sg_rules, un
     field = "egress_rules" if egress else "rules"
     return Change(op="modify", resource_type="security_group", resource_id=group_id,
                   fields={field: copy.deepcopy(current)})
-
-
 def translate_api_calls(
     doc: Any, resolve_role_arn: Callable[[str], str | None] | None = None,
     sg_rules: Callable[[str], list[dict] | None] | None = None,
     nacls: Callable[[str], Any] | None = None,
+    role_policies: list[Any] | None = None,
+    ec2_instances: list[Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(doc, dict) or doc.get("format") != "aws-api-calls/1":
         raise _invalid()
@@ -189,6 +254,14 @@ def translate_api_calls(
     unknown_fields: list[dict[str, Any]] = []
     working: dict[str, list[dict]] = {}
     working_nacls: dict[str, Any] = {}
+    working_roles = {
+        _role_value(role, "role_name"): {"role_arn": _role_value(role, "role_arn"),
+            "policy_names": list(_role_value(role, "policy_names", []) or []),
+            "policy_documents": copy.deepcopy([item.model_dump() if hasattr(item, "model_dump") else item for item in (_role_value(role, "policy_documents") or [])]) if _role_value(role, "policy_documents") is not None else None,
+            "access_statements": copy.deepcopy(_role_value(role, "access_statements", []) or [])}
+        for role in (role_policies or [])
+    }
+    working_instances = {(_role_value(item, "id")): item for item in (ec2_instances or [])}
     for index, call in enumerate(calls):
         if not isinstance(call, dict):
             raise _invalid()
@@ -202,6 +275,118 @@ def translate_api_calls(
         if parameters.get("DryRun") is True or operation.startswith(_READ_ONLY_PREFIXES):
             continue
         lower_service = service.lower()
+        if _sharing_unseen(lower_service, operation, parameters):
+            item = _unmodeled(address, lower_service, operation)
+            item["unseen"] = True
+            item["detail"] = f"{operation} can share a snapshot or image with other AWS accounts or the public, and Emfirge does not read sharing yet"
+            unmodeled.append(item)
+            continue
+        if lower_service == "iam" and operation in {"CreateRole", "UpdateAssumeRolePolicy", "CreateUser"}:
+            if operation == "CreateRole":
+                role_name = parameters.get("RoleName")
+                if not _valid_string(role_name):
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "missing RoleName")); continue
+                document = parameters.get("AssumeRolePolicyDocument")
+                try:
+                    if isinstance(document, str): document = json.loads(document)
+                    if not isinstance(document, dict): raise ValueError
+                except Exception as exc: raise _invalid() from exc
+                for field in parameters:
+                    if field not in {"RoleName", "AssumeRolePolicyDocument", "Tags"}:
+                        unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+                changes.append(Change(op="add", resource_type="iam_role", resource_id=role_name, fields={"trust_policy": document})); addresses.append(address); continue
+            if operation == "UpdateAssumeRolePolicy":
+                role_name, document = parameters.get("RoleName"), parameters.get("PolicyDocument")
+                if not _valid_string(role_name):
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "missing RoleName")); continue
+                try:
+                    if isinstance(document, str): document = json.loads(document)
+                    if not isinstance(document, dict): raise ValueError
+                except Exception as exc: raise _invalid() from exc
+                for field in parameters:
+                    if field not in {"RoleName", "PolicyDocument"}:
+                        unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+                changes.append(Change(op="modify", resource_type="iam_role", resource_id=role_name, fields={"trust_policy": document})); addresses.append(address); continue
+            user_name = parameters.get("UserName")
+            if not _valid_string(user_name):
+                unmodeled.append(_unmodeled(address, lower_service, operation, "missing UserName")); continue
+            for field in parameters:
+                if field not in {"UserName", "Tags"}:
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            changes.append(Change(op="add", resource_type="iam_user", resource_id=user_name, fields={})); addresses.append(address); continue
+        if lower_service == "iam" and operation in {"PutRolePolicy", "DeleteRolePolicy", "AttachRolePolicy", "DetachRolePolicy"}:
+            if role_policies is None:
+                item = _unmodeled(address, lower_service, operation, "IAM role policy state is unavailable")
+                item["unseen"] = True
+                unmodeled.append(item)
+                continue
+            role_name = parameters.get("RoleName")
+            role = working_roles.get(role_name)
+            if role is None:
+                unmodeled.append(_unmodeled(address, lower_service, operation, "role target not in snapshot")); continue
+            if operation == "PutRolePolicy":
+                name, doc = parameters.get("PolicyName"), parameters.get("PolicyDocument")
+                if not _valid_string(name) or doc is None: raise _invalid()
+                from app.models import PolicyDocumentRecord, merge_policy_statements
+                statements = _policy_statements(doc)
+                if role["policy_documents"] is None:
+                    if name in role["policy_names"]:
+                        unmodeled.append(_unmodeled(address, lower_service, operation, "PutRolePolicy replaces an inline policy whose current statements Emfirge did not record")); unmodeled[-1]["unseen"] = True
+                    else:
+                        role["access_statements"] = merge_policy_statements([PolicyDocumentRecord(name="existing", kind="inline", statements=role["access_statements"]), PolicyDocumentRecord(name=name, kind="inline", statements=statements)])
+                        changes.append(Change(op="modify", resource_type="iam_role_policy", resource_id=role["role_arn"], fields={"access_statements": _statement_dicts(role["access_statements"])})); addresses.append(address)
+                else:
+                    records = [PolicyDocumentRecord.model_validate(item) for item in role["policy_documents"] if not (item.get("kind") == "inline" and item.get("name") == name)]
+                    records.append(PolicyDocumentRecord(name=name, kind="inline", statements=statements)); records.sort(key=lambda item: (item.kind, item.name, item.arn or ""))
+                    changes.append(_role_change(role, records, address)); addresses.append(address)
+                continue
+            if role["policy_documents"] is None:
+                detail = f"{operation} removes an inline policy whose statements Emfirge did not record" if operation == "DeleteRolePolicy" else f"{operation} removes a managed policy whose document Emfirge did not record"
+                item = _unmodeled(address, lower_service, operation, detail); item["unseen"] = True; unmodeled.append(item); continue
+            from app.models import PolicyDocumentRecord
+            name = parameters.get("PolicyName")
+            if operation in {"DeleteRolePolicy", "DetachRolePolicy"}:
+                arn = parameters.get("PolicyArn")
+                kind = "inline" if operation == "DeleteRolePolicy" else "managed"
+                matches = [item for item in role["policy_documents"] if item.get("kind") == kind and ((name and item.get("name") == name) or (arn and item.get("arn") == arn))]
+                if not matches:
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "policy is not attached")); continue
+                records = [PolicyDocumentRecord.model_validate(item) for item in role["policy_documents"] if item not in matches]
+                changes.append(_role_change(role, records, address)); addresses.append(address)
+            else:
+                arn = parameters.get("PolicyArn")
+                source = next((r for other in working_roles.values() for r in (other["policy_documents"] or []) if r.get("kind") == "managed" and r.get("arn") == arn), None)
+                if source is None:
+                    item = _unmodeled(address, lower_service, operation, "AttachRolePolicy attaches a managed policy whose document Emfirge did not record"); item["unseen"] = True; unmodeled.append(item); continue
+                if any(r.get("arn") == arn for r in role["policy_documents"]): continue
+                records = [PolicyDocumentRecord.model_validate(item) for item in role["policy_documents"]] + [PolicyDocumentRecord.model_validate(source)]
+                records.sort(key=lambda item: (item.kind, item.name, item.arn or ""))
+                changes.append(_role_change(role, records, address)); addresses.append(address)
+            continue
+        if lower_service == "ec2" and operation == "ModifyInstanceMetadataOptions":
+            if ec2_instances is None:
+                item = _unmodeled(address, lower_service, operation, "EC2 instance metadata state is unavailable")
+                item["unseen"] = True
+                unmodeled.append(item)
+                continue
+            instance_id = parameters.get("InstanceId")
+            instance = working_instances.get(instance_id)
+            if instance is None:
+                unmodeled.append(_unmodeled(address, lower_service, operation, "instance target not in snapshot")); continue
+            for field in ("HttpEndpoint", "HttpPutResponseHopLimit", "HttpProtocolIpv6", "InstanceMetadataTags"):
+                if field in parameters: unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            if "HttpTokens" not in parameters: continue
+            if parameters["HttpTokens"] not in {"required", "optional"}: raise _invalid()
+            value = parameters["HttpTokens"] == "required"
+            current = _role_value(instance, "imdsv2_required")
+            if current == value: continue
+            changes.append(Change(op="modify", resource_type="ec2_instance", resource_id=instance_id, fields={"imdsv2_required": value})); addresses.append(address)
+            if isinstance(instance, dict): instance["imdsv2_required"] = value
+            else: instance.imdsv2_required = value
+            continue
+            item["detail"] = f"{operation} can share a snapshot or image with other AWS accounts or the public, and Emfirge does not read sharing yet"
+            unmodeled.append(item)
+            continue
         if lower_service == "ec2" and operation in {"AuthorizeSecurityGroupIngress", "RevokeSecurityGroupIngress", "AuthorizeSecurityGroupEgress", "RevokeSecurityGroupEgress"}:
             if "GroupId" not in parameters:
                 unmodeled.append(_unmodeled(address, lower_service, operation)); continue
@@ -295,6 +480,34 @@ def translate_api_calls(
             if fields:
                 changes.append(Change(op="modify", resource_type="rds_instance", resource_id=parameters["DBInstanceIdentifier"], fields=fields))
                 addresses.append(address)
+            continue
+        if lower_service == "ec2" and operation == "CreateNatGateway":
+            if not _valid_string(parameters.get("SubnetId")):
+                raise _invalid()
+            fields = {"subnet_id": parameters["SubnetId"]}
+            for source, target in (("ConnectivityType", "connectivity_type"), ("AllocationId", "allocation_id")):
+                if source in parameters:
+                    if not _valid_string(parameters[source]):
+                        raise _invalid()
+                    fields[target] = parameters[source]
+            for field in parameters:
+                if field not in {"SubnetId", "ConnectivityType", "AllocationId", "TagSpecifications", "ClientToken"}:
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            # AWS assigns the NAT id; an empty id lets the branch generate a stable placeholder.
+            changes.append(Change(op="add", resource_type="nat_gateway", resource_id="", fields=fields))
+            addresses.append(address)
+            continue
+        if lower_service == "rds" and operation == "CreateDBSnapshot":
+            if not _valid_string(parameters.get("DBSnapshotIdentifier")):
+                unmodeled.append(_unmodeled(address, lower_service, operation))
+                continue
+            if not _valid_string(parameters.get("DBInstanceIdentifier")):
+                raise _invalid()
+            for field in parameters:
+                if field not in {"DBSnapshotIdentifier", "DBInstanceIdentifier", "Tags"}:
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            changes.append(Change(op="add", resource_type="rds_snapshot", resource_id=parameters["DBSnapshotIdentifier"], fields={"db_instance_id": parameters["DBInstanceIdentifier"]}))
+            addresses.append(address)
             continue
         mapped = _MAPPED.get((lower_service, operation))
         if mapped is None:

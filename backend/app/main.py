@@ -17,12 +17,10 @@ import tempfile
 import hashlib
 import copy
 import logging
+import math
 from datetime import datetime, date, timezone
 from collections import defaultdict
 from dotenv import load_dotenv
-
-# AGENTOPS IMPORT
-import agentops
 
 from app.models import (
     AWSCredentials, AnalysisResponse,
@@ -39,6 +37,7 @@ from app.models import (
 from app.diffing import DiffResult
 from app.cidr import is_internet_cidr
 from app.mutations import Change, MutationCapabilities, apply_change, mutation_capabilities
+from app.trusted_account import verified_trusted_account_id
 from app.typed_handback import UnmappableChanges, build_api_calls, canonical_sha256
 from app.plan_ingest import translate_plan
 from app.aws_api_ingest import translate_api_calls, validate_change_regions
@@ -87,18 +86,18 @@ _insight_request_log: dict = defaultdict(list)
 _INSIGHT_LIMIT = 5       # max requests
 _INSIGHT_WINDOW = 60     # seconds
 
-def _check_insight_rate_limit(ip: str) -> None:
-    """Raises HTTP 429 if the IP has exceeded 5 requests in the last 60 seconds."""
+def _check_insight_rate_limit(key: str) -> None:
+    """Raises HTTP 429 if the key has exceeded 5 requests in the last 60 seconds."""
     now = time.time()
     window_start = now - _INSIGHT_WINDOW
     # Prune timestamps outside the window
-    _insight_request_log[ip] = [t for t in _insight_request_log[ip] if t > window_start]
-    if len(_insight_request_log[ip]) >= _INSIGHT_LIMIT:
+    _insight_request_log[key] = [t for t in _insight_request_log[key] if t > window_start]
+    if len(_insight_request_log[key]) >= _INSIGHT_LIMIT:
         raise HTTPException(
             status_code=429,
             detail=f'Rate limit reached. You can generate {_INSIGHT_LIMIT} AI insights per minute. Please wait a moment and try again.'
         )
-    _insight_request_log[ip].append(now)
+    _insight_request_log[key].append(now)
 
 # ── IN-MEMORY RATE LIMITER FOR TERRAFORM + PR ENDPOINTS ──────────
 _terraform_request_log: dict = defaultdict(list)
@@ -110,31 +109,32 @@ _PR_LIMIT = 10
 _PR_WINDOW = 60
 
 # ── IN-MEMORY RATE LIMITER FOR SIMULATE ENDPOINT ─────────────────
+_SIMULATE_LIMIT = 10
 _simulate_request_log: dict = {}
 
-def _check_terraform_rate_limit(ip: str) -> None:
-    """Raises HTTP 429 if the IP has exceeded 5 terraform requests in the last 60 seconds."""
+def _check_terraform_rate_limit(key: str) -> None:
+    """Raises HTTP 429 if the key has exceeded 5 terraform requests in the last 60 seconds."""
     now = time.time()
     window_start = now - _TERRAFORM_WINDOW
-    _terraform_request_log[ip] = [t for t in _terraform_request_log[ip] if t > window_start]
-    if len(_terraform_request_log[ip]) >= _TERRAFORM_LIMIT:
+    _terraform_request_log[key] = [t for t in _terraform_request_log[key] if t > window_start]
+    if len(_terraform_request_log[key]) >= _TERRAFORM_LIMIT:
         raise HTTPException(
             status_code=429,
             detail=f'Rate limit reached. You can generate {_TERRAFORM_LIMIT} Terraform fixes per minute. Please wait a moment and try again.'
         )
-    _terraform_request_log[ip].append(now)
+    _terraform_request_log[key].append(now)
 
-def _check_pr_rate_limit(ip: str) -> None:
-    """Raises HTTP 429 if the IP has exceeded 10 PR requests in the last 60 seconds."""
+def _check_pr_rate_limit(key: str) -> None:
+    """Raises HTTP 429 if the key has exceeded 10 PR requests in the last 60 seconds."""
     now = time.time()
     window_start = now - _PR_WINDOW
-    _pr_request_log[ip] = [t for t in _pr_request_log[ip] if t > window_start]
-    if len(_pr_request_log[ip]) >= _PR_LIMIT:
+    _pr_request_log[key] = [t for t in _pr_request_log[key] if t > window_start]
+    if len(_pr_request_log[key]) >= _PR_LIMIT:
         raise HTTPException(
             status_code=429,
             detail=f'Rate limit reached. You can open {_PR_LIMIT} PRs per minute. Please wait a moment and try again.'
         )
-    _pr_request_log[ip].append(now)
+    _pr_request_log[key].append(now)
 
 
 # Compatibility seam for evidence tests and older integrations; actual STS
@@ -156,14 +156,22 @@ _BRANCH_WINDOW = 60
 
 
 def _check_branch_rate_limit(ip: str) -> None:
-    """Raise HTTP 429 after 30 branch requests per IP in one minute."""
+    """Raise HTTP 429 after the configured branch requests per minute."""
     now = time.time()
+    try:
+        limit = int(os.environ["EMFIRGE_BRANCH_RATE_LIMIT"])
+        if limit < 1:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        limit = _BRANCH_LIMIT
     window_start = now - _BRANCH_WINDOW
     _branch_request_log[ip] = [t for t in _branch_request_log[ip] if t > window_start]
-    if len(_branch_request_log[ip]) >= _BRANCH_LIMIT:
+    if len(_branch_request_log[ip]) >= limit:
+        retry_after = max(1, math.ceil(_branch_request_log[ip][0] + _BRANCH_WINDOW - now))
         raise HTTPException(
             status_code=429,
-            detail='Rate limit reached. Please wait a moment before making more branch requests.',
+            detail=f"Rate limit reached: {limit} branch requests per minute. Retry in {retry_after} s.",
+            headers={"Retry-After": str(retry_after)},
         )
     _branch_request_log[ip].append(now)
 
@@ -259,7 +267,9 @@ def _branch_summary(branch) -> dict:
     }
 
 
-def _branch_request_ip(request: Request) -> str:
+def _rate_key(request: Request, caller: Caller | None) -> str:
+    if caller is not None and getattr(caller, 'project_id', None):
+        return f'project:{caller.project_id}'
     return request.client.host if request.client else 'unknown'
 
 
@@ -306,13 +316,6 @@ def _lookup_resource_name(resource_id: str, resource_type: str) -> Optional[str]
     except Exception as e:
         print(f"[_lookup_resource_name] Error: {e}")
         return None
-
-# AGENTOPS INIT — runs once when server starts
-try:
-    agentops.init(os.getenv('AGENTOPS_API_KEY'))
-except Exception as _agentops_err:
-    logger.warning(f'AgentOps init failed (non-fatal): {_agentops_err}')
-
 
 # Raw mode = caller is an LLM host (MCP, etc.) so we skip Gemini/Claude calls.
 # The host renders the response itself, no need to spend tokens here.
@@ -475,9 +478,19 @@ def history(limit: int = 10, account_id: str = None, caller: Caller = Depends(ge
 
 @app.get('/project')
 def project_info(caller: Caller = Depends(get_caller)):
+    account_id = verified_trusted_account_id()
     if caller.mode == 'hosted':
-        return {'mode': 'hosted', 'project': caller.project_name, 'external_id': caller.external_id}
-    return {'mode': 'self-host', 'external_id': caller.external_id}
+        return {
+            'mode': 'hosted',
+            'project': caller.project_name,
+            'external_id': caller.external_id,
+            'trusted_account_id': account_id,
+        }
+    return {
+        'mode': 'self-host',
+        'external_id': caller.external_id,
+        'trusted_account_id': account_id,
+    }
 
 
 @app.delete('/admin/account-bindings/{aws_account_id}')
@@ -766,14 +779,14 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
     Fast (~2-4s), reliable, cheap. No Sonnet needed.
     Rate limited to 10 requests/minute per IP.
     """
-    # ── RATE LIMIT: 10/min per IP ─────────────────────────────────
-    client_ip = http_request.client.host if http_request.client else 'unknown'
+    # ── RATE LIMIT: 10/min per project (or client IP when unauthenticated) ──
+    rate_key = _rate_key(http_request, caller)
     now = time.time()
-    _simulate_request_log.setdefault(client_ip, [])
-    _simulate_request_log[client_ip] = [t for t in _simulate_request_log[client_ip] if now - t < 60]
-    if len(_simulate_request_log[client_ip]) >= 10:
+    _simulate_request_log.setdefault(rate_key, [])
+    _simulate_request_log[rate_key] = [t for t in _simulate_request_log[rate_key] if now - t < 60]
+    if len(_simulate_request_log[rate_key]) >= _SIMULATE_LIMIT:
         raise HTTPException(status_code=429, detail='Rate limit exceeded. You can run 10 simulations per minute.')
-    _simulate_request_log[client_ip].append(now)
+    _simulate_request_log[rate_key].append(now)
 
     # ── LOAD INFRASTRUCTURE FROM DB ───────────────────────────────
     from app.database import SessionLocal, AnalysisLog
@@ -1248,7 +1261,7 @@ def usage_remaining(account_id: str = Query(...), caller: Caller = Depends(get_c
 
 
 @app.post('/remediation/generate-insight', response_model=RemediationInsightResponse, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def generate_remediation_insight(request: RemediationInsightRequest, http_request: Request, raw: bool = False):
+def generate_remediation_insight(request: RemediationInsightRequest, http_request: Request, raw: bool = False, caller: Caller = Depends(get_caller)):
     """
     Generate AI-powered 'What this fixes' and 'Why it matters' text for a single finding.
     Rate limited to 5 requests/minute per IP.
@@ -1259,8 +1272,7 @@ def generate_remediation_insight(request: RemediationInsightRequest, http_reques
         return RemediationInsightResponse(what_this_fixes='', why_it_matters='')
 
     # Rate limit: 5 requests/minute per IP
-    client_ip = http_request.client.host if http_request.client else 'unknown'
-    _check_insight_rate_limit(client_ip)
+    _check_insight_rate_limit(_rate_key(http_request, caller))
 
     # ── ACCOUNT-BASED DAILY LIMIT: 5/day per account ─────────────
     INSIGHT_DAILY_LIMIT = 5
@@ -1383,13 +1395,12 @@ def _validate_hcl_output(hcl: str, request: TerraformGenerateRequest) -> bool:
 
 
 @app.post('/remediation/generate-terraform', response_model=TerraformGenerateResponse, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def generate_terraform(request: TerraformGenerateRequest, http_request: Request, raw: bool = False):
+def generate_terraform(request: TerraformGenerateRequest, http_request: Request, raw: bool = False, caller: Caller = Depends(get_caller)):
     # Raw mode: MCP host generates HCL itself, skip Claude
     if _is_raw_mode(http_request, raw):
         return TerraformGenerateResponse(hcl='', filename=f"{(request.rule_id or 'fix').lower()}.tf", valid=None, errors=None)
 
-    client_ip = http_request.client.host if http_request.client else 'unknown'
-    _check_terraform_rate_limit(client_ip)
+    _check_terraform_rate_limit(_rate_key(http_request, caller))
 
     # ── ACCOUNT-BASED DAILY LIMIT: 5/day per account ─────────────
     TERRAFORM_DAILY_LIMIT = 5
@@ -1511,7 +1522,7 @@ resource "aws_vpc_security_group_ingress_rule" "fix_ssh" {{
 
 @app.post('/branches/compare', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def compare_branches_endpoint(payload: dict, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_rate_key(request, caller))
     branch_ids = payload.get('branch_ids') if isinstance(payload, dict) else None
     if not isinstance(branch_ids, list) or not all(isinstance(item, str) for item in branch_ids):
         raise HTTPException(status_code=422, detail='branch_ids must be a list of strings')
@@ -1526,7 +1537,7 @@ def compare_branches_endpoint(payload: dict, request: Request, caller: Caller = 
 
 @app.post('/branches', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def create_branch_endpoint(payload: dict, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_rate_key(request, caller))
     if not isinstance(payload, dict) or not isinstance(payload.get('base_analysis_id'), str) or not isinstance(payload.get('name'), str):
         raise HTTPException(status_code=422, detail='base_analysis_id and name are required strings')
     if caller.mode == 'hosted':
@@ -1545,24 +1556,24 @@ def create_branch_endpoint(payload: dict, request: Request, caller: Caller = Dep
 
 @app.get('/branches', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def list_branches_endpoint(request: Request, base_analysis_id: Optional[str] = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_rate_key(request, caller))
     return [_branch_summary(branch) for branch in branches.list_branches(base_analysis_id)
             if _branch_is_visible(branch.branch_id, caller, db)]
 
 
 @app.get('/branches/capabilities', response_model=MutationCapabilities,
          dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def branch_capabilities_endpoint(request: Request):
+def branch_capabilities_endpoint(request: Request, caller: Caller = Depends(get_caller)):
     """List supported branch mutation resource types, operations, and constraints."""
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_rate_key(request, caller))
     return mutation_capabilities()
 
 
 @app.get('/branches/{branch_id}', response_model=branches.BranchDetail,
          dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def get_branch_endpoint(branch_id: str, request: Request):
+def get_branch_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
     """Read branch metadata and ordered changes without returning its base snapshot."""
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_rate_key(request, caller))
     try:
         return branches.read_branch(branch_id)
     except branches.BranchNotFoundError as exc:
@@ -1571,7 +1582,7 @@ def get_branch_endpoint(branch_id: str, request: Request):
 
 @app.post('/branches/{branch_id}/fork', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def fork_branch_endpoint(branch_id: str, request: Request, payload: dict, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_rate_key(request, caller))
     if not isinstance(payload, dict) or not isinstance(payload.get('name'), str) or not payload['name'].strip():
         raise HTTPException(status_code=422, detail='name is required and must be a non-empty string')
     if set(payload) - {'name', 'branch_revision'}:
@@ -1584,11 +1595,22 @@ def fork_branch_endpoint(branch_id: str, request: Request, payload: dict, caller
         raise HTTPException(status_code=422, detail='branch_revision must be a SHA-256 hex string')
     try:
         if expected_revision is None:
-            new_branch_id, num_changes = branches.fork_branch(branch_id, payload['name'])
+            fork_result = branches.fork_branch(branch_id, payload['name'])
         else:
-            new_branch_id, num_changes = branches.fork_branch(
+            fork_result = branches.fork_branch(
                 branch_id, payload['name'], expected_branch_revision=expected_revision,
             )
+        if hasattr(fork_result, 'plan_id_map'):
+            new_branch_id, num_changes = fork_result
+            plan_id_map = fork_result.plan_id_map
+            legacy_fork_result = False
+        elif len(fork_result) == 2:  # compatibility with older integrations/mocks
+            new_branch_id, num_changes = fork_result
+            plan_id_map = {}
+            legacy_fork_result = True
+        else:
+            new_branch_id, num_changes, plan_id_map = fork_result
+            legacy_fork_result = False
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except branches.BranchConflictError as exc:
@@ -1598,7 +1620,9 @@ def fork_branch_endpoint(branch_id: str, request: Request, payload: dict, caller
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     _record_branch_owner(new_branch_id, caller, db)
-    return {'branch_id': new_branch_id, 'num_changes': num_changes}
+    if legacy_fork_result:
+        return {'branch_id': new_branch_id, 'num_changes': num_changes}
+    return {'branch_id': new_branch_id, 'num_changes': num_changes, 'plan_id_map': plan_id_map}
 
 
 async def _ingest_plan_endpoint(
@@ -1607,8 +1631,9 @@ async def _ingest_plan_endpoint(
     translate,
     invalid_detail: str,
     preserve_value_errors: bool = False,
+    caller: Caller = Depends(get_caller),
 ):
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_rate_key(request, caller))
     raw = await request.body()
     digest = hashlib.sha256(raw).hexdigest()
     try:
@@ -1662,9 +1687,10 @@ def _terraform_translator(branch_id: str, document):
 
 
 @app.post('/branches/{branch_id}/plans/terraform', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-async def terraform_plan_endpoint(branch_id: str, request: Request):
+async def terraform_plan_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
     return await _ingest_plan_endpoint(
         branch_id, request, lambda document: _terraform_translator(branch_id, document), 'Invalid Terraform plan JSON schema',
+        caller=caller,
     )
 
 
@@ -1692,7 +1718,17 @@ def _aws_translator(branch_id: str, document, cli: bool = False):
             association_id = acl_id.split(":", 1)[1]
             return next((acl for acl in nacl_map.values() if association_id in acl.association_ids), None)
         return None
-    translated = translate_api_calls(document, resolve_role_arn=role_arns.get, sg_rules=sg_rule_map.get, nacls=nacl_lookup)
+    translated = translate_api_calls(
+        document,
+        resolve_role_arn=role_arns.get,
+        sg_rules=sg_rule_map.get,
+        nacls=nacl_lookup,
+        # These are the rebuilt base-plus-changes snapshot used by the typed
+        # route and verdict.  IAM/IMDS API translation must never inspect only
+        # the immutable base or guess when this state is unavailable.
+        role_policies=state.iam.role_policies,
+        ec2_instances=state.ec2.instances,
+    )
     validate_change_regions(document["calls"], state.region)
     return translated
 
@@ -1721,26 +1757,26 @@ def _cfn_translator(branch_id: str, document):
 
 
 @app.post('/branches/{branch_id}/plans/cloudformation', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-async def cloudformation_plan_endpoint(branch_id: str, request: Request):
+async def cloudformation_plan_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
     return await _ingest_plan_endpoint(
         branch_id, request, lambda document: _cfn_translator(branch_id, document),
-        'Invalid CloudFormation change set document', preserve_value_errors=True,
+        'Invalid CloudFormation change set document', preserve_value_errors=True, caller=caller,
     )
 
 
 @app.post('/branches/{branch_id}/plans/aws-api', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-async def aws_api_plan_endpoint(branch_id: str, request: Request):
+async def aws_api_plan_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
     return await _ingest_plan_endpoint(
         branch_id, request, lambda document: _aws_translator(branch_id, document),
-        'Invalid AWS API calls document', preserve_value_errors=True,
+        'Invalid AWS API calls document', preserve_value_errors=True, caller=caller,
     )
 
 
 @app.post('/branches/{branch_id}/plans/aws-cli', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-async def aws_cli_plan_endpoint(branch_id: str, request: Request):
+async def aws_cli_plan_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
     return await _ingest_plan_endpoint(
         branch_id, request, lambda document: _aws_translator(branch_id, document, cli=True), 'Invalid AWS CLI commands document',
-        preserve_value_errors=True,
+        preserve_value_errors=True, caller=caller,
     )
 
 
@@ -1760,8 +1796,8 @@ def _scanned_account_id(analysis_id: str) -> str | None:
 
 
 @app.get('/branches/{branch_id}/in-use-evidence/estimate', response_model=EvidenceEstimate, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def in_use_evidence_estimate(branch_id: str, request: Request, sources: str = 'cloudtrail_events,cloudwatch_metrics'):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def in_use_evidence_estimate(branch_id: str, request: Request, caller: Caller = Depends(get_caller), sources: str = 'cloudtrail_events,cloudwatch_metrics'):
+    _check_branch_rate_limit(_rate_key(request, caller))
     requested = [item.strip() for item in sources.split(',') if item.strip()]
     if not requested or len(set(requested)) != len(requested) or any(item not in SOURCES for item in requested):
         raise HTTPException(status_code=422, detail='Invalid evidence sources')
@@ -1786,7 +1822,7 @@ def _evidence_validation_detail(exc: ValidationError) -> list[dict]:
 
 @app.post('/branches/{branch_id}/in-use-evidence', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 async def collect_in_use_evidence(branch_id: str, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    _check_branch_rate_limit(_branch_request_ip(request))
+    _check_branch_rate_limit(_rate_key(request, caller))
     try:
         body = json.loads(await request.body())
     except (ValueError, UnicodeDecodeError):
@@ -1826,8 +1862,8 @@ def _collect_in_use_evidence(branch_id: str, payload: EvidenceRequest, caller: C
     branches.save_evidence(branch_id, estimate.estimate_id, records)
     return {'estimate_id': estimate.estimate_id, 'observed_at': now.isoformat().replace('+00:00', 'Z'), 'window_days': WINDOW_DAYS, 'records': [record.model_dump(mode='json') for record in records]}
 @app.post('/branches/{branch_id}/changes', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def add_branch_change_endpoint(branch_id: str, change: Change, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def add_branch_change_endpoint(branch_id: str, change: Change, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_rate_key(request, caller))
     try:
         current_branch = branches.get_branch(branch_id)
         if current_branch.status != 'open':
@@ -1876,8 +1912,8 @@ def _current_handback_state(branch_id: str):
 
 
 @app.get('/branches/{branch_id}/plans/{plan_id}/handback', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def plan_handback_endpoint(branch_id: str, plan_id: str, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def plan_handback_endpoint(branch_id: str, plan_id: str, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_rate_key(request, caller))
     plan = branches.get_plan(plan_id)
     if plan is None or plan['branch_id'] != branch_id:
         raise HTTPException(status_code=404, detail='Not found')
@@ -1905,8 +1941,8 @@ def plan_handback_endpoint(branch_id: str, plan_id: str, request: Request):
 
 
 @app.post('/handback/verify', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def verify_handback_endpoint(payload: dict, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def verify_handback_endpoint(payload: dict, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_rate_key(request, caller))
     if not isinstance(payload, dict):
         raise HTTPException(status_code=422, detail='Request body must be an object')
     required = ('plan_id', 'plan_text', 'verdict_id', 'base_analysis_id', 'branch_revision')
@@ -1938,21 +1974,28 @@ def verify_handback_endpoint(payload: dict, request: Request):
 
 
 @app.get('/branches/{branch_id}/handback', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def typed_handback_endpoint(branch_id: str, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def typed_handback_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_rate_key(request, caller))
     try:
         branch = branches.get_branch(branch_id)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail='Not found') from exc
     if branches.list_plans(branch_id):
-        return JSONResponse(status_code=409, content={'error': 'branch_has_plan_receipts'})
+        return JSONResponse(status_code=409, content={
+            'error': 'branch_has_plan_receipts',
+            'next_step': 'This branch was built from a submitted plan. Hand back that original plan (terraform/aws-api/aws-cli) instead, or create a new branch from the base analysis and apply typed changes only.',
+        })
     if not branch.changes:
         return JSONResponse(status_code=409, content={'error': 'no_changes'})
     try:
         branch, result, revision = _current_handback_state(branch_id)
         calls = build_api_calls(branch.base, branch.changes)
     except UnmappableChanges as exc:
-        return JSONResponse(status_code=422, content={'error': 'unmappable_changes', 'changes': exc.changes})
+        return JSONResponse(status_code=422, content={
+            'error': 'unmappable_changes',
+            'changes': exc.changes,
+            'next_step': 'These changes have no AWS API equivalent yet, so nothing was handed back. Roll the branch back to before them (or discard and recreate the branch without them) and hand back again, or apply them by hand outside Emfirge.',
+        })
     verdict = result.verdict
     digest = canonical_sha256(calls)
     return {'branch_id': branch_id, 'kind': 'aws-api-calls', 'calls': calls,
@@ -1962,8 +2005,8 @@ def typed_handback_endpoint(branch_id: str, request: Request):
 
 
 @app.post('/branches/{branch_id}/handback/verify', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def verify_typed_handback_endpoint(branch_id: str, payload: dict, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def verify_typed_handback_endpoint(branch_id: str, payload: dict, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_rate_key(request, caller))
     required = ('calls', 'input_sha256', 'base_analysis_id', 'branch_revision', 'verdict_id')
     if not isinstance(payload, dict) or any(field not in payload for field in required):
         raise HTTPException(status_code=422, detail='Missing handback fields')
@@ -1979,7 +2022,11 @@ def verify_typed_handback_endpoint(branch_id: str, payload: dict, request: Reque
     except branches.BranchNotFoundError:
         raise HTTPException(status_code=404, detail='Not found')
     except UnmappableChanges as exc:
-        return JSONResponse(status_code=422, content={'error': 'unmappable_changes', 'changes': exc.changes})
+        return JSONResponse(status_code=422, content={
+            'error': 'unmappable_changes',
+            'changes': exc.changes,
+            'next_step': 'These changes have no AWS API equivalent yet, so nothing was handed back. Roll the branch back to before them (or discard and recreate the branch without them) and hand back again, or apply them by hand outside Emfirge.',
+        })
     expected_hash = canonical_sha256(expected_calls)
     if payload['input_sha256'] != expected_hash:
         return JSONResponse(status_code=409, content={'ok': False, 'reason_code': 'input_hash_mismatch'})
@@ -1993,17 +2040,20 @@ def verify_typed_handback_endpoint(branch_id: str, payload: dict, request: Reque
     return {'ok': True, 'verdict': result.verdict, 'verdict_id': verdict_id}
 
 @app.get('/branches/{branch_id}/diff', response_model=DiffResult, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def branch_diff_endpoint(branch_id: str, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def branch_diff_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_rate_key(request, caller))
     try:
-        return branches.get_branch_diff(branch_id)
+        diff = branches.get_branch_diff(branch_id)
+        if isinstance(diff, dict):
+            return {**diff, "status": branches.get_branch(branch_id).status}
+        return diff.model_copy(update={"status": branches.get_branch(branch_id).status})
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.get('/branches/{branch_id}/verdict', response_model=CombinedVerdict, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def branch_verdict_endpoint(branch_id: str, request: Request):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def branch_verdict_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_rate_key(request, caller))
     try:
         branch = branches.get_branch(branch_id)
         rebuilt = branches.rebuild_branch_state(branch)
@@ -2025,13 +2075,13 @@ def branch_verdict_endpoint(branch_id: str, request: Request):
     if evidence:
         verdict_kwargs["evidence"] = evidence
     result = combined_verdict(branch.base, rebuilt, **verdict_kwargs)
-    return result.model_copy(update={"branch_revision": branches.branch_revision(branch),
+    return result.model_copy(update={"branch_revision": branches.branch_revision(branch), "status": branch.status,
         "plans": [{"plan_id": item["plan_id"], "input_sha256": item["input_sha256"]} for item in plans]})
 
 
 @app.post('/branches/{branch_id}/rollback', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def rollback_branch_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def rollback_branch_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller), payload: Optional[dict] = None):
+    _check_branch_rate_limit(_rate_key(request, caller))
     payload = payload or {}
     if not isinstance(payload, dict) or set(payload) - {'expected_change_count', 'branch_revision'}:
         raise HTTPException(status_code=422, detail='Only expected_change_count and branch_revision are supported')
@@ -2062,8 +2112,8 @@ def rollback_branch_endpoint(branch_id: str, request: Request, payload: Optional
 
 
 @app.post('/branches/{branch_id}/rollback-to-count', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def rollback_branch_to_count_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def rollback_branch_to_count_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller), payload: Optional[dict] = None):
+    _check_branch_rate_limit(_rate_key(request, caller))
     if not isinstance(payload, dict) or set(payload) - {'target_change_count', 'branch_revision'}:
         raise HTTPException(
             status_code=422,
@@ -2094,8 +2144,8 @@ def rollback_branch_to_count_endpoint(branch_id: str, request: Request, payload:
 
 
 @app.post('/branches/{branch_id}/discard', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def discard_branch_endpoint(branch_id: str, request: Request, payload: Optional[dict] = None):
-    _check_branch_rate_limit(_branch_request_ip(request))
+def discard_branch_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller), payload: Optional[dict] = None):
+    _check_branch_rate_limit(_rate_key(request, caller))
     if payload is None:
         payload = {}
     if not isinstance(payload, dict):
@@ -2446,7 +2496,7 @@ def _apply_rule_based_mutation(infra_dict: dict, rule_id: str, resource_id: str)
 
 
 @app.post('/remediation/fix', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def unified_fix(request: TerraformGenerateRequest, http_request: Request, raw: bool = False):
+def unified_fix(request: TerraformGenerateRequest, http_request: Request, raw: bool = False, caller: Caller = Depends(get_caller)):
     """
     Unified fix endpoint: generates HCL + verifies it in one call.
 
@@ -2459,8 +2509,7 @@ def unified_fix(request: TerraformGenerateRequest, http_request: Request, raw: b
     Rate limited: 5/min per IP + 10/day per account.
     """
     # ── RATE LIMIT: 5/min per IP ──────────────────────────────────
-    client_ip = http_request.client.host if http_request.client else 'unknown'
-    _check_terraform_rate_limit(client_ip)
+    _check_terraform_rate_limit(_rate_key(http_request, caller))
 
     # ── DAILY LIMIT: 10/day per account ───────────────────────────
     FIX_DAILY_LIMIT = 10
@@ -2767,9 +2816,8 @@ def github_repos(installation_id: int):
 
 
 @app.post('/github/pr', response_model=GitHubPRResponse, dependencies=[Depends(legacy_ci_enabled), Depends(require_api_key), Depends(branch_tenant_guard)])
-def create_github_pr(request: GitHubPRRequest, http_request: Request):
-    client_ip = http_request.client.host if http_request.client else 'unknown'
-    _check_pr_rate_limit(client_ip)
+def create_github_pr(request: GitHubPRRequest, http_request: Request, caller: Caller = Depends(get_caller)):
+    _check_pr_rate_limit(_rate_key(http_request, caller))
     from app.github_service import get_github_client, search_tf_files, create_fix_pr
     from app.tf_indexer import find_resource_match, TFResource
     try:
@@ -3599,15 +3647,9 @@ def list_feedback(limit: int = 50, key: str = None):
 
 @app.post('/analyze', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    assumed_credentials = assume_customer_role(credentials.role_arn, caller, db)
+    from app.demo_seed import is_demo_arn
+    assumed_credentials = None if is_demo_arn(credentials.role_arn) else assume_customer_role(credentials.role_arn, caller, db)
     start_time = time.time()
-
-    # AGENTOPS SESSION START
-    session = None
-    try:
-        session = agentops.start_session()
-    except Exception:
-        pass
 
     try:
         # ── RATE LIMITING — DAILY_SCAN_LIMIT scans per day per AWS account ──────
@@ -3624,7 +3666,6 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
             if account_id not in WHITELISTED_ACCOUNTS:
                 scan_count = get_scan_count_today(account_id)
                 if scan_count >= DAILY_SCAN_LIMIT:
-                    if session: session.end_session(end_state='Fail')
                     raise HTTPException(
                         status_code=429,
                         detail=f'Rate limit reached. Your AWS account has used {scan_count}/{DAILY_SCAN_LIMIT} free scans today. Limit resets at midnight UTC.'
@@ -3820,9 +3861,6 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
         elif db_result == -1:
             warnings.append('Scan result could not be saved to database. Graph will not be available for this scan.')
 
-        # AGENTOPS SESSION END
-        if session: session.end_session(end_state='Success')
-
         # STEP 6.5 — Drift detection (never fails the scan)
         try:
             if db_result and db_result != -1:
@@ -3909,22 +3947,18 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
         )
 
     except ValueError as e:
-        if session: session.end_session(end_state='Fail')
         raise HTTPException(status_code=400, detail=str(e))
 
     except HTTPException:
-        if session: session.end_session(end_state='Fail')
         raise
 
     except NoCredentialsError:
-        if session: session.end_session(end_state='Fail')
         raise HTTPException(
             status_code=400,
             detail='AWS credentials not found. Please check your server configuration.'
         )
 
     except ClientError as e:
-        if session: session.end_session(end_state='Fail')
         error_code = e.response['Error']['Code']
         if error_code == 'AccessDenied':
             raise HTTPException(status_code=400, detail='Could not assume the IAM role. Make sure you deployed the Emfirge CloudFormation stack correctly.')
@@ -3932,7 +3966,6 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
             raise HTTPException(status_code=400, detail='AWS request failed')
 
     except Exception as e:
-        if session: session.end_session(end_state='Fail')
         raise HTTPException(status_code=500, detail='Internal server error')
 
 
@@ -3943,7 +3976,8 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
 @app.post('/analyze/stream', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 async def analyze_stream(credentials: AWSCredentials, request: Request, raw: bool = False, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     # Authorize before constructing the streaming response so failures are HTTP errors.
-    assumed_credentials = assume_customer_role(credentials.role_arn, caller, db)
+    from app.demo_seed import is_demo_arn
+    assumed_credentials = None if is_demo_arn(credentials.role_arn) else assume_customer_role(credentials.role_arn, caller, db)
     """
     SSE streaming version of /analyze. Sends progress events as each collector
     completes, then emits the full AnalysisResponse as the final event.
@@ -4387,14 +4421,17 @@ def simulate_component(request: ComponentRequest, http_request: Request, caller:
     import copy
     import anthropic as anthropic_lib
 
-    # ── RATE LIMIT: 10/min per IP (shared with /simulate) ─────────
-    client_ip = http_request.client.host if http_request.client else 'unknown'
+    # ── RATE LIMIT: 10/min per project (shared with /simulate) ────
+    rate_key = _rate_key(http_request, caller)
+    legacy_ip = http_request.client.host if http_request.client else 'unknown'
+    if rate_key not in _simulate_request_log and legacy_ip in _simulate_request_log:
+        rate_key = legacy_ip
     now = time.time()
-    _simulate_request_log.setdefault(client_ip, [])
-    _simulate_request_log[client_ip] = [t for t in _simulate_request_log[client_ip] if now - t < 60]
-    if len(_simulate_request_log[client_ip]) >= 10:
+    _simulate_request_log.setdefault(rate_key, [])
+    _simulate_request_log[rate_key] = [t for t in _simulate_request_log[rate_key] if now - t < 60]
+    if len(_simulate_request_log[rate_key]) >= _SIMULATE_LIMIT:
         raise HTTPException(status_code=429, detail='Rate limit exceeded. You can run 10 simulations per minute.')
-    _simulate_request_log[client_ip].append(now)
+    _simulate_request_log[rate_key].append(now)
 
     # ── LOAD INFRASTRUCTURE FROM DB ───────────────────────────────
     from app.database import SessionLocal, AnalysisLog

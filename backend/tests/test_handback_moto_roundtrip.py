@@ -195,6 +195,28 @@ def test_network_acl_entry_modify_roundtrip():
                             fields={"entries": [x.model_dump() for x in current.entries] + [entry.model_dump()]}), collect, "network_acl", acl, ["entries"])
 
 
+def test_nat_gateway_add_roundtrip():
+    ec2 = _client("ec2"); vpc = _vpc()
+    subnet = ec2.create_subnet(VpcId=vpc, CidrBlock="10.0.1.0/24")["Subnet"]["SubnetId"]
+    allocation = ec2.allocate_address(Domain="vpc")["AllocationId"]
+    def collect(): return _base(_collect(collect_vpc), "vpc")
+    base = collect()
+    change = Change(op="add", resource_type="nat_gateway", resource_id="", fields={"subnet_id": subnet, "allocation_id": allocation})
+    modeled = apply_changes(base, [change])
+    calls = build_api_calls(base, [change])
+    assert [item["operation"] for item in calls] == ["CreateNatGateway"]
+    for item in calls:
+        client = _client(item["service"])
+        getattr(client, _method(client, item["operation"]))(**item["params"])
+    recollected = collect()
+    # AWS assigns the id, so compare every other field of the one new NAT gateway.
+    created = [x for x in recollected.vpc.nat_gateway_details if x.id not in base.vpc.nat_gateways]
+    expected = [x for x in modeled.vpc.nat_gateway_details if x.id not in base.vpc.nat_gateways]
+    assert len(created) == len(expected) == 1
+    assert created[0].model_dump(exclude={"id"}) == expected[0].model_dump(exclude={"id"})
+    assert set(recollected.vpc.nat_gateways) == set(base.vpc.nat_gateways) | {created[0].id}
+
+
 def test_tampered_handback_call_is_detected():
     vpc = _vpc(); sg = _sg(vpc); ec2 = _client("ec2")
     ec2.authorize_security_group_ingress(GroupId=sg, IpPermissions=[{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}])

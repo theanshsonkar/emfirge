@@ -287,6 +287,65 @@ class Edge(BaseModel):
         return {"from": self.src, "to": self.dst, "relationship": self.relationship.value}
 
 
+PRIORITY = ("s3_bucket", "lambda_function", "rds_instance", "dynamodb_table", "sqs_queue", "secretsmanager_secret")
+
+
+def _field(obj, name, default=None):
+    return obj.get(name, default) if isinstance(obj, dict) else getattr(obj, name, default)
+
+
+def collect_six_type_names(infra) -> dict[str, set[str]]:
+    """Collect the canonical names used by the six collision-sensitive nodes."""
+    result = {resource_type: set() for resource_type in PRIORITY}
+    for item in _field(_field(infra, "s3"), "buckets", []) or []:
+        name = _field(item, "name")
+        if name is not None: result["s3_bucket"].add(str(name))
+    for item in _field(_field(infra, "lambda_data"), "functions", []) or []:
+        name = _field(item, "name")
+        if name is not None: result["lambda_function"].add(str(name))
+        for secret in _field(item, "secret_refs", []) or []:
+            result["secretsmanager_secret"].add(str(secret))
+    for item in _field(_field(infra, "rds"), "rds_instances", []) or []:
+        name = _field(item, "id")
+        if name is not None: result["rds_instance"].add(str(name))
+    for item in _field(_field(infra, "dynamodb"), "tables", []) or []:
+        name = _field(item, "name")
+        if name is not None: result["dynamodb_table"].add(str(name))
+    for item in _field(_field(infra, "sqs"), "queues", []) or []:
+        name = _field(item, "name")
+        if name is not None: result["sqs_queue"].add(str(name))
+    return result
+
+
+class NodeIdPlan:
+    """Stable IDs for collision-sensitive resource names."""
+    def __init__(self, names: Mapping[str, Set[str]] | None = None, *infras):
+        merged = {resource_type: set() for resource_type in PRIORITY}
+        for source in (names or {},):
+            for resource_type in PRIORITY:
+                merged[resource_type].update(str(name) for name in source.get(resource_type, set()))
+        for infra in infras:
+            collected = collect_six_type_names(infra)
+            for resource_type in PRIORITY:
+                merged[resource_type].update(collected[resource_type])
+        self.names = merged
+        self._colliding = {
+            name for resource_type in PRIORITY for name in merged[resource_type]
+            if sum(name in merged[item] for item in PRIORITY) >= 2
+        }
+
+    @classmethod
+    def from_infras(cls, *infras):
+        return cls({}, *infras)
+
+    def id(self, resource_type: str, name: str) -> str:
+        name = str(name)
+        if resource_type not in PRIORITY or name not in self._colliding:
+            return name
+        owner = next(item for item in PRIORITY if name in self.names[item])
+        return name if owner == resource_type else f"{resource_type}:{name}"
+
+
 class Graph:
     """
     Graph data structure for AWS infrastructure relationships.
@@ -354,6 +413,14 @@ class Graph:
             node_type = node['type']
             self._nodes_by_type.setdefault(node_type, []).append(node)
     
+        self._node_id_plan = NodeIdPlan()
+
+    def node_id_for(self, resource_type: str, name: str) -> Optional[str]:
+        """Return the planned ID when the requested typed node exists."""
+        node_id = self._node_id_plan.id(resource_type, name)
+        node = self._node_index.get(node_id)
+        return node_id if node is not None and node.resource_type == resource_type else None
+
     def get_neighbors(self, node_id: str, relationship_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Find all nodes connected to the given node (both inbound and outbound).
@@ -480,7 +547,7 @@ class Graph:
         }
 
 
-def _match_arn_to_node_id(arn: str, node_id_set: Set[str]) -> Optional[str]:
+def _match_arn_to_node_id(arn: str, node_id_set: Set[str], id_plan: NodeIdPlan | None = None) -> Optional[str]:
     """
     Match a policy Resource ARN to an existing graph node ID.
 
@@ -490,28 +557,29 @@ def _match_arn_to_node_id(arn: str, node_id_set: Set[str]) -> Optional[str]:
     if not arn or arn == '*':
         return None
 
+    def resolve(resource_type, name):
+        candidate = id_plan.id(resource_type, name) if id_plan else name
+        if candidate in node_id_set:
+            return candidate
+        typed = f"{resource_type}:{name}"
+        return typed if typed in node_id_set else None
+
     # S3: arn:aws:s3:::bucket-name or arn:aws:s3:::bucket-name/*
     if ':s3:::' in arn:
         bucket = arn.split(':s3:::')[1].split('/')[0]
         if bucket == '*':
             return None
-        if bucket in node_id_set:
-            return bucket
-        return None
+        return resolve('s3_bucket', bucket)
 
     # RDS: arn:aws:rds:REGION:ACCOUNT:db:INSTANCE-ID
     if ':rds:' in arn and ':db:' in arn:
         rds_id = arn.split(':db:')[-1]
-        if rds_id in node_id_set:
-            return rds_id
-        return None
+        return resolve('rds_instance', rds_id)
 
     # Lambda: arn:aws:lambda:REGION:ACCOUNT:function:NAME
     if ':lambda:' in arn and ':function:' in arn:
         func_name = arn.split(':function:')[-1].split(':')[0]
-        if func_name in node_id_set:
-            return func_name
-        return None
+        return resolve('lambda_function', func_name)
 
     # Secrets Manager: arn:aws:secretsmanager:REGION:ACCOUNT:secret:NAME-SUFFIX
     if ':secretsmanager:' in arn and ':secret:' in arn:
@@ -519,25 +587,18 @@ def _match_arn_to_node_id(arn: str, node_id_set: Set[str]) -> Optional[str]:
         # AWS appends a 6-char random suffix after a hyphen; try both with and without
         if secret_raw in node_id_set:
             return secret_raw
-        # Strip last -XXXXXX suffix (6 random chars)
         stripped = re.sub(r'-[A-Za-z0-9]{6}$', '', secret_raw)
-        if stripped in node_id_set:
-            return stripped
-        return None
+        return resolve('secretsmanager_secret', stripped)
 
     # DynamoDB: arn:aws:dynamodb:REGION:ACCOUNT:table/TABLE-NAME
     if ':dynamodb:' in arn and ':table/' in arn:
         table_name = arn.split(':table/')[-1].split('/')[0]
-        if table_name in node_id_set:
-            return table_name
-        return None
+        return resolve('dynamodb_table', table_name)
 
     # SQS: arn:aws:sqs:REGION:ACCOUNT:QUEUE-NAME
     if ':sqs:' in arn:
         queue_name = arn.split(':')[-1]
-        if queue_name in node_id_set:
-            return queue_name
-        return None
+        return resolve('sqs_queue', queue_name)
 
     return None
 
@@ -1222,7 +1283,7 @@ def _effective_route_table_associations(vpc: Any) -> dict[str, list[str]]:
     return {table_id: sorted(subnet_ids) for table_id, subnet_ids in result.items()}
 
 
-def build_graph(infrastructure: AWSInfrastructure) -> Graph:
+def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = None) -> Graph:
 
     """
     Build a graph representation of AWS infrastructure from collected data.
@@ -1235,6 +1296,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
     Returns:
         Graph object with nodes and edges, providing query methods for traversal
     """
+    id_plan = id_plan or NodeIdPlan.from_infras(infrastructure)
     iam_classifier.begin_build()
     nodes = []
     edges = []
@@ -1468,7 +1530,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             is_empty = bucket.is_empty
         
         nodes.append({
-            'id': bucket_name,
+            'id': id_plan.id('s3_bucket', bucket_name),
             'type': 's3_bucket',
             'label': f"S3: {bucket_name}",
             'metadata': {
@@ -1493,7 +1555,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             })
             edges.append({
                 'from': cf_id,
-                'to': bucket_name,
+                'to': id_plan.id('s3_bucket', bucket_name),
                 'relationship': 'serves_from_bucket'
             })
     
@@ -1514,7 +1576,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             encrypted = rds.encrypted
         
         nodes.append({
-            'id': rds_id,
+            'id': id_plan.id('rds_instance', rds_id),
             'type': 'rds_instance',
             'label': f"RDS: {rds_id}",
             'metadata': {
@@ -1528,7 +1590,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         # Edge: RDS -> Security Group
         for sg_id in sg_ids:
             edges.append({
-                'from': rds_id,
+                'from': id_plan.id('rds_instance', rds_id),
                 'to': sg_id,
                 'relationship': 'uses_security_group'
             })
@@ -1550,7 +1612,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             sg_ids = getattr(func, 'sg_ids', [])
         
         nodes.append({
-            'id': func_name,
+            'id': id_plan.id('lambda_function', func_name),
             'type': 'lambda_function',
             'label': f"Lambda: {func_name}",
 
@@ -1580,7 +1642,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                 })
             
             edges.append({
-                'from': func_name,
+                'from': id_plan.id('lambda_function', func_name),
                 'to': role_id,
                 'relationship': 'uses_iam_role'
             })
@@ -1588,7 +1650,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         # Edge: Lambda -> VPC
         if vpc_id:
             edges.append({
-                'from': func_name,
+                'from': id_plan.id('lambda_function', func_name),
                 'to': vpc_id,
                 'relationship': 'in_vpc'
             })
@@ -1596,14 +1658,14 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         # Edge: Lambda -> Subnet
         for subnet_id in subnet_ids:
             edges.append({
-                'from': func_name,
+                'from': id_plan.id('lambda_function', func_name),
                 'to': subnet_id,
                 'relationship': 'in_subnet'
             })
 
         for sg_id in sg_ids:
             edges.append({
-                'from': func_name,
+                'from': id_plan.id('lambda_function', func_name),
                 'to': sg_id,
                 'relationship': 'uses_security_group'
             })
@@ -1611,16 +1673,17 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
         # Edge: Lambda -> Secrets (env var refs)
         secret_refs = func.get('secret_refs', []) if isinstance(func, dict) else func.secret_refs
         for secret_id in secret_refs:
-            if not any(n['id'] == secret_id for n in nodes):
+            secret_node_id = id_plan.id('secretsmanager_secret', secret_id)
+            if not any(n['id'] == secret_node_id for n in nodes):
                 nodes.append({
-                    'id': secret_id,
+                    'id': id_plan.id('secretsmanager_secret', secret_id),
                     'type': 'secretsmanager_secret',
                     'label': f"Secret: {secret_id}",
                     'metadata': {'source': 'lambda_env'}
                 })
             edges.append({
-                'from': func_name,
-                'to': secret_id,
+                'from': id_plan.id('lambda_function', func_name),
+                'to': id_plan.id('secretsmanager_secret', secret_id),
                 'relationship': 'REFERENCES_SECRET'
             })
     
@@ -2041,7 +2104,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             is_public = queue.is_public
 
         nodes.append({
-            'id': queue_name,
+            'id': id_plan.id('sqs_queue', queue_name),
             'type': 'sqs_queue',
             'label': f"SQS: {queue_name}",
             'metadata': {
@@ -2067,7 +2130,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             billing_mode = table.billing_mode
 
         nodes.append({
-            'id': table_name,
+            'id': id_plan.id('dynamodb_table', table_name),
             'type': 'dynamodb_table',
             'label': f"DynamoDB: {table_name}",
             'metadata': {
@@ -2265,7 +2328,7 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
                         add_access_edge(target, {'actions': ['*'], 'effect': 'allow',
                                                  'has_condition': False, 'confidence': 'assumed'})
                     break
-                target_id = _match_arn_to_node_id(arn, node_id_set)
+                target_id = _match_arn_to_node_id(arn, node_id_set, id_plan)
                 if target_id:
                     target = next((n for n in data_nodes if n['id'] == target_id), None)
                     if target:
@@ -2407,7 +2470,15 @@ def build_graph(infrastructure: AWSInfrastructure) -> Graph:
             "kind": "internal_reachability_budget_exceeded",
             "budget": INTERNAL_REACH_EDGE_BUDGET,
         })
-    return Graph(nodes=nodes, edges=edges, warnings=warnings)
+    graph = Graph(nodes=nodes, edges=edges, warnings=warnings)
+    graph._node_id_plan = id_plan
+    return graph
+
+
+def build_graph_pair(base_infra, branch_infra) -> tuple[Graph, Graph]:
+    """Build comparable graphs from one union-derived ID plan."""
+    plan = NodeIdPlan.from_infras(base_infra, branch_infra)
+    return build_graph(base_infra, plan), build_graph(branch_infra, plan)
 
 
 SLICE_CATEGORIES = {

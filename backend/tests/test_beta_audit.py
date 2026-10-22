@@ -129,14 +129,12 @@ class TestScanDailyLimit:
     def test_rate_limit_returns_429_not_500(self):
         """The bug we fixed: HTTPException(429) was caught by except Exception → 500."""
         with patch("app.main.get_scan_count_today", return_value=5):
-            with patch("app.main.agentops") as mock_ao:
-                mock_ao.start_session.return_value = MagicMock()
-                resp = client.post("/analyze", json={
-                    "role_arn": "arn:aws:iam::123456789012:role/EmfirgeRole",
-                    "region": "us-east-1",
-                })
-                assert resp.status_code == 429
-                assert "5" in resp.json()["detail"]
+            resp = client.post("/analyze", json={
+                "role_arn": "arn:aws:iam::123456789012:role/EmfirgeRole",
+                "region": "us-east-1",
+            })
+            assert resp.status_code == 429
+            assert "5" in resp.json()["detail"]
 
     def test_whitelisted_account_bypasses_limit(self):
         """Account 000000000000 should bypass rate limiting."""
@@ -149,22 +147,20 @@ class TestScanDailyLimit:
                         with patch("app.main.get_report_url", return_value="https://s3/r"):
                             with patch("app.main.save_analysis", return_value=1):
                                 with patch("app.main.get_previous_scan_for_account", return_value={}):
-                                    with patch("app.main.agentops"):
-                                        resp = client.post("/analyze", json={
-                                            "role_arn": "arn:aws:iam::000000000000:role/EmfirgeRole",
-                                            "region": "us-east-1",
-                                        })
-                                        assert resp.status_code == 200
+                                    resp = client.post("/analyze", json={
+                                        "role_arn": "arn:aws:iam::000000000000:role/EmfirgeRole",
+                                        "region": "us-east-1",
+                                    })
+                                    assert resp.status_code == 200
 
     def test_unknown_account_id_not_rate_limited(self):
         """Malformed ARN → account_id='unknown' → no rate limit check."""
         with patch("app.main.collect_infrastructure", side_effect=ValueError("bad")):
-            with patch("app.main.agentops"):
-                resp = client.post("/analyze", json={
-                    "role_arn": "not-a-valid-arn",
-                    "region": "us-east-1",
-                })
-                assert resp.status_code == 400  # ValueError, not 429
+            resp = client.post("/analyze", json={
+                "role_arn": "not-a-valid-arn",
+                "region": "us-east-1",
+            })
+            assert resp.status_code == 400  # ValueError, not 429
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -335,14 +331,13 @@ class TestGracefulDegradation:
                         with patch("app.main.get_report_url", return_value="https://s3/r"):
                             with patch("app.main.save_analysis", return_value=1):
                                 with patch("app.main.get_previous_scan_for_account", return_value={}):
-                                    with patch("app.main.agentops"):
-                                        resp = client.post("/analyze", json={
-                                            "role_arn": "arn:aws:iam::123456789012:role/R",
-                                            "region": "us-east-1",
-                                        })
-                                        assert resp.status_code == 200
-                                        data = resp.json()
-                                        assert any("Gemini" in w or "AI summary" in w for w in data["warnings"])
+                                    resp = client.post("/analyze", json={
+                                        "role_arn": "arn:aws:iam::123456789012:role/R",
+                                        "region": "us-east-1",
+                                    })
+                                    assert resp.status_code == 200
+                                    data = resp.json()
+                                    assert any("Gemini" in w or "AI summary" in w for w in data["warnings"])
 
     def test_analyze_db_failure_still_returns_scan(self):
         mock_infra = AWSInfrastructure(region="us-east-1")
@@ -354,14 +349,13 @@ class TestGracefulDegradation:
                         with patch("app.main.get_report_url", return_value="https://s3/r"):
                             with patch("app.main.save_analysis", return_value=-1):
                                 with patch("app.main.get_previous_scan_for_account", return_value={}):
-                                    with patch("app.main.agentops"):
-                                        resp = client.post("/analyze", json={
-                                            "role_arn": "arn:aws:iam::123456789012:role/R",
-                                            "region": "us-east-1",
-                                        })
-                                        assert resp.status_code == 200
-                                        assert any("database" in w.lower() or "graph" in w.lower()
-                                                   for w in resp.json()["warnings"])
+                                    resp = client.post("/analyze", json={
+                                        "role_arn": "arn:aws:iam::123456789012:role/R",
+                                        "region": "us-east-1",
+                                    })
+                                    assert resp.status_code == 200
+                                    assert any("database" in w.lower() or "graph" in w.lower()
+                                               for w in resp.json()["warnings"])
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -626,29 +620,28 @@ class TestResponseShapes:
                         with patch("app.main.get_report_url", return_value="https://s3/r"):
                             with patch("app.main.save_analysis", return_value=1):
                                 with patch("app.main.get_previous_scan_for_account", return_value={}):
-                                    with patch("app.main.agentops"):
-                                        resp = client.post("/analyze", json={
-                                            "role_arn": "arn:aws:iam::123456789012:role/R",
-                                            "region": "us-east-1",
-                                        })
-                                        data = resp.json()
-                                        required = [
-                                            "analysis_id", "timestamp", "region_analyzed",
-                                            "overall_risk_score", "overall_risk_level",
-                                            "security_score", "availability_score",
-                                            "disaster_recovery_score", "cost_score", "cost_level",
-                                            "maturity_score", "maturity_bonus", "maturity_checks_passed",
-                                            "simulation_baseline",
-                                            "critical_risks", "moderate_risks",
-                                            "best_practices", "cost_findings",
-                                            "toxic_combinations",
-                                            "ai_summary", "recommended_improvements",
-                                            "priority_actions", "warnings",
-                                            "total_resources_scanned", "scan_duration_seconds",
-                                            "report_url",
-                                        ]
-                                        for field in required:
-                                            assert field in data, f"Missing: {field}"
+                                    resp = client.post("/analyze", json={
+                                        "role_arn": "arn:aws:iam::123456789012:role/R",
+                                        "region": "us-east-1",
+                                    })
+                                    data = resp.json()
+                                    required = [
+                                        "analysis_id", "timestamp", "region_analyzed",
+                                        "overall_risk_score", "overall_risk_level",
+                                        "security_score", "availability_score",
+                                        "disaster_recovery_score", "cost_score", "cost_level",
+                                        "maturity_score", "maturity_bonus", "maturity_checks_passed",
+                                        "simulation_baseline",
+                                        "critical_risks", "moderate_risks",
+                                        "best_practices", "cost_findings",
+                                        "toxic_combinations",
+                                        "ai_summary", "recommended_improvements",
+                                        "priority_actions", "warnings",
+                                        "total_resources_scanned", "scan_duration_seconds",
+                                        "report_url",
+                                    ]
+                                    for field in required:
+                                        assert field in data, f"Missing: {field}"
 
     def test_history_response_shape(self):
         fake_logs = [

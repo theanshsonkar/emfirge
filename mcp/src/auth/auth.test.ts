@@ -10,7 +10,7 @@ import { credentialsPath } from "./credentials.js";
 import { _resetForTests as _resetLoginForTests, startLogin } from "./login.js";
 import { _resetForTests, getAccessToken, setSession } from "./session.js";
 import { loginHandler, logoutHandler } from "../tools/login.js";
-import { authHeader, backendCall } from "../client.js";
+import { authHeader, backendCall, _setAuthWaitTimeoutForTests } from "../client.js";
 
 
 const test = (name: string, fn: () => void | Promise<void>) => nodeTest(name, { concurrency: false }, fn);
@@ -149,6 +149,7 @@ beforeEach(() => {
   delete process.env.EMFIRGE_API_KEY;
   delete process.env.EMFIRGE_BASE_URL;
   _resetForTests();
+  _setAuthWaitTimeoutForTests(120_000);
 });
 
 afterEach(() => {
@@ -315,6 +316,7 @@ test("no API key or credentials cannot bypass sign-in", async () => {
   process.env.EMFIRGE_BASE_URL = "http://localhost:8000";
   delete process.env.EMFIRGE_SUPABASE_URL;
   delete process.env.EMFIRGE_SUPABASE_ANON_KEY;
+  _setAuthWaitTimeoutForTests(10);
   await assert.rejects(
     authHeader(),
     /Sign in needed\.|Sign-in is misconfigured/,
@@ -349,6 +351,7 @@ test("no secret appears in output or tool results", async () => {
     const logoutResult = await logoutHandler({});
     process.env.EMFIRGE_BASE_URL = "https://emfirge.cloud/api";
     process.env.EMFIRGE_SUPABASE_URL = supabaseBase;
+    _setAuthWaitTimeoutForTests(10);
     try {
       await authHeader();
     } catch (error) {
@@ -394,4 +397,33 @@ test("single pending login returns the same URL", async () => {
   const second = await startLogin({ timeoutMs: 200 });
   assert.equal(second.url, first.url);
   assert.equal(await first.pending, false);
+});
+
+test("backendCall waits for an in-progress browser login", async () => {
+  const { pending, location, host } = await requestLoginStart();
+  const sameLogin = await startLogin();
+  assert.equal(sameLogin.url, pending.url);
+
+  const originalFetch = globalThis.fetch;
+  let authorization: string | null = null;
+  globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
+    if (String(input).startsWith("https://emfirge.cloud/api")) {
+      authorization = new Headers(init?.headers).get("authorization");
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
+  try {
+    const call = backendCall("GET", "/project");
+    const redirect = new URL(location.searchParams.get("redirect_to") ?? "");
+    const callback = await originalFetch(`${redirect}?code=AUTHCODE-SECRET`, {
+      headers: { Host: host },
+    });
+    assert.equal(callback.status, 200);
+    assert.equal(await pending.pending, true);
+    await call;
+    assert.equal(authorization, "Bearer ACCESS-SECRET-1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

@@ -1,3 +1,5 @@
+
+
 // HTTP client. Override base URL with EMFIRGE_BASE_URL.
 // X-MCP header tells the backend to skip its AI summary (host LLM does that).
 
@@ -5,14 +7,47 @@ import { redactDeep } from "./tokenize.js";
 import { getAccessToken, forceExpire } from "./auth/session.js";
 import { startLogin } from "./auth/login.js";
 
+export function extractNextStep(text: string): string | null {
+  try {
+    const body = JSON.parse(text) as { next_step?: unknown };
+    return typeof body?.next_step === "string" && body.next_step.trim() ? body.next_step : null;
+  } catch {
+    return null;
+  }
+}
+
+let authWaitTimeoutMs = 120_000;
+
+/** Test hook for keeping the pending-login wait short. */
+export function _setAuthWaitTimeoutForTests(timeoutMs: number): void {
+  authWaitTimeoutMs = timeoutMs;
+}
+
+async function waitForLogin(pending: Promise<boolean>): Promise<boolean> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), authWaitTimeoutMs);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([pending, timeout]);
+  } finally {
+    clearTimeout(timer!);
+  }
+}
+
 export async function authHeader(): Promise<string> {
   const apiKey = process.env.EMFIRGE_API_KEY;
   if (apiKey) return `Bearer ${apiKey}`;
   const token = await getAccessToken();
   if (token) return `Bearer ${token}`;
-  const { url } = await startLogin();
+  const login = await startLogin();
+  if (await waitForLogin(login.pending)) {
+    const newToken = await getAccessToken();
+    if (newToken) return `Bearer ${newToken}`;
+  }
   throw new Error(
-    `Sign in needed. Your browser should have opened; if not, open ${url}. Then run this again.`,
+    `Sign in needed. Your browser should have opened; if not, open ${login.url}. Then run this again.`,
   );
 }
 
@@ -25,8 +60,8 @@ function shouldRetrySignIn(): boolean {
 }
 
 export class BackendHttpError extends Error {
-  constructor(public readonly status: number, public readonly body: unknown, path: string) {
-    super(`Backend ${status} on ${path}`);
+  constructor(public readonly status: number, public readonly body: unknown, path: string, detail?: string) {
+    super(String(redactDeep(`Backend ${status} on ${path}${detail ? `: ${detail}` : ""}`)));
     this.name = "BackendHttpError";
   }
 }
@@ -77,31 +112,39 @@ export async function backendCall<T = unknown>(
     if (!res.ok) {
       const text = await res.text();
 
+      const detail = extractDetail(text);
+      const nextStep = extractNextStep(text);
+      const surfacedDetail = nextStep
+        ? [detail, nextStep].filter((value): value is string => Boolean(value)).join(" ")
+        : detail;
       if (res.status === 409) {
-        let body: unknown = text;
-        try { body = JSON.parse(text); } catch { /* preserve raw body */ }
-        throw new BackendHttpError(res.status, body, path);
+        let parsedBody: unknown = text;
+        try { parsedBody = JSON.parse(text); } catch { /* preserve raw body */ }
+        throw new BackendHttpError(res.status, parsedBody, path, surfacedDetail ?? undefined);
       }
 
       if (res.status === 429) {
         throw new Error(
-          extractDetail(text) ??
+          detail ??
             "Daily limit reached for this AWS account. Resets at midnight UTC.",
         );
       }
       if (res.status === 403) {
         throw new Error(
+          detail ??
           "Access denied. Check the role's trust policy and your project ExternalId from emfirge_setup. " +
             "If you don't have a role yet, call emfirge_setup_help.",
         );
       }
       if (res.status === 404) {
-        throw new Error(
-          `Not found at ${path}. If you passed an analysis_id, run emfirge_scan first.`,
-        );
+        const hint = path.startsWith("/branches")
+          ? "Branch not found. Call emfirge_list_branches to see available branches."
+          : `Not found at ${path}. If you passed an analysis_id, run emfirge_scan first.`;
+        const suffix = detail && detail !== "Not Found" ? ` Backend says: ${detail}` : "";
+        throw new Error(`${hint}${suffix}`);
       }
 
-      throw new Error(`Backend ${res.status} on ${path}: ${extractDetail(text) ?? text.slice(0, 300)}`);
+      throw new Error(String(redactDeep(`Backend ${res.status} on ${path}: ${surfacedDetail ?? text.slice(0, 300)}`)));
     }
 
     return (await res.json()) as T;
@@ -124,14 +167,31 @@ export function getBaseUrl(): string {
 // FastAPI returns errors as {"detail": "..."}. Surfacing that verbatim keeps
 // user-facing limits (e.g. "5/day, resets midnight UTC") accurate without the
 // client hardcoding numbers that drift when the backend changes them.
-function extractDetail(text: string): string | null {
+export function extractDetail(text: string): string | null {
   try {
     const j = JSON.parse(text) as { detail?: unknown };
-    if (typeof j.detail === "string" && j.detail.trim()) return j.detail;
+    if (j && typeof j === "object" && Array.isArray(j.detail)) {
+      const issues = j.detail.filter(
+        (item): item is { loc: unknown[]; msg: string } =>
+          Boolean(item && typeof item === "object" && Array.isArray((item as any).loc) && typeof (item as any).msg === "string"),
+      );
+      if (issues.length > 0) {
+        const shown = issues.slice(0, 5).map((item) => {
+          const loc = item.loc[0] === "body" ? item.loc.slice(1) : item.loc;
+          return `${loc.join(".")}: ${item.msg}`;
+        });
+        const remaining = issues.length - shown.length;
+        return `${shown.join("; ")}${remaining > 0 ? ` (+${remaining} more)` : ""}`;
+      }
+    }
+    if (j && typeof j === "object" && typeof j.detail === "string" && j.detail.trim()) return j.detail;
+    if (j && typeof j === "object" && j.detail !== undefined && j.detail !== null) {
+      return JSON.stringify(j.detail).slice(0, 500);
+    }
   } catch {
     /* not JSON */
   }
-  return null;
+  return text && text !== "" && text !== "\"\"" ? text.slice(0, 300) : null;
 }
 
 // Streaming variant for endpoints that return SSE (currently just /simulate
@@ -184,18 +244,28 @@ export async function backendCallSSE<T = unknown>(
 
     if (!res.ok) {
       const text = await res.text();
+      const detail = extractDetail(text);
       if (res.status === 429) {
         throw new Error(
-          extractDetail(text) ??
+          detail ??
             "Daily limit reached for this AWS account. Resets at midnight UTC.",
         );
       }
-      if (res.status === 404) {
+      if (res.status === 403) {
         throw new Error(
-          `Not found at ${path}. If you passed an analysis_id, run emfirge_scan first.`,
+          detail ??
+            "Access denied. Check the role's trust policy and your project ExternalId from emfirge_setup. " +
+              "If you don't have a role yet, call emfirge_setup_help.",
         );
       }
-      throw new Error(`Backend ${res.status} on ${path}: ${extractDetail(text) ?? text.slice(0, 300)}`);
+      if (res.status === 404) {
+        const hint = path.startsWith("/branches")
+          ? "Branch not found. Call emfirge_list_branches to see available branches."
+          : `Not found at ${path}. If you passed an analysis_id, run emfirge_scan first.`;
+        const suffix = detail && detail !== "Not Found" ? ` Backend says: ${detail}` : "";
+        throw new Error(`${hint}${suffix}`);
+      }
+      throw new Error(`Backend ${res.status} on ${path}: ${detail ?? text.slice(0, 300)}`);
     }
 
     if (!res.body) {

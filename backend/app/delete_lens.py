@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-from app.egraph import DEPENDENCY_EDGES, build_graph, get_internet_reachable_set
+from app.egraph import DEPENDENCY_EDGES, build_graph, build_graph_pair, get_internet_reachable_set
 from app.mutations import deletion_ledger
 from app.evidence_models import EvidenceRecord, METRIC_SPECS
 
@@ -65,8 +65,7 @@ def _parse_time(value: Any):
 def analyze_deletions(base: Any, branch: Any, evidence=None) -> DeletionLens:
     evidence = evidence or []
     ledger = deletion_ledger(branch)
-    base_graph = build_graph(base)
-    final_graph = build_graph(branch)
+    base_graph, final_graph = build_graph_pair(base, branch)
     base_nodes = {str(_v(n, "id")): n for n in base_graph.nodes}
     final_ids = {str(_v(n, "id")) for n in final_graph.nodes}
     deleted = list(ledger)

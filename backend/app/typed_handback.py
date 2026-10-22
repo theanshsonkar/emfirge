@@ -84,6 +84,44 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
     def call(service, operation, params):
         return {"change_index": index, "service": service, "operation": operation, "params": params}
     if op == "add":
+        if typ == "rds_snapshot":
+            db_instance_id = fields.get("db_instance_id")
+            if not isinstance(db_instance_id, str) or not db_instance_id:
+                err("error")
+                return [], errors
+            return [call("rds", "CreateDBSnapshot", {"DBSnapshotIdentifier": ident, "DBInstanceIdentifier": db_instance_id})], errors
+        if typ == "iam_role":
+            document = fields.get("trust_policy")
+            if not isinstance(document, dict):
+                err("error")
+                return [], errors
+            name = ident.rsplit("/", 1)[-1]
+            return [call("iam", "CreateRole", {"RoleName": name, "AssumeRolePolicyDocument": json.dumps(document, sort_keys=True)})], errors
+        if typ == "iam_user":
+            if fields.get("has_console_access") is True:
+                err("operation_not_mapped")
+                return [], errors
+            return [call("iam", "CreateUser", {"UserName": ident})], errors
+        if typ == "nat_gateway":
+            existing_ids = set(before.vpc.nat_gateways)
+            detail = next(item for item in after.vpc.nat_gateway_details if item.id not in existing_ids)
+            if not detail.subnet_id or (detail.connectivity_type == "public" and not detail.allocation_id):
+                err("unspecified_values")
+                return [], errors
+            params = {"SubnetId": detail.subnet_id, "ConnectivityType": detail.connectivity_type}
+            if detail.allocation_id:
+                params["AllocationId"] = detail.allocation_id
+            return [call("ec2", "CreateNatGateway", params)], errors
+        err("operation_not_mapped")
+        return [], errors
+    if typ == "iam_role" and op == "modify":
+        document = fields.get("trust_policy")
+        if not isinstance(document, dict):
+            err("error")
+            return [], errors
+        name = ident.rsplit("/", 1)[-1]
+        return [call("iam", "UpdateAssumeRolePolicy", {"RoleName": name, "PolicyDocument": json.dumps(document, sort_keys=True)})], errors
+    if typ == "iam_user":
         err("operation_not_mapped")
         return [], errors
     # All mapped operations are based on an existing resource.  Check this
@@ -226,7 +264,20 @@ def build_api_calls(base: AWSInfrastructure, changes: list[Change]) -> list[dict
     state = base
     calls: list[dict] = []
     errors: list[dict] = []
+    # AWS assigns NAT ids at create time, so a route cannot name a NAT this branch adds.
+    created_nat_ids: set[str] = set()
     for index, change in enumerate(changes):
+        if change.resource_type == "route_table" and isinstance(change.fields.get("routes"), list) and any(
+            isinstance(route, dict) and str(route.get("target_type", "")).lower() in {"nat", "nat_gateway"}
+            and route.get("target_id") in created_nat_ids
+            for route in change.fields["routes"]
+        ):
+            errors.append({"change_index": index, "op": change.op, "resource_type": change.resource_type, "reason": "depends_on_branch_created_nat_gateway"})
+            try:
+                state = apply_changes(state, [change])
+            except Exception:
+                pass
+            continue
         try:
             if change.op != "add" and change.resource_type in {"security_group", "ec2_instance", "rds_instance", "s3_bucket", "lambda_function", "ebs_volume", "ebs_snapshot", "rds_snapshot", "route_table", "network_acl"}:
                 try:
@@ -241,6 +292,8 @@ def build_api_calls(base: AWSInfrastructure, changes: list[Change]) -> list[dict
         except Exception as exc:
             errors.append({"change_index": index, "op": change.op, "resource_type": change.resource_type, "reason": f"build_failed:{type(exc).__name__}"})
             continue
+        if change.op == "add" and change.resource_type == "nat_gateway":
+            created_nat_ids.update(set(after.vpc.nat_gateways) - set(state.vpc.nat_gateways))
         calls.extend(generated); errors.extend(item_errors); state = after
     for item in calls:
         model = _SESSION.get_service_model(item["service"]).operation_model(item["operation"])

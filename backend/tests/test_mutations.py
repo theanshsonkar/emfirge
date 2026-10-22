@@ -262,13 +262,34 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
     }
 
     for resource_type, operations in advertised.items():
-        if resource_type in {"ebs_volume", "ebs_snapshot", "rds_snapshot", "iam_role"}:
+        if resource_type in {"ebs_volume", "ebs_snapshot"}:
             assert operations == {"delete"}
+            continue
+        if resource_type == "iam_role":
+            assert operations == {"add", "modify", "delete"}
+            continue
+        if resource_type in {"iam_user", "nat_gateway"}:
+            assert operations == {"add"}
+            continue
+        if resource_type == "rds_snapshot":
+            assert operations == {"add", "delete"}
             continue
         resource_id, identity_field, add_fields = ids[resource_type]
         for operation in SUPPORTED_OPERATIONS:
             infra = copy.deepcopy(empty_infra)
-            fields = dict(add_fields) if operation == "add" else {}
+            if operation == "add":
+                fields = dict(add_fields)
+            elif operation == "modify":
+                fields = {
+                    "ec2_instance": {"state": "running"},
+                    "security_group": {"name": "capability-modified"},
+                    "rds_instance": {"publicly_accessible": False},
+                    "s3_bucket": {"encrypted": True},
+                    "lambda_function": {"role_arn": None},
+                    "network_acl": {"associated_subnet_ids": []},
+                }.get(resource_type, {})
+            else:
+                fields = {}
             if resource_type == "iam_role_policy" and operation == "modify":
                 fields = {"access_statements": []}
             if resource_type == "route_table" and operation == "modify":

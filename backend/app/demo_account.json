@@ -267,6 +267,7 @@
     "missing_dynamodb_endpoint": false,
     "missing_s3_endpoint": false,
     "nacls": [],
+    "nat_gateway_details": [],
     "nat_gateways": [
       "nat-demo-001"
     ],

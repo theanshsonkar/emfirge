@@ -5,14 +5,17 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 from typing import Any, Dict, Iterable, Literal, Type, get_args
 from ipaddress import ip_network
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError, field_validator, model_validator
 from app.cidr import is_internet_cidr
 
 from app.models import (
     AccessStatement,
+    PolicyDocumentRecord,
+    merge_policy_statements,
     AWSInfrastructure,
     EBSSnapshot,
     EBSVolume,
@@ -26,6 +29,9 @@ from app.models import (
     SecurityGroup,
     NetworkACL,
     NACLEntry,
+    IAMUser,
+    NATGateway,
+    RolePolicy,
 )
 
 
@@ -68,6 +74,13 @@ class SecurityGroupRuleChange(_StrictModel):
             except ValueError as exc:
                 raise ValueError("must contain valid CIDR strings") from exc
         return values
+    @model_validator(mode="after")
+    def validate_rule(self) -> "SecurityGroupRuleChange":
+        if (self.protocol in {"tcp", "udp", "6", "17"}
+                and self.from_port is not None and self.to_port is not None
+                and self.from_port > self.to_port):
+            raise ValueError("from_port must be less than or equal to to_port")
+        return self
 
 
 class AccessStatementChange(_StrictModel):
@@ -116,9 +129,26 @@ _MUTATION_NESTED_TYPES = {
     ("security_group", "rules"): list[SecurityGroupRuleChange],
     ("security_group", "egress_rules"): list[SecurityGroupRuleChange],
     ("iam_role_policy", "access_statements"): list[AccessStatementChange],
+    ("iam_role_policy", "policy_documents"): list[PolicyDocumentRecord],
     ("route_table", "routes"): list[RouteChange],
     ("network_acl", "entries"): list[NACLEntryChange],
 }
+
+def _trust_document(value: Any) -> dict:
+    if isinstance(value, str):
+        try: value = json.loads(value)
+        except Exception as exc: raise ValueError('iam_role.trust_policy must be a JSON object') from exc
+    if not isinstance(value, dict) or 'Statement' not in value:
+        raise ValueError('iam_role.trust_policy must be an object with Statement')
+    return value
+
+def _role_arn(infra: AWSInfrastructure, resource_id: str) -> str:
+    if resource_id.startswith('arn:aws:iam::'):
+        if not re.fullmatch(r'arn:aws:iam::\d{12}:role/[\w+=,.@/-]+', resource_id): raise ValueError('malformed role ARN')
+        return resource_id
+    accounts = {p.role_arn.split(':')[4] for p in infra.iam.role_policies if p.role_arn.startswith('arn:') and len(p.role_arn.split(':')) > 4}
+    if len(accounts) != 1: raise ValueError('pass the full role ARN')
+    return f'arn:aws:iam::{next(iter(accounts))}:role/{resource_id}'
 
 
 def _loc_text(loc: tuple[Any, ...]) -> str:
@@ -161,6 +191,36 @@ def _strict_validate_field(resource_type: str, field: str, value: Any, annotatio
 
 def _validate_change_fields(change: Change) -> None:
     if change.op not in {"add", "modify"}:
+        return
+    if change.resource_type == "nat_gateway" and change.op == "add":
+        unknown = set(change.fields) - {"subnet_id", "connectivity_type", "allocation_id"}
+        if unknown:
+            raise ValueError("nat_gateway add fields: subnet_id, connectivity_type and allocation_id only")
+        for field in ("subnet_id", "allocation_id"):
+            if field in change.fields:
+                _strict_validate_field("nat_gateway", field, change.fields[field], str)
+        connectivity = change.fields.get("connectivity_type", "public")
+        if connectivity not in {"public", "private"}:
+            raise ValueError("connectivity_type must be public or private")
+        if connectivity == "private" and "allocation_id" in change.fields:
+            raise ValueError("A private NAT gateway cannot have an Elastic IP allocation_id")
+        return
+    if change.resource_type == "rds_snapshot" and change.op == "add":
+        unknown = set(change.fields) - {"db_instance_id"}
+        if unknown:
+            raise ValueError("rds_snapshot add fields: unknown schema field")
+        if "db_instance_id" in change.fields:
+            _strict_validate_field("rds_snapshot", "db_instance_id", change.fields["db_instance_id"], str)
+        return
+    if change.resource_type == 'iam_role':
+        allowed = {'trust_policy'}
+        if set(change.fields) - allowed: raise ValueError('iam_role fields: unknown schema field')
+        if 'trust_policy' in change.fields: _trust_document(change.fields['trust_policy'])
+        if change.op == 'modify' and set(change.fields) != allowed: raise ValueError('iam_role modify requires exactly trust_policy')
+        return
+    if change.resource_type == 'iam_user':
+        if set(change.fields) - {'has_console_access'}: raise ValueError('iam_user fields: unknown schema field')
+        if 'has_console_access' in change.fields: _strict_validate_field('iam_user', 'has_console_access', change.fields['has_console_access'], bool)
         return
     if change.resource_type in {"iam_role_policy", "route_table"}:
         annotations = {field: type_ for (resource, field), type_ in _MUTATION_NESTED_TYPES.items() if resource == change.resource_type}
@@ -205,8 +265,10 @@ _MUTATION_CAPABILITIES = {
     "lambda_function": {"model": LambdaFunction, "operations": _CRUD_OPERATIONS, "constraints": ()},
     "ebs_volume": {"model": EBSVolume, "operations": _DELETE_ONLY, "constraints": ()},
     "ebs_snapshot": {"model": EBSSnapshot, "operations": _DELETE_ONLY, "constraints": ()},
-    "rds_snapshot": {"model": RDSSnapshot, "operations": _DELETE_ONLY, "constraints": ()},
-    "iam_role": {"model": None, "operations": _DELETE_ONLY, "constraints": ()},
+    "rds_snapshot": {"model": RDSSnapshot, "operations": frozenset({"add", "delete"}), "constraints": ()},
+    "iam_role": {"model": None, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "iam_user": {"model": IAMUser, "operations": frozenset({"add"}), "constraints": ()},
+    "nat_gateway": {"model": NATGateway, "operations": frozenset({"add"}), "constraints": ()},
     "iam_role_policy": {
         "model": None,
         "operations": frozenset({"modify"}),
@@ -283,6 +345,13 @@ def mutation_capabilities() -> MutationCapabilities:
     )
 
 
+class TargetNotFound(ValueError):
+    def __init__(self, resource_type: str, resource_id: str):
+        self.resource_type = resource_type
+        self.resource_id = resource_id
+        super().__init__(f"Target not found: {resource_type}")
+
+
 class Change(BaseModel):
     op: str
     resource_type: str
@@ -332,6 +401,10 @@ def _validate_change(change: Change) -> None:
         raise ValueError(f"{change.resource_type} supports {', '.join(sorted(capability['operations']))} only")
     if not isinstance(change.fields, dict):
         raise ValueError("Change fields must be a dictionary")
+    if change.resource_type == "ec2_instance" and change.op in {"add", "modify"}:
+        state = change.fields.get("state")
+        if state is not None and state not in {"pending", "running", "shutting-down", "terminated", "stopping", "stopped"}:
+            raise ValueError("state must be one of pending, running, shutting-down, terminated, stopping, stopped")
     _validate_change_fields(change)
     for constraint in capability["constraints"]:
         if constraint["kind"] == "derived_field" and change.op in constraint["operations"]:
@@ -364,6 +437,10 @@ def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
         return infra.vpc.nacls
     if resource_type == "iam_role":
         return infra.iam.role_policies
+    if resource_type == "iam_user":
+        return infra.iam.iam_users
+    if resource_type == "nat_gateway":
+        return infra.vpc.nat_gateway_details
     return infra.lambda_data.functions
 
 
@@ -372,6 +449,8 @@ def _identity(resource_type: str, resource: BaseModel) -> str:
         return resource.name
     if resource_type == "iam_role":
         return resource.role_arn
+    if resource_type == "iam_user":
+        return resource.username
     return resource.id
 
 
@@ -518,7 +597,7 @@ def _delete(
     collection = _collection(infra, resource_type)
     index = next((i for i, item in enumerate(collection) if _identity(resource_type, item) == resource_id), None)
     if index is None:
-        raise ValueError(f"Target not found: {resource_type}")
+        raise TargetNotFound(resource_type, resource_id)
     target = collection[index]
     if resource_type == "network_acl":
         if target.associated_subnet_ids:
@@ -536,8 +615,8 @@ def _delete(
         )})
         if users:
             raise ValueError("Security group is still in use; model detaching or replacing it before deletion")
-    if resource_type == "ebs_volume" and target.attached_to is not None and not implicit:
-        raise ValueError("ebs_volume.attached_to: volume is in use")
+        if resource_type == "ebs_volume" and target.attached_to is not None and not implicit:
+            raise ValueError("ebs_volume.attached_to: volume is in use")
     if resource_type == "rds_instance":
         if target.deletion_protection is True:
             raise ValueError("rds_instance.deletion_protection: deletion is protected")
@@ -605,6 +684,47 @@ def _delete(
             _remove_value(values, resource_id)
 
 
+def _normalized_sg_rule(rule: Any) -> tuple:
+    """Return the modeled identity of a security-group rule."""
+    if isinstance(rule, BaseModel):
+        rule = rule.model_dump()
+    rule = rule or {}
+    return (
+        str(rule.get("protocol", "")),
+        rule.get("from_port"),
+        rule.get("to_port"),
+        tuple(sorted(set(rule.get("ip_ranges") or []))),
+        tuple(sorted(set(rule.get("source_sg_ids") or []))),
+        tuple(sorted(set(rule.get("dest_sg_ids") or []))),
+    )
+
+
+def _validate_security_group_rules(result: AWSInfrastructure, change: Change) -> None:
+    """Permit an unmodeled source-less rule only when replaying one already present."""
+    if change.resource_type != "security_group" or change.op not in {"add", "modify"}:
+        return
+    target = next(
+        (group for group in result.ec2.security_groups if group.id == change.resource_id),
+        None,
+    ) if change.op == "modify" else None
+    for field in ("rules", "egress_rules"):
+        supplied = change.fields.get(field)
+        if not isinstance(supplied, list):
+            continue
+        existing = (getattr(target, field, []) if target is not None else []) or []
+        existing_keys = {_normalized_sg_rule(rule) for rule in existing}
+        for index, rule in enumerate(supplied):
+            if not isinstance(rule, dict):
+                continue
+            if rule.get("ip_ranges") or rule.get("source_sg_ids") or rule.get("dest_sg_ids"):
+                continue
+            if _normalized_sg_rule(rule) not in existing_keys:
+                raise ValueError(
+                    f"security_group.{field}[{index}]: a new rule needs a source "
+                    "(ip_ranges, source_sg_ids or dest_sg_ids) (source is required)"
+                )
+
+
 def _replace_iam_role_policy_statements(
     infra: AWSInfrastructure, change: Change
 ) -> None:
@@ -620,26 +740,36 @@ def _replace_iam_role_policy_statements(
     )
     required_fields = set(constraint["required_fields"])
     allowed_fields = set(constraint["allowed_fields"])
-    if set(change.fields) != required_fields or required_fields != allowed_fields:
-        raise ValueError(
-            f"iam_role_policy modify requires only {', '.join(sorted(required_fields))}"
-        )
-    replacement_field = next(iter(required_fields))
-    statements = change.fields[replacement_field]
-    if not isinstance(statements, list):
-        raise ValueError("access_statements must be a list replacing the complete normalized statement set")
+    if set(change.fields) - {"access_statements", "policy_documents"} or ("access_statements" not in change.fields and "policy_documents" not in change.fields):
+        raise ValueError("iam_role_policy modify requires only access_statements and/or policy_documents")
+    if "policy_documents" in change.fields:
+        if not isinstance(change.fields["policy_documents"], list):
+            raise ValueError("policy_documents must be a list")
+        records = [PolicyDocumentRecord.model_validate(item) for item in change.fields["policy_documents"]]
+        derived = merge_policy_statements(records)
+        if "access_statements" in change.fields:
+            supplied = [AccessStatementChange.model_validate(item) for item in change.fields["access_statements"]]
+            if [item.model_dump() for item in supplied] != [item.model_dump() for item in derived]:
+                raise ValueError("access_statements must equal merge_policy_statements(policy_documents)")
+        statements = derived
+    else:
+        if not isinstance(change.fields["access_statements"], list):
+            raise ValueError("access_statements must be a list")
+        statements = [AccessStatementChange.model_validate(item) for item in change.fields["access_statements"]]
+        records = None
 
     matches = [policy for policy in infra.iam.role_policies if policy.role_arn == change.resource_id]
     if not matches:
-        raise ValueError("Target not found: iam_role_policy")
+        raise TargetNotFound("iam_role_policy", change.resource_id)
     if len(matches) != 1:
         raise ValueError("IAM role policy target is ambiguous; role ARN must identify exactly one collected role")
 
     policy = matches[0]
     policy.access_statements = [
-        AccessStatement.model_validate(AccessStatementChange.model_validate(statement).model_dump())
+        AccessStatement.model_validate(statement.model_dump() if hasattr(statement, "model_dump") else statement)
         for statement in statements
     ]
+    policy.policy_documents = records
     # Do not let stale collector summaries override an empty/replaced statement
     # set in egraph.build_graph's legacy fallback path.
     policy.has_admin = False
@@ -657,7 +787,7 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
         raise ValueError("routes must be a list replacing the complete normalized route set")
     matches = [table for table in infra.vpc.route_tables if table.id == change.resource_id]
     if not matches:
-        raise ValueError("Target not found: route_table")
+        raise TargetNotFound("route_table", change.resource_id)
     if len(matches) != 1:
         raise ValueError("Route table target is ambiguous; ID must identify exactly one collected route table")
     normalized = [Route.model_validate(route) for route in routes]
@@ -701,7 +831,7 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
 def _replace_network_acl(infra: AWSInfrastructure, change: Change) -> None:
     matches = [acl for acl in infra.vpc.nacls if acl.id == change.resource_id]
     if not matches:
-        raise ValueError("Target not found: network_acl")
+        raise TargetNotFound("network_acl", change.resource_id)
     if set(change.fields) - {"entries", "associated_subnet_ids"}:
         raise ValueError("network_acl modify allows only entries and associated_subnet_ids")
     acl = matches[0]
@@ -780,11 +910,88 @@ def recompute_derived_state(
     return infra
 
 
+def _add_nat_gateway(result: AWSInfrastructure, change: Change) -> AWSInfrastructure:
+    """Add a NAT gateway; AWS defaults connectivity to public, unknown placement stays unset."""
+    subnet_id = change.fields.get("subnet_id")
+    vpc_id = None
+    if subnet_id is not None:
+        subnet = next((
+            item for item in result.vpc.subnets
+            if (item.get("id") if isinstance(item, dict) else item.id) == subnet_id
+        ), None)
+        if subnet is None:
+            raise TargetNotFound("subnet", str(subnet_id))
+        vpc_id = subnet.get("vpc_id") if isinstance(subnet, dict) else subnet.vpc_id
+    identity = change.resource_id or _auto_id(result, change)
+    if identity in result.vpc.nat_gateways or any(item.id == identity for item in result.vpc.nat_gateway_details):
+        raise ValueError("Target already exists: nat_gateway")
+    result.vpc.nat_gateway_details.append(NATGateway(
+        id=identity,
+        subnet_id=subnet_id,
+        vpc_id=vpc_id,
+        connectivity_type=change.fields.get("connectivity_type", "public"),
+        allocation_id=change.fields.get("allocation_id"),
+        state="available",
+    ))
+    result.vpc.nat_gateways.append(identity)
+    return result
+
+
 def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     """Apply one change without mutating ``infra``."""
     _validate_change(change)
     result = _fresh(infra)
     resource_type = change.resource_type
+    _validate_security_group_rules(result, change)
+    if resource_type == "ec2_instance" and change.op in {"add", "modify"}:
+        sg_ids = change.fields.get("sg_ids", [])
+        if sg_ids and result.ec2.security_groups:
+            known_sg_ids = {group.id for group in result.ec2.security_groups}
+            missing = next((sg_id for sg_id in sg_ids if sg_id not in known_sg_ids), None)
+            if missing is not None:
+                raise TargetNotFound("security_group", str(missing))
+        subnet_id = change.fields.get("subnet_id")
+        if subnet_id and result.vpc.subnets:
+            known_subnet_ids = {
+                str(subnet.get("id", "")) if isinstance(subnet, dict) else str(subnet.id)
+                for subnet in result.vpc.subnets
+            }
+            if subnet_id not in known_subnet_ids:
+                raise TargetNotFound("subnet", str(subnet_id))
+    if resource_type == "rds_snapshot" and change.op == "add":
+        db_instance_id = change.fields.get("db_instance_id")
+        if db_instance_id is not None and not any(item.id == db_instance_id for item in result.rds.rds_instances):
+            raise TargetNotFound("rds_instance", str(db_instance_id))
+        if change.resource_id and any(item.id == change.resource_id for item in result.rds.rds_snapshots):
+            raise ValueError("Target already exists: rds_snapshot")
+    if resource_type == 'iam_role' and change.op in {'add', 'modify'}:
+        from app.aws_collector import _parse_role_trust_policy
+        from app.trust_policy import external_trust
+        target_id = _role_arn(result, change.resource_id) if change.op == 'add' else change.resource_id
+        if change.op == 'modify':
+            target = next((p for p in result.iam.role_policies if p.role_arn == target_id or p.role_name == target_id), None)
+            if target is None: raise TargetNotFound('iam_role', change.resource_id)
+            target_id = target.role_arn
+            document = _trust_document(change.fields['trust_policy'])
+            target.trusted_role_arns, target.trusted_services, target.trust_allows_external, target.trust_has_conditions = _parse_role_trust_policy(document, target_id)
+            target.trust_external_unrestricted = external_trust(document, target_id)[1]
+            return result
+        if any(p.role_arn == target_id for p in result.iam.role_policies): raise ValueError('Target already exists: iam_role')
+        document = _trust_document(change.fields['trust_policy']) if 'trust_policy' in change.fields else None
+        trusted_roles, services, allows, conditions = _parse_role_trust_policy(document or {}, target_id)
+        name = target_id.split(':role/', 1)[-1].rsplit('/', 1)[-1]
+        result.iam.role_policies.append(RolePolicy(role_name=name, role_arn=target_id, trusted_role_arns=trusted_roles, trusted_services=services, trust_allows_external=allows, trust_has_conditions=conditions, trust_external_unrestricted=external_trust(document or {}, target_id)[1] if document else False))
+        return result
+    if resource_type == 'iam_user' and change.op == 'add':
+        username = change.resource_id
+        if not username: raise ValueError('iam_user resource_id must not be empty')
+        if any(u.username == username for u in result.iam.iam_users): raise ValueError('Target already exists: iam_user')
+        console = change.fields.get('has_console_access', False)
+        result.iam.iam_users.append(IAMUser(username=username, has_console_access=console))
+        if console: _append_unique(result.iam.users_without_mfa, username)
+        return result
+    if resource_type == "nat_gateway" and change.op == "add":
+        return _add_nat_gateway(result, change)
     if resource_type == "iam_role_policy":
         _replace_iam_role_policy_statements(result, change)
         return result
@@ -816,8 +1023,15 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     model_type = _model_for(resource_type)
 
     if change.op == "add":
-        data = _resource_data(result, change)
-        resource = model_type.model_validate(data)
+        if resource_type == "rds_snapshot":
+            data = dict(change.fields)
+            data.update({"snapshot_type": "manual", "status": "available"})
+            identity = change.resource_id or _auto_id(result, change)
+            data["id"] = identity
+            resource = model_type.model_validate(data)
+        else:
+            data = _resource_data(result, change)
+            resource = model_type.model_validate(data)
         if any(_identity(resource_type, item) == _identity(resource_type, resource) for item in _collection(result, resource_type)):
             raise ValueError(f"Target already exists: {resource_type}")
         _collection(result, resource_type).append(resource)
@@ -839,7 +1053,9 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
             None,
         )
         if index is None:
-            raise ValueError(f"Target not found: {resource_type}")
+            raise TargetNotFound(resource_type, change.resource_id)
+        if not change.fields:
+            raise ValueError("modify needs at least one field")
         target = collection[index]
         updated_data = target.model_dump()
         updated_data.update(change.fields)

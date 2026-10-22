@@ -327,10 +327,9 @@ def _finding_buckets(findings):
 def score_branch(base, branch, base_findings, branch_findings) -> dict:
     """Score a branch without rewarding deletion of resources or findings."""
     from app.diffing import _deletion_impacts
-    from app.egraph import build_graph
+    from app.egraph import build_graph, build_graph_pair
 
-    base_graph = build_graph(base)
-    branch_graph = build_graph(branch)
+    base_graph, branch_graph = build_graph_pair(base, branch)
     score_before = score_snapshot(base)
     base_by_key = {
         _finding_key(finding): finding

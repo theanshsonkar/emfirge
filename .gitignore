@@ -33,7 +33,6 @@ Thumbs.db
 
 # Logs
 *.log
-agentops.log
 
 # Build artifacts
 *.db
@@ -64,3 +63,4 @@ TODO.md
 mcp/*.tgz
 backend/accuracy_report.json
 .local/
+/.scratch/

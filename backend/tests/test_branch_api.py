@@ -171,7 +171,7 @@ def test_add_change_and_diff():
          patch("app.main.branches.apply_change_to_branch", return_value=changed), \
          patch("app.main.branches.get_branch_diff", return_value=diff):
         response = client.post("/branches/b-1/changes", json={
-            "op": "modify", "resource_type": "s3_bucket", "resource_id": "bucket", "fields": {}
+            "op": "modify", "resource_type": "s3_bucket", "resource_id": "bucket", "fields": {"encrypted": True}
         })
         diff_response = client.get("/branches/b-1/diff")
     assert response.status_code == 200

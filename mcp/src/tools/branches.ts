@@ -61,15 +61,22 @@ export type ApplyChangeArgs = z.infer<typeof applyChangeZodObject>;
 export async function applyChangeHandler(args: ApplyChangeArgs) {
   // `emfirge_scan` returns tokenized ids (SG_001), so the id and any ids
   // embedded in `fields` must be expanded back to real AWS ids before the
-  // backend looks the target up -- otherwise the branch engine answers
-  // "Target not found" for exactly the ids the agent was just given.
+  // backend looks the target up.
+  const agentResourceId = args.resource_id;
   const { branch_id, ...change } = expandTokens(args) as ApplyChangeArgs;
-  const result = await backendCall(
-    "POST",
-    `/branches/${encodeURIComponent(branch_id)}/changes`,
-    { ...change, fields: change.fields ?? {} },
-  );
-  return ok(result);
+  try {
+    const result = await backendCall(
+      "POST",
+      `/branches/${encodeURIComponent(branch_id)}/changes`,
+      { ...change, fields: change.fields ?? {} },
+    );
+    return ok(result);
+  } catch (error) {
+    if (error instanceof Error && /target not found/i.test(error.message)) {
+      throw new Error(`${error.message} (target: ${agentResourceId})`);
+    }
+    throw error;
+  }
 }
 
 export const branchIdSchema = {
@@ -203,7 +210,7 @@ export async function listBranchesHandler(args: ListBranchesArgs) {
   }
   const queryString = query.toString();
   const result = await backendCall("GET", `/branches${queryString ? `?${queryString}` : ""}`);
-  return ok(result);
+  return ok(Array.isArray(result) ? { branches: result, count: result.length } : result);
 }
 
 export const compareBranchesSchema = {

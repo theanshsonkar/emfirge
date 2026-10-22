@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, PrivateAttr
 from typing import Dict, List, Optional, Literal, Union
+import json
 
 # ── INPUT MODEL ───────────────────────────────────────────────────
 class AWSCredentials(BaseModel):
@@ -140,6 +141,16 @@ class InternetGatewayAttachment(BaseModel):
     state: Optional[str] = None
 
 
+class NATGateway(BaseModel):
+    """Placement detail for one NAT gateway; ``VPCData.nat_gateways`` stays the id list."""
+    id: str
+    subnet_id: Optional[str] = None
+    vpc_id: Optional[str] = None
+    connectivity_type: Optional[Literal["public", "private"]] = None
+    allocation_id: Optional[str] = None
+    state: Optional[str] = None
+
+
 class VPCPeeringConnection(BaseModel):
     id: str
     requester_vpc_id: str
@@ -223,19 +234,47 @@ class AccessStatement(BaseModel):
     has_condition: bool = False
 
 
+class PolicyDocumentRecord(BaseModel):
+    """One normalized inline or managed IAM policy document."""
+    name: str
+    kind: Literal['inline', 'managed']
+    arn: Optional[str] = None
+    statements: List[AccessStatement] = Field(default_factory=list)
+
+
+def merge_policy_statements(records: List[PolicyDocumentRecord]) -> List[AccessStatement]:
+    """Merge records in order, removing identical normalized statements stably."""
+    result: List[AccessStatement] = []
+    seen = set()
+    for record in records:
+        for statement in record.statements:
+            key = json.dumps(statement.model_dump(mode='json'), sort_keys=True, separators=(',', ':'))
+            if key not in seen:
+                seen.add(key)
+                result.append(statement.model_copy(deep=True))
+    return result
+
+
 class RolePolicy(BaseModel):
-    """Parsed IAM role policy data for graph edge creation."""
+    """Parsed IAM role policy data for graph edge creation.
+
+    When policy_documents is present, access_statements is exactly the stable
+    merge/deduplication of every record's statements in record order.
+    None means the policy breakdown was not recorded in an older snapshot.
+    """
     role_name: str
     role_arn: str
     accessible_resources: List[str] = []  # Resource ARNs from Allow statements
     has_admin: bool = False               # True if Action:* Resource:*
     access_statements: List[AccessStatement] = Field(default_factory=list)
+    policy_documents: Optional[List[PolicyDocumentRecord]] = Field(default=None, exclude_if=lambda value: value is None)
     last_used_at: Optional[str] = None
     policy_names: List[str] = []          # attached/inline policy names (for display)
     trusted_role_arns: List[str] = []     # role/user ARNs trusted by the role
     trusted_services: List[str] = []      # AWS services trusted by the role
     trust_allows_external: bool = False  # trust includes external/account-wide principals
     trust_has_conditions: bool = False   # qualifying trust statement has conditions
+    trust_external_unrestricted: bool = Field(default=False, exclude_if=lambda value: value is False)
 
 class IAMData(BaseModel):
     root_has_access_keys: bool = False
@@ -301,6 +340,8 @@ class VPCData(BaseModel):
     # False for older snapshots or incomplete describe_internet_gateways results.
     internet_gateway_attachments_complete: bool = False
     nat_gateways: List[str] = []                 # NAT gateway IDs
+    # Empty for older snapshots; a missing entry means placement is unknown.
+    nat_gateway_details: List[NATGateway] = Field(default_factory=list)
     public_subnet_ids: List[str] = []            # Subnet IDs with route to IGW
     # Relationship tracking
     subnets: List[VPCSubnet] = []
@@ -513,6 +554,7 @@ class RiskFinding(BaseModel):
     blast_radius: Optional[int] = 0
     mitre_technique_id: Optional[str] = None
     mitre_technique_name: Optional[str] = None
+    metadata: Dict[str, object] = Field(default_factory=dict)
 
 # ── PRIORITY ACTION MODEL ─────────────────────────────────────────
 # One item in the AI-generated prioritized action plan (01-05)

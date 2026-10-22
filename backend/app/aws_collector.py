@@ -12,14 +12,14 @@ from app.models import (
     EC2Data, S3Data, RDSData, IAMData, IAMUser,
     CloudTrailData, CostData, CloudWatchData,
     GuardDutyData, LambdaData, SecretsManagerData,
-    VPCData, InternetGatewayAttachment, KMSData, ConfigData, SNSData, ECSData, WAFData,
+    VPCData, InternetGatewayAttachment, NATGateway, KMSData, ConfigData, SNSData, ECSData, WAFData,
     APIGatewayData, APIGatewayInstance,
     ElastiCacheData, ElastiCacheCluster,
     SQSData, SQSQueue,
     DynamoDBData, DynamoDBTable,
     EBSVolume, EBSSnapshot, ElasticIP, Route, RouteTable, NACLEntry, NetworkACL, NetworkInterface,
     VPCPeeringConnection, TransitGatewayAttachment, VPNGateway, InterfaceEndpoint, BlockDevice,
-    RDSSnapshot
+    RDSSnapshot, PolicyDocumentRecord, merge_policy_statements, AccessStatement
 )
 from datetime import datetime, timezone
 
@@ -888,15 +888,16 @@ def _parse_role_trust_policy(document, role_arn):
 
         qualifying_actions = {
             'sts:assumerole', 'sts:assumerolewithsaml',
-            'sts:assumerolewithwebidentity', '*',
+            'sts:assumerolewithwebidentity', '*', 'sts:*',
         }
+        import fnmatch
         for statement in statements:
             if not isinstance(statement, dict):
                 continue
             if str(statement.get('Effect', '')).lower() != 'allow':
                 continue
             actions = principal_values(statement.get('Action', []))
-            if not any(str(action).lower() in qualifying_actions for action in actions):
+            if not any(fnmatch.fnmatchcase(target, str(action).lower()) for action in actions for target in qualifying_actions):
                 continue
             if 'Condition' in statement:
                 trust_has_conditions = True
@@ -1169,8 +1170,11 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                      trust_has_conditions) = _parse_role_trust_policy(
                         role.get('AssumeRolePolicyDocument'), role_arn
                     )
+                    from app.trust_policy import external_trust
+                    trust_external_unrestricted = external_trust(role.get('AssumeRolePolicyDocument'), role_arn)[1]
 
-                    def parse_access_document(doc):
+                    policy_documents = []
+                    def parse_access_document(doc, document_statements=None):
                         """Normalize untrusted IAM policy input without failing collection."""
                         nonlocal has_admin
                         if isinstance(doc, str):
@@ -1196,34 +1200,25 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                             resource_key = 'NotResource' if 'NotResource' in stmt else 'Resource'
                             actions = stmt.get(action_key, [])
                             resources = stmt.get(resource_key, [])
-                            if isinstance(actions, str):
-                                actions = [actions]
-                            if isinstance(resources, str):
-                                resources = [resources]
-                            if not isinstance(actions, list) or not isinstance(resources, list):
-                                continue
+                            if isinstance(actions, str): actions = [actions]
+                            if isinstance(resources, str): resources = [resources]
+                            if not isinstance(actions, list) or not isinstance(resources, list): continue
                             actions = [value for value in actions if isinstance(value, str)]
                             resources = [value for value in resources if isinstance(value, str)]
-                            if not actions and not resources:
-                                continue
-                            from app.models import AccessStatement
-                            access_statements.append(AccessStatement(
-                                effect=effect,
-                                actions=list(dict.fromkeys(actions)),
+                            if not actions and not resources: continue
+                            statement = AccessStatement(
+                                effect=effect, actions=list(dict.fromkeys(actions)),
                                 resources=list(dict.fromkeys(resources)),
                                 is_not_action=action_key == 'NotAction',
                                 is_not_resource=resource_key == 'NotResource',
-                                has_condition=bool(stmt.get('Condition')),
-                            ))
-                            if effect != 'allow':
-                                continue
-                            if '*' in actions and '*' in resources:
-                                has_admin = True
+                                has_condition=bool(stmt.get('Condition')))
+                            access_statements.append(statement)
+                            if document_statements is not None: document_statements.append(statement.model_copy(deep=True))
+                            if effect != 'allow': continue
+                            if '*' in actions and '*' in resources: has_admin = True
                             for res in resources:
-                                if any(svc in res for svc in [':s3:', ':rds:', ':lambda:', ':secretsmanager:', ':dynamodb:']):
-                                    accessible_resources.append(res)
-                                elif res == '*':
-                                    accessible_resources.append('*')
+                                if any(svc in res for svc in [':s3:', ':rds:', ':lambda:', ':secretsmanager:', ':dynamodb:']): accessible_resources.append(res)
+                                elif res == '*': accessible_resources.append('*')
 
                     # Check attached managed policies
                     try:
@@ -1243,7 +1238,9 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                                     PolicyArn=policy_arn,
                                     VersionId=version_id
                                 )
-                                parse_access_document(version['PolicyVersion']['Document'])
+                                document_statements = []
+                                parse_access_document(version['PolicyVersion']['Document'], document_statements)
+                                policy_documents.append(PolicyDocumentRecord(name=policy['PolicyName'], kind='managed', arn=policy_arn, statements=document_statements))
                             except ClientError:
                                 pass
                             except Exception:
@@ -1269,7 +1266,9 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                             policy_names_list.append(pol_name)
                             try:
                                 pol_doc_resp = iam.get_role_policy(RoleName=role_name, PolicyName=pol_name)
-                                parse_access_document(pol_doc_resp.get('PolicyDocument', {}))
+                                document_statements = []
+                                parse_access_document(pol_doc_resp.get('PolicyDocument', {}), document_statements)
+                                policy_documents.append(PolicyDocumentRecord(name=pol_name, kind='inline', arn=None, statements=document_statements))
                             except Exception:
                                 pass
                     except ClientError as e:
@@ -1278,6 +1277,8 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                     except Exception:
                         pass
 
+                    policy_documents.sort(key=lambda item: (item.kind, item.name, item.arn or ''))
+                    access_statements = merge_policy_statements(policy_documents)
                     # Record useful access data or trust metadata. Trust-only roles
                     # are required for graph identity relationships.
                     if (has_admin or accessible_resources or access_statements or trusted_role_arns or
@@ -1289,11 +1290,13 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                             accessible_resources=list(dict.fromkeys(accessible_resources)),
                             has_admin=has_admin,
                             access_statements=list(access_statements),
+                            policy_documents=list(policy_documents),
                             policy_names=policy_names_list,
                             trusted_role_arns=trusted_role_arns,
                             trusted_services=trusted_services,
                             trust_allows_external=trust_allows_external,
                             trust_has_conditions=trust_has_conditions,
+                            trust_external_unrestricted=trust_external_unrestricted,
                             last_used_at=role_last_used.get(role_name),
                         ))
 
@@ -1711,6 +1714,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
     internet_gateway_attachments = []
     internet_gateway_attachments_complete = False
     nat_gateways = []
+    nat_gateway_details = []
     public_subnet_ids = set()
     
     # Relationship tracking
@@ -1832,6 +1836,19 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
             )
             for nat in nats_response.get('NatGateways', []):
                 nat_gateways.append(nat['NatGatewayId'])
+                connectivity = nat.get('ConnectivityType')
+                allocation_ids = [
+                    address['AllocationId'] for address in nat.get('NatGatewayAddresses', [])
+                    if address.get('AllocationId') and address.get('IsPrimary', True)
+                ]
+                nat_gateway_details.append(NATGateway(
+                    id=nat['NatGatewayId'],
+                    subnet_id=nat.get('SubnetId'),
+                    vpc_id=nat.get('VpcId'),
+                    connectivity_type=connectivity if connectivity in {'public', 'private'} else None,
+                    allocation_id=allocation_ids[0] if allocation_ids else None,
+                    state=nat.get('State'),
+                ))
         except ClientError as e:
             print(f'NAT Gateways check skipped: {get_error_code(e)}')
         except Exception:
@@ -2122,6 +2139,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         internet_gateway_attachments=internet_gateway_attachments,
         internet_gateway_attachments_complete=internet_gateway_attachments_complete,
         nat_gateways=nat_gateways,
+        nat_gateway_details=nat_gateway_details,
         public_subnet_ids=list(public_subnet_ids),
         subnets=subnets,
         route_tables=route_tables,

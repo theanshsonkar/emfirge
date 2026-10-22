@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 import copy
+import json
 
 from app.mutations import Change
 from app.aws_api_ingest import remove_security_group_rule
@@ -19,7 +20,25 @@ def is_aws_provider(provider_name: Any) -> bool:
     return provider_name.strip().rstrip("/").rsplit("/", 1)[-1].lower() in _AWS_PROVIDER_TYPES
 
 
-_UNSEEN_TERRAFORM_TYPES = frozenset({"aws_default_security_group"})
+_UNSEEN_TERRAFORM_TYPES = frozenset({
+    "aws_default_security_group", "aws_snapshot_create_volume_permission", "aws_ami_launch_permission",
+    "aws_ebs_snapshot_block_public_access", "aws_ec2_image_block_public_access",
+})
+_SNAPSHOT_SHARING_TYPES = frozenset({"aws_db_snapshot", "aws_db_cluster_snapshot"})
+_LB_SECURITY_FIELDS = {
+    "aws_lb": ("internal", "load_balancer_type", "security_groups", "subnets", "subnet_mapping", "ip_address_type"),
+    "aws_alb": ("internal", "load_balancer_type", "security_groups", "subnets", "subnet_mapping", "ip_address_type"),
+    "aws_lb_listener": ("port", "protocol", "ssl_policy", "certificate_arn", "default_action"),
+    "aws_alb_listener": ("port", "protocol", "ssl_policy", "certificate_arn", "default_action"),
+    "aws_lb_listener_rule": ("action", "condition", "listener_arn"),
+    "aws_alb_listener_rule": ("action", "condition", "listener_arn"),
+    "aws_lb_listener_certificate": ("certificate_arn", "listener_arn"),
+    "aws_alb_listener_certificate": ("certificate_arn", "listener_arn"),
+    "aws_lb_target_group": ("port", "protocol", "target_type", "vpc_id"),
+    "aws_alb_target_group": ("port", "protocol", "target_type", "vpc_id"),
+    "aws_lb_target_group_attachment": ("target_group_arn", "target_id", "port"),
+    "aws_alb_target_group_attachment": ("target_group_arn", "target_id", "port"),
+}
 _TERRAFORM_RULE_TYPES = frozenset({
     "aws_vpc_security_group_ingress_rule", "aws_vpc_security_group_egress_rule",
     "aws_security_group_rule",
@@ -34,7 +53,9 @@ _RESOURCE_MAP = {
     "aws_ebs_volume": ("ebs_volume", "id"),
     "aws_ebs_snapshot": ("ebs_snapshot", "id"),
     "aws_db_snapshot": ("rds_snapshot", "db_snapshot_identifier"),
-    "aws_iam_role": ("iam_role", "arn"),
+    "aws_iam_role": ("iam_role", "name"),
+    "aws_iam_user": ("iam_user", "name"),
+    "aws_nat_gateway": ("nat_gateway", "id"),
 }
 _DELETE_ORDER = ["ec2_instance", "lambda_function", "rds_instance", "ebs_volume",
                  "ebs_snapshot", "rds_snapshot", "s3_bucket", "security_group", "iam_role"]
@@ -177,6 +198,8 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
         "aws_db_instance": {"vpc_security_group_ids": "sg_ids", "publicly_accessible": "publicly_accessible",
             "storage_encrypted": "encrypted", "backup_retention_period": "backup_retention_days",
             "deletion_protection": "deletion_protection", "engine": "engine"},
+        "aws_nat_gateway": {"subnet_id": "subnet_id", "allocation_id": "allocation_id",
+            "connectivity_type": "connectivity_type"},
     }
     supported = mappings.get(resource, {})
     if update:
@@ -195,6 +218,18 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
             continue
         if source in after:
             fields[target] = after[source]
+    if resource == "aws_iam_role":
+        if "assume_role_policy" in (change.get("after_unknown") or {}):
+            _unknown(change, address, "assume_role_policy", unknown)
+        else:
+            policy = after.get("assume_role_policy")
+            if policy is not None and (not update or policy != (change.get("before") or {}).get("assume_role_policy")):
+                try:
+                    fields["trust_policy"] = json.loads(policy) if isinstance(policy, str) else policy
+                except (TypeError, ValueError):
+                    unknown.append({"address": address, "field": "assume_role_policy", "reason": "invalid JSON"})
+    if resource == "aws_iam_user":
+        return fields
     if resource == "aws_instance":
         if "metadata_options" in after and not update and not _unknown(change, address, "metadata_options", unknown):
             metadata = after.get("metadata_options") or {}
@@ -338,7 +373,25 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
     if typ in _UNSEEN_TERRAFORM_TYPES:
         return [], {"address": address, "type": typ, "actions": actions,
                      "provider_name": provider_name if isinstance(provider_name, str) else None,
-                     "outside_view": False, "unseen": True}
+                     "outside_view": False, "unseen": True,
+                     "detail": "snapshot or image sharing can share with other AWS accounts or the public, and Emfirge does not read sharing yet"}
+    if typ in _SNAPSHOT_SHARING_TYPES:
+        change = item.get("change") or {}
+        before, after = change.get("before") or {}, change.get("after") or {}
+        unknown = change.get("after_unknown") or {}
+        if "shared_accounts" in unknown or (after.get("shared_accounts") and after.get("shared_accounts") != before.get("shared_accounts")):
+            return [], {"address": address, "type": typ, "actions": actions,
+                         "provider_name": provider_name if isinstance(provider_name, str) else None,
+                         "outside_view": False, "unseen": True,
+                         "detail": "snapshot or image sharing can share with other AWS accounts or the public, and Emfirge does not read sharing yet"}
+    if typ in _LB_SECURITY_FIELDS and actions in (["delete", "create"], ["create", "delete"]):
+        change = item.get("change") or {}
+        before, after = change.get("before") or {}, change.get("after") or {}
+        unknown = change.get("after_unknown") or {}
+        if all(field not in unknown and before.get(field) == after.get(field) for field in _LB_SECURITY_FIELDS[typ]):
+            return [], {"address": address, "type": typ, "actions": actions,
+                         "provider_name": provider_name if isinstance(provider_name, str) else None,
+                         "outside_view": False, "stateless_replace": True}
     if typ in _TERRAFORM_RULE_TYPES:
         return _rule_change(item, sg_rules or {}, config_resources or {}, created_ids or {}, unknown_fields)
     if typ not in _RESOURCE_MAP:
@@ -363,12 +416,20 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         result.append(Change(op="delete", resource_type=resource, resource_id=str(resource_id or ""), fields=options))
     if actions == ["create"] or actions in (["delete", "create"], ["create", "delete"]):
         fields = _fields(typ, change, address, unknown_fields)
-        if resource in {"lambda_function", "s3_bucket", "ebs_volume", "ebs_snapshot", "rds_snapshot", "iam_role"}:
+        if resource in {"lambda_function", "s3_bucket", "ebs_volume", "ebs_snapshot"}:
             fields = {}
+        elif resource == "nat_gateway":
+            fields = {key: value for key, value in fields.items() if value is not None}
+        elif resource == "rds_snapshot":
+            db_identifier = (after or {}).get("db_instance_identifier")
+            if "db_instance_identifier" not in (change.get("after_unknown") or {}) and isinstance(db_identifier, str):
+                fields = {"db_instance_id": db_identifier}
+            else:
+                fields = {}
         result.append(Change(op="add", resource_type=resource, resource_id=str((after or {}).get(id_key, resource_id) or ""), fields=fields))
     elif actions == ["update"]:
         fields = _fields(typ, change, address, unknown_fields, update=True)
-        supported = {"aws_security_group": {"ingress"}, "aws_db_instance": {"backup_retention_period", "deletion_protection"}}
+        supported = {"aws_security_group": {"ingress"}, "aws_db_instance": {"backup_retention_period", "deletion_protection"}, "aws_iam_role": {"assume_role_policy"}}
         for field in (change.get("before", {}) or {}):
             if (change.get("before") or {}).get(field) != (after or {}).get(field) and field not in supported.get(typ, set()):
                 if field not in (change.get("after_unknown") or {}):
