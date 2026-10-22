@@ -24,8 +24,8 @@ def canonical_sha256(calls: list[dict]) -> str:
     return hashlib.sha256(json.dumps(calls, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def _resource(state: AWSInfrastructure, typ: str, ident: str):
-    collections = {
+def _resource_collections(state: AWSInfrastructure) -> dict[str, list]:
+    return {
         "security_group": state.ec2.security_groups,
         "ec2_instance": state.ec2.instances,
         "rds_instance": state.rds.rds_instances,
@@ -37,7 +37,10 @@ def _resource(state: AWSInfrastructure, typ: str, ident: str):
         "route_table": state.vpc.route_tables,
         "network_acl": state.vpc.nacls,
     }
-    items = collections.get(typ, [])
+
+
+def _resource(state: AWSInfrastructure, typ: str, ident: str):
+    items = _resource_collections(state).get(typ, [])
     key = "name" if typ in {"s3_bucket", "lambda_function"} else "id"
     return next((x for x in items if getattr(x, key, None) == ident), None)
 
@@ -206,6 +209,11 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
             elif field == "sg_ids": result.append(call("ec2", "ModifyInstanceAttribute", {"InstanceId": ident, "Groups": value}))
             elif field == "type": result.append(call("ec2", "ModifyInstanceAttribute", {"InstanceId": ident, "InstanceType": {"Value": value}}))
             elif field == "imdsv2_required": result.append(call("ec2", "ModifyInstanceMetadataOptions", {"InstanceId": ident, "HttpTokens": "required" if value else "optional"}))
+            elif field == "instance_profile_arn" and value and not _resource(before, typ, ident).instance_profile_arn:
+                result.append(call("ec2", "AssociateIamInstanceProfile", {"InstanceId": ident, "IamInstanceProfile": {"Arn": value}}))
+            elif field == "instance_profile_arn":
+                # Replacing or removing a profile needs the association id, which is not collected.
+                err("field_not_mapped: instance_profile_arn (replace or remove needs the association id)")
             elif field == "tags": result += _ec2_tag_calls(call, err, ident, _resource(before, typ, ident).tags, value)
             else: err(f"field_not_mapped: {field}")
         return result, errors
@@ -319,27 +327,47 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
     return [], errors
 
 
+# Types whose ids AWS assigns at create time (names chosen by the caller are not listed).
+_AWS_ASSIGNED_IDS = frozenset({"ec2_instance", "security_group", "nat_gateway", "ebs_volume", "route_table", "network_acl"})
+
+
+def _resources_of(state: AWSInfrastructure, typ: str) -> list:
+    if typ == "nat_gateway":
+        return state.vpc.nat_gateway_details
+    return _resource_collections(state)[typ]
+
+
+def _identity_of(item) -> str:
+    return getattr(item, "id", None) or getattr(item, "name", "")
+
+
+def _created_dependency(change: Change, created: dict[str, set[str]]) -> str | None:
+    """The created type a change refers to by id, if any."""
+    if change.op != "add" and change.resource_id in created.get(change.resource_type, set()):
+        return change.resource_type
+    fields = change.fields if isinstance(change.fields, dict) else {}
+    sg_ids = fields.get("sg_ids")
+    if isinstance(sg_ids, list) and created.get("security_group", set()) & set(sg_ids):
+        return "security_group"
+    if isinstance(fields.get("routes"), list) and any(
+        isinstance(route, dict) and str(route.get("target_type", "")).lower() in {"nat", "nat_gateway"}
+        and route.get("target_id") in created.get("nat_gateway", set())
+        for route in fields["routes"]
+    ):
+        return "nat_gateway"
+    return None
+
+
 def build_api_calls(base: AWSInfrastructure, changes: list[Change]) -> list[dict]:
     state = base
     calls: list[dict] = []
     errors: list[dict] = []
-    # AWS assigns NAT ids at create time, so a route cannot name a NAT this branch adds.
-    created_nat_ids: set[str] = set()
-    created_route_table_ids: set[str] = set()
+    # Resources this branch adds whose ids AWS assigns: a later call cannot name them.
+    created: dict[str, set[str]] = {}
     for index, change in enumerate(changes):
-        if change.resource_type == "route_table" and change.op != "add" and change.resource_id in created_route_table_ids:
-            errors.append({"change_index": index, "op": change.op, "resource_type": change.resource_type, "reason": "depends_on_branch_created_route_table"})
-            try:
-                state = apply_changes(state, [change])
-            except Exception:
-                pass
-            continue
-        if change.resource_type == "route_table" and isinstance(change.fields.get("routes"), list) and any(
-            isinstance(route, dict) and str(route.get("target_type", "")).lower() in {"nat", "nat_gateway"}
-            and route.get("target_id") in created_nat_ids
-            for route in change.fields["routes"]
-        ):
-            errors.append({"change_index": index, "op": change.op, "resource_type": change.resource_type, "reason": "depends_on_branch_created_nat_gateway"})
+        dependency = _created_dependency(change, created)
+        if dependency is not None:
+            errors.append({"change_index": index, "op": change.op, "resource_type": change.resource_type, "reason": f"depends_on_branch_created_{dependency}"})
             try:
                 state = apply_changes(state, [change])
             except Exception:
@@ -359,10 +387,10 @@ def build_api_calls(base: AWSInfrastructure, changes: list[Change]) -> list[dict
         except Exception as exc:
             errors.append({"change_index": index, "op": change.op, "resource_type": change.resource_type, "reason": f"build_failed:{type(exc).__name__}"})
             continue
-        if change.op == "add" and change.resource_type == "nat_gateway":
-            created_nat_ids.update(set(after.vpc.nat_gateways) - set(state.vpc.nat_gateways))
-        if change.op == "add" and change.resource_type == "route_table":
-            created_route_table_ids.update({t.id for t in after.vpc.route_tables} - {t.id for t in state.vpc.route_tables})
+        if change.op == "add" and change.resource_type in _AWS_ASSIGNED_IDS:
+            created.setdefault(change.resource_type, set()).update(
+                {_identity_of(item) for item in _resources_of(after, change.resource_type)}
+                - {_identity_of(item) for item in _resources_of(state, change.resource_type)})
         calls.extend(generated); errors.extend(item_errors); state = after
     for item in calls:
         model = _SESSION.get_service_model(item["service"]).operation_model(item["operation"])
