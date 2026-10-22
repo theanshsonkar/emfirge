@@ -304,6 +304,20 @@ def convert_change_set(doc: Any, nacls: Any = None) -> tuple[dict[str, Any], lis
                         break
                 else:
                     calls.append({"service": "ec2", "operation": "CreateNatGateway", "parameters": params})
+            elif typ == "AWS::EC2::Volume":
+                properties = _properties(_context(resource, "AfterContext")) or {}
+                params = {}
+                for key, value in properties.items():
+                    if key == "Tags":
+                        params["TagSpecifications"] = [{"ResourceType": "volume", "Tags": value}]
+                        continue
+                    params[key] = _resolved(value) if key in {"AvailabilityZone", "VolumeType", "SnapshotId"} else value
+                    if key == "Size" and isinstance(value, str) and value.isdigit():
+                        params[key] = int(value)
+                if any(value is None for value in params.values()):
+                    extras.append(_extra(address, typ, "MissingPropertyValues"))
+                else:
+                    calls.append({"service": "ec2", "operation": "CreateVolume", "parameters": params})
             elif typ == "AWS::EC2::SecurityGroupIngress":
                 after = _context(resource, "AfterContext")
                 rule = _properties(after) if after else None

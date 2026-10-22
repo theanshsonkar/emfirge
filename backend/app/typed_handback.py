@@ -131,6 +131,15 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
             if user_tags(detail.tags):
                 params["TagSpecifications"] = [{"ResourceType": "natgateway", "Tags": [{"Key": k, "Value": v} for k, v in sorted(user_tags(detail.tags).items())]}]
             return [call("ec2", "CreateNatGateway", params)], errors
+        if typ == "ebs_volume":
+            volume = next((item for item in after.ec2.ebs_volumes if item.id not in {v.id for v in before.ec2.ebs_volumes}), None)
+            if volume is None or not volume.availability_zone:
+                err("unspecified_values: availability_zone")
+                return [], errors
+            params = {"AvailabilityZone": volume.availability_zone, "Size": volume.size_gb, "VolumeType": volume.volume_type}
+            if user_tags(volume.tags):
+                params["TagSpecifications"] = [{"ResourceType": "volume", "Tags": [{"Key": k, "Value": v} for k, v in sorted(user_tags(volume.tags).items())]}]
+            return [call("ec2", "CreateVolume", params)], errors
         err("operation_not_mapped")
         return [], errors
     if typ == "iam_role" and op == "modify":

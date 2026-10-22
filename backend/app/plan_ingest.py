@@ -58,7 +58,7 @@ _RESOURCE_MAP = {
     "aws_nat_gateway": ("nat_gateway", "id"),
 }
 _TAGGED_RESOURCES = frozenset({"aws_instance", "aws_db_instance", "aws_security_group", "aws_s3_bucket",
-                               "aws_lambda_function", "aws_nat_gateway"})
+                               "aws_lambda_function", "aws_nat_gateway", "aws_ebs_volume"})
 _DELETE_ORDER = ["ec2_instance", "lambda_function", "rds_instance", "ebs_volume",
                  "ebs_snapshot", "rds_snapshot", "s3_bucket", "security_group", "iam_role"]
 
@@ -200,6 +200,7 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
         "aws_db_instance": {"vpc_security_group_ids": "sg_ids", "publicly_accessible": "publicly_accessible",
             "storage_encrypted": "encrypted", "backup_retention_period": "backup_retention_days",
             "deletion_protection": "deletion_protection", "engine": "engine"},
+        "aws_ebs_volume": {"availability_zone": "availability_zone", "size": "size_gb", "type": "volume_type"},
         "aws_nat_gateway": {"subnet_id": "subnet_id", "allocation_id": "allocation_id",
             "connectivity_type": "connectivity_type"},
     }
@@ -425,9 +426,9 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         result.append(Change(op="delete", resource_type=resource, resource_id=str(resource_id or ""), fields=options))
     if actions == ["create"] or actions in (["delete", "create"], ["create", "delete"]):
         fields = _fields(typ, change, address, unknown_fields)
-        if resource in {"lambda_function", "s3_bucket", "ebs_volume", "ebs_snapshot"}:
-            fields = {}
-        elif resource == "nat_gateway":
+        if resource in {"lambda_function", "s3_bucket", "ebs_snapshot"}:
+            fields = {key: value for key, value in fields.items() if key == "tags"}
+        elif resource in {"nat_gateway", "ebs_volume"}:
             fields = {key: value for key, value in fields.items() if value is not None}
         elif resource == "rds_snapshot":
             db_identifier = (after or {}).get("db_instance_identifier")
@@ -439,6 +440,8 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
     elif actions == ["update"]:
         fields = _fields(typ, change, address, unknown_fields, update=True)
         supported = {"aws_security_group": {"ingress"}, "aws_db_instance": {"backup_retention_period", "deletion_protection"}, "aws_iam_role": {"assume_role_policy"}}
+        if typ in _TAGGED_RESOURCES:
+            supported = {**supported, typ: supported.get(typ, set()) | {"tags", "tags_all"}}
         for field in (change.get("before", {}) or {}):
             if (change.get("before") or {}).get(field) != (after or {}).get(field) and field not in supported.get(typ, set()):
                 if field not in (change.get("after_unknown") or {}):

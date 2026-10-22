@@ -207,6 +207,22 @@ def _validate_change_fields(change: Change) -> None:
         if connectivity == "private" and "allocation_id" in change.fields:
             raise ValueError("A private NAT gateway cannot have an Elastic IP allocation_id")
         return
+    if change.resource_type == "ebs_volume" and change.op == "add":
+        unknown = set(change.fields) - {"availability_zone", "size_gb", "volume_type", "tags"}
+        if unknown:
+            raise ValueError("ebs_volume add fields: availability_zone, size_gb, volume_type and tags only")
+        if "availability_zone" in change.fields:
+            _strict_validate_field("ebs_volume", "availability_zone", change.fields["availability_zone"], str)
+        if "size_gb" not in change.fields:
+            raise ValueError("ebs_volume.size_gb: required (AWS needs Size when no snapshot is given; restoring from a snapshot is not modeled)")
+        _strict_validate_field("ebs_volume", "size_gb", change.fields["size_gb"], int)
+        volume_type = change.fields.get("volume_type", "gp2")
+        if volume_type not in _EBS_SIZE_LIMITS_GIB:
+            raise ValueError(f"ebs_volume.volume_type: must be one of {', '.join(sorted(_EBS_SIZE_LIMITS_GIB))}")
+        low, high = _EBS_SIZE_LIMITS_GIB[volume_type]
+        if not low <= change.fields["size_gb"] <= high:
+            raise ValueError(f"ebs_volume.size_gb: {volume_type} volumes are {low} to {high} GiB")
+        return
     if change.resource_type == "rds_snapshot" and change.op == "add":
         unknown = set(change.fields) - {"db_instance_id"}
         if unknown:
@@ -241,6 +257,11 @@ def _validate_change_fields(change: Change) -> None:
 
 
 _CRUD_OPERATIONS = frozenset({"add", "modify", "delete"})
+# CreateVolume size range per volume type (AWS EBS volume types docs).
+_EBS_SIZE_LIMITS_GIB = {
+    "gp2": (1, 16384), "gp3": (1, 16384), "io1": (4, 16384), "io2": (4, 65536),
+    "st1": (125, 16384), "sc1": (125, 16384), "standard": (1, 1024),
+}
 _DELETE_ONLY = frozenset({"delete"})
 _RDS_DELETE_FIELDS = {
     "skip_final_snapshot": bool,
@@ -276,7 +297,7 @@ _MUTATION_CAPABILITIES = {
         },),
     },
     "lambda_function": {"model": LambdaFunction, "operations": _CRUD_OPERATIONS, "constraints": ()},
-    "ebs_volume": {"model": EBSVolume, "operations": _DELETE_ONLY, "constraints": ()},
+    "ebs_volume": {"model": EBSVolume, "operations": frozenset({"add", "delete"}), "constraints": ()},
     "ebs_snapshot": {"model": EBSSnapshot, "operations": _DELETE_ONLY, "constraints": ()},
     "rds_snapshot": {"model": RDSSnapshot, "operations": frozenset({"add", "delete"}), "constraints": ()},
     "iam_role": {"model": None, "operations": _CRUD_OPERATIONS, "constraints": ()},
@@ -977,6 +998,25 @@ def _add_nat_gateway(result: AWSInfrastructure, change: Change) -> AWSInfrastruc
     return result
 
 
+def _add_ebs_volume(result: AWSInfrastructure, change: Change) -> AWSInfrastructure:
+    """Add an unattached volume; AWS defaults the type to gp2, an unknown AZ stays unset."""
+    zone = change.fields.get("availability_zone")
+    if zone is not None and result.region and not re.fullmatch(re.escape(result.region) + r"[a-z]", zone):
+        raise ValueError(f"ebs_volume.availability_zone: {zone} is not an availability zone in {result.region}")
+    identity = change.resource_id or _auto_id(result, change)
+    if any(item.id == identity for item in result.ec2.ebs_volumes):
+        raise ValueError("Target already exists: ebs_volume")
+    result.ec2.ebs_volumes.append(EBSVolume(
+        id=identity,
+        size_gb=change.fields["size_gb"],
+        volume_type=change.fields.get("volume_type", "gp2"),
+        availability_zone=zone,
+        state="available",
+        tags=change.fields.get("tags"),
+    ))
+    return result
+
+
 def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     """Apply one change without mutating ``infra``."""
     _validate_change(change)
@@ -1040,6 +1080,8 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         return result
     if resource_type == "nat_gateway" and change.op == "add":
         return _add_nat_gateway(result, change)
+    if resource_type == "ebs_volume" and change.op == "add":
+        return _add_ebs_volume(result, change)
     if resource_type == "iam_role_policy":
         _replace_iam_role_policy_statements(result, change)
         return result

@@ -5,6 +5,7 @@ import json
 
 from app.mutations import Change
 from app.aws_collector import build_security_group_rule
+from app.tags import tag_map
 import copy
 import re
 
@@ -495,6 +496,32 @@ def translate_api_calls(
                     unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
             # AWS assigns the NAT id; an empty id lets the branch generate a stable placeholder.
             changes.append(Change(op="add", resource_type="nat_gateway", resource_id="", fields=fields))
+            addresses.append(address)
+            continue
+        if lower_service == "ec2" and operation == "CreateVolume":
+            if "SnapshotId" in parameters or "Size" not in parameters:
+                # Size then comes from a snapshot Emfirge does not read.
+                unmodeled.append(_unmodeled(address, lower_service, operation, "volume size comes from a snapshot; restoring a snapshot is not modeled")); continue
+            if not isinstance(parameters["Size"], int) or isinstance(parameters["Size"], bool):
+                raise _invalid()
+            fields = {"size_gb": parameters["Size"]}
+            for source, target in (("AvailabilityZone", "availability_zone"), ("VolumeType", "volume_type")):
+                if source in parameters:
+                    if not _valid_string(parameters[source]):
+                        raise _invalid()
+                    fields[target] = parameters[source]
+            tags = {}
+            for spec in parameters.get("TagSpecifications") or []:
+                if isinstance(spec, dict) and spec.get("ResourceType") in {None, "volume"}:
+                    tags.update(tag_map(spec.get("Tags")))
+            if tags:
+                fields["tags"] = tags
+            for field in parameters:
+                if field not in {"AvailabilityZone", "Size", "VolumeType", "TagSpecifications", "ClientToken"}:
+                    # Encrypted, Iops, Throughput, KmsKeyId, MultiAttachEnabled, ... are not modeled yet.
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            # AWS assigns the volume id; an empty id lets the branch generate a stable placeholder.
+            changes.append(Change(op="add", resource_type="ebs_volume", resource_id="", fields=fields))
             addresses.append(address)
             continue
         if lower_service == "rds" and operation == "CreateDBSnapshot":

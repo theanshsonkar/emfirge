@@ -262,8 +262,11 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
     }
 
     for resource_type, operations in advertised.items():
-        if resource_type in {"ebs_volume", "ebs_snapshot"}:
+        if resource_type == "ebs_snapshot":
             assert operations == {"delete"}
+            continue
+        if resource_type == "ebs_volume":
+            assert operations == {"add", "delete"}
             continue
         if resource_type == "iam_role":
             assert operations == {"add", "modify", "delete"}
