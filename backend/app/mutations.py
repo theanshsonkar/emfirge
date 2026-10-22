@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, Val
 from app.cidr import is_internet_cidr
 from app.s3_public import effective_is_public, policy_is_public
 from app.tags import TAGGED_TYPES, apply_tag_replacement
+from app.field_catalog import validate_fields as validate_catalog_fields
 
 from app.models import (
     AccessStatement,
@@ -216,12 +217,12 @@ def _validate_change_fields(change: Change) -> None:
         if "size_gb" not in change.fields:
             raise ValueError("ebs_volume.size_gb: required (AWS needs Size when no snapshot is given; restoring from a snapshot is not modeled)")
         _strict_validate_field("ebs_volume", "size_gb", change.fields["size_gb"], int)
+        # The type itself is checked against AWS's VolumeType enum by the field catalog.
         volume_type = change.fields.get("volume_type", "gp2")
-        if volume_type not in _EBS_SIZE_LIMITS_GIB:
-            raise ValueError(f"ebs_volume.volume_type: must be one of {', '.join(sorted(_EBS_SIZE_LIMITS_GIB))}")
-        low, high = _EBS_SIZE_LIMITS_GIB[volume_type]
-        if not low <= change.fields["size_gb"] <= high:
-            raise ValueError(f"ebs_volume.size_gb: {volume_type} volumes are {low} to {high} GiB")
+        if volume_type in _EBS_SIZE_LIMITS_GIB:
+            low, high = _EBS_SIZE_LIMITS_GIB[volume_type]
+            if not low <= change.fields["size_gb"] <= high:
+                raise ValueError(f"ebs_volume.size_gb: {volume_type} volumes are {low} to {high} GiB")
         return
     if change.resource_type == "rds_snapshot" and change.op == "add":
         unknown = set(change.fields) - {"db_instance_id"}
@@ -444,6 +445,8 @@ def _validate_change(change: Change) -> None:
         if constraint["kind"] == "derived_field" and change.op in constraint["operations"]:
             if set(change.fields).intersection(constraint["fields"]):
                 raise ValueError(constraint["message"])
+    if change.op in {"add", "modify"}:
+        validate_catalog_fields(change.resource_type, change.fields)
     if change.op == "delete":
         _validate_delete_fields(change)
 

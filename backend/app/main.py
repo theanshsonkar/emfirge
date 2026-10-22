@@ -45,7 +45,7 @@ from app.aws_cli_ingest import parse_cli_commands
 from app.cfn_ingest import convert_change_set
 from app.verdict import CombinedVerdict, combined_verdict
 from app.diffing import graph_warning_strings
-from app import branches, identifiers
+from app import branches, field_catalog, identifiers
 from app.in_use_evidence import EvidenceRequest, EvidenceEstimate, build_estimate, read_evidence, SOURCES, WINDOW_DAYS
 from app.database import Project, SupabaseIdentity
 from app.aws_collector import collect_infrastructure, ROLE_SESSION_NAME
@@ -1559,6 +1559,13 @@ def list_branches_endpoint(request: Request, base_analysis_id: Optional[str] = N
     _check_branch_rate_limit(_rate_key(request, caller))
     return [_branch_summary(branch) for branch in branches.list_branches(base_analysis_id)
             if _branch_is_visible(branch.branch_id, caller, db)]
+
+
+@app.get('/branches/field-catalog', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def branch_field_catalog_endpoint(request: Request, caller: Caller = Depends(get_caller)):
+    """Every settable branch field, traced to the AWS API member it stands for."""
+    _check_branch_rate_limit(_rate_key(request, caller))
+    return field_catalog.catalog_document()
 
 
 @app.get('/branches/capabilities', response_model=MutationCapabilities,
