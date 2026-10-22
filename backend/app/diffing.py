@@ -15,6 +15,8 @@ from app.egraph import INTERNAL_REACH_EDGE_BUDGET, build_graph_pair, get_interne
 from app.exposure import Exposure, compute_exposures
 from app.graph_schema import NODE_SCHEMAS
 from app.mutations import _MUTATION_CAPABILITIES, _collection, _identity
+from app.models import AWSInfrastructure
+from app.tags import TAGGED_TYPES
 from ipaddress import ip_network
 from app.rules import find_toxic_combos, run_all_checks
 from app.scoring import score_branch
@@ -403,6 +405,23 @@ def _model_only_diff(base_infra: Any, branch_infra: Any) -> tuple[list[dict], li
     return added, removed, modified
 
 
+def _with_tag_changes(modified: list[dict], base_infra: Any, branch_infra: Any) -> list[dict]:
+    """Graph nodes do not carry tags, so tag-only changes are added from the models."""
+    if not isinstance(base_infra, AWSInfrastructure) or not isinstance(branch_infra, AWSInfrastructure):
+        return modified
+    by_key = {(item["resource_type"], item["id"]): item for item in modified}
+    for resource_type in sorted(TAGGED_TYPES):
+        base_items = {_identity(resource_type, item): item for item in _collection(base_infra, resource_type)}
+        for item in _collection(branch_infra, resource_type):
+            before = base_items.get(_identity(resource_type, item))
+            if before is None or before.tags == item.tags:
+                continue
+            key = (resource_type, str(_identity(resource_type, item)))
+            entry = by_key.setdefault(key, {"id": key[1], "resource_type": resource_type, "changed": []})
+            entry["changed"] = sorted(set(entry.get("changed", [])) | {"tags"})
+    return list(by_key.values())
+
+
 def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     """Compare infrastructure snapshots without mutating either input."""
     base_graph, branch_graph = build_graph_pair(base_infra, branch_infra)
@@ -410,7 +429,9 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     model_added, model_removed, model_modified = _model_only_diff(base_infra, branch_infra)
     graph_diff["resources_added"] = sorted(graph_diff["resources_added"] + model_added, key=lambda item: (item["resource_type"], item["id"]))
     graph_diff["resources_removed"] = sorted(graph_diff["resources_removed"] + model_removed, key=lambda item: (item["resource_type"], item["id"]))
-    graph_diff["resources_modified"] = sorted(graph_diff["resources_modified"] + model_modified, key=lambda item: (item["resource_type"], item["id"]))
+    graph_diff["resources_modified"] = sorted(
+        _with_tag_changes(graph_diff["resources_modified"] + model_modified, base_infra, branch_infra),
+        key=lambda item: (item["resource_type"], item["id"]))
     coverage_warnings = []
     collection_warnings = sorted({
         str(item).strip()

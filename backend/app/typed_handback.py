@@ -8,6 +8,7 @@ import botocore.session
 from botocore.validate import ParamValidator
 
 from app.models import AWSInfrastructure
+from app.tags import is_aws_tag, user_tags
 from app.mutations import Change, apply_changes
 
 _SESSION = botocore.session.get_session()
@@ -76,6 +77,22 @@ def _target(route: Any) -> tuple[str, str] | None:
     return (key, ident) if key else None
 
 
+def _ec2_tag_calls(call, err, ident, old, new) -> list[dict]:
+    """CreateTags for added or changed keys, DeleteTags for removed ones."""
+    if old is None:
+        err("field_not_mapped: tags (current tags were not collected; rescan first)")
+        return []
+    old, new = user_tags(old), user_tags(new)
+    result = []
+    changed = {k: v for k, v in new.items() if old.get(k) != v}
+    removed = sorted(set(old) - set(new))
+    if changed:
+        result.append(call("ec2", "CreateTags", {"Resources": [ident], "Tags": [{"Key": k, "Value": v} for k, v in sorted(changed.items())]}))
+    if removed:
+        result.append(call("ec2", "DeleteTags", {"Resources": [ident], "Tags": [{"Key": k} for k in removed]}))
+    return result
+
+
 def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], list[dict]]:
     typ, op, ident, fields = change.resource_type, change.op, change.resource_id, change.fields
     errors: list[dict] = []
@@ -111,6 +128,8 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
             params = {"SubnetId": detail.subnet_id, "ConnectivityType": detail.connectivity_type}
             if detail.allocation_id:
                 params["AllocationId"] = detail.allocation_id
+            if user_tags(detail.tags):
+                params["TagSpecifications"] = [{"ResourceType": "natgateway", "Tags": [{"Key": k, "Value": v} for k, v in sorted(user_tags(detail.tags).items())]}]
             return [call("ec2", "CreateNatGateway", params)], errors
         err("operation_not_mapped")
         return [], errors
@@ -155,7 +174,8 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
             for key in sorted(new_rules.keys() - old_rules.keys()): authorizes.append(call("ec2", auth, {"GroupId": ident, "IpPermissions": [_perm(new_rules[key], egress)]}))
             for key in sorted(old_rules.keys() - new_rules.keys()): revokes.append(call("ec2", revoke, {"GroupId": ident, "IpPermissions": [_perm(old_rules[key], egress)]}))
         result = authorizes + revokes
-        unknown = set(fields) - {"name", "rules", "egress_rules"}
+        if "tags" in fields: result += _ec2_tag_calls(call, err, ident, _resource(before, typ, ident).tags, _resource(after, typ, ident).tags)
+        unknown = set(fields) - {"name", "rules", "egress_rules", "tags"}
         for field in sorted(unknown): err(f"field_not_mapped: {field}")
         return result, errors
     if typ == "ec2_instance":
@@ -167,6 +187,7 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
             elif field == "sg_ids": result.append(call("ec2", "ModifyInstanceAttribute", {"InstanceId": ident, "Groups": value}))
             elif field == "type": result.append(call("ec2", "ModifyInstanceAttribute", {"InstanceId": ident, "InstanceType": {"Value": value}}))
             elif field == "imdsv2_required": result.append(call("ec2", "ModifyInstanceMetadataOptions", {"InstanceId": ident, "HttpTokens": "required" if value else "optional"}))
+            elif field == "tags": result += _ec2_tag_calls(call, err, ident, _resource(before, typ, ident).tags, value)
             else: err(f"field_not_mapped: {field}")
         return result, errors
     deletes = {"ebs_volume": ("ec2", "DeleteVolume", "VolumeId"), "ebs_snapshot": ("ec2", "DeleteSnapshot", "SnapshotId"), "rds_snapshot": ("rds", "DeleteDBSnapshot", "DBSnapshotIdentifier")}
@@ -200,6 +221,16 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
         for field in fields:
             value = getattr(bucket, field)
             if field in bpa: continue
+            if field == "tags":
+                old = _resource(before, typ, ident).tags
+                if old is None or any(is_aws_tag(key) for key in (value or {})):
+                    # PutBucketTagging replaces every tag; unknown or AWS-managed tags would be lost.
+                    err("field_not_mapped: tags (current bucket tags unknown or include aws: tags)")
+                elif user_tags(value):
+                    result.append(call("s3", "PutBucketTagging", {"Bucket": ident, "Tagging": {"TagSet": [{"Key": k, "Value": v} for k, v in sorted(value.items())]}}))
+                else:
+                    result.append(call("s3", "DeleteBucketTagging", {"Bucket": ident}))
+                continue
             if field == "versioning_enabled" and isinstance(value, bool): result.append(call("s3", "PutBucketVersioning", {"Bucket": ident, "VersioningConfiguration": {"Status": "Enabled" if value else "Suspended"}}))
             elif field == "policy" and isinstance(value, str): result.append(call("s3", "PutBucketPolicy", {"Bucket": ident, "Policy": value}))
             elif field == "is_public" and "policy" in fields: continue  # follows from the policy put above

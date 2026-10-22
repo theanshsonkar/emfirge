@@ -12,6 +12,7 @@ from ipaddress import ip_network
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError, field_validator, model_validator
 from app.cidr import is_internet_cidr
 from app.s3_public import effective_is_public, policy_is_public
+from app.tags import TAGGED_TYPES, apply_tag_replacement
 
 from app.models import (
     AccessStatement,
@@ -194,9 +195,9 @@ def _validate_change_fields(change: Change) -> None:
     if change.op not in {"add", "modify"}:
         return
     if change.resource_type == "nat_gateway" and change.op == "add":
-        unknown = set(change.fields) - {"subnet_id", "connectivity_type", "allocation_id"}
+        unknown = set(change.fields) - {"subnet_id", "connectivity_type", "allocation_id", "tags"}
         if unknown:
-            raise ValueError("nat_gateway add fields: subnet_id, connectivity_type and allocation_id only")
+            raise ValueError("nat_gateway add fields: subnet_id, connectivity_type, allocation_id and tags only")
         for field in ("subnet_id", "allocation_id"):
             if field in change.fields:
                 _strict_validate_field("nat_gateway", field, change.fields[field], str)
@@ -970,6 +971,7 @@ def _add_nat_gateway(result: AWSInfrastructure, change: Change) -> AWSInfrastruc
         connectivity_type=change.fields.get("connectivity_type", "public"),
         allocation_id=change.fields.get("allocation_id"),
         state="available",
+        tags=change.fields.get("tags"),
     ))
     result.vpc.nat_gateways.append(identity)
     return result
@@ -980,6 +982,14 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     _validate_change(change)
     result = _fresh(infra)
     resource_type = change.resource_type
+    if resource_type in TAGGED_TYPES and change.op == "add" and change.fields.get("tags") is None:
+        # AWS creates a resource with no tags unless they are given.
+        change = change.model_copy(update={"fields": {**change.fields, "tags": {}}})
+    if resource_type in TAGGED_TYPES and change.op in {"add", "modify"} and "tags" in change.fields:
+        current = next((item for item in _collection(result, resource_type)
+                        if _identity(resource_type, item) == change.resource_id), None) if change.op == "modify" else None
+        tags = apply_tag_replacement(current.tags if current is not None else None, change.fields["tags"])
+        change = change.model_copy(update={"fields": {**change.fields, "tags": tags}})
     _validate_security_group_rules(result, change)
     if resource_type == "ec2_instance" and change.op in {"add", "modify"}:
         sg_ids = change.fields.get("sg_ids", [])

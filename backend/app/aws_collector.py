@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointResolutionError
 from botocore.config import Config
 from app.cidr import is_internet_cidr
+from app.tags import tag_map
 from app.s3_public import acl_grants_are_public, effective_is_public, policy_is_public
 from app.models import (
     AWSCredentials, AWSInfrastructure,
@@ -355,6 +356,7 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
                         delete_on_termination=item['Ebs'].get('DeleteOnTermination'),
                     ) for item in instance.get('BlockDeviceMappings', [])
                     if isinstance(item.get('Ebs'), dict) and item['Ebs'].get('VolumeId')],
+                    'tags': tag_map(instance.get('Tags')),
                 })
                 
                 # Track SG to instance mapping
@@ -401,7 +403,8 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
                 'name': sg_name,
                 'rules': rules,
                 'egress_rules': egress_rules,
-                'attached_to': sg_to_instances.get(sg_id, [])
+                'attached_to': sg_to_instances.get(sg_id, []),
+                'tags': tag_map(sg.get('Tags')),
             })
 
     except ClientError as e:
@@ -513,6 +516,7 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
                     create_time=create_time.isoformat() if hasattr(create_time, 'isoformat') else create_time,
                     availability_zone=v.get('AvailabilityZone'), state=v.get('State', 'available'),
                     attached_to=(v.get('Attachments') or [{}])[0].get('InstanceId'),
+                    tags=tag_map(v.get('Tags')),
                 ))
         collection_status['ebs_volumes'] = 'ok'
     except ClientError as e:
@@ -652,6 +656,7 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                 'is_empty': False,
                 'acl_public': None,
                 'policy_public': None,
+                'tags': None,
                 **{field: None for field, _ in _BPA_FIELDS},
                 'flags': {
                     'public': False,
@@ -740,6 +745,17 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                 result['ignore_public_acls'], result['restrict_public_buckets'])
             result['flags']['public'] = result['is_public']
 
+            # Tags (None = not readable)
+            try:
+                result['tags'] = tag_map(s3.get_bucket_tagging(Bucket=name).get('TagSet'))
+            except ClientError as e:
+                if get_error_code(e) == 'NoSuchTagSet':
+                    result['tags'] = {}
+                else:
+                    print(f'S3 tagging check skipped for {name}: {get_error_code(e)}')
+            except Exception:
+                pass
+
             # Empty check (orphan detection)
             try:
                 response = s3.list_objects_v2(Bucket=name, MaxKeys=1)
@@ -773,6 +789,7 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                     'policy': result['policy'],
                     'is_empty': result['is_empty'],
                     'acl_public': result['acl_public'],
+                    'tags': result['tags'],
                     'policy_public': result['policy_public'],
                     **{field: result[field] for field, _ in _BPA_FIELDS},
                 })
@@ -854,6 +871,7 @@ def collect_rds(key, secret, token, region, warnings) -> RDSData:
                 'engine': db.get('Engine'),
                 'backup_retention_days': db.get('BackupRetentionPeriod'),
                 'deletion_protection': db.get('DeletionProtection'),
+                'tags': tag_map(db.get('TagList')),
             })
 
     except ClientError as e:
@@ -1589,6 +1607,16 @@ def collect_guardduty(key, secret, token, region, warnings) -> GuardDutyData:
     )
 
 # ── LAMBDA COLLECTOR ──────────────────────────────────────────────
+def _lambda_tags(client, function_arn):
+    """Tags of one function; None when they cannot be read (ListFunctions omits them)."""
+    if not function_arn:
+        return None
+    try:
+        return dict(client.list_tags(Resource=function_arn).get('Tags') or {})
+    except Exception:
+        return None
+
+
 def collect_lambda(key, secret, token, region, warnings) -> LambdaData:
     function_count = 0
     functions_with_outdated_runtime = []
@@ -1649,7 +1677,8 @@ def collect_lambda(key, secret, token, region, warnings) -> LambdaData:
                     'vpc_id': vpc_id,
                     'subnet_ids': subnet_ids,
                     'sg_ids': sg_ids,
-                    'secret_refs': secret_refs
+                    'secret_refs': secret_refs,
+                    'tags': _lambda_tags(lm, fn.get('FunctionArn')),
                 })
 
     except ClientError as e:
@@ -1909,6 +1938,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
                     connectivity_type=connectivity if connectivity in {'public', 'private'} else None,
                     allocation_id=allocation_ids[0] if allocation_ids else None,
                     state=nat.get('State'),
+                    tags=tag_map(nat.get('Tags')),
                 ))
         except ClientError as e:
             print(f'NAT Gateways check skipped: {get_error_code(e)}')

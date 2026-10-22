@@ -61,6 +61,7 @@
         ],
         "state": "running",
         "subnet_id": "subnet-demo-public",
+        "tags": null,
         "type": "t3.micro"
       }
     ],
@@ -92,7 +93,8 @@
             "protocol": "tcp",
             "to_port": 22
           }
-        ]
+        ],
+        "tags": null
       },
       {
         "attached_to": [],
@@ -108,7 +110,8 @@
             "protocol": "tcp",
             "to_port": 5432
           }
-        ]
+        ],
+        "tags": null
       }
     ],
     "ssh_open_to_internet": false,
@@ -208,7 +211,8 @@
         "sg_ids": [
           "sg-demo-db"
         ],
-        "subnet_id": "subnet-demo-private"
+        "subnet_id": "subnet-demo-private",
+        "tags": null
       }
     ],
     "rds_snapshots": [],
@@ -230,6 +234,7 @@
         "policy": null,
         "policy_public": null,
         "restrict_public_buckets": null,
+        "tags": null,
         "versioning_enabled": true
       }
     ],

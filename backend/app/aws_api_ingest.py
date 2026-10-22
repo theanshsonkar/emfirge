@@ -509,7 +509,7 @@ def translate_api_calls(
             changes.append(Change(op="add", resource_type="rds_snapshot", resource_id=parameters["DBSnapshotIdentifier"], fields={"db_instance_id": parameters["DBInstanceIdentifier"]}))
             addresses.append(address)
             continue
-        if lower_service == "s3" and operation in {"PutBucketPolicy", "DeleteBucketPolicy", "PutPublicAccessBlock"}:
+        if lower_service == "s3" and operation in {"PutBucketPolicy", "DeleteBucketPolicy", "PutPublicAccessBlock", "PutBucketTagging", "DeleteBucketTagging"}:
             bucket = parameters.get("Bucket")
             if not _valid_string(bucket):
                 unmodeled.append(_unmodeled(address, lower_service, operation, "missing Bucket")); continue
@@ -524,6 +524,15 @@ def translate_api_calls(
                 fields = {"policy": policy}
             elif operation == "DeleteBucketPolicy":
                 fields = {"policy": None}
+            elif operation == "DeleteBucketTagging":
+                fields = {"tags": {}}
+            elif operation == "PutBucketTagging":
+                tag_set = (parameters.get("Tagging") or {}).get("TagSet") if isinstance(parameters.get("Tagging"), dict) else None
+                if not isinstance(tag_set, list) or not all(isinstance(item, dict) and _valid_string(item.get("Key")) and isinstance(item.get("Value"), str) for item in tag_set):
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "missing or malformed Tagging.TagSet")); continue
+                known.add("Tagging")
+                # PutBucketTagging replaces the whole tag set.
+                fields = {"tags": {item["Key"]: item["Value"] for item in tag_set}}
             else:
                 config = parameters.get("PublicAccessBlockConfiguration")
                 if not isinstance(config, dict) or not all(isinstance(value, bool) for value in config.values()):

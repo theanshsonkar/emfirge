@@ -57,6 +57,8 @@ _RESOURCE_MAP = {
     "aws_iam_user": ("iam_user", "name"),
     "aws_nat_gateway": ("nat_gateway", "id"),
 }
+_TAGGED_RESOURCES = frozenset({"aws_instance", "aws_db_instance", "aws_security_group", "aws_s3_bucket",
+                               "aws_lambda_function", "aws_nat_gateway"})
 _DELETE_ORDER = ["ec2_instance", "lambda_function", "rds_instance", "ebs_volume",
                  "ebs_snapshot", "rds_snapshot", "s3_bucket", "security_group", "iam_role"]
 
@@ -228,6 +230,13 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
                     fields["trust_policy"] = json.loads(policy) if isinstance(policy, str) else policy
                 except (TypeError, ValueError):
                     unknown.append({"address": address, "field": "assume_role_policy", "reason": "invalid JSON"})
+    if resource in _TAGGED_RESOURCES:
+        # tags_all is what AWS stores (it includes provider default_tags).
+        source = "tags_all" if "tags_all" in after or "tags_all" in (change.get("after_unknown") or {}) else "tags"
+        if source in (change.get("after_unknown") or {}):
+            _unknown(change, address, source, unknown)
+        elif source in after and (not update or after.get(source) != (change.get("before") or {}).get(source)):
+            fields["tags"] = dict(after.get(source) or {})
     if resource == "aws_iam_user":
         return fields
     if resource == "aws_instance":

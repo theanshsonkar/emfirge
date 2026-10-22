@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app import cost, limits, delete_lens
 from app.evidence_models import parse_iso
+from app.tags import has_conditional_iam_statement, retagged_resources
 from app.diffing import diff_infrastructure
 from app.delete_lens import DeletionLens, analyze_deletions, deleted_base_reachable, deleted_role_usage_unknown, recently_used_deleted
 from app.egraph import build_graph, build_graph_pair, get_internet_reachable_set
@@ -590,6 +591,13 @@ def combined_verdict(
     if unspecified_role_ids:
         if 'unspecified_change_fields' not in coverage_warnings: coverage_warnings.append('unspecified_change_fields')
         reasons.append(_reason('warn', 'unspecified_values', 'A change leaves a role trust policy unspecified; Emfirge cannot tell who can assume it', unspecified_role_ids))
+    retagged = retagged_resources(base_infra, branch_infra) if isinstance(branch_infra, AWSInfrastructure) and isinstance(base_infra, AWSInfrastructure) else []
+    if retagged and has_conditional_iam_statement(branch_infra):
+        reasons.append(_reason(
+            "warn", "tag_change_access_unmodeled",
+            "Tags changed and some IAM policies have conditions; Emfirge does not evaluate tag-based (ABAC) conditions, so access may change",
+            retagged,
+        ))
     if introduced_critical:
         reasons.append(_reason("block", "introduced_critical_finding", "Introduced Critical finding", _resource_ids(item.get("resource") for item in introduced_critical)))
     broad_access_findings = [
