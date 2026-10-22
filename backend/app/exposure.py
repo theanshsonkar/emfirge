@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from pydantic import BaseModel, ConfigDict
 
 from app.egraph import get_internet_reachable_set, internet_ingress, nacl_allows_inbound, subnet_has_igw_route
+from app.rds_ports import rds_port
 from app.rules import PORT_CLASSES
 
 
@@ -128,7 +129,7 @@ def _severity(protocol: str, from_port: int, to_port: int, source: str, state: s
 
 
 def _rule_exposures(sg_id: str, sg: Any, resource_id: str, resource_type: str,
-                    state: str, subnet_id: str | None, graph: Any) -> list[Exposure]:
+                    state: str, subnet_id: str | None, graph: Any, port: int | None = None) -> list[Exposure]:
     result = []
     route = subnet_has_igw_route(subnet_id, graph) if subnet_id else None
     for rule in _value(_data(sg), "rules", []) or []:
@@ -137,6 +138,8 @@ def _rule_exposures(sg_id: str, sg: Any, resource_id: str, resource_type: str,
             continue
         protocol = str(_value(rule, "protocol", "-1"))
         from_port, to_port = _ports(rule)
+        if port is not None and not from_port <= port <= to_port:
+            continue
         if state == "active":
             if route is False:
                 continue
@@ -156,6 +159,12 @@ def compute_exposures(infra: Any, graph: Any, base_infra: Any = None) -> list[Ex
     sg_nodes = _sg_nodes(infra, graph)
     reachable = get_internet_reachable_set(graph)
     exposures: list[Exposure] = []
+    # Node ids are the plain name or "rds_instance:<name>" when names collide.
+    rds_ports: dict[str, int | None] = {}
+    for db in (_value(_value(infra, "rds", {}), "rds_instances", []) or []):
+        port = rds_port(db)
+        rds_ports[str(_value(db, "id"))] = port
+        rds_ports[f"rds_instance:{_value(db, 'id')}"] = port
     for sg_id, sg in sorted(sg_nodes.items()):
         consumers = _sg_consumers(sg_id, infra, graph)
         if not consumers and _eni_proves_unused(sg_id, infra, base_infra):
@@ -177,5 +186,6 @@ def compute_exposures(infra: Any, graph: Any, base_infra: Any = None) -> list[Ex
                 sg_id, sg, resource_id,
                 str(_value(consumer, "resource_type", _value(consumer, "type", ""))),
                 "active", subnet_id, graph,
+                rds_ports.get(resource_id) if str(_value(consumer, "resource_type", _value(consumer, "type", ""))) == "rds_instance" else None,
             ))
     return sorted(exposures, key=lambda item: item.model_dump_json())

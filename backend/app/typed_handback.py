@@ -226,7 +226,7 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
             if field in fields: params[key] = fields[field]
         return [call("rds", "DeleteDBInstance", params)], errors
     if typ == "rds_instance" and op == "modify":
-        params = {"DBInstanceIdentifier": ident, "ApplyImmediately": True}; mapping = {"publicly_accessible":"PubliclyAccessible", "backup_retention_days":"BackupRetentionPeriod", "deletion_protection":"DeletionProtection", "sg_ids":"VpcSecurityGroupIds"}
+        params = {"DBInstanceIdentifier": ident, "ApplyImmediately": True}; mapping = {"publicly_accessible":"PubliclyAccessible", "backup_retention_days":"BackupRetentionPeriod", "deletion_protection":"DeletionProtection", "sg_ids":"VpcSecurityGroupIds", "port":"DBPortNumber"}
         for field in fields:
             value = getattr(after.rds.rds_instances[next(i for i,x in enumerate(after.rds.rds_instances) if x.id == ident)], field)
             if value is None:
