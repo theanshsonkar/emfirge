@@ -30,6 +30,7 @@ from app.models import (
     NetworkACL,
     NACLEntry,
     IAMUser,
+    NATGateway,
     RolePolicy,
 )
 
@@ -191,6 +192,19 @@ def _strict_validate_field(resource_type: str, field: str, value: Any, annotatio
 def _validate_change_fields(change: Change) -> None:
     if change.op not in {"add", "modify"}:
         return
+    if change.resource_type == "nat_gateway" and change.op == "add":
+        unknown = set(change.fields) - {"subnet_id", "connectivity_type", "allocation_id"}
+        if unknown:
+            raise ValueError("nat_gateway add fields: subnet_id, connectivity_type and allocation_id only")
+        for field in ("subnet_id", "allocation_id"):
+            if field in change.fields:
+                _strict_validate_field("nat_gateway", field, change.fields[field], str)
+        connectivity = change.fields.get("connectivity_type", "public")
+        if connectivity not in {"public", "private"}:
+            raise ValueError("connectivity_type must be public or private")
+        if connectivity == "private" and "allocation_id" in change.fields:
+            raise ValueError("A private NAT gateway cannot have an Elastic IP allocation_id")
+        return
     if change.resource_type == "rds_snapshot" and change.op == "add":
         unknown = set(change.fields) - {"db_instance_id"}
         if unknown:
@@ -254,6 +268,7 @@ _MUTATION_CAPABILITIES = {
     "rds_snapshot": {"model": RDSSnapshot, "operations": frozenset({"add", "delete"}), "constraints": ()},
     "iam_role": {"model": None, "operations": _CRUD_OPERATIONS, "constraints": ()},
     "iam_user": {"model": IAMUser, "operations": frozenset({"add"}), "constraints": ()},
+    "nat_gateway": {"model": NATGateway, "operations": frozenset({"add"}), "constraints": ()},
     "iam_role_policy": {
         "model": None,
         "operations": frozenset({"modify"}),
@@ -424,6 +439,8 @@ def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
         return infra.iam.role_policies
     if resource_type == "iam_user":
         return infra.iam.iam_users
+    if resource_type == "nat_gateway":
+        return infra.vpc.nat_gateway_details
     return infra.lambda_data.functions
 
 
@@ -893,6 +910,33 @@ def recompute_derived_state(
     return infra
 
 
+def _add_nat_gateway(result: AWSInfrastructure, change: Change) -> AWSInfrastructure:
+    """Add a NAT gateway; AWS defaults connectivity to public, unknown placement stays unset."""
+    subnet_id = change.fields.get("subnet_id")
+    vpc_id = None
+    if subnet_id is not None:
+        subnet = next((
+            item for item in result.vpc.subnets
+            if (item.get("id") if isinstance(item, dict) else item.id) == subnet_id
+        ), None)
+        if subnet is None:
+            raise TargetNotFound("subnet", str(subnet_id))
+        vpc_id = subnet.get("vpc_id") if isinstance(subnet, dict) else subnet.vpc_id
+    identity = change.resource_id or _auto_id(result, change)
+    if identity in result.vpc.nat_gateways or any(item.id == identity for item in result.vpc.nat_gateway_details):
+        raise ValueError("Target already exists: nat_gateway")
+    result.vpc.nat_gateway_details.append(NATGateway(
+        id=identity,
+        subnet_id=subnet_id,
+        vpc_id=vpc_id,
+        connectivity_type=change.fields.get("connectivity_type", "public"),
+        allocation_id=change.fields.get("allocation_id"),
+        state="available",
+    ))
+    result.vpc.nat_gateways.append(identity)
+    return result
+
+
 def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     """Apply one change without mutating ``infra``."""
     _validate_change(change)
@@ -946,6 +990,8 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         result.iam.iam_users.append(IAMUser(username=username, has_console_access=console))
         if console: _append_unique(result.iam.users_without_mfa, username)
         return result
+    if resource_type == "nat_gateway" and change.op == "add":
+        return _add_nat_gateway(result, change)
     if resource_type == "iam_role_policy":
         _replace_iam_role_policy_statements(result, change)
         return result

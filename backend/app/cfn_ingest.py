@@ -287,7 +287,24 @@ def convert_change_set(doc: Any, nacls: Any = None) -> tuple[dict[str, Any], lis
                 else:
                     extras.append(_extra(address, typ, "UpdateNestedStack" if typ == "AWS::CloudFormation::Stack" else "Update" + suffix))
         elif action == "Add":
-            if typ == "AWS::EC2::SecurityGroupIngress":
+            if typ == "AWS::EC2::NatGateway":
+                after = _context(resource, "AfterContext")
+                properties = _properties(after) if after else None
+                subnet_id = _resolved((properties or {}).get("SubnetId"))
+                if not isinstance(subnet_id, str) or not subnet_id:
+                    extras.append(_extra(address, typ, "MissingPropertyValues"))
+                    continue
+                params = {"SubnetId": subnet_id}
+                for key, value in properties.items():
+                    if key in {"SubnetId", "Tags"}:
+                        continue
+                    params[key] = _resolved(value) if key in {"AllocationId", "ConnectivityType"} else value
+                    if params[key] is None:
+                        extras.append(_extra(address, typ, "MissingPropertyValues"))
+                        break
+                else:
+                    calls.append({"service": "ec2", "operation": "CreateNatGateway", "parameters": params})
+            elif typ == "AWS::EC2::SecurityGroupIngress":
                 after = _context(resource, "AfterContext")
                 rule = _properties(after) if after else None
                 if not isinstance(rule, dict):

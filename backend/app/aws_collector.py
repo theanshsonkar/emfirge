@@ -12,7 +12,7 @@ from app.models import (
     EC2Data, S3Data, RDSData, IAMData, IAMUser,
     CloudTrailData, CostData, CloudWatchData,
     GuardDutyData, LambdaData, SecretsManagerData,
-    VPCData, InternetGatewayAttachment, KMSData, ConfigData, SNSData, ECSData, WAFData,
+    VPCData, InternetGatewayAttachment, NATGateway, KMSData, ConfigData, SNSData, ECSData, WAFData,
     APIGatewayData, APIGatewayInstance,
     ElastiCacheData, ElastiCacheCluster,
     SQSData, SQSQueue,
@@ -1714,6 +1714,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
     internet_gateway_attachments = []
     internet_gateway_attachments_complete = False
     nat_gateways = []
+    nat_gateway_details = []
     public_subnet_ids = set()
     
     # Relationship tracking
@@ -1835,6 +1836,19 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
             )
             for nat in nats_response.get('NatGateways', []):
                 nat_gateways.append(nat['NatGatewayId'])
+                connectivity = nat.get('ConnectivityType')
+                allocation_ids = [
+                    address['AllocationId'] for address in nat.get('NatGatewayAddresses', [])
+                    if address.get('AllocationId') and address.get('IsPrimary', True)
+                ]
+                nat_gateway_details.append(NATGateway(
+                    id=nat['NatGatewayId'],
+                    subnet_id=nat.get('SubnetId'),
+                    vpc_id=nat.get('VpcId'),
+                    connectivity_type=connectivity if connectivity in {'public', 'private'} else None,
+                    allocation_id=allocation_ids[0] if allocation_ids else None,
+                    state=nat.get('State'),
+                ))
         except ClientError as e:
             print(f'NAT Gateways check skipped: {get_error_code(e)}')
         except Exception:
@@ -2125,6 +2139,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         internet_gateway_attachments=internet_gateway_attachments,
         internet_gateway_attachments_complete=internet_gateway_attachments_complete,
         nat_gateways=nat_gateways,
+        nat_gateway_details=nat_gateway_details,
         public_subnet_ids=list(public_subnet_ids),
         subnets=subnets,
         route_tables=route_tables,

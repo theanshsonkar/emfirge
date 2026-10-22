@@ -141,6 +141,16 @@ class InternetGatewayAttachment(BaseModel):
     state: Optional[str] = None
 
 
+class NATGateway(BaseModel):
+    """Placement detail for one NAT gateway; ``VPCData.nat_gateways`` stays the id list."""
+    id: str
+    subnet_id: Optional[str] = None
+    vpc_id: Optional[str] = None
+    connectivity_type: Optional[Literal["public", "private"]] = None
+    allocation_id: Optional[str] = None
+    state: Optional[str] = None
+
+
 class VPCPeeringConnection(BaseModel):
     id: str
     requester_vpc_id: str
@@ -330,6 +340,8 @@ class VPCData(BaseModel):
     # False for older snapshots or incomplete describe_internet_gateways results.
     internet_gateway_attachments_complete: bool = False
     nat_gateways: List[str] = []                 # NAT gateway IDs
+    # Empty for older snapshots; a missing entry means placement is unknown.
+    nat_gateway_details: List[NATGateway] = Field(default_factory=list)
     public_subnet_ids: List[str] = []            # Subnet IDs with route to IGW
     # Relationship tracking
     subnets: List[VPCSubnet] = []

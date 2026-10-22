@@ -569,6 +569,22 @@ def combined_verdict(
             "A change leaves a snapshot source database unspecified; Emfirge cannot tell which database it protects",
             unspecified_snapshot_ids,
         ))
+    base_nat_ids = set(_value(_value(base_infra, "vpc", {}), "nat_gateways", []) or [])
+    unspecified_nat_ids = [
+        _text(_value(item, "id")) for item in (_value(_value(branch_infra, "vpc", {}), "nat_gateway_details", []) or [])
+        if _text(_value(item, "id")) not in base_nat_ids and (
+            not _value(item, "subnet_id")
+            or (_value(item, "connectivity_type") == "public" and not _value(item, "allocation_id"))
+        )
+    ]
+    if unspecified_nat_ids:
+        if "unspecified_change_fields" not in coverage_warnings:
+            coverage_warnings.append("unspecified_change_fields")
+        reasons.append(_reason(
+            "warn", "unspecified_values",
+            "A change leaves a NAT gateway's subnet or public Elastic IP unspecified; AWS requires them and Emfirge will not guess",
+            unspecified_nat_ids,
+        ))
     base_role_ids = {_text(_value(item, 'role_arn')) for item in (_value(_value(base_infra, 'iam', {}), 'role_policies', []) or [])}
     unspecified_role_ids = [_text(_value(item, 'role_arn')) for item in (_value(_value(branch_infra, 'iam', {}), 'role_policies', []) or []) if _text(_value(item, 'role_arn')) not in base_role_ids and not _value(item, 'trust_external_unrestricted') and not _value(item, 'trust_allows_external') and not _value(item, 'trust_has_conditions')]
     if unspecified_role_ids:

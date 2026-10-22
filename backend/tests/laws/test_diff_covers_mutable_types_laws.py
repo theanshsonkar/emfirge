@@ -39,6 +39,9 @@ def _add_samples(base):
         collection = _collection(base, resource_type)
         if resource_type == "rds_snapshot":
             samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="snap-law-add", fields={"db_instance_id": base.rds.rds_instances[0].id})
+        elif resource_type == "nat_gateway":
+            subnet = base.vpc.subnets[0]
+            samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="nat-law-add", fields={"subnet_id": subnet.id, "allocation_id": "eipalloc-law-add"})
         elif resource_type == "network_acl":
             samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="acl-law-add", fields={"vpc_id": base.vpc.total_vpcs and base.vpc.subnets[0].vpc_id or "vpc-law"})
         elif collection:

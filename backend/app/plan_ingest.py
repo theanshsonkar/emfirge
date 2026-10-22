@@ -55,6 +55,7 @@ _RESOURCE_MAP = {
     "aws_db_snapshot": ("rds_snapshot", "db_snapshot_identifier"),
     "aws_iam_role": ("iam_role", "name"),
     "aws_iam_user": ("iam_user", "name"),
+    "aws_nat_gateway": ("nat_gateway", "id"),
 }
 _DELETE_ORDER = ["ec2_instance", "lambda_function", "rds_instance", "ebs_volume",
                  "ebs_snapshot", "rds_snapshot", "s3_bucket", "security_group", "iam_role"]
@@ -197,6 +198,8 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
         "aws_db_instance": {"vpc_security_group_ids": "sg_ids", "publicly_accessible": "publicly_accessible",
             "storage_encrypted": "encrypted", "backup_retention_period": "backup_retention_days",
             "deletion_protection": "deletion_protection", "engine": "engine"},
+        "aws_nat_gateway": {"subnet_id": "subnet_id", "allocation_id": "allocation_id",
+            "connectivity_type": "connectivity_type"},
     }
     supported = mappings.get(resource, {})
     if update:
@@ -415,6 +418,8 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         fields = _fields(typ, change, address, unknown_fields)
         if resource in {"lambda_function", "s3_bucket", "ebs_volume", "ebs_snapshot"}:
             fields = {}
+        elif resource == "nat_gateway":
+            fields = {key: value for key, value in fields.items() if value is not None}
         elif resource == "rds_snapshot":
             db_identifier = (after or {}).get("db_instance_identifier")
             if "db_instance_identifier" not in (change.get("after_unknown") or {}) and isinstance(db_identifier, str):

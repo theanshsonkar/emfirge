@@ -481,6 +481,22 @@ def translate_api_calls(
                 changes.append(Change(op="modify", resource_type="rds_instance", resource_id=parameters["DBInstanceIdentifier"], fields=fields))
                 addresses.append(address)
             continue
+        if lower_service == "ec2" and operation == "CreateNatGateway":
+            if not _valid_string(parameters.get("SubnetId")):
+                raise _invalid()
+            fields = {"subnet_id": parameters["SubnetId"]}
+            for source, target in (("ConnectivityType", "connectivity_type"), ("AllocationId", "allocation_id")):
+                if source in parameters:
+                    if not _valid_string(parameters[source]):
+                        raise _invalid()
+                    fields[target] = parameters[source]
+            for field in parameters:
+                if field not in {"SubnetId", "ConnectivityType", "AllocationId", "TagSpecifications", "ClientToken"}:
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            # AWS assigns the NAT id; an empty id lets the branch generate a stable placeholder.
+            changes.append(Change(op="add", resource_type="nat_gateway", resource_id="", fields=fields))
+            addresses.append(address)
+            continue
         if lower_service == "rds" and operation == "CreateDBSnapshot":
             if not _valid_string(parameters.get("DBSnapshotIdentifier")):
                 unmodeled.append(_unmodeled(address, lower_service, operation))
