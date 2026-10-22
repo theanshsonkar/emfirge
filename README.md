@@ -93,7 +93,7 @@ The installer sets up Claude Desktop, Claude Code, Cursor, Kiro, Cline, Continue
 
 ## Built to be trusted
 
-Every behaviour of the engine is pinned by a numbered **law**, a property test that must always hold. There are 47 so far, for example:
+Every behaviour of the engine is pinned by a numbered **law**, a property test that must always hold. There are 48 so far, for example:
 
 > **L1:** an empty branch scores exactly like the live scan.<br>
 > **L7:** the same snapshot and changes always give the same verdict.<br>
@@ -114,7 +114,7 @@ The checks come from public sources rather than hand-written lists: [pathfinding
 |---|:-:|:-:|:-:|
 | EC2 instance, security group, RDS instance, S3 bucket, Lambda function, network ACL | ✅ | ✅ | ✅ |
 | IAM role (including trust policy) | ✅ | ✅ | ✅ |
-| IAM user | ✅ | | |
+| IAM user, NAT gateway | ✅ | | |
 | RDS snapshot | ✅ | | ✅ |
 | EBS volume, EBS snapshot | | | ✅ |
 | IAM role policy, route table | | ✅ | |
