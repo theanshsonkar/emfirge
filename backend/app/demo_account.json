@@ -218,12 +218,18 @@
   "s3": {
     "buckets": [
       {
+        "acl_public": null,
+        "block_public_acls": null,
+        "block_public_policy": null,
         "encrypted": false,
         "has_cloudfront": false,
+        "ignore_public_acls": null,
         "is_empty": false,
         "is_public": false,
         "name": "emfirge-demo-artifacts-000000000000",
         "policy": null,
+        "policy_public": null,
+        "restrict_public_buckets": null,
         "versioning_enabled": true
       }
     ],

@@ -509,6 +509,38 @@ def translate_api_calls(
             changes.append(Change(op="add", resource_type="rds_snapshot", resource_id=parameters["DBSnapshotIdentifier"], fields={"db_instance_id": parameters["DBInstanceIdentifier"]}))
             addresses.append(address)
             continue
+        if lower_service == "s3" and operation in {"PutBucketPolicy", "DeleteBucketPolicy", "PutPublicAccessBlock"}:
+            bucket = parameters.get("Bucket")
+            if not _valid_string(bucket):
+                unmodeled.append(_unmodeled(address, lower_service, operation, "missing Bucket")); continue
+            known = {"Bucket", "ExpectedBucketOwner", "ChecksumAlgorithm", "ContentMD5"}
+            if operation == "PutBucketPolicy":
+                policy = parameters.get("Policy")
+                if isinstance(policy, dict):
+                    policy = json.dumps(policy)
+                if not _valid_string(policy):
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "missing Policy")); continue
+                known |= {"Policy", "ConfirmRemoveSelfBucketAccess"}
+                fields = {"policy": policy}
+            elif operation == "DeleteBucketPolicy":
+                fields = {"policy": None}
+            else:
+                config = parameters.get("PublicAccessBlockConfiguration")
+                if not isinstance(config, dict) or not all(isinstance(value, bool) for value in config.values()):
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "missing or malformed PublicAccessBlockConfiguration")); continue
+                known.add("PublicAccessBlockConfiguration")
+                # The call replaces the whole configuration; an omitted setting is false.
+                fields = {field: config.get(key, False) for field, key in (
+                    ("block_public_acls", "BlockPublicAcls"), ("ignore_public_acls", "IgnorePublicAcls"),
+                    ("block_public_policy", "BlockPublicPolicy"), ("restrict_public_buckets", "RestrictPublicBuckets"))}
+                for key in sorted(set(config) - {"BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"}):
+                    unknown_fields.append({"address": address, "field": f"PublicAccessBlockConfiguration.{key}", "reason": "unsupported_attribute"})
+            for field in parameters:
+                if field not in known:
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            changes.append(Change(op="modify", resource_type="s3_bucket", resource_id=bucket, fields=fields))
+            addresses.append(address)
+            continue
         mapped = _MAPPED.get((lower_service, operation))
         if mapped is None:
             unmodeled.append(_unmodeled(address, lower_service, operation))

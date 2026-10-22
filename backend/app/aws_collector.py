@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointResolutionError
 from botocore.config import Config
 from app.cidr import is_internet_cidr
+from app.s3_public import acl_grants_are_public, effective_is_public, policy_is_public
 from app.models import (
     AWSCredentials, AWSInfrastructure,
     EC2Data, S3Data, RDSData, IAMData, IAMUser,
@@ -578,6 +579,13 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
     )
 
 # ── S3 COLLECTOR ──────────────────────────────────────────────────
+_BPA_FIELDS = (
+    ('block_public_acls', 'BlockPublicAcls'),
+    ('ignore_public_acls', 'IgnorePublicAcls'),
+    ('block_public_policy', 'BlockPublicPolicy'),
+    ('restrict_public_buckets', 'RestrictPublicBuckets'),
+)
+
 def collect_s3(key, secret, token, region, warnings) -> S3Data:
     total_buckets = 0
     public_buckets = []
@@ -612,6 +620,27 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
         except Exception:
             pass
 
+        # --- Account-level Block Public Access: call ONCE (None = unknown) ---
+        account_bpa = None
+        try:
+            sts = boto3.client('sts', aws_access_key_id=key,
+                               aws_secret_access_key=secret,
+                               aws_session_token=token,
+                               region_name=region, config=BOTO_CONFIG)
+            account_id = sts.get_caller_identity()['Account']
+            s3control = boto3.client('s3control', aws_access_key_id=key,
+                                     aws_secret_access_key=secret,
+                                     aws_session_token=token,
+                                     region_name=region, config=BOTO_CONFIG)
+            account_bpa = s3control.get_public_access_block(AccountId=account_id)['PublicAccessBlockConfiguration']
+        except ClientError as e:
+            if get_error_code(e) == 'NoSuchPublicAccessBlockConfiguration':
+                account_bpa = {}
+            else:
+                print(f'S3 account public access block check skipped: {get_error_code(e)}')
+        except Exception:
+            pass
+
         # --- Per-bucket check (thread-safe, no shared mutation) ---
         def _check_bucket(name: str) -> dict:
             """Returns a self-contained result dict for one bucket."""
@@ -621,6 +650,9 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                 'has_cloudfront': name in cf_bucket_names,
                 'policy': None,
                 'is_empty': False,
+                'acl_public': None,
+                'policy_public': None,
+                **{field: None for field, _ in _BPA_FIELDS},
                 'flags': {
                     'public': False,
                     'unencrypted': False,
@@ -629,17 +661,32 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                 }
             }
 
-            # ACL check
+            # ACL check (AllUsers or AuthenticatedUsers grants are public)
             try:
                 acl = s3.get_bucket_acl(Bucket=name)
-                for grant in acl['Grants']:
-                    if 'AllUsers' in grant['Grantee'].get('URI', ''):
-                        result['is_public'] = True
-                        result['flags']['public'] = True
+                result['acl_public'] = acl_grants_are_public(acl.get('Grants', []))
             except ClientError as e:
                 print(f'S3 ACL check skipped for {name}: {get_error_code(e)}')
             except Exception:
                 pass
+
+            # Block Public Access: a flag is on when the bucket or the account sets it.
+            bucket_bpa = None
+            try:
+                bucket_bpa = s3.get_public_access_block(Bucket=name)['PublicAccessBlockConfiguration']
+            except ClientError as e:
+                if get_error_code(e) == 'NoSuchPublicAccessBlockConfiguration':
+                    bucket_bpa = {}
+                else:
+                    print(f'S3 public access block check skipped for {name}: {get_error_code(e)}')
+            except Exception:
+                pass
+            for field, key in _BPA_FIELDS:
+                values = [cfg.get(key) for cfg in (bucket_bpa, account_bpa) if cfg is not None]
+                if any(values):
+                    result[field] = True
+                elif values:
+                    result[field] = False
 
             # Encryption check
             try:
@@ -676,11 +723,22 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
             try:
                 policy_response = s3.get_bucket_policy(Bucket=name)
                 result['policy'] = policy_response.get('Policy')
+                try:
+                    result['policy_public'] = policy_is_public(result['policy'])
+                except ValueError:
+                    result['policy_public'] = True  # unreadable policy fails closed
             except ClientError as e:
-                if get_error_code(e) != 'NoSuchBucketPolicy':
+                if get_error_code(e) == 'NoSuchBucketPolicy':
+                    result['policy_public'] = False
+                else:
                     print(f'S3 policy check skipped for {name}: {get_error_code(e)}')
             except Exception:
                 pass
+
+            result['is_public'] = effective_is_public(
+                result['acl_public'], result['policy_public'],
+                result['ignore_public_acls'], result['restrict_public_buckets'])
+            result['flags']['public'] = result['is_public']
 
             # Empty check (orphan detection)
             try:
@@ -714,6 +772,9 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                     'has_cloudfront': result['has_cloudfront'],
                     'policy': result['policy'],
                     'is_empty': result['is_empty'],
+                    'acl_public': result['acl_public'],
+                    'policy_public': result['policy_public'],
+                    **{field: result[field] for field, _ in _BPA_FIELDS},
                 })
 
     except ClientError as e:

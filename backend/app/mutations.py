@@ -11,6 +11,7 @@ from ipaddress import ip_network
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError, field_validator, model_validator
 from app.cidr import is_internet_cidr
+from app.s3_public import effective_is_public, policy_is_public
 
 from app.models import (
     AccessStatement,
@@ -261,7 +262,18 @@ _MUTATION_CAPABILITIES = {
         },),
     },
     "rds_instance": {"model": RDSInstance, "operations": _CRUD_OPERATIONS, "constraints": ()},
-    "s3_bucket": {"model": S3Bucket, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "s3_bucket": {
+        "model": S3Bucket,
+        "operations": _CRUD_OPERATIONS,
+        "constraints": ({
+            "operations": ["add", "modify"],
+            "kind": "derived_field",
+            "fields": ["policy_public"],
+            "required_fields": [],
+            "allowed_fields": [],
+            "message": "S3Bucket.policy_public is derived from policy; change policy instead",
+        },),
+    },
     "lambda_function": {"model": LambdaFunction, "operations": _CRUD_OPERATIONS, "constraints": ()},
     "ebs_volume": {"model": EBSVolume, "operations": _DELETE_ONLY, "constraints": ()},
     "ebs_snapshot": {"model": EBSSnapshot, "operations": _DELETE_ONLY, "constraints": ()},
@@ -494,6 +506,32 @@ def _sync_counts(infra: AWSInfrastructure) -> None:
 def _sync_s3_public_buckets(infra: AWSInfrastructure) -> None:
     """Keep the collector's public-bucket summary aligned with bucket models."""
     infra.s3.public_buckets = [bucket.name for bucket in infra.s3.buckets if bucket.is_public]
+
+
+_S3_PUBLIC_INPUTS = frozenset({"policy", "acl_public", "ignore_public_acls", "restrict_public_buckets", "block_public_policy"})
+
+
+def _recompute_s3_public(before: S3Bucket | None, bucket: S3Bucket, change: Change) -> None:
+    """Recompute is_public from its parts after a change to policy, ACL or BPA.
+
+    Legacy snapshots (acl_public None) only had ACL-derived is_public, so the
+    ACL part is taken from the old is_public (fail closed) and kept for later steps.
+    """
+    if not _S3_PUBLIC_INPUTS.intersection(change.fields):
+        return
+    try:
+        policy_public = policy_is_public(bucket.policy) if bucket.policy else False
+    except ValueError as exc:
+        raise ValueError(f"s3_bucket.policy: {exc}") from exc
+    if "policy" in change.fields and policy_public and bucket.block_public_policy:
+        raise ValueError("s3_bucket.policy: BlockPublicPolicy is on for this bucket, so AWS rejects a public bucket policy")
+    if bucket.acl_public is None and "acl_public" not in change.fields:
+        bucket.acl_public = bool(before.is_public) if before is not None else False
+    bucket.policy_public = policy_public
+    computed = effective_is_public(bucket.acl_public, policy_public, bucket.ignore_public_acls, bucket.restrict_public_buckets)
+    if "is_public" in change.fields and change.fields["is_public"] != computed:
+        raise ValueError(f"s3_bucket.is_public: contradicts the policy, ACL and Block Public Access settings (they give {str(computed).lower()})")
+    bucket.is_public = computed
 
 
 def _effective_route_table_associations(infra: AWSInfrastructure) -> dict[str, list[str]]:
@@ -1034,6 +1072,8 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
             resource = model_type.model_validate(data)
         if any(_identity(resource_type, item) == _identity(resource_type, resource) for item in _collection(result, resource_type)):
             raise ValueError(f"Target already exists: {resource_type}")
+        if resource_type == "s3_bucket":
+            _recompute_s3_public(None, resource, change)
         _collection(result, resource_type).append(resource)
         if resource_type == "network_acl":
             for subnet_id in resource.associated_subnet_ids:
@@ -1060,6 +1100,8 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         updated_data = target.model_dump()
         updated_data.update(change.fields)
         collection[index] = model_type.model_validate(updated_data)
+        if resource_type == "s3_bucket":
+            _recompute_s3_public(target, collection[index], change)
     else:
         _delete(result, resource_type, change.resource_id)
 

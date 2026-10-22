@@ -25,7 +25,8 @@ _SHAPE_FIELDS = {
     "ec2_instance": ("type", "subnet_id", "sg_ids", "state", "has_public_ip"),
     "security_group": ("name", "rules", "egress_rules"),
     "iam_role": ("access_statements", "trusted_services", "trusted_role_arns"),
-    "s3_bucket": ("is_public", "policy"),
+    "s3_bucket": ("is_public", "policy", "acl_public", "policy_public", "block_public_acls",
+                  "ignore_public_acls", "block_public_policy", "restrict_public_buckets"),
 }
 
 

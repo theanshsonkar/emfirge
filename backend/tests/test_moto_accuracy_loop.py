@@ -30,7 +30,8 @@ def test_open_ssh_and_admin_policy_block_after_real_apply():
     assert "privilege_escalation" in loop.run_scenario(SCENARIOS[3])["actual_verdict"]["reasons"]
 
 
-@pytest.mark.xfail(strict=True, reason="known_gap: a bucket made public by a bucket policy is not detected; "
-                   "only ACL AllUsers grants set is_public")
-def test_known_gap_public_bucket_policy_does_not_pass():
-    assert loop.run_scenario(SCENARIOS[4])["actual_verdict"]["verdict"] != "pass"
+def test_public_bucket_policy_does_not_pass():
+    # L49: a bucket made public by its policy (not an ACL) is detected on both sides.
+    result = loop.run_scenario(SCENARIOS[4])
+    assert result["actual_verdict"]["verdict"] != "pass"
+    assert result["predicted_verdict"] == result["actual_verdict"]

@@ -189,11 +189,20 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
     if typ == "s3_bucket" and op == "delete": return [call("s3", "DeleteBucket", {"Bucket": ident})], errors
     if typ == "s3_bucket" and op == "modify":
         result=[]
+        bucket = after.s3.buckets[next(i for i,x in enumerate(after.s3.buckets) if x.name == ident)]
+        bpa = {"block_public_acls": "BlockPublicAcls", "ignore_public_acls": "IgnorePublicAcls", "block_public_policy": "BlockPublicPolicy", "restrict_public_buckets": "RestrictPublicBuckets"}
+        # PutPublicAccessBlock replaces all four settings, so send the full after state;
+        # it goes first so a policy put in the same change is not refused by the old setting.
+        if set(fields) & set(bpa) and any(getattr(bucket, field) is None for field in bpa):
+            err("field_not_mapped: block public access settings are not all known; rescan before changing them")
+        elif set(fields) & set(bpa):
+            result.append(call("s3", "PutPublicAccessBlock", {"Bucket": ident, "PublicAccessBlockConfiguration": {key: bool(getattr(bucket, field)) for field, key in bpa.items()}}))
         for field in fields:
-            value = getattr(after.s3.buckets[next(i for i,x in enumerate(after.s3.buckets) if x.name == ident)], field)
+            value = getattr(bucket, field)
+            if field in bpa: continue
             if field == "versioning_enabled" and isinstance(value, bool): result.append(call("s3", "PutBucketVersioning", {"Bucket": ident, "VersioningConfiguration": {"Status": "Enabled" if value else "Suspended"}}))
             elif field == "policy" and isinstance(value, str): result.append(call("s3", "PutBucketPolicy", {"Bucket": ident, "Policy": value}))
-            elif field in {"versioning_enabled", "policy"}: err(f"field_not_mapped: {field}")
+            elif field == "is_public" and "policy" in fields: continue  # follows from the policy put above
             else: err(f"field_not_mapped: {field}")
         return result, errors
     if typ == "lambda_function" and op == "delete": return [call("lambda", "DeleteFunction", {"FunctionName": ident})], errors

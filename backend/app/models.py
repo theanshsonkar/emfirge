@@ -65,6 +65,15 @@ class S3Bucket(BaseModel):
     is_empty: bool = False
     encrypted: Optional[bool] = None
     versioning_enabled: Optional[bool] = None
+    # Public-access parts (None = not collected, e.g. older snapshots).
+    # is_public = (acl_public and not ignore_public_acls)
+    #             or (policy_public and not restrict_public_buckets)
+    acl_public: Optional[bool] = None
+    policy_public: Optional[bool] = None
+    block_public_acls: Optional[bool] = None
+    ignore_public_acls: Optional[bool] = None
+    block_public_policy: Optional[bool] = None
+    restrict_public_buckets: Optional[bool] = None
 
 class RDSInstance(BaseModel):
     id: str

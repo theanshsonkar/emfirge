@@ -47,7 +47,7 @@ def _add_samples(base):
         elif collection:
             source = collection[0].model_dump()
             identity = _identity(resource_type, collection[0])
-            fields = {key: value for key, value in source.items() if key != ("name" if resource_type in {"s3_bucket", "lambda_function"} else "id") and not (resource_type == "security_group" and key == "attached_to")}
+            fields = {key: value for key, value in source.items() if key != ("name" if resource_type in {"s3_bucket", "lambda_function"} else "id") and not (resource_type == "security_group" and key == "attached_to") and not (resource_type == "s3_bucket" and key == "policy_public")}
             samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id=f"{identity}-law-add", fields=fields)
     return samples
 
