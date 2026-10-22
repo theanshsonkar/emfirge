@@ -42,12 +42,16 @@ def _add_samples(base):
         elif resource_type == "nat_gateway":
             subnet = base.vpc.subnets[0]
             samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="nat-law-add", fields={"subnet_id": subnet.id, "allocation_id": "eipalloc-law-add"})
+        elif resource_type == "route_table":
+            samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="rtb-law-add", fields={"vpc_id": base.vpc.route_tables[0].vpc_id})
+        elif resource_type == "ebs_volume":
+            samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="vol-law-add", fields={"size_gb": 8})
         elif resource_type == "network_acl":
             samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="acl-law-add", fields={"vpc_id": base.vpc.total_vpcs and base.vpc.subnets[0].vpc_id or "vpc-law"})
         elif collection:
             source = collection[0].model_dump()
             identity = _identity(resource_type, collection[0])
-            fields = {key: value for key, value in source.items() if key != ("name" if resource_type in {"s3_bucket", "lambda_function"} else "id") and not (resource_type == "security_group" and key == "attached_to")}
+            fields = {key: value for key, value in source.items() if key != ("name" if resource_type in {"s3_bucket", "lambda_function"} else "id") and not (resource_type == "security_group" and key == "attached_to") and not (resource_type == "s3_bucket" and key == "policy_public")}
             samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id=f"{identity}-law-add", fields=fields)
     return samples
 

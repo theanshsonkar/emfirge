@@ -8,6 +8,7 @@ import botocore.session
 from botocore.validate import ParamValidator
 
 from app.models import AWSInfrastructure
+from app.tags import is_aws_tag, user_tags
 from app.mutations import Change, apply_changes
 
 _SESSION = botocore.session.get_session()
@@ -23,8 +24,8 @@ def canonical_sha256(calls: list[dict]) -> str:
     return hashlib.sha256(json.dumps(calls, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def _resource(state: AWSInfrastructure, typ: str, ident: str):
-    collections = {
+def _resource_collections(state: AWSInfrastructure) -> dict[str, list]:
+    return {
         "security_group": state.ec2.security_groups,
         "ec2_instance": state.ec2.instances,
         "rds_instance": state.rds.rds_instances,
@@ -36,7 +37,10 @@ def _resource(state: AWSInfrastructure, typ: str, ident: str):
         "route_table": state.vpc.route_tables,
         "network_acl": state.vpc.nacls,
     }
-    items = collections.get(typ, [])
+
+
+def _resource(state: AWSInfrastructure, typ: str, ident: str):
+    items = _resource_collections(state).get(typ, [])
     key = "name" if typ in {"s3_bucket", "lambda_function"} else "id"
     return next((x for x in items if getattr(x, key, None) == ident), None)
 
@@ -76,6 +80,22 @@ def _target(route: Any) -> tuple[str, str] | None:
     return (key, ident) if key else None
 
 
+def _ec2_tag_calls(call, err, ident, old, new) -> list[dict]:
+    """CreateTags for added or changed keys, DeleteTags for removed ones."""
+    if old is None:
+        err("field_not_mapped: tags (current tags were not collected; rescan first)")
+        return []
+    old, new = user_tags(old), user_tags(new)
+    result = []
+    changed = {k: v for k, v in new.items() if old.get(k) != v}
+    removed = sorted(set(old) - set(new))
+    if changed:
+        result.append(call("ec2", "CreateTags", {"Resources": [ident], "Tags": [{"Key": k, "Value": v} for k, v in sorted(changed.items())]}))
+    if removed:
+        result.append(call("ec2", "DeleteTags", {"Resources": [ident], "Tags": [{"Key": k} for k in removed]}))
+    return result
+
+
 def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], list[dict]]:
     typ, op, ident, fields = change.resource_type, change.op, change.resource_id, change.fields
     errors: list[dict] = []
@@ -111,7 +131,28 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
             params = {"SubnetId": detail.subnet_id, "ConnectivityType": detail.connectivity_type}
             if detail.allocation_id:
                 params["AllocationId"] = detail.allocation_id
+            if user_tags(detail.tags):
+                params["TagSpecifications"] = [{"ResourceType": "natgateway", "Tags": [{"Key": k, "Value": v} for k, v in sorted(user_tags(detail.tags).items())]}]
             return [call("ec2", "CreateNatGateway", params)], errors
+        if typ == "route_table":
+            table = next(item for item in after.vpc.route_tables if item.id not in {t.id for t in before.vpc.route_tables})
+            # AWS assigns the table id, so routes and associations on it cannot be handed back as calls.
+            if any(route.target_type != "local" for route in table.routes) or table.associated_subnet_ids:
+                err("depends_on_branch_created_route_table")
+                return [], errors
+            params = {"VpcId": table.vpc_id}
+            if user_tags(table.tags):
+                params["TagSpecifications"] = [{"ResourceType": "route-table", "Tags": [{"Key": k, "Value": v} for k, v in sorted(user_tags(table.tags).items())]}]
+            return [call("ec2", "CreateRouteTable", params)], errors
+        if typ == "ebs_volume":
+            volume = next((item for item in after.ec2.ebs_volumes if item.id not in {v.id for v in before.ec2.ebs_volumes}), None)
+            if volume is None or not volume.availability_zone:
+                err("unspecified_values: availability_zone")
+                return [], errors
+            params = {"AvailabilityZone": volume.availability_zone, "Size": volume.size_gb, "VolumeType": volume.volume_type}
+            if user_tags(volume.tags):
+                params["TagSpecifications"] = [{"ResourceType": "volume", "Tags": [{"Key": k, "Value": v} for k, v in sorted(user_tags(volume.tags).items())]}]
+            return [call("ec2", "CreateVolume", params)], errors
         err("operation_not_mapped")
         return [], errors
     if typ == "iam_role" and op == "modify":
@@ -155,7 +196,8 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
             for key in sorted(new_rules.keys() - old_rules.keys()): authorizes.append(call("ec2", auth, {"GroupId": ident, "IpPermissions": [_perm(new_rules[key], egress)]}))
             for key in sorted(old_rules.keys() - new_rules.keys()): revokes.append(call("ec2", revoke, {"GroupId": ident, "IpPermissions": [_perm(old_rules[key], egress)]}))
         result = authorizes + revokes
-        unknown = set(fields) - {"name", "rules", "egress_rules"}
+        if "tags" in fields: result += _ec2_tag_calls(call, err, ident, _resource(before, typ, ident).tags, _resource(after, typ, ident).tags)
+        unknown = set(fields) - {"name", "rules", "egress_rules", "tags"}
         for field in sorted(unknown): err(f"field_not_mapped: {field}")
         return result, errors
     if typ == "ec2_instance":
@@ -167,6 +209,12 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
             elif field == "sg_ids": result.append(call("ec2", "ModifyInstanceAttribute", {"InstanceId": ident, "Groups": value}))
             elif field == "type": result.append(call("ec2", "ModifyInstanceAttribute", {"InstanceId": ident, "InstanceType": {"Value": value}}))
             elif field == "imdsv2_required": result.append(call("ec2", "ModifyInstanceMetadataOptions", {"InstanceId": ident, "HttpTokens": "required" if value else "optional"}))
+            elif field == "instance_profile_arn" and value and not _resource(before, typ, ident).instance_profile_arn:
+                result.append(call("ec2", "AssociateIamInstanceProfile", {"InstanceId": ident, "IamInstanceProfile": {"Arn": value}}))
+            elif field == "instance_profile_arn":
+                # Replacing or removing a profile needs the association id, which is not collected.
+                err("field_not_mapped: instance_profile_arn (replace or remove needs the association id)")
+            elif field == "tags": result += _ec2_tag_calls(call, err, ident, _resource(before, typ, ident).tags, value)
             else: err(f"field_not_mapped: {field}")
         return result, errors
     deletes = {"ebs_volume": ("ec2", "DeleteVolume", "VolumeId"), "ebs_snapshot": ("ec2", "DeleteSnapshot", "SnapshotId"), "rds_snapshot": ("rds", "DeleteDBSnapshot", "DBSnapshotIdentifier")}
@@ -189,11 +237,30 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
     if typ == "s3_bucket" and op == "delete": return [call("s3", "DeleteBucket", {"Bucket": ident})], errors
     if typ == "s3_bucket" and op == "modify":
         result=[]
+        bucket = after.s3.buckets[next(i for i,x in enumerate(after.s3.buckets) if x.name == ident)]
+        bpa = {"block_public_acls": "BlockPublicAcls", "ignore_public_acls": "IgnorePublicAcls", "block_public_policy": "BlockPublicPolicy", "restrict_public_buckets": "RestrictPublicBuckets"}
+        # PutPublicAccessBlock replaces all four settings, so send the full after state;
+        # it goes first so a policy put in the same change is not refused by the old setting.
+        if set(fields) & set(bpa) and any(getattr(bucket, field) is None for field in bpa):
+            err("field_not_mapped: block public access settings are not all known; rescan before changing them")
+        elif set(fields) & set(bpa):
+            result.append(call("s3", "PutPublicAccessBlock", {"Bucket": ident, "PublicAccessBlockConfiguration": {key: bool(getattr(bucket, field)) for field, key in bpa.items()}}))
         for field in fields:
-            value = getattr(after.s3.buckets[next(i for i,x in enumerate(after.s3.buckets) if x.name == ident)], field)
+            value = getattr(bucket, field)
+            if field in bpa: continue
+            if field == "tags":
+                old = _resource(before, typ, ident).tags
+                if old is None or any(is_aws_tag(key) for key in (value or {})):
+                    # PutBucketTagging replaces every tag; unknown or AWS-managed tags would be lost.
+                    err("field_not_mapped: tags (current bucket tags unknown or include aws: tags)")
+                elif user_tags(value):
+                    result.append(call("s3", "PutBucketTagging", {"Bucket": ident, "Tagging": {"TagSet": [{"Key": k, "Value": v} for k, v in sorted(value.items())]}}))
+                else:
+                    result.append(call("s3", "DeleteBucketTagging", {"Bucket": ident}))
+                continue
             if field == "versioning_enabled" and isinstance(value, bool): result.append(call("s3", "PutBucketVersioning", {"Bucket": ident, "VersioningConfiguration": {"Status": "Enabled" if value else "Suspended"}}))
             elif field == "policy" and isinstance(value, str): result.append(call("s3", "PutBucketPolicy", {"Bucket": ident, "Policy": value}))
-            elif field in {"versioning_enabled", "policy"}: err(f"field_not_mapped: {field}")
+            elif field == "is_public" and "policy" in fields: continue  # follows from the policy put above
             else: err(f"field_not_mapped: {field}")
         return result, errors
     if typ == "lambda_function" and op == "delete": return [call("lambda", "DeleteFunction", {"FunctionName": ident})], errors
@@ -260,19 +327,47 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
     return [], errors
 
 
+# Types whose ids AWS assigns at create time (names chosen by the caller are not listed).
+_AWS_ASSIGNED_IDS = frozenset({"ec2_instance", "security_group", "nat_gateway", "ebs_volume", "route_table", "network_acl"})
+
+
+def _resources_of(state: AWSInfrastructure, typ: str) -> list:
+    if typ == "nat_gateway":
+        return state.vpc.nat_gateway_details
+    return _resource_collections(state)[typ]
+
+
+def _identity_of(item) -> str:
+    return getattr(item, "id", None) or getattr(item, "name", "")
+
+
+def _created_dependency(change: Change, created: dict[str, set[str]]) -> str | None:
+    """The created type a change refers to by id, if any."""
+    if change.op != "add" and change.resource_id in created.get(change.resource_type, set()):
+        return change.resource_type
+    fields = change.fields if isinstance(change.fields, dict) else {}
+    sg_ids = fields.get("sg_ids")
+    if isinstance(sg_ids, list) and created.get("security_group", set()) & set(sg_ids):
+        return "security_group"
+    if isinstance(fields.get("routes"), list) and any(
+        isinstance(route, dict) and str(route.get("target_type", "")).lower() in {"nat", "nat_gateway"}
+        and route.get("target_id") in created.get("nat_gateway", set())
+        for route in fields["routes"]
+    ):
+        return "nat_gateway"
+    return None
+
+
 def build_api_calls(base: AWSInfrastructure, changes: list[Change]) -> list[dict]:
     state = base
     calls: list[dict] = []
     errors: list[dict] = []
-    # AWS assigns NAT ids at create time, so a route cannot name a NAT this branch adds.
-    created_nat_ids: set[str] = set()
+    # Resources this branch adds whose ids AWS assigns: a later call cannot name them.
+    created: dict[str, set[str]] = {}
     for index, change in enumerate(changes):
-        if change.resource_type == "route_table" and isinstance(change.fields.get("routes"), list) and any(
-            isinstance(route, dict) and str(route.get("target_type", "")).lower() in {"nat", "nat_gateway"}
-            and route.get("target_id") in created_nat_ids
-            for route in change.fields["routes"]
-        ):
-            errors.append({"change_index": index, "op": change.op, "resource_type": change.resource_type, "reason": "depends_on_branch_created_nat_gateway"})
+        dependency = _created_dependency(change, created)
+        if dependency is not None:
+            errors.append({"change_index": index, "op": change.op, "resource_type": change.resource_type, "reason": f"depends_on_branch_created_{dependency}"})
             try:
                 state = apply_changes(state, [change])
             except Exception:
@@ -292,8 +387,10 @@ def build_api_calls(base: AWSInfrastructure, changes: list[Change]) -> list[dict
         except Exception as exc:
             errors.append({"change_index": index, "op": change.op, "resource_type": change.resource_type, "reason": f"build_failed:{type(exc).__name__}"})
             continue
-        if change.op == "add" and change.resource_type == "nat_gateway":
-            created_nat_ids.update(set(after.vpc.nat_gateways) - set(state.vpc.nat_gateways))
+        if change.op == "add" and change.resource_type in _AWS_ASSIGNED_IDS:
+            created.setdefault(change.resource_type, set()).update(
+                {_identity_of(item) for item in _resources_of(after, change.resource_type)}
+                - {_identity_of(item) for item in _resources_of(state, change.resource_type)})
         calls.extend(generated); errors.extend(item_errors); state = after
     for item in calls:
         model = _SESSION.get_service_model(item["service"]).operation_model(item["operation"])

@@ -57,6 +57,8 @@ _RESOURCE_MAP = {
     "aws_iam_user": ("iam_user", "name"),
     "aws_nat_gateway": ("nat_gateway", "id"),
 }
+_TAGGED_RESOURCES = frozenset({"aws_instance", "aws_db_instance", "aws_security_group", "aws_s3_bucket",
+                               "aws_lambda_function", "aws_nat_gateway", "aws_ebs_volume"})
 _DELETE_ORDER = ["ec2_instance", "lambda_function", "rds_instance", "ebs_volume",
                  "ebs_snapshot", "rds_snapshot", "s3_bucket", "security_group", "iam_role"]
 
@@ -198,6 +200,7 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
         "aws_db_instance": {"vpc_security_group_ids": "sg_ids", "publicly_accessible": "publicly_accessible",
             "storage_encrypted": "encrypted", "backup_retention_period": "backup_retention_days",
             "deletion_protection": "deletion_protection", "engine": "engine"},
+        "aws_ebs_volume": {"availability_zone": "availability_zone", "size": "size_gb", "type": "volume_type"},
         "aws_nat_gateway": {"subnet_id": "subnet_id", "allocation_id": "allocation_id",
             "connectivity_type": "connectivity_type"},
     }
@@ -228,6 +231,13 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
                     fields["trust_policy"] = json.loads(policy) if isinstance(policy, str) else policy
                 except (TypeError, ValueError):
                     unknown.append({"address": address, "field": "assume_role_policy", "reason": "invalid JSON"})
+    if resource in _TAGGED_RESOURCES:
+        # tags_all is what AWS stores (it includes provider default_tags).
+        source = "tags_all" if "tags_all" in after or "tags_all" in (change.get("after_unknown") or {}) else "tags"
+        if source in (change.get("after_unknown") or {}):
+            _unknown(change, address, source, unknown)
+        elif source in after and (not update or after.get(source) != (change.get("before") or {}).get(source)):
+            fields["tags"] = dict(after.get(source) or {})
     if resource == "aws_iam_user":
         return fields
     if resource == "aws_instance":
@@ -238,6 +248,40 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
         if not update:
             fields.setdefault("state", "running")
     return fields
+
+
+_TF_ROUTE_TARGETS = (("gateway_id", "internet_gateway"), ("nat_gateway_id", "nat_gateway"))
+
+
+def _route_table_add(item: dict, address: str, unknown: list[dict]) -> list[Change]:
+    """aws_route_table create: VPC, tags and simple IGW/NAT routes (VPC local routes are implicit)."""
+    change = item.get("change") or {}
+    after = change.get("after") or {}
+    after_unknown = change.get("after_unknown") or {}
+    fields: dict[str, Any] = {}
+    if "vpc_id" in after_unknown or not after.get("vpc_id"):
+        unknown.append({"address": address, "field": "vpc_id", "reason": "unknown Terraform value"})
+    else:
+        fields["vpc_id"] = after["vpc_id"]
+    source = "tags_all" if "tags_all" in after or "tags_all" in after_unknown else "tags"
+    if source in after_unknown:
+        unknown.append({"address": address, "field": source})
+    elif after.get(source):
+        fields["tags"] = dict(after[source])
+    if "route" in after_unknown:
+        unknown.append({"address": address, "field": "route", "reason": "unknown Terraform value"})
+    routes = []
+    for route in after.get("route") or []:
+        destination = route.get("cidr_block") or route.get("ipv6_cidr_block")
+        targets = [(kind, route.get(key)) for key, kind in _TF_ROUTE_TARGETS if route.get(key)]
+        others = [key for key, value in route.items() if value and key not in {"cidr_block", "ipv6_cidr_block", "gateway_id", "nat_gateway_id"}]
+        if not destination or len(targets) != 1 or others or (targets[0][0] == "internet_gateway" and not str(targets[0][1]).startswith("igw-")):
+            unknown.append({"address": address, "field": "route", "reason": "unsupported_attribute"})
+            continue
+        routes.append({"destination_cidr": destination, "target_type": targets[0][0], "target_id": targets[0][1]})
+    if routes:
+        fields["routes"] = routes
+    return [Change(op="add", resource_type="route_table", resource_id="", fields=fields)]
 
 
 def _nacl_defaults() -> list[dict]:
@@ -394,6 +438,8 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
                          "outside_view": False, "stateless_replace": True}
     if typ in _TERRAFORM_RULE_TYPES:
         return _rule_change(item, sg_rules or {}, config_resources or {}, created_ids or {}, unknown_fields)
+    if typ == "aws_route_table" and actions == ["create"]:
+        return _route_table_add(item, address, unknown_fields), None
     if typ not in _RESOURCE_MAP:
         return [], {"address": address, "type": typ, "actions": actions,
                      "provider_name": provider_name if isinstance(provider_name, str) else None,
@@ -416,9 +462,9 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         result.append(Change(op="delete", resource_type=resource, resource_id=str(resource_id or ""), fields=options))
     if actions == ["create"] or actions in (["delete", "create"], ["create", "delete"]):
         fields = _fields(typ, change, address, unknown_fields)
-        if resource in {"lambda_function", "s3_bucket", "ebs_volume", "ebs_snapshot"}:
-            fields = {}
-        elif resource == "nat_gateway":
+        if resource in {"lambda_function", "s3_bucket", "ebs_snapshot"}:
+            fields = {key: value for key, value in fields.items() if key == "tags"}
+        elif resource in {"nat_gateway", "ebs_volume"}:
             fields = {key: value for key, value in fields.items() if value is not None}
         elif resource == "rds_snapshot":
             db_identifier = (after or {}).get("db_instance_identifier")
@@ -430,6 +476,8 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
     elif actions == ["update"]:
         fields = _fields(typ, change, address, unknown_fields, update=True)
         supported = {"aws_security_group": {"ingress"}, "aws_db_instance": {"backup_retention_period", "deletion_protection"}, "aws_iam_role": {"assume_role_policy"}}
+        if typ in _TAGGED_RESOURCES:
+            supported = {**supported, typ: supported.get(typ, set()) | {"tags", "tags_all"}}
         for field in (change.get("before", {}) or {}):
             if (change.get("before") or {}).get(field) != (after or {}).get(field) and field not in supported.get(typ, set()):
                 if field not in (change.get("after_unknown") or {}):

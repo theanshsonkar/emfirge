@@ -5,6 +5,7 @@ import json
 
 from app.mutations import Change
 from app.aws_collector import build_security_group_rule
+from app.tags import tag_map
 import copy
 import re
 
@@ -497,6 +498,48 @@ def translate_api_calls(
             changes.append(Change(op="add", resource_type="nat_gateway", resource_id="", fields=fields))
             addresses.append(address)
             continue
+        if lower_service == "ec2" and operation == "CreateRouteTable":
+            if not _valid_string(parameters.get("VpcId")):
+                unmodeled.append(_unmodeled(address, lower_service, operation, "missing VpcId")); continue
+            fields = {"vpc_id": parameters["VpcId"]}
+            tags = {}
+            for spec in parameters.get("TagSpecifications") or []:
+                if isinstance(spec, dict) and spec.get("ResourceType") in {None, "route-table"}:
+                    tags.update(tag_map(spec.get("Tags")))
+            if tags:
+                fields["tags"] = tags
+            for field in parameters:
+                if field not in {"VpcId", "TagSpecifications", "ClientToken"}:
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            changes.append(Change(op="add", resource_type="route_table", resource_id="", fields=fields))
+            addresses.append(address)
+            continue
+        if lower_service == "ec2" and operation == "CreateVolume":
+            if "SnapshotId" in parameters or "Size" not in parameters:
+                # Size then comes from a snapshot Emfirge does not read.
+                unmodeled.append(_unmodeled(address, lower_service, operation, "volume size comes from a snapshot; restoring a snapshot is not modeled")); continue
+            if not isinstance(parameters["Size"], int) or isinstance(parameters["Size"], bool):
+                raise _invalid()
+            fields = {"size_gb": parameters["Size"]}
+            for source, target in (("AvailabilityZone", "availability_zone"), ("VolumeType", "volume_type")):
+                if source in parameters:
+                    if not _valid_string(parameters[source]):
+                        raise _invalid()
+                    fields[target] = parameters[source]
+            tags = {}
+            for spec in parameters.get("TagSpecifications") or []:
+                if isinstance(spec, dict) and spec.get("ResourceType") in {None, "volume"}:
+                    tags.update(tag_map(spec.get("Tags")))
+            if tags:
+                fields["tags"] = tags
+            for field in parameters:
+                if field not in {"AvailabilityZone", "Size", "VolumeType", "TagSpecifications", "ClientToken"}:
+                    # Encrypted, Iops, Throughput, KmsKeyId, MultiAttachEnabled, ... are not modeled yet.
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            # AWS assigns the volume id; an empty id lets the branch generate a stable placeholder.
+            changes.append(Change(op="add", resource_type="ebs_volume", resource_id="", fields=fields))
+            addresses.append(address)
+            continue
         if lower_service == "rds" and operation == "CreateDBSnapshot":
             if not _valid_string(parameters.get("DBSnapshotIdentifier")):
                 unmodeled.append(_unmodeled(address, lower_service, operation))
@@ -507,6 +550,47 @@ def translate_api_calls(
                 if field not in {"DBSnapshotIdentifier", "DBInstanceIdentifier", "Tags"}:
                     unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
             changes.append(Change(op="add", resource_type="rds_snapshot", resource_id=parameters["DBSnapshotIdentifier"], fields={"db_instance_id": parameters["DBInstanceIdentifier"]}))
+            addresses.append(address)
+            continue
+        if lower_service == "s3" and operation in {"PutBucketPolicy", "DeleteBucketPolicy", "PutPublicAccessBlock", "PutBucketTagging", "DeleteBucketTagging"}:
+            bucket = parameters.get("Bucket")
+            if not _valid_string(bucket):
+                unmodeled.append(_unmodeled(address, lower_service, operation, "missing Bucket")); continue
+            known = {"Bucket", "ExpectedBucketOwner", "ChecksumAlgorithm", "ContentMD5"}
+            if operation == "PutBucketPolicy":
+                policy = parameters.get("Policy")
+                if isinstance(policy, dict):
+                    policy = json.dumps(policy)
+                if not _valid_string(policy):
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "missing Policy")); continue
+                known |= {"Policy", "ConfirmRemoveSelfBucketAccess"}
+                fields = {"policy": policy}
+            elif operation == "DeleteBucketPolicy":
+                fields = {"policy": None}
+            elif operation == "DeleteBucketTagging":
+                fields = {"tags": {}}
+            elif operation == "PutBucketTagging":
+                tag_set = (parameters.get("Tagging") or {}).get("TagSet") if isinstance(parameters.get("Tagging"), dict) else None
+                if not isinstance(tag_set, list) or not all(isinstance(item, dict) and _valid_string(item.get("Key")) and isinstance(item.get("Value"), str) for item in tag_set):
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "missing or malformed Tagging.TagSet")); continue
+                known.add("Tagging")
+                # PutBucketTagging replaces the whole tag set.
+                fields = {"tags": {item["Key"]: item["Value"] for item in tag_set}}
+            else:
+                config = parameters.get("PublicAccessBlockConfiguration")
+                if not isinstance(config, dict) or not all(isinstance(value, bool) for value in config.values()):
+                    unmodeled.append(_unmodeled(address, lower_service, operation, "missing or malformed PublicAccessBlockConfiguration")); continue
+                known.add("PublicAccessBlockConfiguration")
+                # The call replaces the whole configuration; an omitted setting is false.
+                fields = {field: config.get(key, False) for field, key in (
+                    ("block_public_acls", "BlockPublicAcls"), ("ignore_public_acls", "IgnorePublicAcls"),
+                    ("block_public_policy", "BlockPublicPolicy"), ("restrict_public_buckets", "RestrictPublicBuckets"))}
+                for key in sorted(set(config) - {"BlockPublicAcls", "IgnorePublicAcls", "BlockPublicPolicy", "RestrictPublicBuckets"}):
+                    unknown_fields.append({"address": address, "field": f"PublicAccessBlockConfiguration.{key}", "reason": "unsupported_attribute"})
+            for field in parameters:
+                if field not in known:
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            changes.append(Change(op="modify", resource_type="s3_bucket", resource_id=bucket, fields=fields))
             addresses.append(address)
             continue
         mapped = _MAPPED.get((lower_service, operation))

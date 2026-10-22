@@ -31,6 +31,7 @@ class EC2Instance(BaseModel):
     has_public_ip: Optional[bool] = None
     instance_profile_arn: Optional[str] = None
     block_devices: List[BlockDevice] = []
+    tags: Optional[Dict[str, str]] = None  # None = not collected
 
 class SecurityGroup(BaseModel):
     id: str
@@ -38,6 +39,7 @@ class SecurityGroup(BaseModel):
     rules: List[dict] = []
     egress_rules: List[dict] = []
     attached_to: List[str] = []
+    tags: Optional[Dict[str, str]] = None  # None = not collected
 
 class NACLEntry(BaseModel):
     rule_number: int
@@ -65,6 +67,16 @@ class S3Bucket(BaseModel):
     is_empty: bool = False
     encrypted: Optional[bool] = None
     versioning_enabled: Optional[bool] = None
+    # Public-access parts (None = not collected, e.g. older snapshots).
+    # is_public = (acl_public and not ignore_public_acls)
+    #             or (policy_public and not restrict_public_buckets)
+    acl_public: Optional[bool] = None
+    policy_public: Optional[bool] = None
+    block_public_acls: Optional[bool] = None
+    ignore_public_acls: Optional[bool] = None
+    block_public_policy: Optional[bool] = None
+    restrict_public_buckets: Optional[bool] = None
+    tags: Optional[Dict[str, str]] = None  # None = not collected
 
 class RDSInstance(BaseModel):
     id: str
@@ -75,6 +87,7 @@ class RDSInstance(BaseModel):
     engine: Optional[str] = None
     backup_retention_days: Optional[int] = None
     deletion_protection: Optional[bool] = None
+    tags: Optional[Dict[str, str]] = None  # None = not collected
 
 class RDSSnapshot(BaseModel):
     id: str
@@ -89,6 +102,7 @@ class LambdaFunction(BaseModel):
     subnet_ids: List[str] = []
     sg_ids: List[str] = []
     secret_refs: List[str] = []
+    tags: Optional[Dict[str, str]] = None  # None = not collected
 
 class LoadBalancer(BaseModel):
     arn: str
@@ -103,6 +117,7 @@ class EBSVolume(BaseModel):
     availability_zone: Optional[str] = None
     state: str = 'available'
     attached_to: Optional[str] = None
+    tags: Optional[Dict[str, str]] = None  # None = not collected
 
 class EBSSnapshot(BaseModel):
     id: str
@@ -133,6 +148,7 @@ class RouteTable(BaseModel):
     is_main: bool = False
     associated_subnet_ids: List[str] = Field(default_factory=list)
     routes: List[Route] = Field(default_factory=list)
+    tags: Optional[Dict[str, str]] = None  # None = not collected
 
 
 class InternetGatewayAttachment(BaseModel):
@@ -149,6 +165,7 @@ class NATGateway(BaseModel):
     connectivity_type: Optional[Literal["public", "private"]] = None
     allocation_id: Optional[str] = None
     state: Optional[str] = None
+    tags: Optional[Dict[str, str]] = None  # None = not collected
 
 
 class VPCPeeringConnection(BaseModel):
