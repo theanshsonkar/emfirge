@@ -116,10 +116,12 @@ The checks come from public sources rather than hand-written lists: [pathfinding
 | IAM role (including trust policy) | ✅ | ✅ | ✅ |
 | IAM user, NAT gateway | ✅ | | |
 | RDS snapshot | ✅ | | ✅ |
-| EBS volume, EBS snapshot | | | ✅ |
-| IAM role policy, route table | | ✅ | |
+| EBS volume | ✅ | | ✅ |
+| EBS snapshot | | | ✅ |
+| Route table | ✅ | ✅ | |
+| IAM role policy | | ✅ | |
 
-The live `GET /branches/capabilities` endpoint is the authoritative list. Anything not modeled degrades the verdict rather than passing.
+The live `GET /branches/capabilities` endpoint is the authoritative list, and `GET /branches/field-catalog` lists every settable field with the AWS API member it stands for. Most resource types also carry `tags`; a tag change replaces the complete user tag set. Anything not modeled degrades the verdict rather than passing.
 
 </details>
 
