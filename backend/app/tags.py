@@ -17,7 +17,7 @@ MAX_VALUE_LENGTH = 256
 # Resource types whose model carries tags.
 TAGGED_TYPES = frozenset({
     "ec2_instance", "security_group", "rds_instance", "s3_bucket",
-    "lambda_function", "ebs_volume", "nat_gateway",
+    "lambda_function", "ebs_volume", "nat_gateway", "route_table",
 })
 
 
@@ -69,6 +69,7 @@ def _tagged_collections(infra: Any) -> dict[str, list]:
         "s3_bucket": infra.s3.buckets,
         "lambda_function": infra.lambda_data.functions,
         "nat_gateway": infra.vpc.nat_gateway_details,
+        "route_table": infra.vpc.route_tables,
     }
 
 

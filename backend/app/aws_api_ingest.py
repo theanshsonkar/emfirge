@@ -498,6 +498,22 @@ def translate_api_calls(
             changes.append(Change(op="add", resource_type="nat_gateway", resource_id="", fields=fields))
             addresses.append(address)
             continue
+        if lower_service == "ec2" and operation == "CreateRouteTable":
+            if not _valid_string(parameters.get("VpcId")):
+                unmodeled.append(_unmodeled(address, lower_service, operation, "missing VpcId")); continue
+            fields = {"vpc_id": parameters["VpcId"]}
+            tags = {}
+            for spec in parameters.get("TagSpecifications") or []:
+                if isinstance(spec, dict) and spec.get("ResourceType") in {None, "route-table"}:
+                    tags.update(tag_map(spec.get("Tags")))
+            if tags:
+                fields["tags"] = tags
+            for field in parameters:
+                if field not in {"VpcId", "TagSpecifications", "ClientToken"}:
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            changes.append(Change(op="add", resource_type="route_table", resource_id="", fields=fields))
+            addresses.append(address)
+            continue
         if lower_service == "ec2" and operation == "CreateVolume":
             if "SnapshotId" in parameters or "Size" not in parameters:
                 # Size then comes from a snapshot Emfirge does not read.

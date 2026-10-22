@@ -61,7 +61,7 @@ def test_capabilities_endpoint_returns_runtime_mutation_contract():
     constraint = resources["iam_role_policy"]["constraints"][0]
     assert constraint["required_fields"] == ["access_statements"]
     assert constraint["allowed_fields"] == ["access_statements"]
-    assert resources["route_table"]["operations"] == ["modify"]
+    assert resources["route_table"]["operations"] == ["add", "modify"]
     route_constraint = resources["route_table"]["constraints"][0]
     assert route_constraint["kind"] == "complete_field_replacement"
     assert route_constraint["required_fields"] == ["routes"]

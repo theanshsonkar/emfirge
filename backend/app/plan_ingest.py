@@ -250,6 +250,40 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
     return fields
 
 
+_TF_ROUTE_TARGETS = (("gateway_id", "internet_gateway"), ("nat_gateway_id", "nat_gateway"))
+
+
+def _route_table_add(item: dict, address: str, unknown: list[dict]) -> list[Change]:
+    """aws_route_table create: VPC, tags and simple IGW/NAT routes (VPC local routes are implicit)."""
+    change = item.get("change") or {}
+    after = change.get("after") or {}
+    after_unknown = change.get("after_unknown") or {}
+    fields: dict[str, Any] = {}
+    if "vpc_id" in after_unknown or not after.get("vpc_id"):
+        unknown.append({"address": address, "field": "vpc_id", "reason": "unknown Terraform value"})
+    else:
+        fields["vpc_id"] = after["vpc_id"]
+    source = "tags_all" if "tags_all" in after or "tags_all" in after_unknown else "tags"
+    if source in after_unknown:
+        unknown.append({"address": address, "field": source})
+    elif after.get(source):
+        fields["tags"] = dict(after[source])
+    if "route" in after_unknown:
+        unknown.append({"address": address, "field": "route", "reason": "unknown Terraform value"})
+    routes = []
+    for route in after.get("route") or []:
+        destination = route.get("cidr_block") or route.get("ipv6_cidr_block")
+        targets = [(kind, route.get(key)) for key, kind in _TF_ROUTE_TARGETS if route.get(key)]
+        others = [key for key, value in route.items() if value and key not in {"cidr_block", "ipv6_cidr_block", "gateway_id", "nat_gateway_id"}]
+        if not destination or len(targets) != 1 or others or (targets[0][0] == "internet_gateway" and not str(targets[0][1]).startswith("igw-")):
+            unknown.append({"address": address, "field": "route", "reason": "unsupported_attribute"})
+            continue
+        routes.append({"destination_cidr": destination, "target_type": targets[0][0], "target_id": targets[0][1]})
+    if routes:
+        fields["routes"] = routes
+    return [Change(op="add", resource_type="route_table", resource_id="", fields=fields)]
+
+
 def _nacl_defaults() -> list[dict]:
     return [{"rule_number": 32767, "protocol": "-1", "rule_action": "deny", "egress": egress,
              "cidr_block": "0.0.0.0/0", "ipv6_cidr_block": None, "port_from": None, "port_to": None}
@@ -404,6 +438,8 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
                          "outside_view": False, "stateless_replace": True}
     if typ in _TERRAFORM_RULE_TYPES:
         return _rule_change(item, sg_rules or {}, config_resources or {}, created_ids or {}, unknown_fields)
+    if typ == "aws_route_table" and actions == ["create"]:
+        return _route_table_add(item, address, unknown_fields), None
     if typ not in _RESOURCE_MAP:
         return [], {"address": address, "type": typ, "actions": actions,
                      "provider_name": provider_name if isinstance(provider_name, str) else None,

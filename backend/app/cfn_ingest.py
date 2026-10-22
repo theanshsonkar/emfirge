@@ -304,6 +304,16 @@ def convert_change_set(doc: Any, nacls: Any = None) -> tuple[dict[str, Any], lis
                         break
                 else:
                     calls.append({"service": "ec2", "operation": "CreateNatGateway", "parameters": params})
+            elif typ == "AWS::EC2::RouteTable":
+                properties = _properties(_context(resource, "AfterContext")) or {}
+                vpc_id = _resolved(properties.get("VpcId"))
+                if not isinstance(vpc_id, str) or not vpc_id:
+                    extras.append(_extra(address, typ, "MissingPropertyValues"))
+                    continue
+                params = {"VpcId": vpc_id}
+                if properties.get("Tags"):
+                    params["TagSpecifications"] = [{"ResourceType": "route-table", "Tags": properties["Tags"]}]
+                calls.append({"service": "ec2", "operation": "CreateRouteTable", "parameters": params})
             elif typ == "AWS::EC2::Volume":
                 properties = _properties(_context(resource, "AfterContext")) or {}
                 params = {}

@@ -148,6 +148,7 @@ class RouteTable(BaseModel):
     is_main: bool = False
     associated_subnet_ids: List[str] = Field(default_factory=list)
     routes: List[Route] = Field(default_factory=list)
+    tags: Optional[Dict[str, str]] = None  # None = not collected
 
 
 class InternetGatewayAttachment(BaseModel):

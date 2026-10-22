@@ -131,6 +131,16 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
             if user_tags(detail.tags):
                 params["TagSpecifications"] = [{"ResourceType": "natgateway", "Tags": [{"Key": k, "Value": v} for k, v in sorted(user_tags(detail.tags).items())]}]
             return [call("ec2", "CreateNatGateway", params)], errors
+        if typ == "route_table":
+            table = next(item for item in after.vpc.route_tables if item.id not in {t.id for t in before.vpc.route_tables})
+            # AWS assigns the table id, so routes and associations on it cannot be handed back as calls.
+            if any(route.target_type != "local" for route in table.routes) or table.associated_subnet_ids:
+                err("depends_on_branch_created_route_table")
+                return [], errors
+            params = {"VpcId": table.vpc_id}
+            if user_tags(table.tags):
+                params["TagSpecifications"] = [{"ResourceType": "route-table", "Tags": [{"Key": k, "Value": v} for k, v in sorted(user_tags(table.tags).items())]}]
+            return [call("ec2", "CreateRouteTable", params)], errors
         if typ == "ebs_volume":
             volume = next((item for item in after.ec2.ebs_volumes if item.id not in {v.id for v in before.ec2.ebs_volumes}), None)
             if volume is None or not volume.availability_zone:
@@ -315,7 +325,15 @@ def build_api_calls(base: AWSInfrastructure, changes: list[Change]) -> list[dict
     errors: list[dict] = []
     # AWS assigns NAT ids at create time, so a route cannot name a NAT this branch adds.
     created_nat_ids: set[str] = set()
+    created_route_table_ids: set[str] = set()
     for index, change in enumerate(changes):
+        if change.resource_type == "route_table" and change.op != "add" and change.resource_id in created_route_table_ids:
+            errors.append({"change_index": index, "op": change.op, "resource_type": change.resource_type, "reason": "depends_on_branch_created_route_table"})
+            try:
+                state = apply_changes(state, [change])
+            except Exception:
+                pass
+            continue
         if change.resource_type == "route_table" and isinstance(change.fields.get("routes"), list) and any(
             isinstance(route, dict) and str(route.get("target_type", "")).lower() in {"nat", "nat_gateway"}
             and route.get("target_id") in created_nat_ids
@@ -343,6 +361,8 @@ def build_api_calls(base: AWSInfrastructure, changes: list[Change]) -> list[dict
             continue
         if change.op == "add" and change.resource_type == "nat_gateway":
             created_nat_ids.update(set(after.vpc.nat_gateways) - set(state.vpc.nat_gateways))
+        if change.op == "add" and change.resource_type == "route_table":
+            created_route_table_ids.update({t.id for t in after.vpc.route_tables} - {t.id for t in state.vpc.route_tables})
         calls.extend(generated); errors.extend(item_errors); state = after
     for item in calls:
         model = _SESSION.get_service_model(item["service"]).operation_model(item["operation"])

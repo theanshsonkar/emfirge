@@ -1995,6 +1995,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
                     is_main=any(assoc.get('Main', False) for assoc in associations),
                     associated_subnet_ids=associated_subnet_ids,
                     routes=routes,
+                    tags=tag_map(rt.get('Tags')),
                 ))
 
                 has_igw_route = any(

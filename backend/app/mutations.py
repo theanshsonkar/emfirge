@@ -327,7 +327,7 @@ _MUTATION_CAPABILITIES = {
     },
     "route_table": {
         "model": RouteTable,
-        "operations": frozenset({"modify"}),
+        "operations": frozenset({"add", "modify"}),
         "constraints": ({
             "operations": ["modify"],
             "kind": "complete_field_replacement",
@@ -475,6 +475,8 @@ def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
         return infra.iam.iam_users
     if resource_type == "nat_gateway":
         return infra.vpc.nat_gateway_details
+    if resource_type == "route_table":
+        return infra.vpc.route_tables
     return infra.lambda_data.functions
 
 
@@ -837,26 +839,17 @@ def _replace_iam_role_policy_statements(
     policy.policy_names = []
 
 
-def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> None:
-    """Replace only the normalized routes on one collected route table."""
-    required_fields = {"routes"}
-    if set(change.fields) != required_fields:
-        raise ValueError("route_table modify requires only routes as the complete replacement list")
-    routes = change.fields["routes"]
+def _validated_routes(infra: AWSInfrastructure, table_vpc_id: str, existing: list[Route], routes: Any) -> list[Route]:
+    """Normalize a complete route list; new IGW routes need same-VPC attachment evidence."""
     if not isinstance(routes, list):
         raise ValueError("routes must be a list replacing the complete normalized route set")
-    matches = [table for table in infra.vpc.route_tables if table.id == change.resource_id]
-    if not matches:
-        raise TargetNotFound("route_table", change.resource_id)
-    if len(matches) != 1:
-        raise ValueError("Route table target is ambiguous; ID must identify exactly one collected route table")
     normalized = [Route.model_validate(route) for route in routes]
     destinations = [route.destination_cidr for route in normalized]
     if len(destinations) != len(set(destinations)):
         raise ValueError("routes cannot contain duplicate destination_cidr values")
     existing_igw_routes = {
         (route.destination_cidr, route.target_id)
-        for route in matches[0].routes
+        for route in existing
         if route.target_type.lower() == "internet_gateway"
     }
     for route in normalized:
@@ -874,8 +867,8 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
             )
         same_vpc_attachment = any(
             attachment.internet_gateway_id == route.target_id
-            and bool(matches[0].vpc_id)
-            and attachment.vpc_id == matches[0].vpc_id
+            and bool(table_vpc_id)
+            and attachment.vpc_id == table_vpc_id
             and attachment.state == "available"
             for attachment in infra.vpc.internet_gateway_attachments
         )
@@ -884,8 +877,70 @@ def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> Non
                 "Internet gateway target is not attached to the route table VPC; "
                 "verify the route table and gateway belong to the same VPC"
             )
-    matches[0].routes = normalized
+    return normalized
+
+
+def _replace_route_table_routes(infra: AWSInfrastructure, change: Change) -> None:
+    """Replace only the normalized routes on one collected route table."""
+    required_fields = {"routes"}
+    if set(change.fields) != required_fields:
+        raise ValueError("route_table modify requires only routes as the complete replacement list")
+    if not isinstance(change.fields["routes"], list):
+        raise ValueError("routes must be a list replacing the complete normalized route set")
+    matches = [table for table in infra.vpc.route_tables if table.id == change.resource_id]
+    if not matches:
+        raise TargetNotFound("route_table", change.resource_id)
+    if len(matches) != 1:
+        raise ValueError("Route table target is ambiguous; ID must identify exactly one collected route table")
+    matches[0].routes = _validated_routes(infra, matches[0].vpc_id, matches[0].routes, change.fields["routes"])
     _sync_route_table_public_subnets(infra)
+
+
+def _add_route_table(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
+    """Add a non-main route table: the VPC's local routes, given routes, explicit associations."""
+    unknown = set(change.fields) - {"vpc_id", "routes", "associated_subnet_ids", "tags"}
+    if unknown:
+        raise ValueError("route_table add fields: vpc_id, routes, associated_subnet_ids and tags only")
+    vpc_id = change.fields.get("vpc_id")
+    if not isinstance(vpc_id, str) or not vpc_id:
+        raise ValueError("route_table.vpc_id: required (CreateRouteTable needs the VPC)")
+    siblings = [table for table in infra.vpc.route_tables if table.vpc_id == vpc_id]
+    if not siblings:
+        raise TargetNotFound("vpc", vpc_id)
+    # Every table in a VPC has the same local routes (one per VPC CIDR block).
+    local = {route.destination_cidr: route for table in siblings for route in table.routes if route.target_type == "local"}
+    routes = _validated_routes(infra, vpc_id, [], change.fields.get("routes", []))
+    for route in routes:
+        if route.target_type == "local" and route.destination_cidr not in local:
+            raise ValueError(f"route_table.routes: {route.destination_cidr} is not a local route of {vpc_id}")
+        if route.target_type != "local" and route.destination_cidr in local:
+            raise ValueError(f"route_table.routes: {route.destination_cidr} is the VPC local route and cannot point elsewhere")
+    given = {route.destination_cidr for route in routes}
+    routes = [local[cidr] for cidr in sorted(local) if cidr not in given] + routes
+    subnet_ids = change.fields.get("associated_subnet_ids", [])
+    if not isinstance(subnet_ids, list) or not all(isinstance(item, str) for item in subnet_ids) or len(subnet_ids) != len(set(subnet_ids)):
+        raise ValueError("route_table.associated_subnet_ids: expected a list of distinct subnet ids")
+    subnet_vpcs = {
+        str(item.get("id") if isinstance(item, dict) else item.id): str(item.get("vpc_id") if isinstance(item, dict) else item.vpc_id)
+        for item in infra.vpc.subnets
+    }
+    for subnet_id in subnet_ids:
+        if subnet_id not in subnet_vpcs:
+            raise TargetNotFound("subnet", subnet_id)
+        if subnet_vpcs[subnet_id] != vpc_id:
+            raise ValueError(f"route_table.associated_subnet_ids: {subnet_id} is not in {vpc_id}")
+    identity = change.resource_id or _auto_id(infra, change)
+    if any(table.id == identity for table in infra.vpc.route_tables):
+        raise ValueError("Target already exists: route_table")
+    # A subnet has one explicit association; associating it here moves it.
+    for table in infra.vpc.route_tables:
+        table.associated_subnet_ids = [item for item in table.associated_subnet_ids if item not in subnet_ids]
+    infra.vpc.route_tables.append(RouteTable(
+        id=identity, vpc_id=vpc_id, is_main=False,
+        associated_subnet_ids=list(subnet_ids), routes=routes, tags=change.fields.get("tags"),
+    ))
+    _sync_route_table_public_subnets(infra)
+    return recompute_derived_state(infra)
 
 
 def _replace_network_acl(infra: AWSInfrastructure, change: Change) -> None:
@@ -1082,6 +1137,8 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         return _add_nat_gateway(result, change)
     if resource_type == "ebs_volume" and change.op == "add":
         return _add_ebs_volume(result, change)
+    if resource_type == "route_table" and change.op == "add":
+        return _add_route_table(result, change)
     if resource_type == "iam_role_policy":
         _replace_iam_role_policy_statements(result, change)
         return result

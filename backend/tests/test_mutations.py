@@ -297,6 +297,9 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
                 fields = {"access_statements": []}
             if resource_type == "route_table" and operation == "modify":
                 fields = {"routes": []}
+            if resource_type == "route_table" and operation == "add":
+                # A new table needs a VPC the snapshot knows; every VPC has a main table.
+                infra.vpc.route_tables.append(RouteTable(id="rt-capability-main", vpc_id="vpc-capability", is_main=True))
             if operation != "add":
                 if resource_type == "iam_role_policy":
                     infra.iam.role_policies.append(RolePolicy(

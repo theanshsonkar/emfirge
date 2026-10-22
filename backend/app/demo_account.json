@@ -299,6 +299,7 @@
             "target_type": "internet_gateway"
           }
         ],
+        "tags": null,
         "vpc_id": "vpc-demo-001"
       },
       {
@@ -314,6 +315,7 @@
             "target_type": "nat_gateway"
           }
         ],
+        "tags": null,
         "vpc_id": "vpc-demo-001"
       }
     ],
