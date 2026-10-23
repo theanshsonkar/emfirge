@@ -11,7 +11,9 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, Field
 
 from app.models import AWSInfrastructure
-from app.serializer import to_terraform_json_string
+import json as _json
+
+from app.serializer import build_terraform, loss_summary  # noqa: F401 (loss_summary re-exported)
 
 
 class ScannerFinding(BaseModel):
@@ -28,6 +30,9 @@ class ScanResult(BaseModel):
     available: bool
     findings: List[ScannerFinding] = Field(default_factory=list)
     error: Optional[str] = None
+    # Terraform name -> {"resource_type", "id"} of the Emfirge resource it
+    # was serialized from, so findings can be keyed by the Emfirge resource.
+    resource_map: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 def _text(value: Any) -> Optional[str]:
@@ -153,11 +158,18 @@ def _trivy_findings(payload: Any) -> list[ScannerFinding]:
     )
 
 
+def scanner_loss(infra: AWSInfrastructure) -> list[dict[str, Any]]:
+    """What the Terraform given to the scanners omits or synthesizes."""
+    return build_terraform(infra).loss
+
+
 def run_checkov(infra: AWSInfrastructure, timeout_s: int = 60) -> ScanResult:
     """Run Checkov against a temporary Terraform JSON configuration."""
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
-            terraform_json = to_terraform_json_string(infra)
+            built = build_terraform(infra)
+            terraform_json = _json.dumps(built.tf, sort_keys=True, separators=(",", ":"))
+            resource_map = {n: {"resource_type": t, "id": i} for n, (t, i) in built.names.items()}
             Path(temp_dir, "main.tf.json").write_text(terraform_json, encoding="utf-8")
             completed = subprocess.run(
                 [
@@ -179,7 +191,7 @@ def run_checkov(infra: AWSInfrastructure, timeout_s: int = 60) -> ScanResult:
                 return _unavailable("Checkov returned empty output")
             payload = json.loads(stdout)
             findings = _parse_findings(payload)
-            return ScanResult(scanner="checkov", available=True, findings=findings)
+            return ScanResult(scanner="checkov", available=True, findings=findings, resource_map=resource_map)
     except FileNotFoundError:
         return _unavailable("Checkov executable not found")
     except subprocess.TimeoutExpired:
@@ -197,7 +209,9 @@ def run_trivy(infra: AWSInfrastructure, timeout_s: int = 60) -> ScanResult:
     """Run Trivy config against a temporary Terraform JSON configuration."""
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
-            terraform_json = to_terraform_json_string(infra)
+            built = build_terraform(infra)
+            terraform_json = _json.dumps(built.tf, sort_keys=True, separators=(",", ":"))
+            resource_map = {n: {"resource_type": t, "id": i} for n, (t, i) in built.names.items()}
             Path(temp_dir, "main.tf.json").write_text(terraform_json, encoding="utf-8")
             completed = subprocess.run(
                 ["trivy", "config", temp_dir, "--format", "json", "--quiet"],
@@ -211,7 +225,7 @@ def run_trivy(infra: AWSInfrastructure, timeout_s: int = 60) -> ScanResult:
                 return _trivy_unavailable("Trivy returned empty output")
             payload = json.loads(stdout)
             findings = _trivy_findings(payload)
-            return ScanResult(scanner="trivy", available=True, findings=findings)
+            return ScanResult(scanner="trivy", available=True, findings=findings, resource_map=resource_map)
     except FileNotFoundError:
         return _trivy_unavailable("Trivy executable not found")
     except subprocess.TimeoutExpired:

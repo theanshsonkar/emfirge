@@ -45,7 +45,7 @@ Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 - `emfirge_attack_paths` — return internet-to-resource paths, chokepoints, and orphaned resources.
 - `emfirge_simulate_breach` — walk a natural-language scenario through entry, pivot, impact, and blast radius.
 - `emfirge_verify_fix` — simulate a supported finding fix and return score and finding deltas.
-- `emfirge_check_compliance` — return CIS AWS Foundations 1.5 or SOC 2 per-control status.
+- `emfirge_check_compliance` — return CIS AWS Foundations 1.5 or SOC 2 per-requirement status (requirements from Prowler's published data; controls Emfirge does not evaluate are reported as not_evaluated).
 
 ### Branch
 

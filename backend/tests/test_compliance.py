@@ -16,16 +16,16 @@ client = TestClient(app)
 class TestEvaluateFramework:
     """Test the pure evaluation logic (no DB, no API)."""
 
-    def test_cis_all_pass_when_no_rules_fired(self):
-        """If no rules fired, all controls with mapped rules should pass."""
+    def test_cis_nothing_fails_when_no_rules_fired(self):
+        """If no rules fired, nothing fails and uncovered requirements are not passes."""
         result = evaluate_framework("cis-aws-1.5", set(), infrastructure=None)
         assert result["id"] == "cis-aws-1.5"
         assert result["name"] == "CIS AWS Foundations Benchmark"
         assert result["version"] == "1.5"
-        assert result["totalControls"] == 29
+        assert result["totalControls"] == 63
         assert result["failedControls"] == 0
-        # All should be pass (no N/A without infrastructure context)
-        assert result["passedControls"] == 29
+        assert result["passedControls"] + result["partialControls"] < 63
+        assert result["notEvaluatedControls"] > 0
 
     def test_cis_fails_when_rules_fire(self):
         """Controls should fail when their mapped rule_id is in fired set."""
@@ -33,11 +33,11 @@ class TestEvaluateFramework:
         result = evaluate_framework("cis-aws-1.5", fired, infrastructure=None)
         assert result["failedControls"] == 3
 
-        # Verify specific controls failed
+        # Verify specific controls failed (Prowler's CIS 1.5 numbering)
         controls_by_id = {c["id"]: c for c in result["controls"]}
-        assert controls_by_id["1.1"]["status"] == "fail"  # IAM-001 = root access keys
-        assert controls_by_id["5.1"]["status"] == "fail"  # EC2-002 = SSH open
-        assert controls_by_id["2.1"]["status"] == "fail"  # S3-001 = public bucket
+        assert controls_by_id["1.4"]["status"] == "fail"  # IAM-001 = root access key
+        assert controls_by_id["5.2"]["status"] == "fail"  # EC2-002 = SSH open (SG)
+        assert controls_by_id["5.3"]["status"] == "fail"  # EC2-002 = SSH open (SG, ::/0 requirement shares the check)
 
     def test_cis_not_applicable_when_no_resources(self):
         """Controls should be N/A when the service has no resources."""
@@ -54,46 +54,40 @@ class TestEvaluateFramework:
         result = evaluate_framework("cis-aws-1.5", set(), infrastructure=infra)
 
         controls_by_id = {c["id"]: c for c in result["controls"]}
-        # EC2 controls should be N/A
-        assert controls_by_id["6.1"]["status"] == "not_applicable"
-        assert controls_by_id["6.2"]["status"] == "not_applicable"
-        # Lambda N/A
-        assert controls_by_id["6.3"]["status"] == "not_applicable"
-        # ECS N/A
-        assert controls_by_id["6.4"]["status"] == "not_applicable"
-        # RDS N/A
-        assert controls_by_id["7.1"]["status"] == "not_applicable"
-        assert controls_by_id["7.2"]["status"] == "not_applicable"
-        assert controls_by_id["7.3"]["status"] == "not_applicable"
-        assert controls_by_id["7.4"]["status"] == "not_applicable"
-        # S3 N/A
-        assert controls_by_id["2.1"]["status"] == "not_applicable"
-        # KMS N/A
-        assert controls_by_id["4.4"]["status"] == "not_applicable"
-        # WAF N/A
-        assert controls_by_id["5.4"]["status"] == "not_applicable"
+        # RDS public access (fully covered by an RDS rule) is N/A with no RDS
+        assert controls_by_id["2.3.3"]["status"] == "not_applicable"
+        # KMS rotation N/A with no CMKs
+        assert controls_by_id["3.8"]["status"] == "not_applicable"
+        # S3 encryption-at-rest N/A with no buckets
+        assert controls_by_id["2.1.1"]["status"] == "not_applicable"
+        # VPC flow logs applies (2 VPCs), so it passes
+        assert controls_by_id["3.9"]["status"] == "pass"
+        # A requirement Emfirge does not evaluate stays not_evaluated, never N/A or pass
+        assert controls_by_id["1.1"]["status"] == "not_evaluated"
 
-        assert result["naControls"] == 14
+        assert result["naControls"] == 3
 
     def test_soc2_evaluation(self):
         """SOC 2 framework evaluates correctly."""
         fired = {"EMFIRGE-IAM-003", "EMFIRGE-CT-001"}
         result = evaluate_framework("soc2", fired, infrastructure=None)
         assert result["id"] == "soc2"
-        assert result["totalControls"] == 12
-        assert result["failedControls"] == 2
+        assert result["totalControls"] == 27
+        assert result["failedControls"] == 4
 
-        controls_by_id = {c["id"]: c for c in result["controls"]}
-        assert controls_by_id["CC6.1"]["status"] == "fail"  # IAM-003 = MFA
-        assert controls_by_id["CC7.2"]["status"] == "fail"  # CT-001 = CloudTrail
+        controls_by_id = {c["label"]: c for c in result["controls"]}
+        # CT-001 maps to cloudtrail_multi_region_enabled, listed in CC2.1, CC7.2, A1.2, PI1.3 (IAM-003 has no mapping)
+        for label in ("CC2.1", "CC7.2", "A1.2", "PI1.3"):
+            assert controls_by_id[label]["status"] == "fail"
+        assert controls_by_id["CC6.1"]["status"] != "fail"
 
-    def test_soc2_null_mapped_rule_passes(self):
-        """Controls with no mapped rule (None) always pass."""
+    def test_soc2_unmapped_control_is_not_a_pass(self):
+        """Controls with no mapped rule are not_evaluated, never pass."""
         result = evaluate_framework("soc2", set(), infrastructure=None)
-        controls_by_id = {c["id"]: c for c in result["controls"]}
-        # CC6.5 and CC8.2 have no mapped rule
-        assert controls_by_id["CC6.5"]["status"] == "pass"
-        assert controls_by_id["CC8.2"]["status"] == "pass"
+        controls_by_id = {c["label"]: c for c in result["controls"]}
+        # CC6.7 (in-transit encryption checks) and CC7.5 have no Emfirge rule
+        assert controls_by_id["CC6.7"]["status"] == "not_evaluated"
+        assert controls_by_id["CC7.5"]["status"] == "not_evaluated"
 
     def test_unknown_framework_returns_error(self):
         """Unknown framework ID returns error dict."""
@@ -113,13 +107,13 @@ class TestEvaluateFramework:
         result = evaluate_framework("cis-aws-1.5", fired)
         controls_by_id = {c["id"]: c for c in result["controls"]}
 
-        # 5.1 should fail with fail description
-        assert controls_by_id["5.1"]["status"] == "fail"
-        assert "SSH open" in controls_by_id["5.1"]["description"]
+        # 5.2 should fail and name the rule that fired
+        assert controls_by_id["5.2"]["status"] == "fail"
+        assert "EMFIRGE-EC2-002" in controls_by_id["5.2"]["description"]
 
-        # 5.2 should pass with pass description
-        assert controls_by_id["5.2"]["status"] == "pass"
-        assert "not exposed" in controls_by_id["5.2"]["description"]
+        # 3.9 (VPC flow logs) is fully covered and nothing fired, so it passes
+        assert controls_by_id["3.9"]["status"] == "pass"
+        assert "none fired" in controls_by_id["3.9"]["description"]
 
     def test_counts_add_up(self):
         """passed + failed + na should equal total."""
@@ -135,7 +129,8 @@ class TestEvaluateFramework:
             "waf": {"total_albs": 0},
         }
         result = evaluate_framework("cis-aws-1.5", fired, infrastructure=infra)
-        assert result["passedControls"] + result["failedControls"] + result["naControls"] == result["totalControls"]
+        assert (result["passedControls"] + result["failedControls"] + result["naControls"]
+                + result["partialControls"] + result["notEvaluatedControls"]) == result["totalControls"]
 
 
 # ── API ENDPOINT TESTS ────────────────────────────────────────────
@@ -201,12 +196,12 @@ class TestComplianceEndpoint:
             # CIS framework
             cis = data["frameworks"][0]
             assert cis["id"] == "cis-aws-1.5"
-            assert cis["failedControls"] == 2  # IAM-001 + EC2-002
+            assert cis["failedControls"] == 3  # IAM-001 -> 1.4; EC2-002 -> 5.2 and 5.3
 
             # SOC2 framework
             soc2 = data["frameworks"][1]
             assert soc2["id"] == "soc2"
-            assert soc2["failedControls"] == 1  # EC2-002 maps to CC6.3
+            assert soc2["failedControls"] == 2  # EC2-002 (SSH) is a check of CC6.6 and CC7.2
 
     def test_compliance_endpoint_not_found(self):
         """Returns 404 when analysis_id doesn't exist."""

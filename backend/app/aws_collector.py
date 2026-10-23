@@ -6,7 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointResolutionError
 from botocore.config import Config
-from app.cidr import is_internet_cidr
+from app.cidr import is_internet_cidr, rule_opens_port_to_internet
 from app.tags import tag_map
 from app.s3_public import acl_grants_are_public, effective_is_public, policy_is_public
 from app.models import (
@@ -386,11 +386,10 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
                 
                 if any(is_internet_cidr(ip.get('CidrIp')) for ip in rule.get('IpRanges', [])) or any(is_internet_cidr(ip.get('CidrIpv6')) for ip in rule.get('Ipv6Ranges', [])):
                     open_security_groups.append(sg_name)
-                    port = rule.get('FromPort', 0)
-                    if port == 22:
+                    if rule_opens_port_to_internet(rules[-1], 22):
                         ssh_open = True
                         ssh_security_group_id = sg_id
-                    if port == 3389:
+                    if rule_opens_port_to_internet(rules[-1], 3389):
                         rdp_open = True
                         rdp_security_group_id = sg_id
 

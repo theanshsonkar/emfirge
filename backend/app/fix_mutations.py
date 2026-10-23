@@ -8,7 +8,7 @@ Each function receives (infra_dict, resource_id) and mutates infra_dict in-place
 Returns True if mutation was applied, False if resource not found.
 """
 
-from app.cidr import is_internet_cidr
+from app.cidr import is_internet_cidr, rule_opens_port_to_internet
 
 
 def _fix_ssh_open(infra_dict: dict, resource_id: str) -> bool:
@@ -17,10 +17,7 @@ def _fix_ssh_open(infra_dict: dict, resource_id: str) -> bool:
         if sg['id'] == resource_id:
             sg['rules'] = [
                 r for r in sg.get('rules', [])
-                if not (
-                    r.get('from_port') == 22 and
-                    any(is_internet_cidr(cidr) for cidr in r.get('ip_ranges', []))
-                )
+                if not rule_opens_port_to_internet(r, 22)
             ]
             # Also update the ssh_open_to_internet flag
             infra_dict['ec2']['ssh_open_to_internet'] = False
@@ -35,10 +32,7 @@ def _fix_rdp_open(infra_dict: dict, resource_id: str) -> bool:
         if sg['id'] == resource_id:
             sg['rules'] = [
                 r for r in sg.get('rules', [])
-                if not (
-                    r.get('from_port') == 3389 and
-                    any(is_internet_cidr(cidr) for cidr in r.get('ip_ranges', []))
-                )
+                if not rule_opens_port_to_internet(r, 3389)
             ]
             infra_dict['ec2']['rdp_open_to_internet'] = False
             infra_dict['ec2']['rdp_security_group_id'] = None

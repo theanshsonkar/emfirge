@@ -26,7 +26,7 @@ from app.iam_escalation import matching_paths
 from app.mutations import _MUTATION_CAPABILITIES, deletion_ledger
 from app.models import AWSInfrastructure
 from app.plan_ingest import is_aws_provider
-from app.scanners import run_checkov, run_cloudsplaining, run_trivy
+from app.scanners import loss_summary, run_checkov, run_cloudsplaining, run_trivy, scanner_loss as compute_scanner_loss
 from app.exposure import compute_exposures
 
 
@@ -65,6 +65,9 @@ class CombinedVerdict(BaseModel):
     # that silently drops two scanners is exactly the false-confidence this
     # product exists to avoid. Always read this alongside it.
     scanner_status: dict[str, str] = Field(default_factory=dict)
+    # Everything the Terraform handed to the scanners omits or synthesizes
+    # (resources, fields, assumed values) for the branch; see app/serializer.py.
+    scanner_loss: list[dict[str, Any]] = Field(default_factory=list)
     # Human-readable degradation notices. NON-EMPTY means this verdict was
     # computed with less than the full lens set, so it must not be presented as
     # a complete answer.
@@ -208,6 +211,9 @@ def _scanner_map(result: Any) -> dict[tuple[str, str, str], dict[str, Any]] | No
     if available is False:
         return None
     findings = _value(result, "findings", result if isinstance(result, list) else None)
+    resource_map = _value(result, "resource_map", None)
+    if not isinstance(resource_map, Mapping):
+        resource_map = {}
     if findings is None and isinstance(result, Mapping):
         # A direct finding dictionary is also a useful test/mock shape.
         findings = [result] if "check_id" in result else None
@@ -218,6 +224,14 @@ def _scanner_map(result: Any) -> dict[tuple[str, str, str], dict[str, Any]] | No
         normalized = _scanner_finding(raw)
         if normalized is None:
             continue
+        # Checkov reports "resource.<name>", Trivy "<type>.<name>" or the bare
+        # name; either way the last segment is the Terraform name.
+        mapped = resource_map.get(normalized["resource"].rsplit(".", 1)[-1])
+        if isinstance(mapped, (tuple, list)) and len(mapped) == 2:
+            mapped = {"resource_type": mapped[0], "id": mapped[1]}
+        if isinstance(mapped, Mapping) and mapped.get("id"):
+            normalized["resource"] = str(mapped["id"])
+            normalized["resource_type"] = str(mapped.get("resource_type", ""))
         key = (normalized["source"], normalized["check_id"], normalized["resource"])
         current = selected.get(key)
         if current is None or _sort_finding(normalized) < _sort_finding(current):
@@ -414,6 +428,7 @@ def combined_verdict(
     collection_warnings = diff.collection_warnings
     scanner_added: list[dict[str, Any]] = []
     scanner_removed: list[dict[str, Any]] = []
+    scanner_loss: list[dict[str, Any]] = []
     scanner_results = ((run_checkov, "checkov"), (run_trivy, "trivy"), (run_cloudsplaining, "cloudsplaining"))
     if not run_scanners:
         # run_scanners=False is a deliberate configuration (the verdict endpoint
@@ -426,6 +441,13 @@ def combined_verdict(
         scanner_status = {name: "disabled" for _, name in scanner_results}
         coverage_warnings.append("native rules only")
     if run_scanners:
+        try:
+            scanner_loss = compute_scanner_loss(branch_infra)
+        except Exception:  # noqa: BLE001 - the report must never break a verdict
+            scanner_loss = []
+        loss_note = loss_summary(scanner_loss)
+        if loss_note:
+            coverage_warnings.append(loss_note)
         base_scans: dict[str, dict[tuple[str, str, str], dict[str, Any]] | None] = {}
         branch_scans: dict[str, dict[tuple[str, str, str], dict[str, Any]] | None] = {}
         # Why the reason is captured per side: a scanner that is missing from the
@@ -789,6 +811,7 @@ def combined_verdict(
         deletion_impacts=diff.deletion_impacts,
         scanner_available=scanner_available,
         scanner_status=scanner_status,
+        scanner_loss=scanner_loss,
         coverage_warnings=coverage_warnings,
         collection_warnings=collection_warnings,
         cost_delta_monthly_usd=cost_delta_monthly_usd,

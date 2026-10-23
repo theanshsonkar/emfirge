@@ -296,13 +296,15 @@ const toolInfo: Record<string,[string,string,string,string,string[],string]> = {
   "tool-check-compliance":["emfirge_check_compliance","Evaluate CIS AWS Foundations 1.5 or SOC 2 controls against a scan as one focused analysis lens.","analysis_id: string · required; framework: cis-aws-1.5 | soc2 · optional",`{
   "analysis_id": "7f3c9a2e-4b1d-4c8a-9f2e-1a2b3c4d5e6f",
   "framework": "cis-aws-1.5"
-}`, ["Omit framework to receive both CIS AWS Foundations 1.5 and SOC 2. The top level contains analysis_id, frameworks, and fired_rule_ids.","Each framework reports id, name, version, totalControls, passedControls, failedControls, naControls, sections, and controls. Each control includes id, title, section, status, mappedRuleId, and description. Control mapping is based on rule-ID presence. Unmapped controls (including SOC2 controls with no matching rule) are assumed pass, so this is not a full audit; fired_rule_ids lists triggered rules.","CIS AWS Foundations 1.5 has 28 controls and SOC 2 has 12. Each finding carries MITRE ATT&CK mapping. Results are read-only and do not constitute certification or a full audit; mapping is based on rule-ID presence, and unmapped controls are assumed pass."],`{
+}`, ["Omit framework to receive both CIS AWS Foundations 1.5 and SOC 2. The top level contains analysis_id, frameworks, and fired_rule_ids.","Each framework reports id, name, version, totalControls, passedControls, failedControls, partialControls, naControls, notEvaluatedControls, coverage, source, sections, and controls. Each control includes id, label, title, section, status, mappedRuleId, mappedRuleIds, checks, and description. Statuses are pass, fail, partial, not_applicable, and not_evaluated.","Requirements and ids come from Prowler's published CIS AWS Foundations 1.5 and SOC 2 files (Apache-2.0; commit in source). A control fails when a mapped Emfirge rule fired. It passes only when Emfirge evaluates every check of that requirement and none fired; partial means some checks are covered and nothing was found; not_evaluated means no Emfirge rule covers it. Coverage counts the controls Emfirge evaluates out of the total. Prowler's SOC 2 file covers a subset of the criteria. Results are read-only and do not constitute certification or a full audit; fired_rule_ids lists triggered rules."],`{
   "analysis_id": "7f3c9a2e-4b1d-4c8a-9f2e-1a2b3c4d5e6f",
   "frameworks": [{
-    "id": "cis-aws-1.5", "name": "CIS AWS Foundations", "version": "1.5", "totalControls": 28,
-    "passedControls": 5, "failedControls": 24, "naControls": 0,
+    "id": "cis-aws-1.5", "name": "CIS AWS Foundations Benchmark", "version": "1.5", "totalControls": 63,
+    "passedControls": 7, "failedControls": 2, "partialControls": 1, "naControls": 0, "notEvaluatedControls": 53,
+    "coverage": { "evaluated": 10, "total": 63 },
+    "source": { "publisher": "Prowler", "repo": "https://github.com/prowler-cloud/prowler", "commit": "35d25a7218ee80f9c6e00db8b6f79f23308e51f5", "file": "prowler/compliance/aws/cis_1.5_aws.json", "license": "Apache-2.0" },
     "sections": [{ "id": "1", "title": "Identity and Access Management" }],
-    "controls": [{ "id": "1.2", "title": "Ensure MFA enabled for all IAM users", "section": "1", "status": "fail", "mappedRuleId": "EMFIRGE-IAM-003", "description": "Users without MFA detected" }]
+    "controls": [{ "id": "1.4", "label": "1.4", "title": "Ensure no 'root' user account access key exists", "section": "1", "status": "fail", "mappedRuleId": "EMFIRGE-IAM-001", "mappedRuleIds": ["EMFIRGE-IAM-001"], "checks": { "total": 1, "evaluated": 1 }, "description": "Emfirge found: EMFIRGE-IAM-001" }]
   }],
   "fired_rule_ids": ["EMFIRGE-EC2-002", "EMFIRGE-IAM-003", "…"]
 }`],

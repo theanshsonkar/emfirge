@@ -1,5 +1,7 @@
-"""Deterministic, embedded-price cost estimates for collected AWS infrastructure."""
+"""Deterministic, vendored-price cost estimates for collected AWS infrastructure."""
 
+import json
+from pathlib import Path
 from typing import List, Literal, Optional, Tuple
 
 from pydantic import BaseModel
@@ -8,40 +10,27 @@ from .models import AWSInfrastructure
 
 
 PRICE_TABLE_REGION = "us-east-1"
-PRICE_TABLE_AS_OF = "2026-09-15"
 HOURS_PER_MONTH = 730
-# Embedded list-price sources (all rates below are deliberately fixed snapshots):
-# EC2: https://aws.amazon.com/ec2/pricing/on-demand/
-# NAT Gateway: https://aws.amazon.com/vpc/pricing/
-# EBS: https://aws.amazon.com/ebs/pricing/
-# Application Load Balancer: https://aws.amazon.com/elasticloadbalancing/pricing/
-NAT_GATEWAY_HOURLY_USD = 0.045
-ALB_HOURLY_USD = 0.0225
-EBS_GP3_GB_MONTH_USD = 0.08
+# Prices are AWS's published Price List Bulk API values, vendored by
+# scripts/generate_prices.py into app/data/aws_prices.json (with source URLs and
+# publication dates). Nothing here is hand-typed.
+_PRICES_PATH = Path(__file__).resolve().parent / "data" / "aws_prices.json"
 
-# Curated Linux/Unix, shared-tenancy, us-east-1 on-demand rates. The table is
-# intentionally small and transparent rather than a live pricing lookup.
-EC2_HOURLY_USD = {
-    "t3.nano": 0.0052,
-    "t3.micro": 0.0104,
-    "t3.small": 0.0208,
-    "t3.medium": 0.0416,
-    "t3.large": 0.0832,
-    "t3.xlarge": 0.1664,
-    "t3.2xlarge": 0.3328,
-    "m5.large": 0.096,
-    "m5.xlarge": 0.192,
-    "m5.2xlarge": 0.384,
-    "m5.4xlarge": 0.768,
-    "m5.12xlarge": 2.304,
-    "m5.24xlarge": 4.608,
-    "c5.large": 0.085,
-    "c5.xlarge": 0.17,
-    "c5.2xlarge": 0.34,
-    "c5.4xlarge": 0.68,
-    "c5.9xlarge": 1.53,
-    "c5.18xlarge": 3.06,
-}
+
+def _load_prices(region: str) -> dict:
+    with open(_PRICES_PATH, encoding="utf-8") as handle:
+        return json.load(handle)["regions"][region]
+
+
+_PRICES = _load_prices(PRICE_TABLE_REGION)
+# Publication date (YYYY-MM-DD) of the EC2 offer file the prices came from.
+PRICE_TABLE_AS_OF = _PRICES["sources"]["AmazonEC2"]["publication_date"][:10]
+NAT_GATEWAY_HOURLY_USD = _PRICES["nat_gateway_hourly_usd"]
+ALB_HOURLY_USD = _PRICES["alb_hourly_usd"]
+EBS_GB_MONTH_USD = _PRICES["ebs_gb_month_usd"]
+EBS_GP3_GB_MONTH_USD = EBS_GB_MONTH_USD["gp3"]
+# Linux, shared-tenancy, no pre-installed software, on-demand rates.
+EC2_HOURLY_USD = _PRICES["ec2_hourly_usd"]
 
 CostBasis = Literal[
     "provisioned-estimate", "usage-based-unknown", "price-unavailable", "free"
@@ -125,8 +114,9 @@ def estimate_monthly_cost(infra: AWSInfrastructure) -> CostEstimate:
         if volume.state != "available":
             continue
         monthly = None
-        if volume.volume_type.lower() == "gp3" and volume.size_gb > 0:
-            monthly = volume.size_gb * EBS_GP3_GB_MONTH_USD
+        per_gb = EBS_GB_MONTH_USD.get(volume.volume_type.lower())
+        if per_gb is not None and volume.size_gb > 0:
+            monthly = volume.size_gb * per_gb
         resources.append(_record(
             volume.id, "ebs_volume", monthly,
             "provisioned-estimate" if monthly is not None else "price-unavailable",
@@ -259,9 +249,9 @@ def _unknown_reason(resource: ResourceCost) -> str:
     if resource.basis == "usage-based-unknown":
         return "usage-based pricing is not embedded"
     if resource.resource_type == "ec2_instance":
-        return "EC2 instance type is not in the curated table"
+        return "EC2 instance type is not in the AWS price list data"
     if resource.resource_type == "ebs_volume":
-        return "only positive gp3 storage is priced"
+        return "only positive-size volumes of types in the AWS price list data are priced"
     if resource.resource_type == "load_balancer":
         return "only the ALB fixed portion is embedded"
     if resource.resource_type == "rds_instance":

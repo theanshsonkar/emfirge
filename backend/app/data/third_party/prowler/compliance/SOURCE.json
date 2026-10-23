@@ -1,0 +1,16 @@
+{
+  "project": "Prowler",
+  "repo": "https://github.com/prowler-cloud/prowler",
+  "branch": "master",
+  "commit": "35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
+  "commit_date": "2026-10-23T10:58:15+02:00",
+  "fetched": "2026-10-23",
+  "license": "Apache-2.0",
+  "license_file": "LICENSE",
+  "notice_file": null,
+  "files": [
+    {"path": "cis_1.5_aws.json", "upstream_path": "prowler/compliance/aws/cis_1.5_aws.json", "framework": "CIS AWS Foundations Benchmark", "version": "1.5", "sha256": "a181a87cdd6a8a6d07487f057d639fa1f52f7069bc74e68f39711958dceecf63"},
+    {"path": "soc2_aws.json", "upstream_path": "prowler/compliance/aws/soc2_aws.json", "framework": "SOC 2", "version": "", "sha256": "64bb9adc31fda8db889b5bee5d18c8c7e9ab1d8c0acb669904a8026e5f63be35"}
+  ],
+  "note": "Files are unmodified copies. Prowler's SOC 2 file covers a subset of the Trust Services Criteria and carries no version string. The Emfirge rule to Prowler check mapping lives in backend/app/compliance_sources.py and is Emfirge's own."
+}

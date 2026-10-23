@@ -132,7 +132,7 @@ export const tools: ToolRegistration[] = [
   {
     name: "emfirge_check_compliance",
     description:
-      "Get CIS AWS Foundations 1.5 or SOC 2 compliance status. Returns per-control pass/fail with the findings that triggered each failure.",
+      "Get CIS AWS Foundations 1.5 or SOC 2 compliance status. Returns per-requirement status (pass, fail, partial, not_applicable, not_evaluated) using Prowler's published requirement ids, with the rules that triggered each failure and coverage of how many requirements Emfirge evaluates.",
     schema: complianceSchema as Record<string, z.ZodTypeAny>,
     zodObject: complianceZodObject as z.ZodObject<z.ZodRawShape>,
     handler: complianceHandler,
