@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterable, Literal, Type, get_args
 from ipaddress import ip_network
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, TypeAdapter, ValidationError, field_validator, model_validator
-from app.cidr import is_internet_cidr
+from app.cidr import is_internet_cidr, rule_opens_port_to_internet
 from app.s3_public import effective_is_public, policy_is_public
 from app.tags import TAGGED_TYPES, apply_tag_replacement
 from app.field_catalog import validate_fields as validate_catalog_fields
@@ -996,29 +996,13 @@ def recompute_derived_state(
     ssh_matches: list[str] = []
     rdp_matches: list[str] = []
 
-    def covers_port(rule: dict, port: int) -> bool:
-        try:
-            start = int(rule.get("from_port", 0))
-            end_value = rule.get("to_port")
-            end = start if end_value is None else int(end_value)
-        except (TypeError, ValueError):
-            return False
-        if start < 0 or end < 0:
-            return False
-        if start > end:
-            start, end = end, start
-        return start <= port <= end
-
     for group in sorted(infra.ec2.security_groups, key=lambda item: item.id):
         if group.id not in attached_sg_ids:
             continue
         for rule in group.rules:
-            cidrs = rule.get("ip_ranges") or []
-            if not any(is_internet_cidr(cidr) for cidr in cidrs):
-                continue
-            if covers_port(rule, 22):
+            if rule_opens_port_to_internet(rule, 22):
                 ssh_matches.append(group.id)
-            if covers_port(rule, 3389):
+            if rule_opens_port_to_internet(rule, 3389):
                 rdp_matches.append(group.id)
 
     infra.ec2.ssh_open_to_internet = bool(ssh_matches)
