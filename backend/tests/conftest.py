@@ -27,6 +27,18 @@ from app.models import (
 
 
 @pytest.fixture(autouse=True)
+def isolated_scanner_state(monkeypatch):
+    """The scan-result cache is process-wide; tests must not see each other's results."""
+    from app import scanners
+
+    monkeypatch.delenv("EMFIRGE_SCANNER_URL", raising=False)
+    monkeypatch.delenv("EMFIRGE_RUN_TRIVY", raising=False)
+    scanners.clear_scan_cache()
+    yield
+    scanners.clear_scan_cache()
+
+
+@pytest.fixture(autouse=True)
 def no_real_trusted_account_sts(monkeypatch):
     """Tests must not contact AWS; tests needing STS explicitly override this."""
     from app import trusted_account

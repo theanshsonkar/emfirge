@@ -155,6 +155,7 @@ def test_real_checkov_is_optional(infra):
 
 
 def test_trivy_output_normalizes_resources_and_findings(monkeypatch, infra):
+    monkeypatch.setenv("EMFIRGE_RUN_TRIVY", "1")
     output = {
         "Results": [
             {
@@ -226,6 +227,7 @@ def test_trivy_output_normalizes_resources_and_findings(monkeypatch, infra):
 
 
 def test_trivy_not_installed_is_unavailable(monkeypatch, infra):
+    monkeypatch.setenv("EMFIRGE_RUN_TRIVY", "1")
     def run(*args, **kwargs):
         raise FileNotFoundError()
 
