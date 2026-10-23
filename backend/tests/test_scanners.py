@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.models import AWSInfrastructure
-from app.scanners import run_checkov
+from app.scanners import ScanResult, ScannerFinding, run_checkov
 
 
 @pytest.fixture
@@ -397,3 +397,17 @@ def test_cloudsplaining_import_error_is_unavailable(monkeypatch, infra):
     result = run_cloudsplaining(infra)
     assert result.available is False
     assert result.findings == []
+
+
+def test_verdict_scanner_map_keys_findings_by_emfirge_resource():
+    from app.verdict import _scanner_map
+
+    result = ScanResult(
+        scanner="checkov",
+        available=True,
+        findings=[ScannerFinding(check_id="CKV_AWS_21", resource="resource.s3_b_1_deadbeef", severity="HIGH", title="t")],
+        resource_map={"s3_b_1_deadbeef": {"resource_type": "s3_bucket", "id": "b.1"}},
+    )
+    (key, finding), = _scanner_map(result).items()
+    assert key == ("checkov", "CKV_AWS_21", "b.1")
+    assert finding["resource_type"] == "s3_bucket"
