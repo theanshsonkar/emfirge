@@ -32,6 +32,8 @@ ADAPTER_MODULES = {
     "field_catalog", "mutations", "models", "trust_policy", "trusted_account",
     "iam_classifier", "iam_escalation", "role_access", "tf_parser",
     "tf_indexer", "serializer", "scanners", "drift_service", "fix_mutations",
+    # AWS rule packs and their mappings: every check is AWS-specific.
+    "rules", "compliance", "compliance_sources", "mitre",
 }
 AWS_LIBS = {"boto3", "botocore"}
 
@@ -40,11 +42,11 @@ AWS_LIBS = {"boto3", "botocore"}
 # comment); prefer putting the AWS-specific part behind the adapter.
 ALLOWED: dict[str, set[str]] = {
     "branches": {"mutations", "models"},
-    "diffing": {"mutations", "models", "tags"},
+    "diffing": {"mutations", "models", "tags", "rules"},
     "verdict": {"tags", "iam_escalation", "mutations", "models",
                 "plan_ingest", "scanners"},
-    "exposure": {"rds_ports"},
-    "scoring": {"mutations"},
+    "exposure": {"rds_ports", "rules"},
+    "scoring": {"mutations", "rules"},
     "delete_lens": {"mutations"},
     "cost": {"models"},
     "limits": {"models"},
