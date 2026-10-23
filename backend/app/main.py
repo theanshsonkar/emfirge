@@ -713,9 +713,9 @@ def get_compliance(analysis_id: str, caller: Caller = Depends(get_caller), db=De
     """
     Evaluate compliance frameworks (CIS AWS 1.5, SOC 2) against a completed scan.
 
-    For each control, checks if the mapped EMFIRGE rule fired in the scan findings.
-    Rule fired → control FAIL. Rule not fired → control PASS.
-    Returns pass/fail per control + overall percentages for each framework.
+    Requirements come from Prowler's published CIS 1.5 / SOC 2 data. A requirement fails
+    if a mapped EMFIRGE rule fired, passes only if Emfirge evaluates all its checks and none
+    fired, and is not_evaluated when no rule covers it.
     """
     import re
 
