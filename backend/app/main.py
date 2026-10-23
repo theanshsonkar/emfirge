@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request, Query, Depends
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 from starlette.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware  # NEW
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -46,6 +46,7 @@ from app.cfn_ingest import convert_change_set
 from app.verdict import CombinedVerdict, combined_verdict
 from app.diffing import graph_warning_strings
 from app import branches, field_catalog, identifiers
+from app import policy_checks, aws_policy_checks
 from app.in_use_evidence import EvidenceRequest, EvidenceEstimate, build_estimate, read_evidence, SOURCES, WINDOW_DAYS
 from app.database import Project, SupabaseIdentity
 from app.aws_collector import collect_infrastructure, ROLE_SESSION_NAME
@@ -1868,6 +1869,65 @@ def _collect_in_use_evidence(branch_id: str, payload: EvidenceRequest, caller: C
     records = read_evidence(creds, branch.base.region, estimate.resources, payload.sources, now=now, own_session_name=ROLE_SESSION_NAME, client_factory=None, sleep=None)
     branches.save_evidence(branch_id, estimate.estimate_id, records)
     return {'estimate_id': estimate.estimate_id, 'observed_at': now.isoformat().replace('+00:00', 'Z'), 'window_days': WINDOW_DAYS, 'records': [record.model_dump(mode='json') for record in records]}
+
+
+@app.get('/branches/{branch_id}/policy-checks/estimate', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def policy_checks_estimate(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
+    """Lists the policies that would be sent to AWS Access Analyzer. Makes no AWS calls."""
+    _check_branch_rate_limit(_rate_key(request, caller))
+    try:
+        branch = branches.get_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='Branch not found') from exc
+    return policy_checks.build_estimate(branch.base, branches.rebuild_branch_state(branch), branch.changes, branches.branch_revision(branch))
+
+
+class PolicyCheckRequest(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    role_arn: str
+    approve: bool = False
+    accept_estimate_id: Optional[str] = None
+
+
+@app.post('/branches/{branch_id}/policy-checks', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+async def run_policy_checks(branch_id: str, payload: PolicyCheckRequest, request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    _check_branch_rate_limit(_rate_key(request, caller))
+    return await run_in_threadpool(_run_policy_checks, branch_id, payload, caller, db)
+
+
+def _run_policy_checks(branch_id: str, payload: PolicyCheckRequest, caller: Caller, db):
+    from app.demo_seed import is_demo_arn
+    try:
+        branch = branches.get_branch(branch_id)
+    except branches.BranchNotFoundError as exc:
+        raise HTTPException(status_code=404, detail='Branch not found') from exc
+    revision = branches.branch_revision(branch)
+    estimate = policy_checks.build_estimate(branch.base, branches.rebuild_branch_state(branch), branch.changes, revision)
+    if not payload.approve:
+        return JSONResponse(status_code=409, content={'detail': 'Approval required: nothing was sent to AWS. Review the estimate and resend with approve=true', 'estimate': estimate.model_dump(mode='json')})
+    if is_demo_arn(payload.role_arn):
+        raise HTTPException(status_code=422, detail='Demo roles cannot run AWS policy checks; local logic is used')
+    if payload.accept_estimate_id is not None and payload.accept_estimate_id != estimate.estimate_id:
+        return JSONResponse(status_code=409, content={'detail': 'Estimate changed; review it and accept the new estimate_id', 'estimate': estimate.model_dump(mode='json')})
+    if len(estimate.policies) > estimate.max_policies:
+        raise HTTPException(status_code=422, detail=f'Too many policies for one check (max {estimate.max_policies})')
+    role_match = re.fullmatch(r'arn:[^:]+:iam::(\d{12}):role/.+', payload.role_arn)
+    account_id = role_match.group(1) if role_match else None
+    scanned = _scanned_account_id(branch.base_analysis_id)
+    if not account_id or not scanned or account_id != scanned:
+        raise HTTPException(status_code=409, detail='Role account does not match the scanned account')
+    if not estimate.policies:
+        return {'estimate_id': estimate.estimate_id, 'branch_revision': revision, 'aws_calls_made': 0, 'records': []}
+    try:
+        creds, assumed_account = assume_role_credentials(payload.role_arn, caller, db)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail='Could not assume the Emfirge role') from exc
+    if assumed_account != scanned:
+        raise HTTPException(status_code=409, detail='Role account does not match the scanned account')
+    now = datetime.now(timezone.utc)
+    records = aws_policy_checks.check_policies(creds, branch.base.region, estimate.policies, now=now, revision=revision)
+    policy_checks.save_policy_evidence(branch_id, revision, estimate.estimate_id, records)
+    return {'estimate_id': estimate.estimate_id, 'branch_revision': revision, 'aws_calls_made': len(records), 'records': [record.model_dump(mode='json') for record in records]}
 @app.post('/branches/{branch_id}/changes', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def add_branch_change_endpoint(branch_id: str, change: Change, request: Request, caller: Caller = Depends(get_caller)):
     _check_branch_rate_limit(_rate_key(request, caller))
@@ -1914,6 +1974,9 @@ def _current_handback_state(branch_id: str):
     evidence = branches.list_evidence(branch_id)
     if evidence:
         verdict_kwargs["evidence"] = evidence
+    policy_notes = policy_checks.verdict_inputs(branch_id, branch, rebuilt, branches.branch_revision(branch))
+    if policy_notes:
+        verdict_kwargs["policy_notes"] = policy_notes
     result = combined_verdict(branch.base, rebuilt, **verdict_kwargs)
     return branch, result, branches.branch_revision(branch)
 
@@ -2081,6 +2144,9 @@ def branch_verdict_endpoint(branch_id: str, request: Request, caller: Caller = D
     evidence = branches.list_evidence(branch_id)
     if evidence:
         verdict_kwargs["evidence"] = evidence
+    policy_notes = policy_checks.verdict_inputs(branch_id, branch, rebuilt, branches.branch_revision(branch))
+    if policy_notes:
+        verdict_kwargs["policy_notes"] = policy_notes
     result = combined_verdict(branch.base, rebuilt, **verdict_kwargs)
     return result.model_copy(update={"branch_revision": branches.branch_revision(branch), "status": branch.status,
         "plans": [{"plan_id": item["plan_id"], "input_sha256": item["input_sha256"]} for item in plans]})

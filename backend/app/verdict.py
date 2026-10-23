@@ -393,6 +393,7 @@ def combined_verdict(
     run_scanners: bool = True,
     plans: list[Mapping[str, Any]] | None = None,
     evidence=None,
+    policy_notes: list[str] | None = None,
 ) -> CombinedVerdict:
     diff = diff_infrastructure(base_infra, branch_infra)
     deletion = analyze_deletions(base_infra, branch_infra, evidence=evidence)
@@ -425,6 +426,7 @@ def combined_verdict(
     scanner_available = False
     scanner_status: dict[str, str] = {}
     coverage_warnings: list[str] = list(diff.coverage_warnings)
+    coverage_warnings.extend(policy_notes or [])
     collection_warnings = diff.collection_warnings
     scanner_added: list[dict[str, Any]] = []
     scanner_removed: list[dict[str, Any]] = []

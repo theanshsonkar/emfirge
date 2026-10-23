@@ -45,6 +45,12 @@ Resources:
                   - cloudwatch:GetMetricData
                 Resource: '*'
               - Effect: Allow
+                Sid: PolicyChecks
+                Action:
+                  - access-analyzer:CheckNoPublicAccess
+                  - access-analyzer:ValidatePolicy
+                Resource: '*'
+              - Effect: Allow
                 Action:
                   - budgets:DescribeBudgets
                   - guardduty:ListDetectors

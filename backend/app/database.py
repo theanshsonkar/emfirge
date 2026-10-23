@@ -155,6 +155,17 @@ class BranchEvidenceLog(Base):
     records_json = Column(Text, nullable=False, default='[]')
 
 
+class BranchPolicyCheckLog(Base):
+    """Persisted opt-in policy-check results for one branch revision."""
+    __tablename__ = 'branch_policy_check_logs'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    branch_id = Column(String(36), nullable=False, index=True)
+    branch_revision = Column(String(64), nullable=False)
+    estimate_id = Column(String(64), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    records_json = Column(Text, nullable=False, default='[]')
+
+
 class CIAPIKey(Base):
     """API keys for CI/CD gate endpoint authentication."""
     __tablename__ = 'ci_api_keys'

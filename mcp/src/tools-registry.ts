@@ -22,6 +22,7 @@ import {
   complianceHandler,
 } from "./tools/compliance.js";
 import { simulateSchema, simulateZodObject, simulateHandler } from "./tools/simulate.js";
+import { policyChecksSchema, policyChecksZodObject, policyChecksHandler } from "./tools/policy-checks.js";
 import { inUseEvidenceSchema, inUseEvidenceZodObject, inUseEvidenceHandler } from "./tools/evidence.js";
 import { planVerdictSchema, planVerdictZodObject, planVerdictHandler } from "./tools/plan-verdict.js";
 import { branchHandbackSchema, branchHandbackZodObject, branchHandbackHandler } from "./tools/branch-handback.js";
@@ -260,6 +261,14 @@ export const tools: ToolRegistration[] = [
 
     zodObject: inUseEvidenceZodObject as z.ZodObject<z.ZodRawShape>,
     handler: inUseEvidenceHandler,
+  },
+  {
+    name: "emfirge_policy_checks",
+    description:
+      "Opt-in: asks AWS IAM Access Analyzer (CheckNoPublicAccess, about $0.002 per policy, billed to your AWS account) whether changed S3 bucket policies and role trust policies are public. Only policies that differ from the base are sent. Without approval it returns the estimate and sends nothing. AWS evidence can only make a verdict stricter, never looser; role_arn must be the same role used by emfirge_scan. Never call with approve unless the user agreed to the shown estimate.",
+    schema: policyChecksSchema as Record<string, z.ZodTypeAny>,
+    zodObject: policyChecksZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: policyChecksHandler,
   },
 ];
 
