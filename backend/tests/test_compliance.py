@@ -201,7 +201,7 @@ class TestComplianceEndpoint:
             # SOC2 framework
             soc2 = data["frameworks"][1]
             assert soc2["id"] == "soc2"
-            assert soc2["failedControls"] == 1  # EC2-002 (SSH) is a check of CC6.6
+            assert soc2["failedControls"] == 2  # EC2-002 (SSH) is a check of CC6.6 and CC7.2
 
     def test_compliance_endpoint_not_found(self):
         """Returns 404 when analysis_id doesn't exist."""
