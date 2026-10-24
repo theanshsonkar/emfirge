@@ -73,7 +73,7 @@ jobs:
             sudo docker run -d --name emfirge-engine --restart=always \
               --memory=1400m --memory-swap=1400m \
               --network emfirge-net \
-              -e EMFIRGE_RUN_SCANNERS=0 \
+              -e EMFIRGE_RUN_SCANNERS=1 \
               -e EMFIRGE_SCANNER_URL=http://emfirge-scanner-worker:8765 \
               --env-file /home/ubuntu/.env \
               -e EMFIRGE_REQUIRE_AUTH=1 \
