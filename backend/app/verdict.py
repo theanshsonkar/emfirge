@@ -26,7 +26,10 @@ from app.iam_escalation import matching_paths
 from app.mutations import _MUTATION_CAPABILITIES, deletion_ledger
 from app.models import AWSInfrastructure
 from app.plan_ingest import is_aws_provider
-from app.scanners import loss_summary, run_checkov, run_cloudsplaining, run_trivy, scanner_loss as compute_scanner_loss
+from app.scanners import (
+    TRIVY_DISABLED_REASON, govern_scanner_finding, loss_summary, plan_scan_scope, run_checkov,
+    run_cloudsplaining, run_trivy, scan_scope, scanner_loss as compute_scanner_loss,
+)
 from app.exposure import compute_exposures
 
 
@@ -232,6 +235,7 @@ def _scanner_map(result: Any) -> dict[tuple[str, str, str], dict[str, Any]] | No
         if isinstance(mapped, Mapping) and mapped.get("id"):
             normalized["resource"] = str(mapped["id"])
             normalized["resource_type"] = str(mapped.get("resource_type", ""))
+        govern_scanner_finding(normalized)  # severity policy lives in scanners.py
         key = (normalized["source"], normalized["check_id"], normalized["resource"])
         current = selected.get(key)
         if current is None or _sort_finding(normalized) < _sort_finding(current):
@@ -393,6 +397,7 @@ def combined_verdict(
     run_scanners: bool = True,
     plans: list[Mapping[str, Any]] | None = None,
     evidence=None,
+    policy_notes: list[str] | None = None,
 ) -> CombinedVerdict:
     diff = diff_infrastructure(base_infra, branch_infra)
     deletion = analyze_deletions(base_infra, branch_infra, evidence=evidence)
@@ -425,6 +430,7 @@ def combined_verdict(
     scanner_available = False
     scanner_status: dict[str, str] = {}
     coverage_warnings: list[str] = list(diff.coverage_warnings)
+    coverage_warnings.extend(policy_notes or [])
     collection_warnings = diff.collection_warnings
     scanner_added: list[dict[str, Any]] = []
     scanner_removed: list[dict[str, Any]] = []
@@ -470,9 +476,11 @@ def combined_verdict(
                 reasons[name] = f"{side} scan returned no usable result"
             return mapped
 
-        for scanner, name in scanner_results:
-            base_scans[name] = _run(scanner, name, base_infra, "base")
-            branch_scans[name] = _run(scanner, name, branch_infra, "branch")
+        # Scan only what changed plus its neighbours, the same subset on both sides.
+        with scan_scope(plan_scan_scope(base_infra, branch_infra)):
+            for scanner, name in scanner_results:
+                base_scans[name] = _run(scanner, name, base_infra, "base")
+                branch_scans[name] = _run(scanner, name, branch_infra, "branch")
 
         available_scanners = {
             name for name in base_scans
@@ -482,7 +490,8 @@ def combined_verdict(
             if name in available_scanners:
                 scanner_status[name] = "ok"
             else:
-                scanner_status[name] = f"unavailable: {reasons.get(name, 'unknown reason')}"
+                reason = reasons.get(name, 'unknown reason')
+                scanner_status[name] = reason if reason == TRIVY_DISABLED_REASON else f"unavailable: {reason}"
         missing = sorted(name for _, name in scanner_results if name not in available_scanners)
         if missing:
             coverage_warnings.append(
@@ -719,6 +728,12 @@ def combined_verdict(
         reasons.append(_reason("warn", "recovery_point_removed", "A recovery point was removed", removed_recovery_point_ids))
     if deleted_base_reachable(base_infra, branch_infra):
         reasons.append(_reason("warn", "lost_ingress", "Internet ingress resource was deleted", _resource_ids(diff.no_longer_internet_reachable)))
+    # Scanner findings never block unless their check id has a published severity
+    # (scanners.govern_scanner_finding); otherwise they only warn.
+    introduced_scanner = [item for item in introduced_other if any(item is added for added in scanner_added)]
+    introduced_other = [item for item in introduced_other if not any(item is added for added in scanner_added)]
+    if introduced_scanner:
+        reasons.append(_reason("warn", "new_scanner_finding", "New scanner finding (scanner severity is advisory)", _resource_ids(item.get("resource") for item in introduced_scanner)))
     if introduced_other:
         reasons.append(_reason("warn", "introduced_finding", "Introduced finding", _resource_ids(item.get("resource") for item in introduced_other)))
     if latent_exposure:

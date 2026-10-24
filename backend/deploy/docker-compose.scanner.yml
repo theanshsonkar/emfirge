@@ -1,0 +1,52 @@
+# Engine + warm Checkov scanner worker on one host.  NOT used by the live
+# deploy yet: .github/workflows/deploy.yml still starts a single container with
+# `docker run` and EMFIRGE_RUN_SCANNERS=0.  This file is the reviewed target
+# for turning scanners on safely (see "What would change" in the PR notes):
+#
+#   docker compose -f backend/deploy/docker-compose.scanner.yml up -d
+#
+# The worker is the SAME image as the engine (Checkov already lives in
+# /opt/checkov-venv there), started with that venv's Python, in its own
+# container with a hard 300 MB cap.  Checkov costs ~150 MB fixed plus ~0.045 MB
+# per resource and dies under ~155 MB, so 300m leaves room for ~3000 resources;
+# if it is OOM-killed only the scanner goes away: the API reports
+# "unavailable: Checkov worker unreachable" and keeps answering.
+#
+# Trivy stays off (EMFIRGE_RUN_TRIVY unset): it spikes to 1.3-1.5 GB.
+
+services:
+  engine:
+    image: ${DOCKERHUB_USERNAME}/aws-risk-agent:latest
+    container_name: emfirge-engine
+    restart: always
+    mem_limit: 1500m
+    memswap_limit: 1500m
+    env_file: /home/ubuntu/.env
+    environment:
+      EMFIRGE_REQUIRE_AUTH: "1"
+      # Scanners stay OFF in production until the deploy diff is reviewed.
+      # To enable: set this to "1".  The URL is already wired to the worker.
+      EMFIRGE_RUN_SCANNERS: "0"
+      EMFIRGE_SCANNER_URL: http://scanner-worker:8765
+      EMFIRGE_SCANNER_TIMEOUT_S: "20"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - scanner-worker
+
+  scanner-worker:
+    image: ${DOCKERHUB_USERNAME}/aws-risk-agent:latest
+    container_name: emfirge-scanner-worker
+    restart: always
+    mem_limit: 300m
+    memswap_limit: 300m
+    command: ["/opt/checkov-venv/bin/python", "-m", "app.scanner_worker"]
+    environment:
+      # Reachable by the engine on the compose network only; no `ports:` entry,
+      # so it is not published on the host.
+      EMFIRGE_SCANNER_WORKER_BIND: 0.0.0.0:8765
+    healthcheck:
+      test: ["CMD", "/opt/checkov-venv/bin/python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8765/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

@@ -63,6 +63,7 @@ Scan arn:aws:iam::123456789012:role/EmfirgeReadOnly in us-east-1
 - `emfirge_fork_branch` — create an independent open branch from an open branch's current base and ordered changes.
 - `emfirge_compare_branches` — compare branch models and rank outcomes safest-first.
 - `emfirge_in_use_evidence` — estimate and, after explicit approval, read usage evidence for resources a branch deletes.
+- `emfirge_policy_checks` — estimate and, after explicit approval, ask AWS IAM Access Analyzer whether changed S3 bucket and role trust policies are public (about $0.002 per policy; can only make a verdict stricter).
 
 ### Account and setup
 
