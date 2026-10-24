@@ -55,18 +55,37 @@ jobs:
           script: |
             sudo docker pull ${{ secrets.DOCKERHUB_USERNAME }}/aws-risk-agent:latest
             sudo docker rm -f emfirge-engine 2>/dev/null || true
+            sudo docker rm -f emfirge-scanner-worker 2>/dev/null || true
             sudo docker ps -q --filter "publish=8000" | xargs -r sudo docker rm -f || true
             sudo docker system prune -af || true
             if [ -n "${{ secrets.APP_PRIVATE_KEY_B64 }}" ] && ! sudo grep -q "GITHUB_PRIVATE_KEY_B64" /home/ubuntu/.env; then
               echo "GITHUB_PRIVATE_KEY_B64=${{ secrets.APP_PRIVATE_KEY_B64 }}" | sudo tee -a /home/ubuntu/.env > /dev/null
             fi
+            # Network is created AFTER prune (prune removes unused networks).
+            sudo docker network create emfirge-net 2>/dev/null || true
+            # Warm Checkov scanner worker: same image, Checkov venv Python, not published.
+            sudo docker run -d --name emfirge-scanner-worker --restart=always \
+              --memory=300m --memory-swap=300m \
+              --network emfirge-net \
+              -e EMFIRGE_SCANNER_WORKER_BIND=0.0.0.0:8765 \
+              ${{ secrets.DOCKERHUB_USERNAME }}/aws-risk-agent:latest \
+              /opt/checkov-venv/bin/python -m app.scanner_worker
             sudo docker run -d --name emfirge-engine --restart=always \
-              --memory=1500m --memory-swap=1500m \
+              --memory=1400m --memory-swap=1400m \
+              --network emfirge-net \
               -e EMFIRGE_RUN_SCANNERS=0 \
+              -e EMFIRGE_SCANNER_URL=http://emfirge-scanner-worker:8765 \
               --env-file /home/ubuntu/.env \
               -e EMFIRGE_REQUIRE_AUTH=1 \
               -p 8000:8000 \
               ${{ secrets.DOCKERHUB_USERNAME }}/aws-risk-agent:latest
+            # Non-fatal worker check (scanners are off); allow time for the Checkov import.
+            ok=0
+            for i in 1 2 3 4 5 6; do
+              sleep 2
+              if sudo docker exec emfirge-scanner-worker /opt/checkov-venv/bin/python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8765/health', timeout=5).read())"; then ok=1; break; fi
+            done
+            [ "$ok" = 1 ] || echo "scanner worker health check failed (scanners are off; not fatal)"
       - name: Post-deploy health check (/api/project must return 401)
         run: |
           url="https://emfirge.cloud/api/project"
