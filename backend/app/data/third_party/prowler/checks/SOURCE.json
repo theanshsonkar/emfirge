@@ -1,0 +1,99 @@
+{
+  "project": "Prowler",
+  "repo": "https://github.com/prowler-cloud/prowler",
+  "branch": "master",
+  "commit": "35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
+  "commit_date": "2026-10-23T10:58:15+02:00",
+  "fetched": "2026-10-24",
+  "license": "Apache-2.0",
+  "license_file": "LICENSE",
+  "notice_file": null,
+  "files": [
+    {
+      "path": "ec2_instance_detailed_monitoring_enabled.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/ec2/ec2_instance_detailed_monitoring_enabled/ec2_instance_detailed_monitoring_enabled.metadata.json",
+      "sha256": "a1715ca4ce894a75b885b682bb668578108e65f03b004f3b862971f01961e949"
+    },
+    {
+      "path": "ec2_instance_imdsv2_enabled.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/ec2/ec2_instance_imdsv2_enabled/ec2_instance_imdsv2_enabled.metadata.json",
+      "sha256": "f42e264802c040f8442edee7123f3292d3b8911eeee0f134c0c497a3cd1b03fb"
+    },
+    {
+      "path": "ec2_instance_profile_attached.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/ec2/ec2_instance_profile_attached/ec2_instance_profile_attached.metadata.json",
+      "sha256": "663ffcf5eb5b7cd7bad29e09877d959c417296f73f9f616fd866d60fc1639055"
+    },
+    {
+      "path": "ec2_securitygroup_allow_ingress_from_internet_to_all_ports.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/ec2/ec2_securitygroup_allow_ingress_from_internet_to_all_ports/ec2_securitygroup_allow_ingress_from_internet_to_all_ports.metadata.json",
+      "sha256": "6fe7827c4da1bf45d0ed0e2f671ee64f42f8672225a23e723b60bacf54cff686"
+    },
+    {
+      "path": "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/ec2/ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22/ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22.metadata.json",
+      "sha256": "cafe12fb504e56df62944af1e64c3aaa45ea069377c26359e5fe8ead9b79afcc"
+    },
+    {
+      "path": "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_3389.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/ec2/ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_3389/ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_3389.metadata.json",
+      "sha256": "734317b9d7e6203bc36bf02105e520317bf5c46efbfc400fe89380d5a04230fa"
+    },
+    {
+      "path": "rds_instance_backup_enabled.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/rds/rds_instance_backup_enabled/rds_instance_backup_enabled.metadata.json",
+      "sha256": "77316a7c73b96538fec0dbc672e100794f3499600be7d54816dab553c12a4cfc"
+    },
+    {
+      "path": "rds_instance_deletion_protection.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/rds/rds_instance_deletion_protection/rds_instance_deletion_protection.metadata.json",
+      "sha256": "d41c34fc01f488b678ed6af0c4188dad5a2be48e0dbe837aac5bb49a319af801"
+    },
+    {
+      "path": "rds_instance_enhanced_monitoring_enabled.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/rds/rds_instance_enhanced_monitoring_enabled/rds_instance_enhanced_monitoring_enabled.metadata.json",
+      "sha256": "455c3c5e2f0c468865438cdfeb713627dd1d3cc3731661eaf4dbf0d8e6ef3ad3"
+    },
+    {
+      "path": "rds_instance_iam_authentication_enabled.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/rds/rds_instance_iam_authentication_enabled/rds_instance_iam_authentication_enabled.metadata.json",
+      "sha256": "a02cc94ab89fb0497b2921f98d3f9545b15d2ab87de2c2f307cbcf0df4fefab1"
+    },
+    {
+      "path": "rds_instance_integration_cloudwatch_logs.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/rds/rds_instance_integration_cloudwatch_logs/rds_instance_integration_cloudwatch_logs.metadata.json",
+      "sha256": "f56aaed1aa54806bd5264c35cfd87ca78a8c7f3081e6fda424846d246a37200b"
+    },
+    {
+      "path": "rds_instance_minor_version_upgrade_enabled.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/rds/rds_instance_minor_version_upgrade_enabled/rds_instance_minor_version_upgrade_enabled.metadata.json",
+      "sha256": "27835d4f62126387e2b47dde393cc8de9a7fbdabb5ffe39c6a89c677861cf70a"
+    },
+    {
+      "path": "rds_instance_multi_az.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/rds/rds_instance_multi_az/rds_instance_multi_az.metadata.json",
+      "sha256": "a156f05fb39682334a11c061501f1e93e31dc20b522dfcea5f2c173cb3acf30f"
+    },
+    {
+      "path": "rds_instance_storage_encrypted.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/rds/rds_instance_storage_encrypted/rds_instance_storage_encrypted.metadata.json",
+      "sha256": "e765a2e8391aaca345ea239d6727231d8991f7eb837ed8fd8dd1993b68accaec"
+    },
+    {
+      "path": "s3_bucket_kms_encryption.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/s3/s3_bucket_kms_encryption/s3_bucket_kms_encryption.metadata.json",
+      "sha256": "a2ccacc0f4f9049dc374ced2885362d650793e3c121648a0fee09d07a0ee0cf0"
+    },
+    {
+      "path": "s3_bucket_object_versioning.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/s3/s3_bucket_object_versioning/s3_bucket_object_versioning.metadata.json",
+      "sha256": "9172c2ed770821d18baa08bcfdf114bec905e3918e585cf911a0109787622433"
+    },
+    {
+      "path": "s3_bucket_server_access_logging_enabled.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/s3/s3_bucket_server_access_logging_enabled/s3_bucket_server_access_logging_enabled.metadata.json",
+      "sha256": "d62cf6b4019fafc81185b90a6b9687589f7430638f4cfd261835cc5fc94f9b31"
+    }
+  ],
+  "note": "Per-check metadata JSON, unmodified copies; read as JSON only (no Prowler code is vendored or run). The Checkov check to Prowler check mapping and its equivalence notes live in backend/app/data/scanner_severity_crosswalk.json and are Emfirge's own; the Severity values are Prowler's."
+}
