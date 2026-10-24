@@ -84,7 +84,8 @@ def test_startup_reports_auth_state(shared_test_db, monkeypatch, capsys):
 
 def test_deploy_workflow_forces_auth():
     workflow = (Path(__file__).parents[2] / '.github' / 'workflows' / 'deploy.yml').read_text()
-    docker_run = workflow[workflow.index('sudo docker run'):]
+    # The engine container (the scanner worker is a separate, unpublished container).
+    docker_run = workflow[workflow.index('sudo docker run -d --name emfirge-engine'):]
     env_file = docker_run.index('--env-file /home/ubuntu/.env')
     forced_auth = docker_run.index('-e EMFIRGE_REQUIRE_AUTH=1')
     image = docker_run.index('${{ secrets.DOCKERHUB_USERNAME }}/aws-risk-agent:latest')
