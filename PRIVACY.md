@@ -1,6 +1,6 @@
 # Privacy & Data Handling
 
-> Last updated: 2026-06-10
+> Last updated: 2026-10-24
 
 This document explains exactly what data Emfirge collects, where it is
 stored, for how long, and how to delete it. Cloud-security users are
@@ -173,3 +173,18 @@ store status, used/holds-data flags, metric peaks/latest values, the last event
 time, and AWS event name. CloudTrail user names, IP addresses, access keys, and
 raw events are never stored. Evidence follows the same retention period as
 branches.
+
+## AWS policy checks (opt-in)
+
+Policy checks run only after you accept an estimate. For the S3 bucket policies
+and role trust policies a branch changes, the Emfirge engine sends the policy
+document to AWS IAM Access Analyzer (`CheckNoPublicAccess`) using your own role,
+in your AWS account. It is not sent to any other third party. The calls are
+billed to your AWS account, about $0.002 per policy
+([AWS pricing](https://aws.amazon.com/iam/access-analyzer/pricing/)). Emfirge
+already holds these policies from the scan; the check stores only the policy's
+SHA-256 hash, the AWS answer, and the local answer, with the branch (same
+retention as branches). The role
+needs `access-analyzer:CheckNoPublicAccess` and `access-analyzer:ValidatePolicy`;
+update your CloudFormation role stack to add them. Without them the check does
+not run and the verdict is unchanged.

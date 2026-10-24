@@ -102,7 +102,7 @@ The typical workflow is:
 read-only scan → fork graph → apply modeled change → diff → re-run lenses → verdict
 ```
 
-A branch is an analysis model. `emfirge_branch_verdict` reports `scanner_status` and `coverage_warnings`; non-empty warnings mean degraded coverage and must not be presented as complete. `pass` is advisory evidence from the available lenses, not a guarantee of safety or application connectivity.
+A branch is an analysis model. `emfirge_branch_verdict` reports `scanner_status`, `scanner_loss` (what the scanner input omitted), and `coverage_warnings`; scanner findings are advisory. Non-empty warnings mean degraded coverage and must not be presented as complete. `pass` is advisory evidence from the available lenses, not a guarantee of safety or application connectivity.
 
 ## License
 

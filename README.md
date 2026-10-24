@@ -66,8 +66,8 @@ Each lens judges the branch from one angle, and together they produce a single `
 |---|---|---|
 | ✅ | **Security** | Does this expose something, or open a privilege-escalation path? |
 | ✅ | **Dependencies** | What breaks if this is removed? Is it still in use? Can it be recovered? |
-| ✅ | **Compliance** | Which CIS and SOC 2 controls flip? |
-| 🟡 | **Cost** | What does it cost before and after? (early: a fixed price table) |
+| ✅ | **Compliance** | Which CIS 1.5 and SOC 2 controls flip? (control lists from Prowler's published data; uncovered controls are never `pass`) |
+| 🟡 | **Cost** | What does it cost before and after? (AWS's published Price List, us-east-1 only; no LCUs) |
 | 🟡 | **Limits** | Will it hit an AWS quota? (early: AWS default quotas) |
 | 🔜 | **Yours** | Bring your own evaluator, run against the same branch contract. |
 
@@ -101,7 +101,7 @@ Every behaviour of the engine is pinned by a numbered **law**, a property test t
 > **L12:** evidence can make a verdict stricter, never looser.<br>
 > **L21:** a Terraform security-group rule and the equivalent AWS API call get the same verdict.
 
-The checks come from public sources rather than hand-written lists: [pathfinding.cloud](https://pathfinding.cloud) escalation paths, policy_sentry IAM data, and AWS schemas. Every CI run publishes a scorecard.
+The checks come from public sources rather than hand-written lists: [pathfinding.cloud](https://pathfinding.cloud) escalation paths, policy_sentry IAM data, AWS schemas, Prowler's compliance data, and the AWS Price List. Checkov runs on each branch verdict as an advisory scanner (it warns, it does not block on its own); Trivy is off. Every CI run publishes a scorecard.
 
 **What Emfirge does not claim:** a branch is a model of your cloud, so a `pass` is evidence, not a guarantee. If any part of the check was skipped, the verdict says so. Today Emfirge is a safe workspace, not a gate that blocks a live apply.
 
