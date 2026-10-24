@@ -187,4 +187,5 @@ SHA-256 hash, the AWS answer, and the local answer, with the branch (same
 retention as branches). The role
 needs `access-analyzer:CheckNoPublicAccess` and `access-analyzer:ValidatePolicy`;
 update your CloudFormation role stack to add them. Without them the check does
-not run and the verdict is unchanged.
+not run: the verdict uses Emfirge's own logic and notes that the AWS check was
+not run.
