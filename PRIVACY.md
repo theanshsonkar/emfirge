@@ -182,9 +182,9 @@ document to AWS IAM Access Analyzer (`CheckNoPublicAccess`) using your own role,
 in your AWS account. It is not sent to any other third party. The calls are
 billed to your AWS account, about $0.002 per policy
 ([AWS pricing](https://aws.amazon.com/iam/access-analyzer/pricing/)). Emfirge
-already holds these policies from the scan; the check stores only the policy's
-SHA-256 hash, the AWS answer, and the local answer, with the branch (same
-retention as branches). The role
+already holds these policies from the scan; the check stores no policy text,
+only which resource was checked, the AWS answer and Emfirge's own answer, with
+the branch (same retention as branches). The role
 needs `access-analyzer:CheckNoPublicAccess` and `access-analyzer:ValidatePolicy`;
 update your CloudFormation role stack to add them. Without them the check does
 not run: the verdict uses Emfirge's own logic and notes that the AWS check was
