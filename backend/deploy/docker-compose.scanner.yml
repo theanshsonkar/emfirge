@@ -1,7 +1,8 @@
-# Engine + warm Checkov scanner worker on one host.  NOT used by the live
-# deploy yet: .github/workflows/deploy.yml still starts a single container with
-# `docker run` and EMFIRGE_RUN_SCANNERS=0.  This file is the reviewed target
-# for turning scanners on safely (see "What would change" in the PR notes):
+# Engine + warm Checkov scanner worker on one host.  The live deploy
+# (.github/workflows/deploy.yml) now runs the equivalent of this file with
+# plain `docker run` (worker + engine on the emfirge-net network, scanners
+# still OFF via EMFIRGE_RUN_SCANNERS=0).  This file stays as the compose form
+# of the same layout, for turning scanners on safely:
 #
 #   docker compose -f backend/deploy/docker-compose.scanner.yml up -d
 #
@@ -19,8 +20,8 @@ services:
     image: ${DOCKERHUB_USERNAME}/aws-risk-agent:latest
     container_name: emfirge-engine
     restart: always
-    mem_limit: 1500m
-    memswap_limit: 1500m
+    mem_limit: 1400m
+    memswap_limit: 1400m
     env_file: /home/ubuntu/.env
     environment:
       EMFIRGE_REQUIRE_AUTH: "1"
