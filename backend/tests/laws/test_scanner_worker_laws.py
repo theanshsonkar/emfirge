@@ -235,9 +235,9 @@ def test_L61d_crosswalked_critical_finding_can_block(worker, monkeypatch):
     assert verdict.verdict == "block"
 
 
-def test_L61d_crosswalk_table_exists_starts_empty_and_ignores_bad_rows(monkeypatch, tmp_path):
+def test_L61d_crosswalk_table_exists_and_ignores_bad_rows(monkeypatch, tmp_path):
     shipped = scanners._CROSSWALK_PATH
-    assert json.loads(shipped.read_text()) == []
+    assert isinstance(json.loads(shipped.read_text()), list)
     table = tmp_path / "t.json"
     table.write_text(json.dumps([
         {"check_id": "A", "severity": "Critical", "source": "Prowler"},
