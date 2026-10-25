@@ -52,6 +52,7 @@
     "instances": [
       {
         "block_devices": [],
+        "detailed_monitoring": null,
         "has_public_ip": true,
         "id": "i-demo-web-001",
         "imdsv2_required": true,
@@ -202,11 +203,16 @@
     "publicly_accessible": [],
     "rds_instances": [
       {
+        "auto_minor_version_upgrade": null,
         "backup_retention_days": null,
         "deletion_protection": null,
         "encrypted": true,
         "engine": null,
+        "iam_auth_enabled": null,
         "id": "demo-postgres",
+        "log_exports": null,
+        "monitoring_interval": null,
+        "multi_az": null,
         "port": null,
         "publicly_accessible": false,
         "sg_ids": [

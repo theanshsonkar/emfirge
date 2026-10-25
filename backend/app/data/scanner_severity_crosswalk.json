@@ -4,70 +4,110 @@
     "prowler_check": "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22",
     "severity": "high",
     "source": "prowler ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_22 @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: ingress open to 0.0.0.0/0 or ::/0 covering TCP port 22. Checkov does not test the protocol (a UDP rule spanning 22 also fires) and Prowler skips the check when all ports are open (reported by the all-ports check instead); neither changes what a firing finding means."
+    "equivalence_note": "Same condition: ingress open to 0.0.0.0/0 or ::/0 covering TCP port 22. Checkov does not test the protocol (a UDP rule spanning 22 also fires) and Prowler skips the check when all ports are open (reported by the all-ports check instead); neither changes what a firing finding means.",
+    "tf_type": "aws_security_group",
+    "reads": [
+      "ingress"
+    ]
   },
   {
     "check_id": "CKV_AWS_25",
     "prowler_check": "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_3389",
     "severity": "high",
     "source": "prowler ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_3389 @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition as port 22 for TCP port 3389 (RDP). Checkov ignores protocol; Prowler defers to the all-ports check when all ports are open."
+    "equivalence_note": "Same condition as port 22 for TCP port 3389 (RDP). Checkov ignores protocol; Prowler defers to the all-ports check when all ports are open.",
+    "tf_type": "aws_security_group",
+    "reads": [
+      "ingress"
+    ]
   },
   {
     "check_id": "CKV_AWS_277",
     "prowler_check": "ec2_securitygroup_allow_ingress_from_internet_to_all_ports",
     "severity": "critical",
     "source": "prowler ec2_securitygroup_allow_ingress_from_internet_to_all_ports @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Checkov fires on an all-protocol, all-port rule open to 0.0.0.0/0 or ::/0; that is exactly the condition Prowler rates critical. Prowler also fails a single-protocol rule spanning ports 0-65535, which Checkov does not flag, so Prowler is the broader check. Prowler lowers its own severity to high for unattached groups at scan time; the published metadata severity is critical."
+    "equivalence_note": "Checkov fires on an all-protocol, all-port rule open to 0.0.0.0/0 or ::/0; that is exactly the condition Prowler rates critical. Prowler also fails a single-protocol rule spanning ports 0-65535, which Checkov does not flag, so Prowler is the broader check. Prowler lowers its own severity to high for unattached groups at scan time; the published metadata severity is critical.",
+    "tf_type": "aws_security_group",
+    "reads": [
+      "ingress"
+    ]
   },
   {
     "check_id": "CKV_AWS_79",
     "prowler_check": "ec2_instance_imdsv2_enabled",
     "severity": "high",
     "source": "prowler ec2_instance_imdsv2_enabled @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: pass only when IMDSv2 tokens are required or the metadata endpoint is disabled; missing metadata options fail in both."
+    "equivalence_note": "Same condition: pass only when IMDSv2 tokens are required or the metadata endpoint is disabled; missing metadata options fail in both.",
+    "tf_type": "aws_instance",
+    "reads": [
+      "metadata_options"
+    ]
   },
   {
     "check_id": "CKV_AWS_16",
     "prowler_check": "rds_instance_storage_encrypted",
     "severity": "high",
     "source": "prowler rds_instance_storage_encrypted @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: storage_encrypted must be true."
+    "equivalence_note": "Same condition: storage_encrypted must be true.",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "storage_encrypted"
+    ]
   },
   {
     "check_id": "CKV_AWS_133",
     "prowler_check": "rds_instance_backup_enabled",
     "severity": "medium",
     "source": "prowler rds_instance_backup_enabled @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition for valid values: backup retention above 0 days. Checkov also fails a retention above 35 days, which AWS does not allow, and passes an unset value because the provider default is 1."
+    "equivalence_note": "Same condition for valid values: backup retention above 0 days. Checkov also fails a retention above 35 days, which AWS does not allow, and passes an unset value because the provider default is 1.",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "backup_retention_period"
+    ]
   },
   {
     "check_id": "CKV_AWS_293",
     "prowler_check": "rds_instance_deletion_protection",
     "severity": "medium",
     "source": "prowler rds_instance_deletion_protection @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: deletion protection enabled on the instance. Prowler also resolves cluster-level protection for cluster members; Emfirge serializes standalone aws_db_instance only."
+    "equivalence_note": "Same condition: deletion protection enabled on the instance. Prowler also resolves cluster-level protection for cluster members; Emfirge serializes standalone aws_db_instance only.",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "deletion_protection"
+    ]
   },
   {
     "check_id": "CKV_AWS_157",
     "prowler_check": "rds_instance_multi_az",
     "severity": "medium",
     "source": "prowler rds_instance_multi_az @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: multi_az enabled on the instance (Prowler also resolves cluster-level Multi-AZ for cluster members)."
+    "equivalence_note": "Same condition: multi_az enabled on the instance (Prowler also resolves cluster-level Multi-AZ for cluster members).",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "multi_az"
+    ]
   },
   {
     "check_id": "CKV_AWS_129",
     "prowler_check": "rds_instance_integration_cloudwatch_logs",
     "severity": "medium",
     "source": "prowler rds_instance_integration_cloudwatch_logs @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: at least one log type is exported to CloudWatch Logs."
+    "equivalence_note": "Same condition: at least one log type is exported to CloudWatch Logs.",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "enabled_cloudwatch_logs_exports"
+    ]
   },
   {
     "check_id": "CKV_AWS_21",
     "prowler_check": "s3_bucket_object_versioning",
     "severity": "medium",
     "source": "prowler s3_bucket_object_versioning @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: bucket versioning is Enabled (inline or aws_s3_bucket_versioning)."
+    "equivalence_note": "Same condition: bucket versioning is Enabled (inline or aws_s3_bucket_versioning).",
+    "tf_type": "aws_s3_bucket",
+    "reads": [
+      "aws_s3_bucket_versioning"
+    ]
   },
   {
     "check_id": "CKV_AWS_18",
@@ -81,41 +121,65 @@
     "prowler_check": "s3_bucket_kms_encryption",
     "severity": "medium",
     "source": "prowler s3_bucket_kms_encryption @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: default encryption algorithm is aws:kms. Prowler also accepts aws:kms:dsse. Not the same as CKV_AWS_19, which passes AES256 and an unset configuration."
+    "equivalence_note": "Same condition: default encryption algorithm is aws:kms. Prowler also accepts aws:kms:dsse. Not the same as CKV_AWS_19, which passes AES256 and an unset configuration.",
+    "tf_type": "aws_s3_bucket",
+    "reads": [
+      "aws_s3_bucket_server_side_encryption_configuration"
+    ]
   },
   {
     "check_id": "CKV_AWS_126",
     "prowler_check": "ec2_instance_detailed_monitoring_enabled",
     "severity": "low",
     "source": "prowler ec2_instance_detailed_monitoring_enabled @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: detailed monitoring enabled on the instance."
+    "equivalence_note": "Same condition: detailed monitoring enabled on the instance.",
+    "tf_type": "aws_instance",
+    "reads": [
+      "monitoring"
+    ]
   },
   {
     "check_id": "CKV_AWS_226",
     "prowler_check": "rds_instance_minor_version_upgrade_enabled",
     "severity": "medium",
     "source": "prowler rds_instance_minor_version_upgrade_enabled @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: automatic minor version upgrade enabled."
+    "equivalence_note": "Same condition: automatic minor version upgrade enabled.",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "auto_minor_version_upgrade"
+    ]
   },
   {
     "check_id": "CKV_AWS_161",
     "prowler_check": "rds_instance_iam_authentication_enabled",
     "severity": "medium",
     "source": "prowler rds_instance_iam_authentication_enabled @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: IAM database authentication enabled. Checkov evaluates only mysql and postgres (other engines are unknown); Prowler also covers mariadb and aurora. On the engines both evaluate they agree."
+    "equivalence_note": "Same condition: IAM database authentication enabled. Checkov evaluates only mysql and postgres (other engines are unknown); Prowler also covers mariadb and aurora. On the engines both evaluate they agree.",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "iam_database_authentication_enabled"
+    ]
   },
   {
     "check_id": "CKV_AWS_118",
     "prowler_check": "rds_instance_enhanced_monitoring_enabled",
     "severity": "low",
     "source": "prowler rds_instance_enhanced_monitoring_enabled @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: enhanced monitoring on (a monitoring interval above 0 in Terraform, a monitoring role in the live API)."
+    "equivalence_note": "Same condition: enhanced monitoring on (a monitoring interval above 0 in Terraform, a monitoring role in the live API).",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "monitoring_interval"
+    ]
   },
   {
     "check_id": "CKV2_AWS_41",
     "prowler_check": "ec2_instance_profile_attached",
     "severity": "medium",
     "source": "prowler ec2_instance_profile_attached @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
-    "equivalence_note": "Same condition: an IAM instance profile is attached to the instance (Prowler ignores terminated instances)."
+    "equivalence_note": "Same condition: an IAM instance profile is attached to the instance (Prowler ignores terminated instances).",
+    "tf_type": "aws_instance",
+    "reads": [
+      "iam_instance_profile"
+    ]
   }
 ]

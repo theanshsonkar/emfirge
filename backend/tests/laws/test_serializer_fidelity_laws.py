@@ -21,7 +21,7 @@ def _full_infra() -> AWSInfrastructure:
         ec2=EC2Data(
             instances=[EC2Instance(
                 id="i-1", type="t3.micro", state="running", subnet_id="subnet-1", sg_ids=["sg-1"],
-                imdsv2_required=True, has_public_ip=False, instance_profile_arn="arn:x", tags=TAGS,
+                imdsv2_required=True, has_public_ip=False, instance_profile_arn="arn:aws:iam::1:instance-profile/p", detailed_monitoring=True, tags=TAGS,
             )],
             security_groups=[SecurityGroup(
                 id="sg-1", name="web", attached_to=["i-1"], tags=TAGS, egress_rules=[{"protocol": "-1", "ip_ranges": ["0.0.0.0/0"]}],
@@ -35,7 +35,9 @@ def _full_infra() -> AWSInfrastructure:
         )]),
         rds=RDSData(rds_instances=[RDSInstance(
             id="db-1", sg_ids=["sg-1"], subnet_id="subnet-1", publicly_accessible=False, encrypted=True,
-            engine="postgres", port=5432, backup_retention_days=7, deletion_protection=True, tags=TAGS,
+            engine="postgres", port=5432, backup_retention_days=7, deletion_protection=True,
+            multi_az=True, log_exports=["postgresql"], iam_auth_enabled=True, monitoring_interval=60,
+            auto_minor_version_upgrade=True, tags=TAGS,
         )]),
     )
 

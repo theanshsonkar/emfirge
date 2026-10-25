@@ -71,6 +71,9 @@ class CombinedVerdict(BaseModel):
     # Everything the Terraform handed to the scanners omits or synthesizes
     # (resources, fields, assumed values) for the branch; see app/serializer.py.
     scanner_loss: list[dict[str, Any]] = Field(default_factory=list)
+    # Scanner findings not evaluated because an input the check reads was not
+    # collected for that branch resource: {"check_id", "resource_type", "id", "inputs"}.
+    scanner_skipped: list[dict[str, Any]] = Field(default_factory=list)
     # Human-readable degradation notices. NON-EMPTY means this verdict was
     # computed with less than the full lens set, so it must not be presented as
     # a complete answer.
@@ -435,6 +438,7 @@ def combined_verdict(
     scanner_added: list[dict[str, Any]] = []
     scanner_removed: list[dict[str, Any]] = []
     scanner_loss: list[dict[str, Any]] = []
+    scanner_skipped: list[dict[str, Any]] = []
     scanner_results = ((run_checkov, "checkov"), (run_trivy, "trivy"), (run_cloudsplaining, "cloudsplaining"))
     if not run_scanners:
         # run_scanners=False is a deliberate configuration (the verdict endpoint
@@ -468,6 +472,10 @@ def combined_verdict(
             except Exception as exc:  # noqa: BLE001 - scanners are arm's-length
                 reasons.setdefault(name, f"{side} scan raised {type(exc).__name__}")
                 return None
+            if side == "branch":
+                skipped = _value(raw, "skipped", None)
+                if isinstance(skipped, list):
+                    scanner_skipped.extend(item for item in skipped if isinstance(item, dict))
             error = _value(raw, "error", None)
             if error and name not in reasons:
                 reasons[name] = str(error)
@@ -499,6 +507,11 @@ def combined_verdict(
                 f"no findings from {', '.join(missing)} — this verdict is NOT full coverage"
             )
         scanner_available = bool(available_scanners)
+        if scanner_skipped:
+            scanner_skipped.sort(key=lambda e: (e.get("check_id", ""), e.get("resource_type", ""), e.get("id", "")))
+            coverage_warnings.append(
+                f"{len(scanner_skipped)} scanner checks skipped: input not collected; see scanner_skipped"
+            )
         if scanner_available:
             base_scan = {}
             branch_scan = {}
@@ -827,6 +840,7 @@ def combined_verdict(
         scanner_available=scanner_available,
         scanner_status=scanner_status,
         scanner_loss=scanner_loss,
+        scanner_skipped=scanner_skipped,
         coverage_warnings=coverage_warnings,
         collection_warnings=collection_warnings,
         cost_delta_monthly_usd=cost_delta_monthly_usd,
