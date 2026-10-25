@@ -272,6 +272,15 @@ def _references(args: Any) -> set[str]:
     return found
 
 
+# Where a changed resource points at one of these, the parent's other referrers join
+# the scope (all of them for None), since checks on the parent read them.
+_SIBLING_TYPES: dict[str, Optional[frozenset[str]]] = {
+    "aws_s3_bucket": None,
+    "aws_iam_role": frozenset({"aws_iam_role_policy"}),
+    "aws_vpc": frozenset({"aws_flow_log"}),
+}
+
+
 def plan_scan_scope(base: AWSInfrastructure, branch: AWSInfrastructure) -> Optional[ScanScope]:
     """Changed resources plus the neighbours graph checks need, or None (scan everything).
 
@@ -279,7 +288,9 @@ def plan_scan_scope(base: AWSInfrastructure, branch: AWSInfrastructure) -> Optio
     groups, a bucket sub-resource's bucket) and what references it (a bucket's
     policy and sub-resources, the instances using a changed security group).
     Where a changed resource points at a bucket, the bucket's other
-    sub-resources join too, since bucket checks read them.  Both sides are
+    sub-resources join too, since bucket checks read them; likewise a role's
+    policies (a Lambda function that points at a role brings in its policies)
+    and a VPC's flow logs (a changed subnet brings in its VPC's flow logs).  Both sides are
     scanned with this one name set, so a finding can only appear or vanish
     because the resource itself changed.
     """
@@ -290,16 +301,29 @@ def plan_scan_scope(base: AWSInfrastructure, branch: AWSInfrastructure) -> Optio
         changed = {n for n in names if base_flat.get(n) != branch_flat.get(n)}
         edges: set[tuple[str, str]] = set()  # (referrer, referenced)
         for flat in (base_flat, branch_flat):
-            for name, (_, args) in flat.items():
-                edges.update((name, ref) for ref in _references(args) if ref in names and ref != name)
+            for name, (tf_type, args) in flat.items():
+                for ref in _references(args):
+                    if ref not in names or ref == name:
+                        continue
+                    # A security group's rule naming a peer group is not a link a check reads.
+                    if tf_type == "aws_security_group" and (flat.get(ref) or ("", None))[0] == "aws_security_group":
+                        continue
+                    edges.add((name, ref))
         scope = set(changed)
         outgoing = {dst for src, dst in edges if src in changed}
         scope |= outgoing | {src for src, dst in edges if dst in changed}
-        buckets = {
-            n for n in outgoing
-            if (base_flat.get(n) or branch_flat.get(n) or ("", None))[0] == "aws_s3_bucket"
-        }
-        scope |= {src for src, dst in edges if dst in buckets}
+        for parent in outgoing:
+            parent_type = (base_flat.get(parent) or branch_flat.get(parent) or ("", None))[0]
+            if parent_type not in _SIBLING_TYPES:
+                continue
+            wanted = _SIBLING_TYPES[parent_type]
+            scope |= {
+                src for src, dst in edges
+                if dst == parent and (
+                    wanted is None
+                    or (base_flat.get(src) or branch_flat.get(src) or ("", None))[0] in wanted
+                )
+            }
         return ScanScope(frozenset(scope))
     except Exception:  # noqa: BLE001 - the subset logic must never break a verdict
         return None

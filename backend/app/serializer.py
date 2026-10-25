@@ -28,7 +28,6 @@ from app.models import AWSInfrastructure
 
 _NON_ALPHANUMERIC = re.compile(r"[^A-Za-z0-9]")
 _RULE_FIELDS = ("from_port", "to_port", "protocol")
-_RULE_KEYS_EMITTED = frozenset(_RULE_FIELDS) | {"ip_ranges"}
 _BPA_FLAGS = ("block_public_acls", "ignore_public_acls", "block_public_policy", "restrict_public_buckets")
 
 # Emfirge resource types the serializer emits.
@@ -36,6 +35,14 @@ EC2_INSTANCE = "ec2_instance"
 SECURITY_GROUP = "security_group"
 S3_BUCKET = "s3_bucket"
 RDS_INSTANCE = "rds_instance"
+ROLE_POLICY = "role_policy"
+LAMBDA_FUNCTION = "lambda_function"
+VPC_SUBNET = "vpc_subnet"
+# Types without a list of model objects of their own: a VPC exists as an id
+# on subnets/route tables/NACLs, KMS keys as ids in a list, the trail as a flat section.
+VPC = "vpc"
+KMS_KEY = "kms_key"
+CLOUDTRAIL = "cloudtrail"
 
 # (section attribute, list attribute) -> emfirge resource type
 EMITTED_COLLECTIONS: dict[tuple[str, str], str] = {
@@ -43,6 +50,9 @@ EMITTED_COLLECTIONS: dict[tuple[str, str], str] = {
     ("ec2", "security_groups"): SECURITY_GROUP,
     ("s3", "buckets"): S3_BUCKET,
     ("rds", "rds_instances"): RDS_INSTANCE,
+    ("iam", "role_policies"): ROLE_POLICY,
+    ("lambda_data", "functions"): LAMBDA_FUNCTION,
+    ("vpc", "subnets"): VPC_SUBNET,
 }
 
 _NAME_PREFIX = {
@@ -54,6 +64,13 @@ _NAME_PREFIX = {
     "aws_s3_bucket_versioning": "s3ver",
     "aws_s3_bucket_policy": "s3pol",
     "aws_db_instance": "rds",
+    "aws_iam_role": "iamrole",
+    "aws_iam_role_policy": "iamrp",
+    "aws_kms_key": "kms",
+    "aws_cloudtrail": "trail",
+    "aws_lambda_function": "fn",
+    "aws_vpc": "vpc",
+    "aws_subnet": "subnet",
 }
 
 # Per emitted resource type, every model field and what happens to it:
@@ -121,12 +138,91 @@ FIELD_MAP: dict[str, dict[str, tuple]] = {
     },
 }
 
+_TRUST_LOSS = "trust policy: only parsed flags are kept, not the raw document, so assume_role_policy cannot be emitted"
+
+FIELD_MAP.update({
+    ROLE_POLICY: {
+        "role_name": ("emit", "name", False),
+        "role_arn": ("identity",),
+        "accessible_resources": ("loss", "derived from access_statements; not emitted"),
+        "has_admin": ("loss", "derived from access_statements and attached policy names; not emitted"),
+        # Effective permissions: managed and inline statements merged into one aws_iam_role_policy.
+        # An incomplete record (a Condition, a missing policy) is reported against access_statements.
+        "access_statements": ("emit", "policy", False),
+        "policy_documents": ("emit", "policy", False),
+        "last_used_at": ("loss", "last-used time has no Terraform equivalent"),
+        "policy_names": ("loss", "policy names are display data; statements are emitted merged"),
+        "trusted_role_arns": ("loss", _TRUST_LOSS),
+        "trusted_services": ("loss", _TRUST_LOSS),
+        "trust_allows_external": ("loss", _TRUST_LOSS),
+        "trust_has_conditions": ("loss", _TRUST_LOSS),
+        "trust_external_unrestricted": ("loss", _TRUST_LOSS),
+    },
+    LAMBDA_FUNCTION: {
+        "name": ("emit", "function_name", False),
+        "role_arn": ("emit", "role", True),
+        "vpc_id": ("emit", "vpc_config", False),
+        "subnet_ids": ("emit", "vpc_config", False),
+        "sg_ids": ("emit", "vpc_config", False),
+        "secret_refs": ("loss", "environment variable names are not serialized"),
+        "tags": ("emit", "tags", True),
+    },
+    VPC_SUBNET: {
+        "id": ("identity",),
+        "vpc_id": ("emit", "vpc_id", False),
+        "cidr": ("emit", "cidr_block", True),
+        "resources": ("loss", "resources in the subnet have no Terraform subnet argument"),
+        "availability_zone": ("emit", "availability_zone", False),
+        "is_public": ("loss", "route-derived; map_public_ip_on_launch is not collected"),
+    },
+    # No model object: the pseudo-model is the id plus what is known about it.
+    VPC: {
+        "id": ("identity",),
+        "flow_logs": ("emit", "aws_flow_log", False),
+    },
+    KMS_KEY: {
+        "id": ("identity",),
+        "enable_key_rotation": ("emit", "enable_key_rotation", False),
+    },
+    CLOUDTRAIL: {
+        "trail_arn": ("identity",),
+        "is_enabled": ("emit", "enable_logging", False),
+        "is_multi_region": ("emit", "is_multi_region_trail", False),
+        "has_log_file_validation": ("emit", "enable_log_file_validation", False),
+    },
+})
+
+# Terraform arguments of an emitted resource that the model has no field for at
+# all: reported on every such resource so the output is never read as complete.
+UNMODELED: dict[str, dict[str, str]] = {
+    "aws_iam_role": {"assume_role_policy": _TRUST_LOSS},
+    "aws_lambda_function": {
+        name: "not collected into the model"
+        for name in ("runtime", "handler", "timeout", "environment", "tracing_config", "dead_letter_config",
+                     "kms_key_arn", "reserved_concurrent_executions", "code_signing_config_arn")
+    },
+    "aws_cloudtrail": {
+        name: "not collected into the model"
+        for name in ("s3_bucket_name", "kms_key_id", "sns_topic_name", "cloud_watch_logs_group_arn")
+    },
+    "aws_kms_key": {name: "not collected into the model" for name in ("customer_master_key_spec", "policy")},
+    "aws_subnet": {"map_public_ip_on_launch": "not collected into the model"},
+    "aws_vpc": {"cidr_block": "not collected into the model"},
+}
+
 # Terraform resource type -> Emfirge resource type (the main resource a check reports on).
 TF_TO_EMFIRGE: dict[str, str] = {
     "aws_instance": EC2_INSTANCE,
     "aws_security_group": SECURITY_GROUP,
     "aws_s3_bucket": S3_BUCKET,
     "aws_db_instance": RDS_INSTANCE,
+    "aws_iam_role": ROLE_POLICY,
+    "aws_iam_role_policy": ROLE_POLICY,
+    "aws_lambda_function": LAMBDA_FUNCTION,
+    "aws_subnet": VPC_SUBNET,
+    "aws_vpc": VPC,
+    "aws_kms_key": KMS_KEY,
+    "aws_cloudtrail": CLOUDTRAIL,
 }
 
 
@@ -171,7 +267,18 @@ def _value(rule: Any, key: str) -> tuple[bool, Any]:
     return hasattr(rule, key), getattr(rule, key, None)
 
 
-def _serialize_rules(rules: Iterable[Any]) -> list[dict[str, Any]]:
+def _serialize_rules(rules: Iterable[Any], group_key: str, own_id: str, link) -> list[dict[str, Any]]:
+    """Rules as Terraform ingress/egress blocks.
+
+    ``group_key`` is the model key holding peer security group ids
+    (``source_sg_ids`` for ingress, ``dest_sg_ids`` for egress).  A peer in the
+    input becomes a reference, the group itself becomes ``self``, anything else
+    stays the literal id.  IPv6 ranges go to ``ipv6_cidr_blocks``.  Peers sit in
+    their own block when the rule also has address ranges: AWS keeps one
+    permission per source, and Checkov skips a block's CIDRs when it also
+    carries ``self``.  Protocol ``-1`` takes ports 0/0, which Terraform requires
+    for it and AWS ignores.
+    """
     serialized: list[dict[str, Any]] = []
     for rule in rules:
         item: dict[str, Any] = {}
@@ -179,26 +286,56 @@ def _serialize_rules(rules: Iterable[Any]) -> list[dict[str, Any]]:
             present, value = _value(rule, key)
             if present and value is not None:
                 item[key] = value
+        if str(item.get("protocol")) == "-1":
+            item.setdefault("from_port", 0)
+            item.setdefault("to_port", 0)
+        base = dict(item)
+        has_ranges = False
         present, value = _value(rule, "ip_ranges")
         if present and value is not None:
-            item["cidr_blocks"] = value
+            v6 = [r for r in value if ":" in str(r)]
+            v4 = [r for r in value if ":" not in str(r)]
+            item["cidr_blocks"] = v4
+            if v6:
+                item["ipv6_cidr_blocks"] = v6
+            has_ranges = bool(value)
+        present, peers = _value(rule, group_key)
+        peer_item: dict[str, Any] | None = None
+        if present and peers:
+            peers = [str(peer) for peer in peers if peer]
+            target = dict(base) if has_ranges else item
+            if own_id in peers:
+                target["self"] = True
+            others = sorted(set(peers) - {own_id})
+            if others:
+                target["security_groups"] = link(others)
+            if has_ranges and len(target) > len(base):
+                peer_item = target
         serialized.append(item)
+        if peer_item is not None:
+            serialized.append(peer_item)
     return sorted(
         serialized,
         key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":"), default=str),
     )
 
 
-def _extra_rule_keys(rules: Iterable[Any]) -> list[str]:
+def _extra_rule_keys(rules: Iterable[Any], group_key: str) -> list[str]:
     keys: set[str] = set()
+    emitted = set(_RULE_FIELDS) | {"ip_ranges", group_key}
     for rule in rules:
         if isinstance(rule, dict):
-            keys.update(str(k) for k in rule if k not in _RULE_KEYS_EMITTED)
+            for key, value in rule.items():
+                if key in emitted:
+                    continue
+                if key in ("source_sg_ids", "dest_sg_ids") and not value:
+                    continue  # the other direction's peer list is empty by default
+                keys.add(str(key))
     return sorted(keys)
 
 
-def _ref(tf_type: str, name: str) -> str:
-    return f"${{{tf_type}.{name}.id}}"
+def _ref(tf_type: str, name: str, attribute: str = "id") -> str:
+    return f"${{{tf_type}.{name}.{attribute}}}"
 
 
 def _model_fields(model: Any) -> list[str]:
@@ -211,6 +348,56 @@ def _item_id(item: Any, index: int) -> str:
         if value not in (None, ""):
             return str(value)
     return f"#{index}"
+
+
+_TRAIL_ARN = re.compile(r"arn:[^:]*:cloudtrail:[^:]*:[^:]*:trail/(.+)")
+
+
+def _role_policy_document(role: Any) -> tuple[dict | None, list[str]]:
+    """The role's effective permissions as one policy document, plus why it may be incomplete.
+
+    Built only from the statements the model kept (effect, actions, resources,
+    NotAction/NotResource).  Conditions are not kept, so a statement that had one
+    is emitted without it and reported; a policy the model does not record is
+    reported too.  The raw trust document is not kept at all.
+    """
+    problems: list[str] = []
+    statements: list[dict[str, Any]] = []
+    conditioned: list[int] = []
+    malformed: list[int] = []
+    for index, st in enumerate(role.access_statements):
+        effect = {"allow": "Allow", "deny": "Deny"}.get(str(st.effect).lower())
+        if effect is None or not st.actions or not st.resources:
+            malformed.append(index)
+            continue
+        statements.append({
+            "Effect": effect,
+            ("NotAction" if st.is_not_action else "Action"): list(st.actions),
+            ("NotResource" if st.is_not_resource else "Resource"): list(st.resources),
+        })
+        if st.has_condition:
+            conditioned.append(index)
+    if conditioned:
+        problems.append(
+            f"statement(s) {conditioned} have a Condition that is not kept; emitted without it, "
+            "so the document is broader than the real policy"
+        )
+    if malformed:
+        problems.append(f"statement(s) {malformed} have no usable effect/action/resource and were dropped")
+    if role.policy_documents is None:
+        if role.policy_names:
+            problems.append("policy breakdown not recorded; cannot confirm every attached or inline policy contributed")
+    else:
+        missing = sorted(set(role.policy_names) - {doc.name for doc in role.policy_documents})
+        if missing:
+            problems.append(f"policy document(s) not recorded: {', '.join(missing)}")
+    if role.has_admin and not any(
+        str(st.effect).lower() == "allow" and "*" in st.actions and "*" in st.resources
+        for st in role.access_statements
+    ):
+        problems.append("role is recorded as administrator but no matching statement was kept")
+    document = {"Statement": statements} if statements else None
+    return document, problems
 
 
 def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
@@ -310,8 +497,8 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
         if duplicate(SECURITY_GROUP, group.id):
             continue
         args = {"name": group.name}
-        ingress = _serialize_rules(group.rules)
-        egress = _serialize_rules(group.egress_rules)
+        ingress = _serialize_rules(group.rules, "source_sg_ids", str(group.id), sg_links)
+        egress = _serialize_rules(group.egress_rules, "dest_sg_ids", str(group.id), sg_links)
         if ingress:
             args["ingress"] = ingress
         if egress:
@@ -322,8 +509,10 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
             emitted.add("tags")
         add("aws_security_group", SECURITY_GROUP, group.id, args)
         report_fields(SECURITY_GROUP, group.id, group, emitted)
-        for label, rules in (("rules", group.rules), ("egress_rules", group.egress_rules)):
-            extra = _extra_rule_keys(rules)
+        for label, rules, group_key in (
+            ("rules", group.rules, "source_sg_ids"), ("egress_rules", group.egress_rules, "dest_sg_ids"),
+        ):
+            extra = _extra_rule_keys(rules, group_key)
             if extra:
                 omitted_field(SECURITY_GROUP, group.id, label, f"rule keys not emitted: {', '.join(extra)}")
 
@@ -401,6 +590,143 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
             emitted.add("tags")
         add("aws_db_instance", RDS_INSTANCE, database.id, args)
         report_fields(RDS_INSTANCE, database.id, database, emitted)
+
+    role_names: dict[str, str] = {}  # role ARN -> Terraform name of its aws_iam_role
+    for role in infra.iam.role_policies:
+        if duplicate(ROLE_POLICY, role.role_name):
+            continue
+        rname = add("aws_iam_role", ROLE_POLICY, role.role_name, {"name": role.role_name})
+        if role.role_arn:
+            role_names.setdefault(role.role_arn, rname)
+        document, problems = _role_policy_document(role)
+        if document is not None:
+            add("aws_iam_role_policy", ROLE_POLICY, role.role_name, {
+                "role": _ref("aws_iam_role", rname),
+                "policy": json.dumps(document, sort_keys=True, separators=(",", ":")),
+            })
+        for problem in problems:
+            omitted_field(ROLE_POLICY, role.role_name, "access_statements", problem)
+        for attribute, reason in UNMODELED["aws_iam_role"].items():
+            omitted_field(ROLE_POLICY, role.role_name, attribute, reason)
+        report_fields(ROLE_POLICY, role.role_name, role, {"role_name", "role_arn", "access_statements", "policy_documents"})
+
+    vpc_ids = {
+        str(vpc_id) for vpc_id in (
+            list(infra.vpc.vpcs_without_flow_logs)
+            + [subnet.vpc_id for subnet in infra.vpc.subnets]
+            + [table.vpc_id for table in infra.vpc.route_tables]
+            + [acl.vpc_id for acl in infra.vpc.nacls]
+            + [infra.vpc.default_vpc_id]
+        ) if vpc_id
+    }
+    vpc_names = {vpc_id: terraform_name("aws_vpc", VPC, vpc_id) for vpc_id in vpc_ids}
+    subnet_names = {str(subnet.id): terraform_name("aws_subnet", VPC_SUBNET, subnet.id) for subnet in infra.vpc.subnets}
+    no_flow_logs = set(infra.vpc.vpcs_without_flow_logs)
+
+    for vpc_id in sorted(vpc_ids):
+        add("aws_vpc", VPC, vpc_id, {})
+        # Only a VPC listed as having no flow log is known to have none; for any
+        # other VPC the collector cannot tell "has one" from "check failed".
+        if vpc_id not in no_flow_logs:
+            omitted_field(VPC, vpc_id, "flow_logs", "flow log state unknown: not listed as lacking flow logs, "
+                          "which does not show that one exists; no aws_flow_log is emitted")
+        for attribute, reason in UNMODELED["aws_vpc"].items():
+            omitted_field(VPC, vpc_id, attribute, reason)
+    unlisted_vpcs = infra.vpc.total_vpcs - len(vpc_ids)
+    if unlisted_vpcs > 0:
+        lose(VPC, "unlisted", f"{unlisted_vpcs} VPC(s) are known only as a count; not serialized", kind="omitted_resource")
+
+    for subnet in infra.vpc.subnets:
+        if duplicate(VPC_SUBNET, subnet.id):
+            continue
+        args = {"vpc_id": _ref("aws_vpc", vpc_names[str(subnet.vpc_id)])}
+        emitted = {"id", "vpc_id", "availability_zone"}
+        if subnet.cidr is not None:
+            args["cidr_block"] = subnet.cidr
+            emitted.add("cidr")
+        if subnet.availability_zone:
+            args["availability_zone"] = subnet.availability_zone
+        else:
+            omitted_field(VPC_SUBNET, subnet.id, "availability_zone", "value not collected (unknown); omitted rather than guessed")
+        add("aws_subnet", VPC_SUBNET, subnet.id, args)
+        for attribute, reason in UNMODELED["aws_subnet"].items():
+            omitted_field(VPC_SUBNET, subnet.id, attribute, reason)
+        report_fields(VPC_SUBNET, subnet.id, subnet, emitted)
+
+    for function in infra.lambda_data.functions:
+        if duplicate(LAMBDA_FUNCTION, function.name):
+            continue
+        args = {"function_name": function.name}
+        emitted = {"name", "vpc_id", "subnet_ids", "sg_ids"}
+        if function.role_arn:
+            args["role"] = (
+                _ref("aws_iam_role", role_names[function.role_arn], "arn")
+                if function.role_arn in role_names else function.role_arn
+            )
+            emitted.add("role_arn")
+        else:
+            omitted_field(LAMBDA_FUNCTION, function.name, "role_arn", "value not collected (unknown); omitted rather than guessed")
+            emitted.add("role_arn")
+        if function.subnet_ids or function.sg_ids:
+            config: dict[str, Any] = {}
+            if function.subnet_ids:
+                config["subnet_ids"] = [
+                    _ref("aws_subnet", subnet_names[str(s)]) if str(s) in subnet_names else s
+                    for s in function.subnet_ids
+                ]
+            if function.sg_ids:
+                config["security_group_ids"] = sg_links(function.sg_ids)
+            args["vpc_config"] = [config]
+        if function.tags is not None:
+            args["tags"] = dict(function.tags)
+            emitted.add("tags")
+        add("aws_lambda_function", LAMBDA_FUNCTION, function.name, args)
+        for attribute, reason in UNMODELED["aws_lambda_function"].items():
+            omitted_field(LAMBDA_FUNCTION, function.name, attribute, reason)
+        report_fields(LAMBDA_FUNCTION, function.name, function, emitted)
+
+    # KMS: the model lists only enabled keys WITHOUT rotation and keys pending
+    # deletion; there is no full key list, so a key absent from both lists has
+    # an unknown rotation state and is never emitted as "rotation on".
+    without_rotation = list(dict.fromkeys(str(k) for k in infra.kms.cmks_without_rotation))
+    for key_id in without_rotation:
+        if duplicate(KMS_KEY, key_id):
+            continue
+        add("aws_kms_key", KMS_KEY, key_id, {"enable_key_rotation": False})
+        for attribute, reason in UNMODELED["aws_kms_key"].items():
+            omitted_field(KMS_KEY, key_id, attribute, reason)
+    for key_id in dict.fromkeys(str(k) for k in infra.kms.cmks_pending_deletion):
+        if (KMS_KEY, key_id) not in seen:
+            lose(KMS_KEY, key_id, "key is pending deletion; rotation state unknown, not serialized", kind="omitted_resource")
+    other_keys = infra.kms.total_cmks - len(set(without_rotation) | set(map(str, infra.kms.cmks_pending_deletion)))
+    if other_keys > 0:
+        lose(KMS_KEY, "unlisted", f"{other_keys} customer-managed key(s) are known only as a count; "
+             "rotation state unknown, not serialized", kind="omitted_resource")
+
+    trail = infra.cloudtrail
+    if trail.trail_arn:
+        trail_args: dict[str, Any] = {"enable_logging": trail.is_enabled}
+        match = _TRAIL_ARN.fullmatch(trail.trail_arn)
+        if match:
+            trail_args["name"] = match.group(1)
+        # The model's flags are "any trail" aggregates while trail_arn is one trail:
+        # False holds for every trail; True cannot be attributed to this one.
+        aggregate = (
+            ("is_multi_region", "is_multi_region_trail", trail.is_multi_region),
+            ("has_log_file_validation", "enable_log_file_validation", trail.has_log_file_validation),
+        )
+        for model_field, tf_arg, value in aggregate:
+            if value:
+                omitted_field(CLOUDTRAIL, trail.trail_arn, model_field,
+                              "recorded true for any trail, not for this one; omitted rather than attributed")
+            else:
+                trail_args[tf_arg] = False
+        add("aws_cloudtrail", CLOUDTRAIL, trail.trail_arn, trail_args)
+        for attribute, reason in UNMODELED["aws_cloudtrail"].items():
+            omitted_field(CLOUDTRAIL, trail.trail_arn, attribute, reason)
+        report_fields(CLOUDTRAIL, trail.trail_arn, trail, {"trail_arn", "is_enabled", "is_multi_region", "has_log_file_validation"})
+    elif trail.is_enabled or trail.is_multi_region or trail.has_log_file_validation:
+        lose(CLOUDTRAIL, "none", "CloudTrail state is recorded without a logging trail ARN; not serialized", kind="omitted_resource")
 
     _report_unemitted_collections(infra, lose)
     loss.sort(key=lambda e: (e["resource_type"], e["id"], e.get("field", ""), e["reason"]))

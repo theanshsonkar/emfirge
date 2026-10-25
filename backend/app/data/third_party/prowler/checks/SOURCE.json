@@ -10,6 +10,16 @@
   "notice_file": null,
   "files": [
     {
+      "path": "awslambda_function_inside_vpc.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/awslambda/awslambda_function_inside_vpc/awslambda_function_inside_vpc.metadata.json",
+      "sha256": "32474edf3e38d12ebb41f2f928760eb0a25b9b989e3c298afdfaf5f333e0d8be"
+    },
+    {
+      "path": "cloudtrail_log_file_validation_enabled.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/cloudtrail/cloudtrail_log_file_validation_enabled/cloudtrail_log_file_validation_enabled.metadata.json",
+      "sha256": "42104a1e0374e5c0270b488d803014237dcf31827102eba9f62c89aae7cff09d"
+    },
+    {
       "path": "ec2_instance_detailed_monitoring_enabled.metadata.json",
       "upstream_path": "prowler/providers/aws/services/ec2/ec2_instance_detailed_monitoring_enabled/ec2_instance_detailed_monitoring_enabled.metadata.json",
       "sha256": "a1715ca4ce894a75b885b682bb668578108e65f03b004f3b862971f01961e949"
@@ -38,6 +48,11 @@
       "path": "ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_3389.metadata.json",
       "upstream_path": "prowler/providers/aws/services/ec2/ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_3389/ec2_securitygroup_allow_ingress_from_internet_to_tcp_port_3389.metadata.json",
       "sha256": "734317b9d7e6203bc36bf02105e520317bf5c46efbfc400fe89380d5a04230fa"
+    },
+    {
+      "path": "kms_cmk_rotation_enabled.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/kms/kms_cmk_rotation_enabled/kms_cmk_rotation_enabled.metadata.json",
+      "sha256": "9b473e8538812b12416ba9469d6316fa215fe95d700056860aadfc1cf8e60d46"
     },
     {
       "path": "rds_instance_backup_enabled.metadata.json",
@@ -93,6 +108,11 @@
       "path": "s3_bucket_server_access_logging_enabled.metadata.json",
       "upstream_path": "prowler/providers/aws/services/s3/s3_bucket_server_access_logging_enabled/s3_bucket_server_access_logging_enabled.metadata.json",
       "sha256": "d62cf6b4019fafc81185b90a6b9687589f7430638f4cfd261835cc5fc94f9b31"
+    },
+    {
+      "path": "vpc_flow_logs_enabled.metadata.json",
+      "upstream_path": "prowler/providers/aws/services/vpc/vpc_flow_logs_enabled/vpc_flow_logs_enabled.metadata.json",
+      "sha256": "12dd63a1c39f3790101de8463703fc60da1e5d88e3cf8e6f3c7d3132c5a80205"
     }
   ],
   "note": "Per-check metadata JSON, unmodified copies; read as JSON only (no Prowler code is vendored or run). The Checkov check to Prowler check mapping and its equivalence notes live in backend/app/data/scanner_severity_crosswalk.json and are Emfirge's own; the Severity values are Prowler's."
