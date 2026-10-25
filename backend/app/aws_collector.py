@@ -893,7 +893,7 @@ def collect_rds(key, secret, token, region, warnings) -> RDSData:
                 'backup_retention_days': db.get('BackupRetentionPeriod'),
                 'deletion_protection': db.get('DeletionProtection'),
                 'multi_az': db.get('MultiAZ'),
-                'log_exports': list(db['EnabledCloudwatchLogsExports']) if isinstance(db.get('EnabledCloudwatchLogsExports'), list) else None,
+                'log_exports': list(db.get('EnabledCloudwatchLogsExports') or []),  # AWS omits an empty list
                 'iam_auth_enabled': db.get('IAMDatabaseAuthenticationEnabled'),
                 'monitoring_interval': db.get('MonitoringInterval'),
                 'auto_minor_version_upgrade': db.get('AutoMinorVersionUpgrade'),

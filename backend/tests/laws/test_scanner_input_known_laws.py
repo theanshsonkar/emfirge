@@ -70,7 +70,7 @@ def test_L64c_collector_maps_new_rds_and_ec2_fields(mocker):
     assert (first.multi_az, first.log_exports, first.iam_auth_enabled, first.monitoring_interval,
             first.auto_minor_version_upgrade) == (True, ["postgresql"], False, 60, True)
     assert (second.multi_az, second.log_exports, second.iam_auth_enabled, second.monitoring_interval,
-            second.auto_minor_version_upgrade) == (None, None, None, None, None)
+            second.auto_minor_version_upgrade) == (None, [], None, None, None)
 
     ec2 = MagicMock()
     states = {"i-1": {"State": "enabled"}, "i-2": {"State": "disabled"}, "i-3": {"State": "pending"}, "i-4": None}
@@ -122,3 +122,25 @@ def test_L64e_instance_profile_is_emitted_as_the_profile_name():
         EC2Instance(id="i-1", type="t3.micro", state="running", instance_profile_arn="arn:aws:iam::1:role/r")])))
     assert "iam_instance_profile" not in next(iter(role.tf["resource"]["aws_instance"].values()))
     assert any(e.get("field") == "instance_profile_arn" for e in role.loss)
+
+
+def test_L64f_absent_log_exports_means_none_enabled_and_the_check_is_kept(monkeypatch):
+    infra = _rds_infra(log_exports=[])
+    assert next(iter(build_terraform(infra).tf["resource"]["aws_db_instance"].values()))["enabled_cloudwatch_logs_exports"] == []
+    _stub_checkov(monkeypatch, infra, "CKV_AWS_129")
+    result = scanners.run_checkov(infra)
+    assert [f.check_id for f in result.findings] == ["CKV_AWS_129"] and result.skipped == []
+
+
+def test_L64g_unknown_input_on_one_side_skips_the_check_on_both(monkeypatch):
+    from app.verdict import combined_verdict
+
+    base, branch = _rds_infra(multi_az=False), _rds_infra()
+    name = next(iter(build_terraform(base).names))
+    stdout = json.dumps({"results": {"failed_checks": [{
+        "check_id": "CKV_AWS_157", "resource": f"aws_db_instance.{name}", "check_name": "stub"}]}})
+    monkeypatch.setattr("app.scanners.subprocess.run", lambda *a, **k: SimpleNamespace(stdout=stdout, returncode=1))
+    scanners.clear_scan_cache()
+    verdict = combined_verdict(base, branch)
+    assert not [f for f in verdict.scanner_added + verdict.scanner_removed if f.get("check_id") == "CKV_AWS_157"]
+    assert [(e["check_id"], e["id"]) for e in verdict.scanner_skipped] == [("CKV_AWS_157", "db-1")]

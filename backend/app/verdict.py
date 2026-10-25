@@ -472,10 +472,9 @@ def combined_verdict(
             except Exception as exc:  # noqa: BLE001 - scanners are arm's-length
                 reasons.setdefault(name, f"{side} scan raised {type(exc).__name__}")
                 return None
-            if side == "branch":
-                skipped = _value(raw, "skipped", None)
-                if isinstance(skipped, list):
-                    scanner_skipped.extend(item for item in skipped if isinstance(item, dict))
+            skipped = _value(raw, "skipped", None)
+            if isinstance(skipped, list):
+                scanner_skipped.extend(item for item in skipped if isinstance(item, dict))
             error = _value(raw, "error", None)
             if error and name not in reasons:
                 reasons[name] = str(error)
@@ -508,6 +507,18 @@ def combined_verdict(
             )
         scanner_available = bool(available_scanners)
         if scanner_skipped:
+            # Unknown input on either side skips the check on both, so it never shows as added or removed.
+            merged: dict[tuple[str, str, str], dict[str, Any]] = {}
+            for item in scanner_skipped:
+                key = (str(item.get("check_id", "")), str(item.get("resource_type", "")), str(item.get("id", "")))
+                entry = merged.setdefault(key, {**item, "inputs": []})
+                entry["inputs"] = sorted(set(entry["inputs"]) | set(item.get("inputs") or []))
+            scanner_skipped[:] = list(merged.values())
+            skipped_keys = {(k[0], k[2]) for k in merged}
+            for scans in (base_scans, branch_scans):
+                for scan in scans.values():
+                    for key in [k for k, f in (scan or {}).items() if (f.get("check_id"), f.get("resource")) in skipped_keys]:
+                        del scan[key]
             scanner_skipped.sort(key=lambda e: (e.get("check_id", ""), e.get("resource_type", ""), e.get("id", "")))
             coverage_warnings.append(
                 f"{len(scanner_skipped)} scanner checks skipped: input not collected; see scanner_skipped"
