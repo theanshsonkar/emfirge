@@ -350,6 +350,7 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
                     'imdsv2_required': imdsv2_required,
                     'has_public_ip': has_public_ip,
                     'instance_profile_arn': instance.get('IamInstanceProfile', {}).get('Arn'),
+                    'detailed_monitoring': _monitoring_enabled(instance),
                     'block_devices': [BlockDevice(
                         volume_id=item['Ebs']['VolumeId'],
                         device_name=item.get('DeviceName'),
@@ -818,6 +819,13 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
     )
 
 # ── RDS COLLECTOR ─────────────────────────────────────────────────
+def _monitoring_enabled(instance):
+    """Detailed monitoring from Monitoring.State: enabled/disabled, else None (not collected)."""
+    monitoring = instance.get('Monitoring')
+    state = monitoring.get('State') if isinstance(monitoring, dict) else None
+    return {'enabled': True, 'disabled': False}.get(state)
+
+
 def collect_rds(key, secret, token, region, warnings) -> RDSData:
     instances = []
     multi_az = False
@@ -884,6 +892,11 @@ def collect_rds(key, secret, token, region, warnings) -> RDSData:
                 'engine': db.get('Engine'),
                 'backup_retention_days': db.get('BackupRetentionPeriod'),
                 'deletion_protection': db.get('DeletionProtection'),
+                'multi_az': db.get('MultiAZ'),
+                'log_exports': list(db.get('EnabledCloudwatchLogsExports') or []),  # AWS omits an empty list
+                'iam_auth_enabled': db.get('IAMDatabaseAuthenticationEnabled'),
+                'monitoring_interval': db.get('MonitoringInterval'),
+                'auto_minor_version_upgrade': db.get('AutoMinorVersionUpgrade'),
                 'tags': tag_map(db.get('TagList')),
             })
 

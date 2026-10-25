@@ -72,7 +72,9 @@ FIELD_MAP: dict[str, dict[str, tuple]] = {
         "state": ("loss", "instance state has no Terraform equivalent"),
         "imdsv2_required": ("emit", "metadata_options", False),
         "has_public_ip": ("emit", "associate_public_ip_address", True),
-        "instance_profile_arn": ("loss", "an ARN cannot be expressed as iam_instance_profile (needs a profile name)"),
+        # None means no profile attached or not collected (the collector cannot tell them apart), so it is not reported.
+        "instance_profile_arn": ("emit", "iam_instance_profile", False),
+        "detailed_monitoring": ("emit", "monitoring", True),
         "block_devices": ("loss", "block devices are not serialized"),
         "tags": ("emit", "tags", True),
     },
@@ -110,9 +112,37 @@ FIELD_MAP: dict[str, dict[str, tuple]] = {
         "port": ("emit", "port", True),
         "backup_retention_days": ("emit", "backup_retention_period", True),
         "deletion_protection": ("emit", "deletion_protection", True),
+        "multi_az": ("emit", "multi_az", True),
+        "log_exports": ("emit", "enabled_cloudwatch_logs_exports", True),
+        "iam_auth_enabled": ("emit", "iam_database_authentication_enabled", True),
+        "monitoring_interval": ("emit", "monitoring_interval", True),
+        "auto_minor_version_upgrade": ("emit", "auto_minor_version_upgrade", True),
         "tags": ("emit", "tags", True),
     },
 }
+
+# Terraform resource type -> Emfirge resource type (the main resource a check reports on).
+TF_TO_EMFIRGE: dict[str, str] = {
+    "aws_instance": EC2_INSTANCE,
+    "aws_security_group": SECURITY_GROUP,
+    "aws_s3_bucket": S3_BUCKET,
+    "aws_db_instance": RDS_INSTANCE,
+}
+
+
+def attribute_fields(tf_type: str) -> dict[str, list[str]]:
+    """Terraform attribute (or sub-resource) -> the model fields it carries, for a Terraform type."""
+    out: dict[str, list[str]] = {}
+    for model_field, spec in FIELD_MAP.get(TF_TO_EMFIRGE.get(tf_type, ""), {}).items():
+        if spec[0] == "emit":
+            out.setdefault(spec[1], []).append(model_field)
+    return out
+
+
+def _profile_name(arn: str) -> str | None:
+    """Terraform's iam_instance_profile takes the profile name: the last segment of an instance-profile ARN."""
+    match = re.fullmatch(r"arn:[^:]*:iam::[^:]*:instance-profile/(?:[^/]+/)*([^/]+)", arn)
+    return match.group(1) if match else None
 
 
 @dataclass
@@ -257,6 +287,19 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
         if instance.has_public_ip is not None:
             args["associate_public_ip_address"] = instance.has_public_ip
             emitted.add("has_public_ip")
+        if instance.detailed_monitoring is not None:
+            args["monitoring"] = instance.detailed_monitoring
+            emitted.add("detailed_monitoring")
+        if instance.instance_profile_arn is not None:
+            profile = _profile_name(instance.instance_profile_arn)
+            if profile is not None:
+                args["iam_instance_profile"] = profile
+                emitted.add("instance_profile_arn")
+            else:
+                omitted_field(EC2_INSTANCE, instance.id, "instance_profile_arn",
+                              "ARN is not an instance-profile ARN, so no profile name can be derived")
+        else:
+            emitted.add("instance_profile_arn")
         if instance.tags is not None:
             args["tags"] = dict(instance.tags)
             emitted.add("tags")
@@ -343,10 +386,15 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
             ("engine", "engine"),
             ("port", "port"),
             ("backup_retention_days", "backup_retention_period"),
+            ("multi_az", "multi_az"),
+            ("log_exports", "enabled_cloudwatch_logs_exports"),
+            ("iam_auth_enabled", "iam_database_authentication_enabled"),
+            ("monitoring_interval", "monitoring_interval"),
+            ("auto_minor_version_upgrade", "auto_minor_version_upgrade"),
         ):
             value = getattr(database, model_field)
             if value is not None:
-                args[tf_arg] = value
+                args[tf_arg] = list(value) if isinstance(value, list) else value
                 emitted.add(model_field)
         if database.tags is not None:
             args["tags"] = dict(database.tags)

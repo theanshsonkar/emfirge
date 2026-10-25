@@ -30,6 +30,7 @@ class EC2Instance(BaseModel):
     imdsv2_required: bool = False
     has_public_ip: Optional[bool] = None
     instance_profile_arn: Optional[str] = None
+    detailed_monitoring: Optional[bool] = None  # None = not collected
     block_devices: List[BlockDevice] = []
     tags: Optional[Dict[str, str]] = None  # None = not collected
 
@@ -88,6 +89,11 @@ class RDSInstance(BaseModel):
     port: Optional[int] = None  # None = not collected
     backup_retention_days: Optional[int] = None
     deletion_protection: Optional[bool] = None
+    multi_az: Optional[bool] = None  # None = not collected
+    log_exports: Optional[List[str]] = None  # None = not collected
+    iam_auth_enabled: Optional[bool] = None  # None = not collected
+    monitoring_interval: Optional[int] = None  # None = not collected
+    auto_minor_version_upgrade: Optional[bool] = None  # None = not collected
     tags: Optional[Dict[str, str]] = None  # None = not collected
 
 class RDSSnapshot(BaseModel):

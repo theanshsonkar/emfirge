@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from app.models import AWSInfrastructure
 import json as _json
 
-from app.serializer import build_terraform, loss_summary  # noqa: F401 (loss_summary re-exported)
+from app.serializer import attribute_fields, build_terraform, loss_summary  # noqa: F401 (loss_summary re-exported)
 
 
 class ScannerFinding(BaseModel):
@@ -44,6 +44,9 @@ class ScanResult(BaseModel):
     # Terraform name -> {"resource_type", "id"} of the Emfirge resource it
     # was serialized from, so findings can be keyed by the Emfirge resource.
     resource_map: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Findings dropped because an attribute the check reads was not collected
+    # for that resource: {"check_id", "resource_type", "id", "inputs"}.
+    skipped: List[dict[str, Any]] = Field(default_factory=list)
 
 
 def _text(value: Any) -> Optional[str]:
@@ -167,6 +170,53 @@ def _trivy_findings(payload: Any) -> list[ScannerFinding]:
             finding.guideline or "",
         ),
     )
+
+
+def check_reads() -> dict[str, tuple[str, tuple[str, ...]]]:
+    """check_id -> (Terraform type, attributes the check reads), from the crosswalk table."""
+    return {
+        check_id: (str(row["tf_type"]), tuple(row["reads"]))
+        for check_id, row in _crosswalk_rows().items()
+        if isinstance(row.get("reads"), list) and row.get("tf_type")
+    }
+
+
+def skip_unknown_input(result: "ScanResult", loss: list[dict[str, Any]]) -> "ScanResult":
+    """Drop findings whose checked attribute was omitted as not collected.
+
+    A check that reads an attribute the serializer left out fires on the
+    missing value, not on the resource.  Such a finding is removed and listed
+    in ``skipped`` so the verdict reports it as not checked.
+    """
+    if not result.findings:
+        return result
+    omitted: dict[tuple[str, str], set[str]] = {}
+    for entry in loss:
+        if entry.get("kind") == "omitted_field" and entry.get("field"):
+            omitted.setdefault((entry["resource_type"], entry["id"]), set()).add(entry["field"])
+    reads = check_reads()
+    kept: list[ScannerFinding] = []
+    skipped: list[dict[str, Any]] = []
+    for finding in result.findings:
+        mapped = result.resource_map.get(finding.resource.rsplit(".", 1)[-1])
+        read = reads.get(finding.check_id)
+        if mapped is not None and read is not None:
+            tf_type, attributes = read
+            carried = attribute_fields(tf_type)
+            unknown = sorted(
+                attribute for attribute in attributes
+                if omitted.get((mapped["resource_type"], mapped["id"]), set()) & set(carried.get(attribute, ()))
+            )
+            if unknown:
+                skipped.append({
+                    "check_id": finding.check_id, "resource_type": mapped["resource_type"],
+                    "id": mapped["id"], "inputs": unknown,
+                })
+                continue
+        kept.append(finding)
+    if not skipped:
+        return result
+    return result.model_copy(update={"findings": kept, "skipped": skipped})
 
 
 def scanner_loss(infra: AWSInfrastructure) -> list[dict[str, Any]]:
@@ -346,6 +396,7 @@ def run_checkov(infra: AWSInfrastructure, timeout_s: int = 60) -> ScanResult:
             tf = {**tf, "resource": {t: e for t, e in kept.items() if e}}
             names = {n: v for n, v in names.items() if n in scope.names}
         resource_map = {n: {"resource_type": t, "id": i} for n, (t, i) in names.items()}
+        loss = built.loss
         if scope is not None and not tf.get("resource"):  # nothing in scope: nothing to scan
             return ScanResult(scanner="checkov", available=True, findings=[], resource_map=resource_map)
         terraform_json = _json.dumps(tf, sort_keys=True, separators=(",", ":"))
@@ -355,7 +406,7 @@ def run_checkov(infra: AWSInfrastructure, timeout_s: int = 60) -> ScanResult:
         ).hexdigest()
         cached = _cache_get(key)
         if cached is not None:
-            return cached.model_copy(update={"resource_map": resource_map})
+            return skip_unknown_input(cached.model_copy(update={"resource_map": resource_map}), loss)
         if url:
             try:
                 findings = _scan_via_worker(url, terraform_json, _worker_timeout())
@@ -363,7 +414,7 @@ def run_checkov(infra: AWSInfrastructure, timeout_s: int = 60) -> ScanResult:
                 return _worker_failure(exc)
             result = ScanResult(scanner="checkov", available=True, findings=findings, resource_map=resource_map)
             _cache_put(key, result)
-            return result
+            return skip_unknown_input(result, loss)
         with tempfile.TemporaryDirectory() as temp_dir:
             Path(temp_dir, "main.tf.json").write_text(terraform_json, encoding="utf-8")
             completed = subprocess.run(
@@ -388,7 +439,7 @@ def run_checkov(infra: AWSInfrastructure, timeout_s: int = 60) -> ScanResult:
             findings = _parse_findings(payload)
             result = ScanResult(scanner="checkov", available=True, findings=findings, resource_map=resource_map)
             _cache_put(key, result)
-            return result
+            return skip_unknown_input(result, loss)
     except FileNotFoundError:
         return _unavailable("Checkov executable not found")
     except subprocess.TimeoutExpired:
@@ -408,6 +459,15 @@ def run_checkov(infra: AWSInfrastructure, timeout_s: int = 60) -> ScanResult:
 
 _CROSSWALK_PATH = Path(__file__).resolve().parent / "data" / "scanner_severity_crosswalk.json"
 _CROSSWALK_SEVERITIES = {"critical", "high", "medium", "low"}
+
+
+@lru_cache(maxsize=1)
+def _crosswalk_rows() -> dict[str, dict[str, Any]]:
+    try:
+        rows = json.loads(_CROSSWALK_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {str(r["check_id"]): r for r in rows if isinstance(r, dict) and r.get("check_id")} if isinstance(rows, list) else {}
 
 
 @lru_cache(maxsize=1)
