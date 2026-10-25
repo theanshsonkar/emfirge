@@ -181,5 +181,49 @@
     "reads": [
       "iam_instance_profile"
     ]
+  },
+  {
+    "check_id": "CKV_AWS_7",
+    "prowler_check": "kms_cmk_rotation_enabled",
+    "severity": "high",
+    "source": "prowler kms_cmk_rotation_enabled @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
+    "equivalence_note": "Same condition: automatic rotation enabled on an enabled customer-managed symmetric key. Emfirge serializes only keys recorded as enabled with rotation off (the collector skips keys whose rotation status it cannot read, such as asymmetric keys), and Checkov treats an unset key spec as symmetric, so every serialized key is one both checks evaluate. Keys with unknown rotation state are not serialized.",
+    "tf_type": "aws_kms_key",
+    "reads": [
+      "enable_key_rotation"
+    ]
+  },
+  {
+    "check_id": "CKV_AWS_36",
+    "prowler_check": "cloudtrail_log_file_validation_enabled",
+    "severity": "medium",
+    "source": "prowler cloudtrail_log_file_validation_enabled @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
+    "equivalence_note": "Same condition: log file validation enabled on the trail. Prowler evaluates every trail; Emfirge serializes the one logging trail and emits the flag only when it is false (the model's flag is true if any trail has it, so a true value is not attributed to this trail and the check is skipped).",
+    "tf_type": "aws_cloudtrail",
+    "reads": [
+      "enable_log_file_validation"
+    ]
+  },
+  {
+    "check_id": "CKV2_AWS_11",
+    "prowler_check": "vpc_flow_logs_enabled",
+    "severity": "medium",
+    "source": "prowler vpc_flow_logs_enabled @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
+    "equivalence_note": "Same condition: the VPC has no flow log. Prowler evaluates only VPCs that are in use by default, Checkov every VPC. Emfirge serializes no aws_flow_log: a VPC listed as lacking flow logs is known to have none, any other VPC has unknown state and the check is skipped for it.",
+    "tf_type": "aws_vpc",
+    "reads": [
+      "aws_flow_log"
+    ]
+  },
+  {
+    "check_id": "CKV_AWS_117",
+    "prowler_check": "awslambda_function_inside_vpc",
+    "severity": "low",
+    "source": "prowler awslambda_function_inside_vpc @ 35d25a7218ee80f9c6e00db8b6f79f23308e51f5",
+    "equivalence_note": "Same condition: the function has VPC networking (a VPC config in Terraform, a VPC id in the live API). Emfirge emits vpc_config from the function's subnet and security group ids; a function recorded without them is treated as not in a VPC, which is what the Lambda API reports for it.",
+    "tf_type": "aws_lambda_function",
+    "reads": [
+      "vpc_config"
+    ]
   }
 ]

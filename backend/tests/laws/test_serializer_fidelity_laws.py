@@ -4,16 +4,24 @@ resources, and reports everything it omits or synthesizes."""
 from __future__ import annotations
 
 from app.models import (
-    AWSInfrastructure, EC2Data, EC2Instance, RDSData, RDSInstance, S3Bucket, S3Data, SecurityGroup,
+    AWSInfrastructure, AccessStatement, CloudTrailData, EC2Data, EC2Instance, IAMData, KMSData, LambdaData,
+    LambdaFunction, PolicyDocumentRecord, RDSData, RDSInstance, RolePolicy, S3Bucket, S3Data, SecurityGroup,
+    VPCData, VPCSubnet,
 )
 from app.serializer import (
-    EC2_INSTANCE, EMITTED_COLLECTIONS, FIELD_MAP, RDS_INSTANCE, S3_BUCKET, SECURITY_GROUP,
-    build_terraform, collections, terraform_name,
+    CLOUDTRAIL, EC2_INSTANCE, EMITTED_COLLECTIONS, FIELD_MAP, KMS_KEY, LAMBDA_FUNCTION, RDS_INSTANCE, ROLE_POLICY,
+    S3_BUCKET, SECURITY_GROUP, VPC, VPC_SUBNET, build_terraform, collections, terraform_name,
 )
 from tests.incidents.synthetic_base import load_synthetic_base
 
-MODELS = {EC2_INSTANCE: EC2Instance, SECURITY_GROUP: SecurityGroup, S3_BUCKET: S3Bucket, RDS_INSTANCE: RDSInstance}
+MODELS = {
+    EC2_INSTANCE: EC2Instance, SECURITY_GROUP: SecurityGroup, S3_BUCKET: S3Bucket, RDS_INSTANCE: RDSInstance,
+    ROLE_POLICY: RolePolicy, LAMBDA_FUNCTION: LambdaFunction, VPC_SUBNET: VPCSubnet, CLOUDTRAIL: CloudTrailData,
+}
+# Emitted types with no model object of their own: the VPC and the KMS key exist as ids.
+PSEUDO_MODELS = {VPC, KMS_KEY}
 TAGS = {"env": "prod"}
+_STATEMENT = AccessStatement(effect="allow", actions=["s3:GetObject"], resources=["arn:aws:s3:::b.1/*"])
 
 
 def _full_infra() -> AWSInfrastructure:
@@ -39,6 +47,20 @@ def _full_infra() -> AWSInfrastructure:
             multi_az=True, log_exports=["postgresql"], iam_auth_enabled=True, monitoring_interval=60,
             auto_minor_version_upgrade=True, tags=TAGS,
         )]),
+        iam=IAMData(role_policies=[RolePolicy(
+            role_name="app", role_arn="arn:aws:iam::1:role/app", access_statements=[_STATEMENT],
+            policy_documents=[PolicyDocumentRecord(name="p", kind="inline", statements=[_STATEMENT])],
+            policy_names=["p"], trusted_services=["lambda.amazonaws.com"],
+        )]),
+        lambda_data=LambdaData(functions=[LambdaFunction(
+            name="fn", role_arn="arn:aws:iam::1:role/app", vpc_id="vpc-1", subnet_ids=["subnet-1"], sg_ids=["sg-1"], tags=TAGS,
+        )]),
+        vpc=VPCData(
+            total_vpcs=1, vpcs_without_flow_logs=["vpc-1"],
+            subnets=[VPCSubnet(id="subnet-1", vpc_id="vpc-1", cidr="10.0.0.0/24", availability_zone="us-east-1a")],
+        ),
+        kms=KMSData(total_cmks=1, cmks_without_rotation=["key-1"]),
+        cloudtrail=CloudTrailData(is_enabled=True, trail_arn="arn:aws:cloudtrail:us-east-1:1:trail/t"),
     )
 
 
@@ -50,10 +72,14 @@ def test_L60a_every_model_field_is_emitted_or_reported():
     for resource_type, model in MODELS.items():
         # A new model field must be classified in FIELD_MAP before this passes.
         assert set(model.model_fields) == set(FIELD_MAP[resource_type]), resource_type
+    assert set(FIELD_MAP) == set(MODELS) | PSEUDO_MODELS
     out = build_terraform(_full_infra())
     emitted = _all_args(out.tf)
     reported = {(e["resource_type"], e.get("field")) for e in out.loss if e.get("kind") == "omitted_field"}
     for resource_type, fields in FIELD_MAP.items():
+        if resource_type == VPC:  # no aws_flow_log is ever emitted: a listed VPC is known to have none
+            assert "aws_flow_log" not in emitted and (VPC, "flow_logs") not in reported
+            continue
         for field_name, spec in fields.items():
             if spec[0] == "loss":
                 assert (resource_type, field_name) in reported, (resource_type, field_name)
@@ -127,7 +153,7 @@ def test_L60e_name_mapping_round_trips():
     assert {n for _, n in emitted} == set(out.names)
     for _, name in emitted:
         resource_type, rid = out.names[name]
-        assert resource_type in MODELS
+        assert resource_type in MODELS or resource_type in PSEUDO_MODELS
         assert name.endswith(terraform_name("aws_instance", resource_type, rid)[-8:])
 
 
@@ -149,7 +175,15 @@ def test_L60f_known_bpa_flags_exact_unknown_absent_and_reported():
 
 def test_L60g_dropped_rule_keys_are_reported():
     infra = AWSInfrastructure(ec2=EC2Data(security_groups=[
-        SecurityGroup(id="sg-9", name="n", rules=[{"protocol": "tcp", "source_sg_ids": ["sg-1"]}])
+        SecurityGroup(id="sg-9", name="n", rules=[
+            {"protocol": "tcp", "prefix_list_ids": ["pl-1"], "dest_sg_ids": ["sg-2"], "source_sg_ids": []},
+        ])
     ]))
     reasons = [e["reason"] for e in build_terraform(infra).loss if e.get("field") == "rules"]
-    assert any("source_sg_ids" in r for r in reasons)
+    assert any("prefix_list_ids" in r and "dest_sg_ids" in r for r in reasons)
+    # Peer groups the serializer emits (source on ingress, dest on egress) and empty defaults are not dropped keys.
+    clean = AWSInfrastructure(ec2=EC2Data(security_groups=[
+        SecurityGroup(id="sg-9", name="n", rules=[{"protocol": "tcp", "source_sg_ids": ["sg-1"], "dest_sg_ids": []}],
+                      egress_rules=[{"protocol": "tcp", "dest_sg_ids": ["sg-1"], "source_sg_ids": []}])
+    ]))
+    assert not [e for e in build_terraform(clean).loss if e.get("field") in ("rules", "egress_rules")]

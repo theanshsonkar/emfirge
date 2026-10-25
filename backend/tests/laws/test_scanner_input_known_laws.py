@@ -29,6 +29,7 @@ def _stub_checkov(monkeypatch, infra, check_id):
 def test_L64a_every_reads_attribute_is_one_the_serializer_can_emit():
     rows = [row for row in scanners._crosswalk_rows().values() if "reads" in row]
     assert any(row["check_id"] == "CKV_AWS_157" for row in rows)
+    assert {"aws_kms_key", "aws_cloudtrail", "aws_vpc", "aws_lambda_function"} <= {row["tf_type"] for row in rows}
     for row in rows:
         assert row["tf_type"] in TF_TO_EMFIRGE, row["check_id"]
         emitted = attribute_fields(row["tf_type"])
