@@ -238,8 +238,19 @@ def _validate_change_fields(change: Change) -> None:
         if change.op == 'modify' and set(change.fields) != allowed: raise ValueError('iam_role modify requires exactly trust_policy')
         return
     if change.resource_type == 'iam_user':
-        if set(change.fields) - {'has_console_access'}: raise ValueError('iam_user fields: unknown schema field')
-        if 'has_console_access' in change.fields: _strict_validate_field('iam_user', 'has_console_access', change.fields['has_console_access'], bool)
+        if set(change.fields) - _IAM_USER_FIELDS: raise ValueError('iam_user fields: unknown schema field')
+        for field in ('has_console_access', 'has_access_keys'):
+            if field in change.fields: _strict_validate_field('iam_user', field, change.fields[field], bool)
+        for field in ('access_statements', 'policy_documents'):
+            if field in change.fields and not isinstance(change.fields[field], list): raise ValueError(f'iam_user.{field} must be a list')
+        if change.op == 'modify' and not change.fields: raise ValueError('modify needs at least one field')
+        return
+    if change.resource_type == 'iam_instance_profile':
+        if set(change.fields) - {'role_arn'}: raise ValueError('iam_instance_profile fields: unknown schema field')
+        if not re.fullmatch(r'arn:aws:iam::\d{12}:instance-profile/[\w+=,.@/-]+', change.resource_id or ''):
+            raise ValueError('iam_instance_profile resource_id must be an instance profile ARN')
+        if 'role_arn' in change.fields and not re.fullmatch(r'arn:aws:iam::\d{12}:role/[\w+=,.@/-]+', str(change.fields['role_arn'])):
+            raise ValueError('iam_instance_profile.role_arn must be a role ARN')
         return
     if change.resource_type in {"iam_role_policy", "route_table"}:
         annotations = {field: type_ for (resource, field), type_ in _MUTATION_NESTED_TYPES.items() if resource == change.resource_type}
@@ -258,6 +269,7 @@ def _validate_change_fields(change: Change) -> None:
 
 
 _CRUD_OPERATIONS = frozenset({"add", "modify", "delete"})
+_IAM_USER_FIELDS = frozenset({"has_console_access", "access_statements", "policy_documents", "has_access_keys"})
 # CreateVolume size range per volume type (AWS EBS volume types docs).
 _EBS_SIZE_LIMITS_GIB = {
     "gp2": (1, 16384), "gp3": (1, 16384), "io1": (4, 16384), "io2": (4, 65536),
@@ -302,7 +314,17 @@ _MUTATION_CAPABILITIES = {
     "ebs_snapshot": {"model": EBSSnapshot, "operations": _DELETE_ONLY, "constraints": ()},
     "rds_snapshot": {"model": RDSSnapshot, "operations": frozenset({"add", "delete"}), "constraints": ()},
     "iam_role": {"model": None, "operations": _CRUD_OPERATIONS, "constraints": ()},
-    "iam_user": {"model": IAMUser, "operations": frozenset({"add"}), "constraints": ()},
+    "iam_user": {
+        "model": IAMUser,
+        "operations": frozenset({"add", "modify"}),
+        "constraints": ({
+            "operations": ["modify"], "kind": "complete_field_replacement",
+            "fields": [], "required_fields": [],
+            "allowed_fields": ["has_console_access", "access_statements", "policy_documents", "has_access_keys"],
+            "message": "Replace the complete normalized statement list of one user (access_statements and policy_documents together), or set the console/access-key flags",
+        },),
+    },
+    "iam_instance_profile": {"model": None, "operations": frozenset({"add"}), "constraints": ()},
     "nat_gateway": {"model": NATGateway, "operations": frozenset({"add"}), "constraints": ()},
     "iam_role_policy": {
         "model": None,
@@ -790,6 +812,24 @@ def _validate_security_group_rules(result: AWSInfrastructure, change: Change) ->
                 )
 
 
+def _normalized_policy_fields(change: Change, label: str) -> tuple[list[AccessStatement], list[PolicyDocumentRecord] | None]:
+    """The complete statement list a change supplies: policy_documents (statements derived) or access_statements."""
+    if "policy_documents" in change.fields:
+        if not isinstance(change.fields["policy_documents"], list):
+            raise ValueError("policy_documents must be a list")
+        records = [PolicyDocumentRecord.model_validate(item) for item in change.fields["policy_documents"]]
+        derived = merge_policy_statements(records)
+        if "access_statements" in change.fields:
+            supplied = [AccessStatementChange.model_validate(item) for item in change.fields["access_statements"]]
+            if [item.model_dump() for item in supplied] != [item.model_dump() for item in derived]:
+                raise ValueError("access_statements must equal merge_policy_statements(policy_documents)")
+        return derived, records
+    if not isinstance(change.fields["access_statements"], list):
+        raise ValueError("access_statements must be a list")
+    supplied = [AccessStatementChange.model_validate(item) for item in change.fields["access_statements"]]
+    return [AccessStatement.model_validate(item.model_dump()) for item in supplied], None
+
+
 def _replace_iam_role_policy_statements(
     infra: AWSInfrastructure, change: Change
 ) -> None:
@@ -1112,13 +1152,39 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         name = target_id.split(':role/', 1)[-1].rsplit('/', 1)[-1]
         result.iam.role_policies.append(RolePolicy(role_name=name, role_arn=target_id, trusted_role_arns=trusted_roles, trusted_services=services, trust_allows_external=allows, trust_has_conditions=conditions, trust_external_unrestricted=external_trust(document or {}, target_id)[1] if document else False))
         return result
-    if resource_type == 'iam_user' and change.op == 'add':
+    if resource_type == 'iam_user' and change.op in {'add', 'modify'}:
         username = change.resource_id
         if not username: raise ValueError('iam_user resource_id must not be empty')
-        if any(u.username == username for u in result.iam.iam_users): raise ValueError('Target already exists: iam_user')
-        console = change.fields.get('has_console_access', False)
-        result.iam.iam_users.append(IAMUser(username=username, has_console_access=console))
-        if console: _append_unique(result.iam.users_without_mfa, username)
+        existing = next((u for u in result.iam.iam_users if u.username == username), None)
+        if change.op == 'add':
+            if existing is not None: raise ValueError('Target already exists: iam_user')
+            console = change.fields.get('has_console_access', False)
+            existing = IAMUser(username=username, has_console_access=console)
+            result.iam.iam_users.append(existing)
+            if console: _append_unique(result.iam.users_without_mfa, username)
+        elif existing is None:
+            raise TargetNotFound('iam_user', username)
+        elif change.fields.get('has_console_access') and not existing.has_console_access:
+            existing.has_console_access = True
+            _append_unique(result.iam.users_without_mfa, username)
+        elif 'has_console_access' in change.fields:
+            existing.has_console_access = change.fields['has_console_access']
+        if 'has_access_keys' in change.fields: existing.has_access_keys = change.fields['has_access_keys']
+        if 'access_statements' in change.fields or 'policy_documents' in change.fields:
+            statements, records = _normalized_policy_fields(change, 'iam_user')
+            existing.access_statements, existing.policy_documents = statements, records
+            admin = any(s.effect == 'allow' and not s.is_not_action and '*' in s.actions and '*' in s.resources for s in statements)
+            if admin: _append_unique(result.iam.users_with_admin_policy, username)
+            else: _remove_value(result.iam.users_with_admin_policy, username)
+        return result
+    if resource_type == 'iam_instance_profile' and change.op == 'add':
+        arn = change.resource_id
+        profiles = result.iam.instance_profile_roles
+        if arn in profiles: raise ValueError('Target already exists: iam_instance_profile')
+        role_arn = change.fields.get('role_arn')
+        mapping = {'role_name': role_arn.rsplit('/', 1)[-1], 'role_arn': role_arn} if role_arn else {}
+        profiles[arn] = dict(mapping)
+        if role_arn: profiles.setdefault(arn.rsplit('/', 1)[-1], dict(mapping))
         return result
     if resource_type == "nat_gateway" and change.op == "add":
         return _add_nat_gateway(result, change)

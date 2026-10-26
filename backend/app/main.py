@@ -1692,7 +1692,8 @@ def _terraform_translator(branch_id: str, document):
         for group in state.ec2.security_groups
     }
     return translate_plan(document, sg_rules=sg_rule_map, nacls={acl.id: acl for acl in state.vpc.nacls},
-                          iam_roles=state.iam.role_policies)
+                          iam_roles=state.iam.role_policies, iam_users=state.iam.iam_users,
+                          instance_profiles=state.iam.instance_profile_roles)
 
 
 @app.post('/branches/{branch_id}/plans/terraform', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])

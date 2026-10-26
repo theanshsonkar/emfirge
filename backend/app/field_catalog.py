@@ -149,6 +149,12 @@ CATALOG: dict[str, dict[str, Source]] = {
     },
     "iam_user": {
         "has_console_access": Normalized("CreateLoginProfile / DeleteLoginProfile"),
+        "access_statements": Normalized("PutUserPolicy / AttachUserPolicy", "complete normalized statement list"),
+        "policy_documents": Normalized("PutUserPolicy / AttachUserPolicy", "normalized policy documents"),
+        "has_access_keys": Normalized("CreateAccessKey / DeleteAccessKey", "true when the user has programmatic credentials"),
+    },
+    "iam_instance_profile": {
+        "role_arn": Normalized("CreateInstanceProfile / AddRoleToInstanceProfile", "the one role the profile carries; the profile ARN is the change's resource_id"),
     },
     "iam_role_policy": {
         "access_statements": Normalized("PutRolePolicy / AttachRolePolicy", "complete normalized statement list"),

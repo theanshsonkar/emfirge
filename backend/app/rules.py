@@ -1106,6 +1106,20 @@ def check_iam_escalation_paths(infra: AWSInfrastructure, ctx: Optional['GraphCon
             recommendation='Remove the permissions completing these known IAM escalation paths or scope them to the minimum required resources.',
             aws_service='IAM', resource_id=role.role_name if not isinstance(role, dict) else role.get('role_name'),
             resource_type='iam_role', region='global'))
+    # Users are principals too. A user whose policies were not collected (None) says nothing either way.
+    for user in infra.iam.iam_users:
+        statements = user.access_statements if not isinstance(user, dict) else user.get('access_statements')
+        paths = matching_paths(statements) if statements else []
+        if not paths:
+            continue
+        labels = ', '.join(f"{path['id']} ({path['name']})" for path in paths)
+        references = ', '.join(f"pathfinding.cloud {path['id']}" for path in paths)
+        findings.append(RiskFinding(
+            rule_id='EMFIRGE-IAM-007', category='Security', severity='Critical', raw_severity='Critical', confidence='HIGH',
+            issue=f"IAM user can escalate privileges: {labels}; source/reference: {references}",
+            recommendation='Remove the permissions completing these known IAM escalation paths or scope them to the minimum required resources.',
+            aws_service='IAM', resource_id=user.username if not isinstance(user, dict) else user.get('username'),
+            resource_type='iam_user', region='global'))
     return findings
 
 def check_iam_high_risk_users(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> List[RiskFinding]:

@@ -244,10 +244,6 @@ class RDSData(BaseModel):
     rds_snapshots: List[RDSSnapshot] = []
     collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
 
-class IAMUser(BaseModel):
-    username: str
-    has_console_access: Optional[bool] = None
-
 class AccessStatement(BaseModel):
     """A normalized IAM identity-policy access statement."""
     effect: str
@@ -264,6 +260,16 @@ class PolicyDocumentRecord(BaseModel):
     kind: Literal['inline', 'managed']
     arn: Optional[str] = None
     statements: List[AccessStatement] = Field(default_factory=list)
+
+
+class IAMUser(BaseModel):
+    username: str
+    has_console_access: Optional[bool] = None
+    # None = not collected (the collector does not read user policies); a list is the complete
+    # normalized statement view and policy_documents, when present, is its breakdown.
+    access_statements: Optional[List[AccessStatement]] = Field(default=None, exclude_if=lambda value: value is None)
+    policy_documents: Optional[List[PolicyDocumentRecord]] = Field(default=None, exclude_if=lambda value: value is None)
+    has_access_keys: Optional[bool] = Field(default=None, exclude_if=lambda value: value is None)  # None = not collected
 
 
 def merge_policy_statements(records: List[PolicyDocumentRecord]) -> List[AccessStatement]:

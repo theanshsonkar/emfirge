@@ -271,7 +271,10 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
         if resource_type == "iam_role":
             assert operations == {"add", "modify", "delete"}
             continue
-        if resource_type in {"iam_user", "nat_gateway"}:
+        if resource_type == "iam_user":
+            assert operations == {"add", "modify"}
+            continue
+        if resource_type in {"iam_instance_profile", "nat_gateway"}:
             assert operations == {"add"}
             continue
         if resource_type == "rds_snapshot":
