@@ -36,11 +36,16 @@ Evidence items on a resource id (all taken from the harness results):
 
 Clean set: every Critical/High native finding, Critical/High scanner finding, and every `block`
 reason in the verdict is listed as a false alarm candidate. Native findings whose resource_id is
-not a mapped Emfirge id of that target are account-level findings produced by the empty base
+not (after splitting ", "-joined aggregate ids, none of whose tokens is) a mapped Emfirge id of that target are account-level findings produced by the empty base
 (CloudTrail, GuardDuty, Config, CloudWatch alarms, budgets, root account, "all-buckets"...); they
 are EXCLUDED and listed with that reason. Block reasons are split into security findings
 (introduced_critical_finding / introduced_critical_exposure / privilege_escalation) and
 ingest-coverage blocks (unmodeled/unseen/rejected), which are reported separately.
+
+Amendment (after the first grading run, disclosed in the scorecard): aggregate native findings whose
+resource_id is a ", "-joined list of ids were first treated as one opaque id, which wrongly excluded a
+real clean-set RDS finding as "account-level". Tokenizing the id list (rid_tokens) fixes that and is
+applied to both the per-entry evidence match and the clean-set exclusion.
 
 Outputs: a scored JSON and a Markdown scorecard. Nothing here changes app code.
 """
@@ -119,6 +124,11 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def rid_tokens(value) -> set[str]:
+    """Aggregate native findings join several resource ids with ', '; each token counts as being on that resource."""
+    return {x.strip() for x in str(value or "").split(",") if x.strip()}
+
+
 def result_key(entry: dict) -> str:
     return "terragoat" if entry["project"] == "terragoat" else f"cloudgoat/{entry['scenario']}"
 
@@ -167,7 +177,7 @@ class Target:
         spec = CATEGORY_EVIDENCE[category]
         out = []
         for f in self.native:
-            if f.get("resource_id") in ids and re.search(spec["native"], f.get("issue") or "", re.I):
+            if rid_tokens(f.get("resource_id")) & ids and re.search(spec["native"], f.get("issue") or "", re.I):
                 out.append({"kind": "native", "id": f.get("rule_id"), "resource": f["resource_id"], "text": f.get("issue")})
         for f in self.scanner:
             if f.get("resource") in ids and re.search(spec["scanner"], f.get("title") or "", re.I):
@@ -240,7 +250,7 @@ def grade_clean(name: str, t: Target | None) -> dict:
         if (f.get("severity") or "").lower() not in HIGH_SEVERITIES:
             continue
         item = {"source": "native", "id": f.get("rule_id"), "resource": f.get("resource_id"), "severity": f.get("severity"), "text": f.get("issue")}
-        if f.get("resource_id") in t.mapped_ids:
+        if rid_tokens(f.get("resource_id")) & t.mapped_ids:
             fa.append(item)
         else:
             excluded.append({**item, "excluded_because": "account-level finding from the empty base (resource id is not a mapped plan resource)"})
@@ -341,6 +351,12 @@ def render(scored: dict) -> str:
     for x in g:
         d = "; ".join(sorted({f"{e['kind']}:{e['id']}" for e in x.get("evidence", [])})) or "; ".join(x.get("reasons", []))[:160]
         lines.append(f"| {x['id']} | {x['status']} | {d} |")
+    lines += ["", "## Notes", "",
+              "- Grader amendment after the first grading run: aggregate native findings whose resource_id is a comma-joined id list are now tokenised (before: the clean RDS Critical was wrongly excluded as account-level). Per-entry totals were identical before and after (11 caught / 36 missed_ingest / 30 missed_logic / 1 negative correct).",
+              "- All 10 TerraGoat S3 entries are missed_logic because translate_plan keeps only `tags` for aws_s3_bucket (acl, versioning, encryption and logging are dropped), so Emfirge only emitted the aggregate 'All S3 buckets are private' finding. Same for Lambda (environment variables) and EBS snapshots.",
+              "- The clean EC2 false alarms are Checkov IMDSv1 findings: `metadata_options` is unknown at plan time, so the instance is treated as IMDSv1. The clean RDS Critical (backups disabled) matches `backup_retention_period = 0` set in the example itself (examples/complete-postgres/main.tf:134-135), so it is arguably a true finding rather than a false alarm.",
+              "- TerraGoat ec2.tf has two fake key values replaced by placeholders (SOURCE.json `redactions`); this can only reduce secret-scanner evidence on `aws_instance.web_host`.",
+              "- Provider pins: aws 5.100.0 (CloudGoat), 4.67.0 (TerraGoat), unpinned 6.x for the clean examples."]
     return "\n".join(lines) + "\n"
 
 
