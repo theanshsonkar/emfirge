@@ -1,0 +1,445 @@
+{
+  "repo": "https://github.com/RhinoSecurityLabs/cloudgoat",
+  "commit": "63c65bd26edc6919499adfa20b176c450e35c33c",
+  "license": "BSD-3-Clause",
+  "license_file": "LICENSE",
+  "license_sha256": "ede91ac947753ad23dca4d729429a26a04832c8df38a4e1bd5b58c6d95934854",
+  "files": [
+    {
+      "path": "cloud_breach_s3/terraform/data_sources.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/cloud_breach_s3/terraform/data_sources.tf",
+      "sha256": "87ad419a0951dd6fef3e8e7a05c436814f4d109e1578d0d61829ff9fe2dc30cd"
+    },
+    {
+      "path": "cloud_breach_s3/terraform/ec2.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/cloud_breach_s3/terraform/ec2.tf",
+      "sha256": "6b17b156e2f64538d7279dfe00e3e79f5fa01791c95f51cbbf4f3d18575aa9f9"
+    },
+    {
+      "path": "cloud_breach_s3/terraform/locals.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/cloud_breach_s3/terraform/locals.tf",
+      "sha256": "f771edd18c76f6316f3125c94cb6fb68eb9ae30817e482c797ea94caacfb8ca9"
+    },
+    {
+      "path": "cloud_breach_s3/terraform/outputs.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/cloud_breach_s3/terraform/outputs.tf",
+      "sha256": "2dfb594f5265f10bd6f2e98f44557f7791657d7ee413d45183bb7cf2261d355f"
+    },
+    {
+      "path": "cloud_breach_s3/terraform/provider.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/cloud_breach_s3/terraform/provider.tf",
+      "sha256": "18db916056912c79fb391099ac9f2b529afdb80e1b45fc168476c1b20ab6a225"
+    },
+    {
+      "path": "cloud_breach_s3/terraform/s3.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/cloud_breach_s3/terraform/s3.tf",
+      "sha256": "8a27c6f1b592fa08b7a88fa42dd924be3633dd1fb9920f3787159771a4ae64b9"
+    },
+    {
+      "path": "cloud_breach_s3/terraform/variables.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/cloud_breach_s3/terraform/variables.tf",
+      "sha256": "a7e6bc0e991a742eebc0217e71f29e1aaab1afb7313751f5c5bc17dfeb6f30b2"
+    },
+    {
+      "path": "cloud_breach_s3/terraform/vpc.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/cloud_breach_s3/terraform/vpc.tf",
+      "sha256": "2ba9b70869976d06333f82bb39b746bc358aadf9352bb91ea3872419318ae252"
+    },
+    {
+      "path": "ec2_ssrf/terraform/data.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/ec2_ssrf/terraform/data.tf",
+      "sha256": "29ae1c5a5c7eff38087224fab44bbbf0026983ce3abe09b3687f1837929be6f0"
+    },
+    {
+      "path": "ec2_ssrf/terraform/ec2.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/ec2_ssrf/terraform/ec2.tf",
+      "sha256": "874fef60a20d5f23af29f1baed98a6c3017d7fdf4e0b7d0126fefd759901265f"
+    },
+    {
+      "path": "ec2_ssrf/terraform/iam.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/ec2_ssrf/terraform/iam.tf",
+      "sha256": "34d5e69203bd21e20c5c11f92084771127acd2085dcdaf7457d9ad3d721aaad2"
+    },
+    {
+      "path": "ec2_ssrf/terraform/lambda.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/ec2_ssrf/terraform/lambda.tf",
+      "sha256": "3e755ac63b132847fcdb8e340feef117b7db01fa5feff524ee7fe7bc71a490a2"
+    },
+    {
+      "path": "ec2_ssrf/terraform/outputs.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/ec2_ssrf/terraform/outputs.tf",
+      "sha256": "bd64dead77e894da50df6568565ab28bedc3702c703e70ddf5ca5fdbf70f5796"
+    },
+    {
+      "path": "ec2_ssrf/terraform/provider.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/ec2_ssrf/terraform/provider.tf",
+      "sha256": "206373669d7432377c1b844ffd04a1ec7aa4bef4e38939fb381bd8443cb96225"
+    },
+    {
+      "path": "ec2_ssrf/terraform/s3.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/ec2_ssrf/terraform/s3.tf",
+      "sha256": "0db4793bf8f992e9c2eb2bc4910c8c56934cd15ebbc182eda004de60d8d00b5f"
+    },
+    {
+      "path": "ec2_ssrf/terraform/variables.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/ec2_ssrf/terraform/variables.tf",
+      "sha256": "9f1cc992fdaf5f44a8a1d555918ba99d1fbcaa2d0065986fda9853c2fa8c7d73"
+    },
+    {
+      "path": "ec2_ssrf/terraform/vpc.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/ec2_ssrf/terraform/vpc.tf",
+      "sha256": "7cc35c878570fd0900179f25858a0926cd09f6474ade2c108d245fe5f2359a10"
+    },
+    {
+      "path": "iam_privesc_by_attachment/terraform/data_sources.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/terraform/data_sources.tf",
+      "sha256": "145c5c0ad7cbfe2ddfbea9f30bd3b7d40aeaffde692c57c8514e99a85f1df175"
+    },
+    {
+      "path": "iam_privesc_by_attachment/terraform/ec2.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/terraform/ec2.tf",
+      "sha256": "45a692026bf519da512c83415944d1d3d50530bf1f99ee91067a25d4ecfbe4dc"
+    },
+    {
+      "path": "iam_privesc_by_attachment/terraform/iam.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/terraform/iam.tf",
+      "sha256": "5cd7f3d8f3d61520bd89d2dc897b71689d031c5ad02d557bd3f8d8f3d386cba0"
+    },
+    {
+      "path": "iam_privesc_by_attachment/terraform/iam_meek.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/terraform/iam_meek.tf",
+      "sha256": "fac1921edf32e3cad51ae3d5e584e6007d42a6ab23367ca82d8f7b8b62d3c8c3"
+    },
+    {
+      "path": "iam_privesc_by_attachment/terraform/iam_mighty.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/terraform/iam_mighty.tf",
+      "sha256": "a2fd4b2fa30857bad49f224204cae77ebbff5346f4adb3f1445289ffcfe9abc5"
+    },
+    {
+      "path": "iam_privesc_by_attachment/terraform/outputs.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/terraform/outputs.tf",
+      "sha256": "40c8aac00a4fb378358e928c7f2ab5cc19518faa48fefaaa4801f099af6133f0"
+    },
+    {
+      "path": "iam_privesc_by_attachment/terraform/provider.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/terraform/provider.tf",
+      "sha256": "bb50d529030fca2a23f5171cdbf65a8120a16a3a3ef3119afc5626263c7d358f"
+    },
+    {
+      "path": "iam_privesc_by_attachment/terraform/variables.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/terraform/variables.tf",
+      "sha256": "834c111a809c25efd71d978a41e8a5520cee2116ae16bf39b95c6b4557e16144"
+    },
+    {
+      "path": "iam_privesc_by_attachment/terraform/vpc.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/terraform/vpc.tf",
+      "sha256": "d6116598b9c3e2f1cb150e4425abec7c7ac11fe2508677d93154ae3ec408d4cc"
+    },
+    {
+      "path": "iam_privesc_by_ec2/terraform/data.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_ec2/terraform/data.tf",
+      "sha256": "0901c2323d4c0264bc82999f9f45fa6767f081d6296b73fd84b3055891c8a74b"
+    },
+    {
+      "path": "iam_privesc_by_ec2/terraform/ec2.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_ec2/terraform/ec2.tf",
+      "sha256": "fb0973ed3fef5713ead11fd67233f2523f7336312c55cab44a19c0ee1356c43b"
+    },
+    {
+      "path": "iam_privesc_by_ec2/terraform/iam.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_ec2/terraform/iam.tf",
+      "sha256": "e06ce062c92084dbdd9f0c53b0fe02280d926be8a6c651bff5a3519d260ec099"
+    },
+    {
+      "path": "iam_privesc_by_ec2/terraform/outputs.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_ec2/terraform/outputs.tf",
+      "sha256": "ccc4deb122e7e2ebf5d4ed472d5f4f7dfb202d6afb8a2f86716317198299f00a"
+    },
+    {
+      "path": "iam_privesc_by_ec2/terraform/provider.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_ec2/terraform/provider.tf",
+      "sha256": "063b148ddd970e0660d521d4aa1d3d17b1529ca109f25b4a26d7cccd8b596901"
+    },
+    {
+      "path": "iam_privesc_by_ec2/terraform/variables.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_ec2/terraform/variables.tf",
+      "sha256": "13baf113c95a0bb5d40c9fe01214d0b9bb806877a344463da1afc3dc59f56091"
+    },
+    {
+      "path": "iam_privesc_by_ec2/terraform/vpc.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_ec2/terraform/vpc.tf",
+      "sha256": "5c9ab9c2180b75c862c74db1c42f2c68b4163e0c70ed2a95760eaf297f1ef07e"
+    },
+    {
+      "path": "iam_privesc_by_key_rotation/terraform/data.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/terraform/data.tf",
+      "sha256": "6c1b449aa3482f7106bc32654902f9e25e5fa3c2073992d5feaa3da75f878ba2"
+    },
+    {
+      "path": "iam_privesc_by_key_rotation/terraform/iam_admin.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/terraform/iam_admin.tf",
+      "sha256": "e2a39a193726453d4d152f7d2732863826ee674245263a8e5692738b967fb045"
+    },
+    {
+      "path": "iam_privesc_by_key_rotation/terraform/iam_developer.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/terraform/iam_developer.tf",
+      "sha256": "692744f373cf37a587cff744ea585d0f4ac6bc702083a5b2a5396ec0914481de"
+    },
+    {
+      "path": "iam_privesc_by_key_rotation/terraform/iam_manager.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/terraform/iam_manager.tf",
+      "sha256": "d636cf7ea4a625c0d5844383ddbdc709010d9119d97b5489a83dd059e946927e"
+    },
+    {
+      "path": "iam_privesc_by_key_rotation/terraform/outputs.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/terraform/outputs.tf",
+      "sha256": "e5cec93b7b42df4d4d004090c594435f3c222c9c3c9c1334faee89b11d60659c"
+    },
+    {
+      "path": "iam_privesc_by_key_rotation/terraform/provider.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/terraform/provider.tf",
+      "sha256": "bb50d529030fca2a23f5171cdbf65a8120a16a3a3ef3119afc5626263c7d358f"
+    },
+    {
+      "path": "iam_privesc_by_key_rotation/terraform/secrets.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/terraform/secrets.tf",
+      "sha256": "36965078e4e4e17b793adac20c8f6be5f517b9f0f2eb4b64c401e678ff395e62"
+    },
+    {
+      "path": "iam_privesc_by_key_rotation/terraform/variables.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/terraform/variables.tf",
+      "sha256": "4dfd2256c437d10e5c0f483fe726b66c56e64512e5e196daccb23da84e43e202"
+    },
+    {
+      "path": "lambda_privesc/terraform/iam.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/lambda_privesc/terraform/iam.tf",
+      "sha256": "d3b6b6c213bd5c814f584ede522d8b4eb98b316bcad8bc6484aa097b0ba54478"
+    },
+    {
+      "path": "lambda_privesc/terraform/outputs.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/lambda_privesc/terraform/outputs.tf",
+      "sha256": "49369f2acce6c9ed9cbe98c0e842477effce1de08820fb0b240404752d8dbf7a"
+    },
+    {
+      "path": "lambda_privesc/terraform/provider.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/lambda_privesc/terraform/provider.tf",
+      "sha256": "bb50d529030fca2a23f5171cdbf65a8120a16a3a3ef3119afc5626263c7d358f"
+    },
+    {
+      "path": "lambda_privesc/terraform/variables.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/lambda_privesc/terraform/variables.tf",
+      "sha256": "76e0f622002042959b78aaab1c18cb39beabd75e1bb8169b63a05a2d24bbdfd8"
+    },
+    {
+      "path": "rds_snapshot/terraform/data_sources.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rds_snapshot/terraform/data_sources.tf",
+      "sha256": "8b81a6d77dcc0dbf5304d17a5ee6b0362cf8cde567bb525b150598180ff8cae3"
+    },
+    {
+      "path": "rds_snapshot/terraform/ec2.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rds_snapshot/terraform/ec2.tf",
+      "sha256": "c5fbb0a42a28a799fe2d14fea3a80964da85be068a8b17431b635f4692eef976"
+    },
+    {
+      "path": "rds_snapshot/terraform/iam.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rds_snapshot/terraform/iam.tf",
+      "sha256": "f72eccb9d5f586d3b89de8aef5a10262420cad2ebb8ce45dfb9156772280a982"
+    },
+    {
+      "path": "rds_snapshot/terraform/output.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rds_snapshot/terraform/output.tf",
+      "sha256": "f106b52f6328f60b57c08c69cfdaedb71f85922b2dbe6a2e30be12b3f6855c8c"
+    },
+    {
+      "path": "rds_snapshot/terraform/provider.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rds_snapshot/terraform/provider.tf",
+      "sha256": "51a14f858d9563aa79aa7bd850e6ff38252b2b75fdbecd528cee030b399cfc03"
+    },
+    {
+      "path": "rds_snapshot/terraform/rds.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rds_snapshot/terraform/rds.tf",
+      "sha256": "cd3f97cb9901fe4ebc4933383c5067c3ef92166e92d098361b6231b29c8f2e47"
+    },
+    {
+      "path": "rds_snapshot/terraform/s3.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rds_snapshot/terraform/s3.tf",
+      "sha256": "35264d3de278e876277a16cb34599c728551809157ba2a203d9e02d3b97bf92f"
+    },
+    {
+      "path": "rds_snapshot/terraform/variable.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rds_snapshot/terraform/variable.tf",
+      "sha256": "46e9484feaf69366ab7e62d541aa16f17e28a0f0b5e587d7eb5610a7cf339c89"
+    },
+    {
+      "path": "rds_snapshot/terraform/vpc.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rds_snapshot/terraform/vpc.tf",
+      "sha256": "d555569daf513f57ba18a66bd8654b6cc0a00bb99eba908178d1d909e3f8cdce"
+    },
+    {
+      "path": "vulnerable_lambda/terraform/data_sources.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vulnerable_lambda/terraform/data_sources.tf",
+      "sha256": "fff796a350236af519abe3bf0c09d33ec204f9c9b7122067d23c3b4e7c54873e"
+    },
+    {
+      "path": "vulnerable_lambda/terraform/iam.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vulnerable_lambda/terraform/iam.tf",
+      "sha256": "b04d1269d5ecf12ab38c75be1b197939e9233e1b9b866f06200dfa15d9c366fc"
+    },
+    {
+      "path": "vulnerable_lambda/terraform/lambda.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vulnerable_lambda/terraform/lambda.tf",
+      "sha256": "05ccf976580ced505fac3128953f18c5eed5dbcea9f635cf21e50c138201e87c"
+    },
+    {
+      "path": "vulnerable_lambda/terraform/outputs.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vulnerable_lambda/terraform/outputs.tf",
+      "sha256": "537ae67407c4895b3fed52b0fa0a38aab0a0240498ac642f7ea6e75efa2ed89c"
+    },
+    {
+      "path": "vulnerable_lambda/terraform/provider.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vulnerable_lambda/terraform/provider.tf",
+      "sha256": "663bd8873c243320d6ef864f4f05507424edc2642d0a343a07c164dbb1e74c56"
+    },
+    {
+      "path": "vulnerable_lambda/terraform/secretsmanager.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vulnerable_lambda/terraform/secretsmanager.tf",
+      "sha256": "37a4643ed812a5ac96962614707b04cc4a7ec8c1d8a7526f058049e67913e298"
+    },
+    {
+      "path": "vulnerable_lambda/terraform/variables.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vulnerable_lambda/terraform/variables.tf",
+      "sha256": "afed96318ec5be124a0b264037b4e4055c0d8ff8630f16c7746e24b62fb66927"
+    },
+    {
+      "path": "vpc_peering_overexposed/terraform/ec2.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/ec2.tf",
+      "sha256": "7646f5e85098a5b78d26e013e44ebbbd5bf3bf64adcbff1b15942c0614da215c"
+    },
+    {
+      "path": "vpc_peering_overexposed/terraform/iam.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/iam.tf",
+      "sha256": "64debcf85ad3b4d277733e4145d523f3007f50871a6b8d18aea882ef09fd99ef"
+    },
+    {
+      "path": "vpc_peering_overexposed/terraform/output.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/output.tf",
+      "sha256": "3881f3cadc3192dfba757b0a96717716e5dc650369ec7b5e2fd7df8c718e75f5"
+    },
+    {
+      "path": "vpc_peering_overexposed/terraform/provider.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/provider.tf",
+      "sha256": "a27e60c6c7353618af039f290cc3fe82ec040dbd5f2f6e43e9af8a082b37b1f9"
+    },
+    {
+      "path": "vpc_peering_overexposed/terraform/rds.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/rds.tf",
+      "sha256": "009e6339d9f80ee6a12eca2a79a023a930938fdf1fb42b9af552958ccd1daa92"
+    },
+    {
+      "path": "vpc_peering_overexposed/terraform/variables.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/variables.tf",
+      "sha256": "f5d23b9d9ba06d2560c89e66152073aea7981685b3427e200495484aaaacfe20"
+    },
+    {
+      "path": "vpc_peering_overexposed/terraform/vpc.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/vpc.tf",
+      "sha256": "05d1fb7971e32e559b0edc05cbbd8b47e75a931861a2a3957002ccc2d3a5a926"
+    },
+    {
+      "path": "data_secrets/terraform/ec2.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/data_secrets/terraform/ec2.tf",
+      "sha256": "79cd80145a182e4d1f0d41bbd3110c3e294ad6a4fbf991bdebb466c1972aa182"
+    },
+    {
+      "path": "data_secrets/terraform/iam.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/data_secrets/terraform/iam.tf",
+      "sha256": "f86bb86d6c2523ec79fba9c9b2a215d12ba1201a1633e836755bc8d6c42160fa"
+    },
+    {
+      "path": "data_secrets/terraform/lambda.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/data_secrets/terraform/lambda.tf",
+      "sha256": "8bea4fb6137f80a9ee1277948a11ccf3c487822ad15c5629adf5ed8dd28987ad"
+    },
+    {
+      "path": "data_secrets/terraform/output.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/data_secrets/terraform/output.tf",
+      "sha256": "83f0c2372d815d65c83a7f08fff4b7a8bab84136731a2f457b3617648ca2d8a0"
+    },
+    {
+      "path": "data_secrets/terraform/provider.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/data_secrets/terraform/provider.tf",
+      "sha256": "4d389a6aad20ad29e17932fa296aaf1807e4917074f9cbd9be3ddf5ade5c3d73"
+    },
+    {
+      "path": "data_secrets/terraform/secrets.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/data_secrets/terraform/secrets.tf",
+      "sha256": "d7273b1d0fcbfbe912dc7be7dd7d3c0bad71be0da5d3a22a50b48d910455e758"
+    },
+    {
+      "path": "data_secrets/terraform/variables.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/data_secrets/terraform/variables.tf",
+      "sha256": "da8a3414ad3646825b6ee03e47cdba014880911f7b2e5094d87f3f0b23adb44b"
+    },
+    {
+      "path": "data_secrets/terraform/vpc.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/data_secrets/terraform/vpc.tf",
+      "sha256": "5cb448d322ac03f3ff2f391e0b7c74370ba1fa199de6522bf557906baee82d02"
+    },
+    {
+      "path": "rce_web_app/terraform/data.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rce_web_app/terraform/data.tf",
+      "sha256": "b9a716d9c336dd64a798a4d6453d406661f3e67e399dec8f08fd2ee83d32a2fd"
+    },
+    {
+      "path": "rce_web_app/terraform/ec2.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rce_web_app/terraform/ec2.tf",
+      "sha256": "e060248525ea8b0aeef79842fe588dc1d5d3cbbfc7df3bd3bf462be7a9836b36"
+    },
+    {
+      "path": "rce_web_app/terraform/iam.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rce_web_app/terraform/iam.tf",
+      "sha256": "a20f88e6a6f4bebb4561bc5cd88fcd8ba99a6a43e671706a9076a92518ab0cf9"
+    },
+    {
+      "path": "rce_web_app/terraform/lb.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rce_web_app/terraform/lb.tf",
+      "sha256": "76f171028796ebd771af87295c82b40165f2f24e0e0f593314185275e3b472d2"
+    },
+    {
+      "path": "rce_web_app/terraform/locals.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rce_web_app/terraform/locals.tf",
+      "sha256": "639c8ec564b1ed51096853ba64bdb6f0dcb28433a2da60729564b0b76ff21a7d"
+    },
+    {
+      "path": "rce_web_app/terraform/outputs.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rce_web_app/terraform/outputs.tf",
+      "sha256": "51cd3bfe15457d46d4af2b520b236d11a3adde829bc5b9d49aded7618358eddc"
+    },
+    {
+      "path": "rce_web_app/terraform/rds.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rce_web_app/terraform/rds.tf",
+      "sha256": "099c20ed3040c14f1665c13412284875f18adc07b99004ebbe02aabb70120a23"
+    },
+    {
+      "path": "rce_web_app/terraform/s3.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rce_web_app/terraform/s3.tf",
+      "sha256": "dfc60d84e807526c13e0a0cbffdea691053dcbebeabdf8cb8ea51ca641088292"
+    },
+    {
+      "path": "rce_web_app/terraform/settings.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rce_web_app/terraform/settings.tf",
+      "sha256": "452a2f525dbed6c284069e6e5bebd50447c28b1381ca1ae86c0047b49792b8b0"
+    },
+    {
+      "path": "rce_web_app/terraform/variables.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rce_web_app/terraform/variables.tf",
+      "sha256": "38420c37cd9ad170d85b52807b95a73d042673e68f335c9b92779587ee0bfb4b"
+    },
+    {
+      "path": "rce_web_app/terraform/vpc.tf",
+      "upstream_path": "cloudgoat/scenarios/aws/rce_web_app/terraform/vpc.tf",
+      "sha256": "732eb8184125174705c24e673846487351564f0b879533390fd424f48ce23176"
+    }
+  ],
+  "note": "only terraform/*.tf per scenario; assets/, lambda source trees, scripts and binaries are not vendored (stubbed at run time)."
+}

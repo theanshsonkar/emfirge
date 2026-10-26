@@ -1,0 +1,54 @@
+{
+  "repo": "https://github.com/terraform-aws-modules/terraform-aws-ec2-instance",
+  "commit": "4dfedcdd1f26006009c52439bbadba40a76ddb79",
+  "license": "Apache-2.0",
+  "license_file": "LICENSE",
+  "license_sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+  "entrypoint": "examples/complete",
+  "registry_modules_downloaded_by_terraform_init": {
+    "terraform-aws-modules/vpc/aws": "~> 6.0",
+    "terraform-aws-modules/security-group/aws": "~> 5.0"
+  },
+  "files": [
+    {
+      "path": "main.tf",
+      "upstream_path": "main.tf",
+      "sha256": "48c1ba1801446e4e2d44db531c64b5e22b20fa087dbea42cccd4618b5af41b29"
+    },
+    {
+      "path": "outputs.tf",
+      "upstream_path": "outputs.tf",
+      "sha256": "2a1bcb1d477875d4d2acf29ccd847d9fd58897d88f8c217c8ed64285b5eec3b2"
+    },
+    {
+      "path": "variables.tf",
+      "upstream_path": "variables.tf",
+      "sha256": "2ace57b0cda57ea9c4a85738a0d0c10dd49218d961401675ae2b5c0cd0eac3fd"
+    },
+    {
+      "path": "versions.tf",
+      "upstream_path": "versions.tf",
+      "sha256": "bd32f5dd07d9fe0dd70b7642d398b98a1f910e3d549428425c8195fac113ad81"
+    },
+    {
+      "path": "examples/complete/main.tf",
+      "upstream_path": "examples/complete/main.tf",
+      "sha256": "b9c99ecc9bc2b4e239150b68165e529bfd24eaa6d755d58e59867bb37c74a1d7"
+    },
+    {
+      "path": "examples/complete/outputs.tf",
+      "upstream_path": "examples/complete/outputs.tf",
+      "sha256": "e491162e1432f4eeb02b1eb48e6e5035f0a791f12a9a58a8bd422e235285a968"
+    },
+    {
+      "path": "examples/complete/variables.tf",
+      "upstream_path": "examples/complete/variables.tf",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "examples/complete/versions.tf",
+      "upstream_path": "examples/complete/versions.tf",
+      "sha256": "21448e237f2514232fd9758808e7f53f98847c4e3a49046bbadabad342d0ead0"
+    }
+  ]
+}
