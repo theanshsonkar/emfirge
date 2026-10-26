@@ -1,0 +1,78 @@
+{
+  "repo": "https://github.com/terraform-aws-modules/terraform-aws-vpc",
+  "commit": "b3abd6df2ecf052451a361ed55b8f06f8742a795",
+  "license": "Apache-2.0",
+  "license_file": "LICENSE",
+  "license_sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+  "entrypoint": "examples/complete",
+  "registry_modules_downloaded_by_terraform_init": {
+    "terraform-aws-modules/security-group/aws": "~> 6.0"
+  },
+  "files": [
+    {
+      "path": "main.tf",
+      "upstream_path": "main.tf",
+      "sha256": "6a483e4221a1af60247b0e7c6f86a76df25b3c94bb47d35d5948e8cbd8dcf352"
+    },
+    {
+      "path": "outputs.tf",
+      "upstream_path": "outputs.tf",
+      "sha256": "ef5f4fbff46ef32f2e10043dc389f5502a973e8286ba04d9705c8b9660c92713"
+    },
+    {
+      "path": "variables.tf",
+      "upstream_path": "variables.tf",
+      "sha256": "6719b1cfe8e3b86f5b2e152d736185cc5d7851e3b62ba1b214e14cb053a159b5"
+    },
+    {
+      "path": "versions.tf",
+      "upstream_path": "versions.tf",
+      "sha256": "943226434b15cc3ca29d1639b0274f40396339a05c0ad2e4b860ff54abffcdce"
+    },
+    {
+      "path": "vpc-flow-logs.tf",
+      "upstream_path": "vpc-flow-logs.tf",
+      "sha256": "2ce1bcc1aeb2d712dc0f3c612d9931c7e6bb18c8beb5d2eaff0262e7a279ebf3"
+    },
+    {
+      "path": "examples/complete/main.tf",
+      "upstream_path": "examples/complete/main.tf",
+      "sha256": "20d9b95f2fe0b390928496962b29b2baa434db24089ec17a17998a87ce6b90f4"
+    },
+    {
+      "path": "examples/complete/outputs.tf",
+      "upstream_path": "examples/complete/outputs.tf",
+      "sha256": "a566c56ac5cc2f0c7ddbd998e462971f958afd7e415f03caa947cf5c0ca6ec0c"
+    },
+    {
+      "path": "examples/complete/variables.tf",
+      "upstream_path": "examples/complete/variables.tf",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "examples/complete/versions.tf",
+      "upstream_path": "examples/complete/versions.tf",
+      "sha256": "edafe31dd92cf5f5c7905b389ac939eb421668964d8982d04734ae986678723d"
+    },
+    {
+      "path": "modules/vpc-endpoints/main.tf",
+      "upstream_path": "modules/vpc-endpoints/main.tf",
+      "sha256": "8614fd370a344c2146699b1528932507148218452b750179f2c2501b9092ab61"
+    },
+    {
+      "path": "modules/vpc-endpoints/outputs.tf",
+      "upstream_path": "modules/vpc-endpoints/outputs.tf",
+      "sha256": "7c6ba34b9f77b1ebf95c5db5d6780d620e63e82a5e00b1560f3d8df0016e52a4"
+    },
+    {
+      "path": "modules/vpc-endpoints/variables.tf",
+      "upstream_path": "modules/vpc-endpoints/variables.tf",
+      "sha256": "d2ca2643c54c4fe6b3684937144674dec1573f7142fa66a95a46d77125ac3670"
+    },
+    {
+      "path": "modules/vpc-endpoints/versions.tf",
+      "upstream_path": "modules/vpc-endpoints/versions.tf",
+      "sha256": "943226434b15cc3ca29d1639b0274f40396339a05c0ad2e4b860ff54abffcdce"
+    }
+  ]
+}

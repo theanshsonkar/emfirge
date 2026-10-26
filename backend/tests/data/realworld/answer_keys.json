@@ -1,0 +1,1499 @@
+{
+  "meta": {
+    "purpose": "Published answer keys for the real-world evaluation corpus. Every expectation is a statement made by the corpus project itself (inline comments, README, cheat sheet), quoted verbatim in citation.quote.",
+    "derivation_rule": "No entry was derived from running Checkov or any Emfirge rule. A resource the project states nothing about has no entry.",
+    "citation_files_are_relative_to": "the upstream repo at the commit in each project's SOURCE.json (README/cheat-sheet files are not vendored)",
+    "citation_paths": {
+      "terragoat": "terraform/aws/<file>.tf",
+      "cloudgoat": "cloudgoat/scenarios/aws/<scenario>/{README.md,cheat_sheet*.md,terraform/*.tf}"
+    },
+    "kind": {
+      "misconfiguration": "a single resource-level weakness the project states",
+      "attack_path": "an ordered chain the project documents (path_resources lists the Terraform resources on it)",
+      "negative": "a project statement that something is NOT reachable or NOT exposed"
+    },
+    "mapping": {
+      "explicit": "the project names the resource or the resource carries the project's own comment",
+      "inferred": "the project describes the role/step in prose; mapping the prose to this Terraform resource is the corpus builder's reading"
+    },
+    "caveat": "present where the project's prose and its .tf disagree or where the .tf does not obviously show the stated condition",
+    "run_assumptions": "see backend/scripts/realworld_eval.py (provider 5.100.0 for TerraGoat/CloudGoat; cg_whitelist=203.0.113.10/32 where the scenario has no default)"
+  },
+  "entries": [
+    {
+      "id": "terragoat.s3.01",
+      "project": "terragoat",
+      "scenario": "s3",
+      "resource": "aws_s3_bucket.data",
+      "terraform_file": "terraform/aws/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Bucket is publicly accessible.",
+      "category": "public_exposure",
+      "citation": {
+        "file": "terraform/aws/s3.tf",
+        "lines": "2",
+        "quote": "bucket is public"
+      },
+      "caveat": "The comment says public, but at this commit s3.tf lines 1-21 set no acl, bucket policy or public-access-block that would make the bucket public; this is the author's claim and may not be reproducible from the .tf alone."
+    },
+    {
+      "id": "terragoat.s3.02",
+      "project": "terragoat",
+      "scenario": "s3",
+      "resource": "aws_s3_bucket.data",
+      "terraform_file": "terraform/aws/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Bucket is not encrypted (no server-side encryption configuration).",
+      "category": "encryption",
+      "citation": {
+        "file": "terraform/aws/s3.tf",
+        "lines": "3",
+        "quote": "bucket is not encrypted"
+      }
+    },
+    {
+      "id": "terragoat.s3.03",
+      "project": "terragoat",
+      "scenario": "s3",
+      "resource": "aws_s3_bucket.data",
+      "terraform_file": "terraform/aws/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Bucket has no access logging.",
+      "category": "logging",
+      "citation": {
+        "file": "terraform/aws/s3.tf",
+        "lines": "4",
+        "quote": "bucket does not have access logs"
+      }
+    },
+    {
+      "id": "terragoat.s3.04",
+      "project": "terragoat",
+      "scenario": "s3",
+      "resource": "aws_s3_bucket.data",
+      "terraform_file": "terraform/aws/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Bucket has no versioning.",
+      "category": "data_protection",
+      "citation": {
+        "file": "terraform/aws/s3.tf",
+        "lines": "5",
+        "quote": "bucket does not have versioning"
+      }
+    },
+    {
+      "id": "terragoat.s3.05",
+      "project": "terragoat",
+      "scenario": "s3",
+      "resource": "aws_s3_bucket.financials",
+      "terraform_file": "terraform/aws/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Bucket is not encrypted.",
+      "category": "encryption",
+      "citation": {
+        "file": "terraform/aws/s3.tf",
+        "lines": "43",
+        "quote": "bucket is not encrypted"
+      }
+    },
+    {
+      "id": "terragoat.s3.06",
+      "project": "terragoat",
+      "scenario": "s3",
+      "resource": "aws_s3_bucket.financials",
+      "terraform_file": "terraform/aws/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Bucket has no access logging.",
+      "category": "logging",
+      "citation": {
+        "file": "terraform/aws/s3.tf",
+        "lines": "44",
+        "quote": "bucket does not have access logs"
+      }
+    },
+    {
+      "id": "terragoat.s3.07",
+      "project": "terragoat",
+      "scenario": "s3",
+      "resource": "aws_s3_bucket.financials",
+      "terraform_file": "terraform/aws/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Bucket has no versioning.",
+      "category": "data_protection",
+      "citation": {
+        "file": "terraform/aws/s3.tf",
+        "lines": "45",
+        "quote": "bucket does not have versioning"
+      }
+    },
+    {
+      "id": "terragoat.s3.08",
+      "project": "terragoat",
+      "scenario": "s3",
+      "resource": "aws_s3_bucket.operations",
+      "terraform_file": "terraform/aws/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Bucket is not encrypted.",
+      "category": "encryption",
+      "citation": {
+        "file": "terraform/aws/s3.tf",
+        "lines": "66",
+        "quote": "bucket is not encrypted"
+      }
+    },
+    {
+      "id": "terragoat.s3.09",
+      "project": "terragoat",
+      "scenario": "s3",
+      "resource": "aws_s3_bucket.operations",
+      "terraform_file": "terraform/aws/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Bucket has no access logging.",
+      "category": "logging",
+      "citation": {
+        "file": "terraform/aws/s3.tf",
+        "lines": "67",
+        "quote": "bucket does not have access logs"
+      }
+    },
+    {
+      "id": "terragoat.s3.10",
+      "project": "terragoat",
+      "scenario": "s3",
+      "resource": "aws_s3_bucket.data_science",
+      "terraform_file": "terraform/aws/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Bucket is not encrypted.",
+      "category": "encryption",
+      "citation": {
+        "file": "terraform/aws/s3.tf",
+        "lines": "90",
+        "quote": "bucket is not encrypted"
+      }
+    },
+    {
+      "id": "terragoat.ec2.01",
+      "project": "terragoat",
+      "scenario": "ec2",
+      "resource": "aws_instance.web_host",
+      "terraform_file": "terraform/aws/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Instance user_data contains plain-text secrets (AWS access key and secret key exported in the boot script).",
+      "category": "secrets_exposure",
+      "citation": {
+        "file": "terraform/aws/ec2.tf",
+        "lines": "2",
+        "quote": "ec2 have plain text secrets in user data"
+      }
+    },
+    {
+      "id": "terragoat.ec2.02",
+      "project": "terragoat",
+      "scenario": "ec2",
+      "resource": "aws_ebs_volume.web_host_storage",
+      "terraform_file": "terraform/aws/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "EBS volume is unencrypted.",
+      "category": "encryption",
+      "citation": {
+        "file": "terraform/aws/ec2.tf",
+        "lines": "35",
+        "quote": "unencrypted volume"
+      }
+    },
+    {
+      "id": "terragoat.ec2.03",
+      "project": "terragoat",
+      "scenario": "ec2",
+      "resource": "aws_ebs_snapshot.example_snapshot",
+      "terraform_file": "terraform/aws/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "EBS snapshot is not encrypted.",
+      "category": "encryption",
+      "citation": {
+        "file": "terraform/aws/ec2.tf",
+        "lines": "54",
+        "quote": "ebs snapshot without encryption"
+      }
+    },
+    {
+      "id": "terragoat.ec2.04",
+      "project": "terragoat",
+      "scenario": "ec2",
+      "resource": "aws_security_group.web-node",
+      "terraform_file": "terraform/aws/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Security group is open to the world (0.0.0.0/0) on SSH port 22.",
+      "category": "public_exposure",
+      "citation": {
+        "file": "terraform/aws/ec2.tf",
+        "lines": "78",
+        "quote": "security group is open to the world in SSH port"
+      }
+    },
+    {
+      "id": "terragoat.kms.01",
+      "project": "terragoat",
+      "scenario": "kms",
+      "resource": "aws_kms_key.logs_key",
+      "terraform_file": "terraform/aws/kms.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "KMS key does not have key rotation enabled.",
+      "category": "encryption",
+      "citation": {
+        "file": "terraform/aws/kms.tf",
+        "lines": "2",
+        "quote": "key does not have rotation enabled"
+      }
+    },
+    {
+      "id": "terragoat.lambda.01",
+      "project": "terragoat",
+      "scenario": "lambda",
+      "resource": "aws_lambda_function.analysis_lambda",
+      "terraform_file": "terraform/aws/lambda.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Lambda function has plain-text secrets (access key and secret key) in environment variables.",
+      "category": "secrets_exposure",
+      "citation": {
+        "file": "terraform/aws/lambda.tf",
+        "lines": "33",
+        "quote": "lambda have plain text secrets in environment variables"
+      }
+    },
+    {
+      "id": "terragoat.db-app.01",
+      "project": "terragoat",
+      "scenario": "db-app",
+      "resource": "aws_instance.db_app",
+      "terraform_file": "terraform/aws/db-app.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Instance user_data contains plain-text secrets.",
+      "category": "secrets_exposure",
+      "citation": {
+        "file": "terraform/aws/db-app.tf",
+        "lines": "244",
+        "quote": "ec2 have plain text secrets in user data"
+      }
+    },
+    {
+      "id": "cloudgoat.cloud_breach_s3.01",
+      "project": "cloudgoat",
+      "scenario": "cloud_breach_s3",
+      "resource": "aws_instance.ec2-vulnerable-proxy-server",
+      "terraform_file": "cloud_breach_s3/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "EC2 instance runs a misconfigured reverse proxy that an anonymous outsider can use to reach the EC2 metadata service and obtain the attached instance profile's keys.",
+      "category": "public_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/cloud_breach_s3/README.md",
+        "lines": "25",
+        "quote": "exploit a misconfigured reverse-proxy server to query the EC2 metadata service and acquire instance profile keys"
+      }
+    },
+    {
+      "id": "cloudgoat.cloud_breach_s3.02",
+      "project": "cloudgoat",
+      "scenario": "cloud_breach_s3",
+      "resource": "aws_iam_role.cg-banking-WAF-Role",
+      "terraform_file": "cloud_breach_s3/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The instance profile role carries powerful permissions that, once its keys are stolen, let the attacker explore the cloud environment and reach S3.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/cloud_breach_s3/README.md",
+        "lines": "36",
+        "quote": "the attacker is now able to explore the victim's cloud environment using the powerful permissions granted to the role"
+      }
+    },
+    {
+      "id": "cloudgoat.cloud_breach_s3.03",
+      "project": "cloudgoat",
+      "scenario": "cloud_breach_s3",
+      "resource": "aws_s3_bucket.cg-cardholder-data-bucket",
+      "terraform_file": "cloud_breach_s3/terraform/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "Private S3 bucket holding sensitive cardholder data is reachable and downloadable with the stolen instance-profile credentials.",
+      "category": "data_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/cloud_breach_s3/README.md",
+        "lines": "37-38",
+        "quote": "The attacker is then able to list, identify, and access a private S3 bucket."
+      }
+    },
+    {
+      "id": "cloudgoat.cloud_breach_s3.04",
+      "project": "cloudgoat",
+      "scenario": "cloud_breach_s3",
+      "resource": "aws_s3_bucket.cg-cardholder-data-bucket",
+      "terraform_file": "cloud_breach_s3/terraform/s3.tf",
+      "kind": "attack_path",
+      "mapping": "inferred",
+      "expected": "Attack path: internet-facing EC2 reverse proxy -> instance profile role -> private S3 bucket with sensitive files exfiltrated.",
+      "category": "attack_path",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/cloud_breach_s3/README.md",
+        "lines": "25",
+        "quote": "Then, use those keys to discover, access, and exfiltrate sensitive data from an S3 bucket."
+      },
+      "path_resources": [
+        "aws_instance.ec2-vulnerable-proxy-server",
+        "aws_iam_role.cg-banking-WAF-Role",
+        "aws_s3_bucket.cg-cardholder-data-bucket"
+      ]
+    },
+    {
+      "id": "cloudgoat.ec2_ssrf.01",
+      "project": "cloudgoat",
+      "scenario": "ec2_ssrf",
+      "resource": "aws_lambda_function.lambda_function",
+      "terraform_file": "ec2_ssrf/terraform/lambda.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Lambda function contains hardcoded secrets (another IAM user's access keys in its configuration).",
+      "category": "secrets_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/ec2_ssrf/README.md",
+        "lines": "26",
+        "quote": "where hardcoded secrets lead them to an EC2 instance running a web application"
+      }
+    },
+    {
+      "id": "cloudgoat.ec2_ssrf.02",
+      "project": "cloudgoat",
+      "scenario": "ec2_ssrf",
+      "resource": "aws_instance.ubuntu_ec2",
+      "terraform_file": "ec2_ssrf/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "EC2 instance runs a web application vulnerable to SSRF; exploiting it against the metadata service yields the instance role's keys.",
+      "category": "public_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/ec2_ssrf/README.md",
+        "lines": "36-37",
+        "quote": "discovers an EC2 instance running a web application vulnerable to a SSRF vulnerability"
+      }
+    },
+    {
+      "id": "cloudgoat.ec2_ssrf.03",
+      "project": "cloudgoat",
+      "scenario": "ec2_ssrf",
+      "resource": "aws_iam_role.ec2_role",
+      "terraform_file": "ec2_ssrf/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The EC2 instance role's keys give access to a private S3 bucket.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/ec2_ssrf/README.md",
+        "lines": "26",
+        "quote": "the attacker gains access to a private S3 bucket with a set of keys that allow them to invoke the Lambda function"
+      }
+    },
+    {
+      "id": "cloudgoat.ec2_ssrf.04",
+      "project": "cloudgoat",
+      "scenario": "ec2_ssrf",
+      "resource": "aws_s3_object.shepards_credentials",
+      "terraform_file": "ec2_ssrf/terraform/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "A private S3 bucket stores another, more powerful IAM user's (Shepard) credentials in plain text.",
+      "category": "secrets_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/ec2_ssrf/README.md",
+        "lines": "38",
+        "quote": "finds a private S3 bucket containing another set of AWS credentials for a more powerful user: Shepard"
+      }
+    },
+    {
+      "id": "cloudgoat.ec2_ssrf.05",
+      "project": "cloudgoat",
+      "scenario": "ec2_ssrf",
+      "resource": "aws_iam_user.shepard",
+      "terraform_file": "ec2_ssrf/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "User Shepard ends up with full-admin privileges.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/ec2_ssrf/README.md",
+        "lines": "39",
+        "quote": "Now operating as Shepard, with full-admin final privileges"
+      },
+      "caveat": "README says full-admin, but aws_iam_policy.shepard in iam.tf only allows lambda:Get*, lambda:Invoke* and lambda:List*. README prose and .tf disagree; score as uncertain."
+    },
+    {
+      "id": "cloudgoat.ec2_ssrf.06",
+      "project": "cloudgoat",
+      "scenario": "ec2_ssrf",
+      "resource": "aws_lambda_function.lambda_function",
+      "terraform_file": "ec2_ssrf/terraform/lambda.tf",
+      "kind": "attack_path",
+      "mapping": "inferred",
+      "expected": "Attack path: IAM user Solus (Lambda read-only) -> Lambda hardcoded Wrex keys -> EC2 SSRF -> instance role keys -> S3 secret bucket -> Shepard credentials -> invoke Lambda.",
+      "category": "attack_path",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/ec2_ssrf/README.md",
+        "lines": "34-39",
+        "quote": "discovers they can list Lambda functions in the account"
+      },
+      "path_resources": [
+        "aws_iam_user.solus",
+        "aws_lambda_function.lambda_function",
+        "aws_iam_user.wrex",
+        "aws_instance.ubuntu_ec2",
+        "aws_iam_role.ec2_role",
+        "aws_s3_bucket.secret_bucket",
+        "aws_iam_user.shepard"
+      ]
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_attachment.01",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_attachment",
+      "resource": "aws_iam_user.kerrigan",
+      "terraform_file": "iam_privesc_by_attachment/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "IAM user Kerrigan, with a limited set of permissions, can escalate to full administrative power by swapping the full-admin role onto an instance profile and launching an EC2 instance with it (instance-profile attachment privilege escalation).",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/README.md",
+        "lines": "25",
+        "quote": "the attacker is able to leverage the instance-profile-attachment permissions to create a new EC2 instance with significantly greater privileges than their own"
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_attachment.02",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_attachment",
+      "resource": "aws_iam_policy.kerrigan_policy",
+      "terraform_file": "iam_privesc_by_attachment/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The policy grants the combination of instance-profile role swapping, iam:PassRole and EC2 instance creation that enables the escalation.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/cheat_sheet_kerrigan.md",
+        "lines": "9-11",
+        "quote": "aws iam remove-role-from-instance-profile"
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_attachment.03",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_attachment",
+      "resource": "aws_iam_role.ec2_mighty_role",
+      "terraform_file": "iam_privesc_by_attachment/terraform/iam_mighty.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The 'mighty' role is the full-admin role that the attacker swaps onto the instance profile.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/README.md",
+        "lines": "38",
+        "quote": "First, they swap the full-admin role onto the instance profile."
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_attachment.04",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_attachment",
+      "resource": "aws_iam_instance_profile.ec2_meek",
+      "terraform_file": "iam_privesc_by_attachment/terraform/iam_meek.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "An existing instance profile whose role can be replaced by the attacker, giving a new EC2 instance admin privileges.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/README.md",
+        "lines": "37",
+        "quote": "identifying an instance profile they can use and a promising-looking role"
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_attachment.05",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_attachment",
+      "resource": "aws_instance.super_critical_security_server",
+      "terraform_file": "iam_privesc_by_attachment/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "The attacker, via the escalated admin access, can terminate cg-super-critical-security-server, which they cannot affect with their own permissions.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_attachment/README.md",
+        "lines": "43",
+        "quote": "The attacker is finally able to terminate the \"cg-super-critical-security-server\" EC2 instance"
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_ec2.01",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_ec2",
+      "resource": "aws_iam_user.dev_user",
+      "terraform_file": "iam_privesc_by_ec2/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "ReadOnly user cg_dev_user can reach administrator permissions by compromising the admin_ec2 instance.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_ec2/README.md",
+        "lines": "25",
+        "quote": "you need to use your ReadOnly permissions to enumerate the IAM Users and Roles permissions to compromise the \"admin_ec2\" in the account and gain administrator permissions"
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_ec2.02",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_ec2",
+      "resource": "aws_iam_role_policy.ec2_manage_permissions",
+      "terraform_file": "iam_privesc_by_ec2/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "cg_ec2_management_role can stop/start instances and modify instance attributes (user data), but only on resources without a specific tag; the condition is bypassable because dev_user can delete that tag.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_ec2/README.md",
+        "lines": "30",
+        "quote": "it has the permissions ec2:stopInstances,ec2:startInstances,ec2:modifyUserAttribute but only resources without a specific tag"
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_ec2.03",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_ec2",
+      "resource": "aws_iam_user_policy.dev_ec2_permissions",
+      "terraform_file": "iam_privesc_by_ec2/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "cg_dev_user has ec2:DeleteTags, which removes the tag that blocks the management role, enabling the escalation.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_ec2/README.md",
+        "lines": "31-32",
+        "quote": "cg_dev_user has ec2:deleteTags permission."
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_ec2.04",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_ec2",
+      "resource": "aws_instance.admin_ec2",
+      "terraform_file": "iam_privesc_by_ec2/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "admin_ec2 holds an administrator instance profile; its user data can be modified by the management role to gain access or exfiltrate its credentials.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_ec2/README.md",
+        "lines": "33",
+        "quote": "modifies the userdata to run a command to either gain access to it or exfiltrate the credentials from it"
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_ec2.05",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_ec2",
+      "resource": "aws_instance.admin_ec2",
+      "terraform_file": "iam_privesc_by_ec2/terraform/ec2.tf",
+      "kind": "negative",
+      "mapping": "explicit",
+      "expected": "admin_ec2 has no internal or external network access (not internet reachable).",
+      "category": "network",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_ec2/cheat_sheet_dev_user.md",
+        "lines": "55",
+        "quote": "The EC2 does not have internal or external network access"
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_key_rotation.01",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_key_rotation",
+      "resource": "aws_iam_user_policy.manager_manage_access_keys",
+      "terraform_file": "iam_privesc_by_key_rotation/terraform/iam_manager.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "The manager user can create/delete access keys and MFA devices for users tagged developer=true; combined with the ability to tag users, it can take over the admin user (key rotation privilege escalation).",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/README.md",
+        "lines": "32-34",
+        "quote": "Starting with the manager user add a tag to the admin user"
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_key_rotation.02",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_key_rotation",
+      "resource": "aws_iam_user_policy.manager_tag_resources",
+      "terraform_file": "iam_privesc_by_key_rotation/terraform/iam_manager.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "The manager user can tag IAM users (iam:TagUser), letting it satisfy the developer=true condition on the admin user.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/README.md",
+        "lines": "32",
+        "quote": "add a tag to the admin user"
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_key_rotation.03",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_key_rotation",
+      "resource": "aws_iam_user.admin",
+      "terraform_file": "iam_privesc_by_key_rotation/terraform/iam_admin.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The admin user can be taken over by the manager (new access key, MFA device) and can then assume the secretsmanager role.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/README.md",
+        "lines": "25",
+        "quote": "Start with a role that manages other users credentials and find a weakness in the setup to access the \"admin\" role"
+      }
+    },
+    {
+      "id": "cloudgoat.iam_privesc_by_key_rotation.04",
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_key_rotation",
+      "resource": "aws_secretsmanager_secret.primary_secret",
+      "terraform_file": "iam_privesc_by_key_rotation/terraform/secrets.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The scenario's secret becomes retrievable by the escalated principal via the secretsmanager role.",
+      "category": "data_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/iam_privesc_by_key_rotation/README.md",
+        "lines": "36-37",
+        "quote": "Assume the secretsmanager role with MFA"
+      }
+    },
+    {
+      "id": "cloudgoat.lambda_privesc.01",
+      "project": "cloudgoat",
+      "scenario": "lambda_privesc",
+      "resource": "aws_iam_user.chris",
+      "terraform_file": "lambda_privesc/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "IAM user Chris can escalate to full admin by assuming a role with full Lambda and PassRole permissions and attaching the administrator role to a new Lambda function.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/lambda_privesc/README.md",
+        "lines": "25",
+        "quote": "the attacker discovers that they can assume a role that has full Lambda access and pass role permissions. The attacker can then perform privilege escalation to obtain full admin access."
+      }
+    },
+    {
+      "id": "cloudgoat.lambda_privesc.02",
+      "project": "cloudgoat",
+      "scenario": "lambda_privesc",
+      "resource": "aws_iam_policy.lambdaManager_policy",
+      "terraform_file": "lambda_privesc/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "lambdaManager has full Lambda access and iam:PassRole.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/lambda_privesc/README.md",
+        "lines": "38",
+        "quote": "lambdaManager has full lambda access and pass role permissions"
+      }
+    },
+    {
+      "id": "cloudgoat.lambda_privesc.03",
+      "project": "cloudgoat",
+      "scenario": "lambda_privesc",
+      "resource": "aws_iam_role.debug_role",
+      "terraform_file": "lambda_privesc/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "The debug role has full administrator privileges and can only be assumed by a Lambda function, which is the target of the PassRole escalation.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/lambda_privesc/README.md",
+        "lines": "38-39",
+        "quote": "the debug role has full administrator privileges"
+      }
+    },
+    {
+      "id": "cloudgoat.rds_snapshot.01",
+      "project": "cloudgoat",
+      "scenario": "rds_snapshot",
+      "resource": "aws_instance.cg-ec2-instance",
+      "terraform_file": "rds_snapshot/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The attacker uses the privileges of the (hijacked) EC2 instance to steal credentials from S3.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/rds_snapshot/README.md",
+        "lines": "28",
+        "quote": "the user can leverage the privileges of the EC2 instance to steal credentials from S3"
+      }
+    },
+    {
+      "id": "cloudgoat.rds_snapshot.02",
+      "project": "cloudgoat",
+      "scenario": "rds_snapshot",
+      "resource": "aws_iam_role.cg-ec2-admin-role",
+      "terraform_file": "rds_snapshot/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The EC2 role (named cg-ec2-admin-role) can read S3, which is how the attacker reaches the stolen credentials.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/rds_snapshot/cheat_sheet.md",
+        "lines": "37",
+        "quote": "The attacker sees that S3 is accessible and steals the credentials."
+      }
+    },
+    {
+      "id": "cloudgoat.rds_snapshot.03",
+      "project": "cloudgoat",
+      "scenario": "rds_snapshot",
+      "resource": "aws_s3_object.object",
+      "terraform_file": "rds_snapshot/terraform/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "An S3 object stores the cg-rds-instance-user's access keys in plain text (access_keys.txt).",
+      "category": "secrets_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/rds_snapshot/README.md",
+        "lines": "41",
+        "quote": "The attacker accesses S3 on the compromised EC2 instance and retrieves credentials."
+      }
+    },
+    {
+      "id": "cloudgoat.rds_snapshot.04",
+      "project": "cloudgoat",
+      "scenario": "rds_snapshot",
+      "resource": "aws_iam_user_policy.cg-david-policy",
+      "terraform_file": "rds_snapshot/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "With the stolen credentials the attacker gets RDS snapshot restore (and modify) privileges.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/rds_snapshot/README.md",
+        "lines": "30",
+        "quote": "the attacker can gain RDS Snapshot restore privileges, which will allow them to access the DB and retrieve flags"
+      }
+    },
+    {
+      "id": "cloudgoat.rds_snapshot.05",
+      "project": "cloudgoat",
+      "scenario": "rds_snapshot",
+      "resource": "aws_db_snapshot.cg-rds_snapshot",
+      "terraform_file": "rds_snapshot/terraform/rds.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "An RDS snapshot exists that the attacker can restore to hijack the DB containing customer data.",
+      "category": "data_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/rds_snapshot/README.md",
+        "lines": "43-44",
+        "quote": "The attacker verifies that an RDS snapshot exists."
+      }
+    },
+    {
+      "id": "cloudgoat.vulnerable_lambda.01",
+      "project": "cloudgoat",
+      "scenario": "vulnerable_lambda",
+      "resource": "aws_lambda_function.policy_applier_lambda1",
+      "terraform_file": "vulnerable_lambda/terraform/lambda.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Lambda function that applies managed policies to users is vulnerable to SQL injection, letting the caller attach AdministratorAccess to the bilbo user.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vulnerable_lambda/terraform/lambda.tf",
+        "lines": "1",
+        "quote": "policy applier lambda 1 (vulnerable to sql injection)"
+      }
+    },
+    {
+      "id": "cloudgoat.vulnerable_lambda.02",
+      "project": "cloudgoat",
+      "scenario": "vulnerable_lambda",
+      "resource": "aws_iam_role.policy_applier_lambda1",
+      "terraform_file": "vulnerable_lambda/terraform/lambda.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The Lambda execution role may call iam:AttachUserPolicy on the bilbo user, so exploiting the Lambda escalates bilbo to administrator.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vulnerable_lambda/README.md",
+        "lines": "27-29",
+        "quote": "exploit a vulnerability in the function to escalate the privileges of the bilbo user in order to search for secrets"
+      }
+    },
+    {
+      "id": "cloudgoat.vulnerable_lambda.03",
+      "project": "cloudgoat",
+      "scenario": "vulnerable_lambda",
+      "resource": "aws_iam_role.cg-lambda-invoker",
+      "terraform_file": "vulnerable_lambda/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "bilbo can assume the cg-lambda-invoker role, which can list and invoke the vulnerable Lambda.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vulnerable_lambda/README.md",
+        "lines": "27",
+        "quote": "You will assume a role with more privileges"
+      }
+    },
+    {
+      "id": "cloudgoat.vulnerable_lambda.04",
+      "project": "cloudgoat",
+      "scenario": "vulnerable_lambda",
+      "resource": "aws_secretsmanager_secret.final_flag",
+      "terraform_file": "vulnerable_lambda/terraform/secretsmanager.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "After escalation to admin, bilbo can list and read the scenario's secret from Secrets Manager.",
+      "category": "data_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vulnerable_lambda/README.md",
+        "lines": "46",
+        "quote": "Now that Bilbo is an admin, use credentials for that user to list secrets from secretsmanager."
+      }
+    },
+    {
+      "id": "cloudgoat.vpc_peering_overexposed.01",
+      "project": "cloudgoat",
+      "scenario": "vpc_peering_overexposed",
+      "resource": "aws_instance.dev_ec2",
+      "terraform_file": "vpc_peering_overexposed/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Dev EC2 instance has IMDSv1 enabled (http_tokens optional), allowing theft of its IAM role credentials from the metadata service.",
+      "category": "imds",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/ec2.tf",
+        "lines": "33",
+        "quote": "Dev EC2 instance with IMDSv1 enabled and no hop limit restrictions"
+      }
+    },
+    {
+      "id": "cloudgoat.vpc_peering_overexposed.02",
+      "project": "cloudgoat",
+      "scenario": "vpc_peering_overexposed",
+      "resource": "aws_instance.dev_ec2",
+      "terraform_file": "vpc_peering_overexposed/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "IMDSv1 is deliberately left enabled as a vulnerable configuration.",
+      "category": "imds",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/ec2.tf",
+        "lines": "43",
+        "quote": "Ensure IMDSv1 is enabled (vulnerable configuration)"
+      }
+    },
+    {
+      "id": "cloudgoat.vpc_peering_overexposed.03",
+      "project": "cloudgoat",
+      "scenario": "vpc_peering_overexposed",
+      "resource": "aws_vpc_peering_connection.dev_to_prod",
+      "terraform_file": "vpc_peering_overexposed/terraform/vpc.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Dev-to-Prod VPC peering is intentionally misconfigured to allow all traffic between the VPCs (no segmentation).",
+      "category": "network",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/vpc.tf",
+        "lines": "108",
+        "quote": "Intentionally misconfigured to allow all traffic between VPCs"
+      }
+    },
+    {
+      "id": "cloudgoat.vpc_peering_overexposed.04",
+      "project": "cloudgoat",
+      "scenario": "vpc_peering_overexposed",
+      "resource": "aws_route.dev_to_prod_route",
+      "terraform_file": "vpc_peering_overexposed/terraform/vpc.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Route tables route between Dev and Prod over the peering connection, intentionally overly permissive.",
+      "category": "network",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/vpc.tf",
+        "lines": "119",
+        "quote": "Misconfigured route tables to allow overly permissive access between VPCs"
+      }
+    },
+    {
+      "id": "cloudgoat.vpc_peering_overexposed.05",
+      "project": "cloudgoat",
+      "scenario": "vpc_peering_overexposed",
+      "resource": "aws_route.prod_to_dev_route",
+      "terraform_file": "vpc_peering_overexposed/terraform/vpc.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Route tables route between Prod and Dev over the peering connection, intentionally overly permissive.",
+      "category": "network",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/vpc.tf",
+        "lines": "119",
+        "quote": "Misconfigured route tables to allow overly permissive access between VPCs"
+      }
+    },
+    {
+      "id": "cloudgoat.vpc_peering_overexposed.06",
+      "project": "cloudgoat",
+      "scenario": "vpc_peering_overexposed",
+      "resource": "aws_security_group.prod_sg",
+      "terraform_file": "vpc_peering_overexposed/terraform/vpc.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Prod security group is misconfigured to allow SSH from the Dev VPC.",
+      "category": "network",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/vpc.tf",
+        "lines": "164",
+        "quote": "Misconfigured to allow SSH from Dev VPC"
+      }
+    },
+    {
+      "id": "cloudgoat.vpc_peering_overexposed.07",
+      "project": "cloudgoat",
+      "scenario": "vpc_peering_overexposed",
+      "resource": "aws_iam_role.dev_ec2_role",
+      "terraform_file": "vpc_peering_overexposed/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Dev EC2 role is intentionally over-permissioned.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/iam.tf",
+        "lines": "35",
+        "quote": "Role for Dev EC2 - Intentionally over-permissioned"
+      }
+    },
+    {
+      "id": "cloudgoat.vpc_peering_overexposed.08",
+      "project": "cloudgoat",
+      "scenario": "vpc_peering_overexposed",
+      "resource": "aws_iam_role_policy.dev_ec2_policy",
+      "terraform_file": "vpc_peering_overexposed/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Dev EC2 policy has excessive permissions for lateral movement (SSM StartSession, instance and RDS discovery).",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/iam.tf",
+        "lines": "57",
+        "quote": "Policy for Dev EC2 with excessive permissions for lateral movement"
+      }
+    },
+    {
+      "id": "cloudgoat.vpc_peering_overexposed.09",
+      "project": "cloudgoat",
+      "scenario": "vpc_peering_overexposed",
+      "resource": "aws_instance.prod_ec2",
+      "terraform_file": "vpc_peering_overexposed/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Prod web server stores database credentials in a world-readable configuration file (.env, mode 644) written by user data.",
+      "category": "secrets_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vpc_peering_overexposed/terraform/ec2.tf",
+        "lines": "109-110",
+        "quote": "Create database environment file in web config directory"
+      }
+    },
+    {
+      "id": "cloudgoat.vpc_peering_overexposed.10",
+      "project": "cloudgoat",
+      "scenario": "vpc_peering_overexposed",
+      "resource": "aws_instance.prod_ec2",
+      "terraform_file": "vpc_peering_overexposed/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "Prod instance is reachable from the Dev instance via SSM session manager (lateral movement).",
+      "category": "network",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vpc_peering_overexposed/README.md",
+        "lines": "71",
+        "quote": "Use SSM Session Manager with the elevated credentials to move laterally to Prod EC2"
+      }
+    },
+    {
+      "id": "cloudgoat.vpc_peering_overexposed.11",
+      "project": "cloudgoat",
+      "scenario": "vpc_peering_overexposed",
+      "resource": "aws_db_instance.customer_db",
+      "terraform_file": "vpc_peering_overexposed/terraform/rds.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "Production RDS MySQL instance with customer PII is ultimately reachable by the attacker through the Dev -> Prod lateral movement.",
+      "category": "data_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vpc_peering_overexposed/README.md",
+        "lines": "75",
+        "quote": "Access and view sensitive customer data"
+      }
+    },
+    {
+      "id": "cloudgoat.vpc_peering_overexposed.12",
+      "project": "cloudgoat",
+      "scenario": "vpc_peering_overexposed",
+      "resource": "aws_instance.dev_ec2",
+      "terraform_file": "vpc_peering_overexposed/terraform/ec2.tf",
+      "kind": "attack_path",
+      "mapping": "inferred",
+      "expected": "Attack path: Dev EC2 (public IP, SSH) -> IMDSv1 role credentials -> VPC peering -> SSM into Prod EC2 -> DB credentials in config -> customer data in RDS.",
+      "category": "attack_path",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/vpc_peering_overexposed/README.md",
+        "lines": "63-75",
+        "quote": "Exploit IMDSv1 to steal IAM credentials from the Dev EC2 instance"
+      },
+      "path_resources": [
+        "aws_instance.dev_ec2",
+        "aws_iam_role.dev_ec2_role",
+        "aws_vpc_peering_connection.dev_to_prod",
+        "aws_instance.prod_ec2",
+        "aws_db_instance.customer_db"
+      ]
+    },
+    {
+      "id": "cloudgoat.data_secrets.01",
+      "project": "cloudgoat",
+      "scenario": "data_secrets",
+      "resource": "aws_instance.ec2_instance",
+      "terraform_file": "data_secrets/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "EC2 instance user data contains sensitive credentials (system user password) and enables SSH password authentication.",
+      "category": "secrets_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/data_secrets/terraform/ec2.tf",
+        "lines": "22",
+        "quote": "VULNERABILITY: Sensitive credentials stored in User Data"
+      }
+    },
+    {
+      "id": "cloudgoat.data_secrets.02",
+      "project": "cloudgoat",
+      "scenario": "data_secrets",
+      "resource": "aws_lambda_function.sensitive_lambda",
+      "terraform_file": "data_secrets/terraform/lambda.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Lambda environment variables contain another IAM user's access key and secret key.",
+      "category": "secrets_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/data_secrets/terraform/lambda.tf",
+        "lines": "34",
+        "quote": "VULNERABILITY: Credentials stored in Environment Variables"
+      }
+    },
+    {
+      "id": "cloudgoat.data_secrets.03",
+      "project": "cloudgoat",
+      "scenario": "data_secrets",
+      "resource": "aws_iam_role.ec2_role",
+      "terraform_file": "data_secrets/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "The EC2 instance role is acquired through the metadata service (IMDS) and can read Lambda function details.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/data_secrets/terraform/iam.tf",
+        "lines": "36-37",
+        "quote": "Attack Path: Acquired via Metadata (IMDS). Can read Lambda details."
+      }
+    },
+    {
+      "id": "cloudgoat.data_secrets.04",
+      "project": "cloudgoat",
+      "scenario": "data_secrets",
+      "resource": "aws_iam_user.lambda_user",
+      "terraform_file": "data_secrets/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Hidden user whose credentials are stored in the Lambda's environment variables can read Secrets Manager secrets.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/data_secrets/terraform/iam.tf",
+        "lines": "84-85",
+        "quote": "Attack Path: Credentials found in Lambda Env Vars. Can read Secrets."
+      }
+    },
+    {
+      "id": "cloudgoat.data_secrets.05",
+      "project": "cloudgoat",
+      "scenario": "data_secrets",
+      "resource": "aws_iam_user.start_user",
+      "terraform_file": "data_secrets/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Starting user can describe EC2 instances and instance attributes, which exposes the user data credentials.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/data_secrets/terraform/iam.tf",
+        "lines": "1-2",
+        "quote": "Attack Path: Starts here. Can Describe EC2 to find User Data."
+      }
+    },
+    {
+      "id": "cloudgoat.data_secrets.06",
+      "project": "cloudgoat",
+      "scenario": "data_secrets",
+      "resource": "aws_secretsmanager_secret.final_flag",
+      "terraform_file": "data_secrets/terraform/secrets.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The final flag in Secrets Manager is reachable by the lambda_user found at the end of the chain.",
+      "category": "data_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/data_secrets/README.md",
+        "lines": "58",
+        "quote": "use them to retrieve the flag from AWS Secrets Manager"
+      }
+    },
+    {
+      "id": "cloudgoat.rce_web_app.01",
+      "project": "cloudgoat",
+      "scenario": "rce_web_app",
+      "resource": "aws_s3_bucket.logs",
+      "terraform_file": "rce_web_app/terraform/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "Load balancer access-log bucket is readable by the Lara user and its logs reveal a secret admin page of the web app.",
+      "category": "data_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/rce_web_app/README.md",
+        "lines": "40-41",
+        "quote": "discovering one which contains the logs for the Load Balancer"
+      }
+    },
+    {
+      "id": "cloudgoat.rce_web_app.02",
+      "project": "cloudgoat",
+      "scenario": "rce_web_app",
+      "resource": "aws_instance.ubuntu",
+      "terraform_file": "rce_web_app/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "The web app on the EC2 instance is vulnerable to remote code execution, giving the attacker a shell with the instance role's permissions.",
+      "category": "public_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/rce_web_app/README.md",
+        "lines": "42-43",
+        "quote": "the web app is vulnerable to a remote code execution (RCE) attack via a secret parameter embedded in a form"
+      }
+    },
+    {
+      "id": "cloudgoat.rce_web_app.03",
+      "project": "cloudgoat",
+      "scenario": "rce_web_app",
+      "resource": "aws_iam_role_policy_attachments_exclusive.ec2",
+      "terraform_file": "rce_web_app/terraform/iam.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The EC2 role has expansive permissions (AmazonS3FullAccess) that let the attacker access a private S3 bucket.",
+      "category": "iam_escalation",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/rce_web_app/README.md",
+        "lines": "47",
+        "quote": "operating with its role's more expansive permissions"
+      }
+    },
+    {
+      "id": "cloudgoat.rce_web_app.04",
+      "project": "cloudgoat",
+      "scenario": "rce_web_app",
+      "resource": "aws_s3_object.db_credentials",
+      "terraform_file": "rce_web_app/terraform/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "A text file in the private S3 bucket holds the RDS database login credentials.",
+      "category": "secrets_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/rce_web_app/README.md",
+        "lines": "48",
+        "quote": "contains the login credentials for an RDS database"
+      }
+    },
+    {
+      "id": "cloudgoat.rce_web_app.05",
+      "project": "cloudgoat",
+      "scenario": "rce_web_app",
+      "resource": "aws_s3_object.ssh_private_key",
+      "terraform_file": "rce_web_app/terraform/s3.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The keystore bucket holds the SSH key pair that grants direct access to the EC2 server.",
+      "category": "secrets_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/rce_web_app/README.md",
+        "lines": "62",
+        "quote": "Inside that one S3 bucket they find a pair of SSH keys."
+      }
+    },
+    {
+      "id": "cloudgoat.rce_web_app.06",
+      "project": "cloudgoat",
+      "scenario": "rce_web_app",
+      "resource": "aws_instance.ubuntu",
+      "terraform_file": "rce_web_app/terraform/ec2.tf",
+      "kind": "misconfiguration",
+      "mapping": "explicit",
+      "expected": "The RDS credentials and address are discoverable from the EC2 metadata service (user data).",
+      "category": "secrets_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/rce_web_app/README.md",
+        "lines": "54",
+        "quote": "queries the EC2 metadata service and discovers the RDS database credentials and address"
+      }
+    },
+    {
+      "id": "cloudgoat.rce_web_app.07",
+      "project": "cloudgoat",
+      "scenario": "rce_web_app",
+      "resource": "aws_db_instance.postgres",
+      "terraform_file": "rce_web_app/terraform/rds.tf",
+      "kind": "misconfiguration",
+      "mapping": "inferred",
+      "expected": "The goal is the secret text stored in the highly-secured RDS database, reached through the compromised EC2 instance.",
+      "category": "data_exposure",
+      "citation": {
+        "file": "cloudgoat/scenarios/aws/rce_web_app/README.md",
+        "lines": "25",
+        "quote": "Find a secret stored in the RDS database."
+      }
+    }
+  ],
+  "clean_set": [
+    {
+      "id": "clean.terraform-aws-vpc",
+      "project": "terraform-aws-modules/terraform-aws-vpc",
+      "dir": "clean/terraform-aws-vpc",
+      "entrypoint": "examples/complete",
+      "expected": "No critical or high severity finding in the categories public_exposure, iam_escalation, data_exposure, encryption, logging or network, other than anything listed in intentionally_insecure_per_own_docs.",
+      "intentionally_insecure_per_own_docs": [],
+      "citation": {
+        "file": "examples/complete/README.md",
+        "lines": "3",
+        "quote": "Configuration in this directory creates set of VPC resources which may be sufficient for staging or production environment"
+      },
+      "observed_config_facts_not_project_statements": []
+    },
+    {
+      "id": "clean.terraform-aws-s3-bucket",
+      "project": "terraform-aws-modules/terraform-aws-s3-bucket",
+      "dir": "clean/terraform-aws-s3-bucket",
+      "entrypoint": "examples/complete",
+      "expected": "No critical or high severity finding in the categories public_exposure, iam_escalation, data_exposure, encryption, logging or network, other than anything listed in intentionally_insecure_per_own_docs.",
+      "intentionally_insecure_per_own_docs": [],
+      "citation": {
+        "file": "examples/complete/README.md",
+        "lines": "1",
+        "quote": "Complete S3 bucket with most of supported features enabled"
+      },
+      "observed_config_facts_not_project_statements": [
+        "examples/complete/main.tf:101 configures static website hosting on one bucket",
+        "examples/complete/README.md lists 'grants (required for CloudFront logs)'"
+      ]
+    },
+    {
+      "id": "clean.terraform-aws-rds",
+      "project": "terraform-aws-modules/terraform-aws-rds",
+      "dir": "clean/terraform-aws-rds",
+      "entrypoint": "examples/complete-postgres",
+      "expected": "No critical or high severity finding in the categories public_exposure, iam_escalation, data_exposure, encryption, logging or network, other than anything listed in intentionally_insecure_per_own_docs.",
+      "intentionally_insecure_per_own_docs": [],
+      "citation": {
+        "file": "examples/complete-postgres/README.md",
+        "lines": "3",
+        "quote": "Configuration in this directory creates a set of RDS resources including DB instance, DB subnet group and DB parameter group."
+      },
+      "observed_config_facts_not_project_statements": [
+        "examples/complete-postgres/main.tf:70-72 sets backup_retention_period = 1, skip_final_snapshot = true, deletion_protection = false",
+        "examples/complete-postgres/main.tf:134-135 sets backup_retention_period = 0 for the replica-style instance"
+      ]
+    },
+    {
+      "id": "clean.terraform-aws-ec2-instance",
+      "project": "terraform-aws-modules/terraform-aws-ec2-instance",
+      "dir": "clean/terraform-aws-ec2-instance",
+      "entrypoint": "examples/complete",
+      "expected": "No critical or high severity finding in the categories public_exposure, iam_escalation, data_exposure, encryption, logging or network, other than anything listed in intentionally_insecure_per_own_docs.",
+      "intentionally_insecure_per_own_docs": [],
+      "citation": {
+        "file": "examples/complete/README.md",
+        "lines": "3",
+        "quote": "Configuration in this directory creates EC2 instances with different sets of arguments"
+      },
+      "observed_config_facts_not_project_statements": [
+        "examples/complete/main.tf:407-408 security group ingress_cidr_blocks = [\"0.0.0.0/0\"] with ingress_rules http-80-tcp and all-icmp",
+        "examples/complete/main.tf:150,167,281 associate_public_ip_address = true on some instances"
+      ]
+    }
+  ],
+  "excluded": [
+    {
+      "project": "cloudgoat",
+      "scenario": "agentcore_identity_confusion",
+      "reason": "Bedrock AgentCore, OpenSearch Serverless and Bedrock knowledge bases are not modeled by Emfirge; plan would be mostly unmodeled."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "beanstalk_secrets",
+      "reason": "Core resource is Elastic Beanstalk, not modeled; the rest is IAM/secrets plumbing."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "bedrock_agent_hijacking",
+      "reason": "Bedrock agents are not modeled."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "codebuild_secrets",
+      "reason": "CodeBuild and SSM parameters are the attack surface and are not modeled; uses multiple RDS/VPC plumbing."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "detection_evasion",
+      "reason": "Scenario is about CloudWatch/SNS/GuardDuty-style detection evasion (log metric filters, alarms, SNS); detection logic is not something Emfirge models."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "ecs_efs_attack",
+      "reason": "ECS and EFS are not modeled."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "ecs_privesc_evade_protection",
+      "reason": "ECS capacity providers, autoscaling, GuardDuty and SES are not modeled."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "ecs_takeover",
+      "reason": "ECS task definitions and services are the attack surface and are not modeled."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "federated_console_takeover",
+      "reason": "Attack relies on SSM documents / console federation (aws_ssm_document, VPC endpoints) which are not modeled."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "glue_privesc",
+      "reason": "AWS Glue jobs/connections are the escalation vector and are not modeled."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "iam_enum_basics",
+      "reason": "Enumeration tutorial; README states no misconfiguration or attack path to check (IAM-only, no exploitation route)."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "iam_privesc_by_rollback",
+      "reason": "Escalation is via IAM policy versions created by a null_resource local-exec at apply time; a plan contains only the first version, so the attack is not representable offline."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "s3_version_rollback_via_cfn",
+      "reason": "Relies on CloudFormation stack and S3 object-version rollback; CloudFormation behaviour is not modeled."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "scenario_template",
+      "reason": "Template with no documented vulnerability."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "secrets_in_the_cloud",
+      "reason": "DynamoDB, Secrets Manager resource policy and Lambda-code secrets are not modeled; attack is mostly data-plane."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "sns_secrets",
+      "reason": "API Gateway and SNS are the attack surface and are not modeled."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "sqs_flag_shop",
+      "reason": "SQS/Lambda event-source mapping logic bug and a web shop app; application-level, not infra-configuration."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "vulnerable_cognito",
+      "reason": "Cognito and API Gateway are not modeled."
+    },
+    {
+      "project": "cloudgoat",
+      "scenario": "static",
+      "reason": "Not a scenario directory (static assets)."
+    },
+    {
+      "project": "terragoat",
+      "scenario": "ecr",
+      "reason": "No human-written vulnerability statement in the file; also contains a null_resource local-exec docker push (never executed)."
+    },
+    {
+      "project": "terragoat",
+      "scenario": "eks",
+      "reason": "No inline vulnerability statement; EKS is not modeled."
+    },
+    {
+      "project": "terragoat",
+      "scenario": "elb",
+      "reason": "No vulnerability statement (only the comment '# Create a new load balancer')."
+    },
+    {
+      "project": "terragoat",
+      "scenario": "es",
+      "reason": "No inline vulnerability statement; Elasticsearch not modeled."
+    },
+    {
+      "project": "terragoat",
+      "scenario": "iam",
+      "reason": "No inline vulnerability statement."
+    },
+    {
+      "project": "terragoat",
+      "scenario": "neptune",
+      "reason": "No vulnerability statement; Neptune is not modeled."
+    },
+    {
+      "project": "terragoat",
+      "scenario": "rds",
+      "reason": "No inline vulnerability statement; Aurora clusters only."
+    },
+    {
+      "project": "terragoat",
+      "scenario": "README.md auto-generated table",
+      "reason": "The README's 'Existing vulnerabilities (Auto-Generated)' table is Checkov output, so using it would grade Emfirge against a scanner rather than the authors' own statements; only the authors' inline comments are used."
+    }
+  ]
+}
