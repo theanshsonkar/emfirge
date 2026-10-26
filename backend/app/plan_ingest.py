@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 import copy
 import json
+import re
 
 from app.mutations import Change
 from app.aws_api_ingest import remove_security_group_rule
@@ -61,6 +62,74 @@ _TAGGED_RESOURCES = frozenset({"aws_instance", "aws_db_instance", "aws_security_
                                "aws_lambda_function", "aws_nat_gateway", "aws_ebs_volume"})
 _DELETE_ORDER = ["ec2_instance", "lambda_function", "rds_instance", "ebs_volume",
                  "ebs_snapshot", "rds_snapshot", "s3_bucket", "security_group", "iam_role"]
+
+
+_PLACEHOLDER_ACCOUNT = "000000000000"
+_PLACEHOLDER_REASON = "account id unknown at plan time; placeholder used for identity only"
+_ACCOUNT_RE = re.compile(r"^\d{12}$")
+
+
+def _plan_account_id(plan: dict) -> str | None:
+    """Account id the plan itself knows: an aws_caller_identity data source in prior_state."""
+    def walk(module: Any) -> str | None:
+        if not isinstance(module, dict):
+            return None
+        for resource in module.get("resources") or []:
+            if isinstance(resource, dict) and resource.get("type") == "aws_caller_identity":
+                account = (resource.get("values") or {}).get("account_id")
+                if isinstance(account, str) and _ACCOUNT_RE.match(account):
+                    return account
+        for child in module.get("child_modules") or []:
+            found = walk(child)
+            if found:
+                return found
+        return None
+    prior = plan.get("prior_state")
+    values = prior.get("values") if isinstance(prior, dict) else None
+    return walk((values or {}).get("root_module")) if isinstance(values, dict) else None
+
+
+def _role_field(role: Any, name: str, default: Any = None) -> Any:
+    return role.get(name, default) if isinstance(role, dict) else getattr(role, name, default)
+
+
+def _iam_context(plan: dict, iam_roles: Any) -> dict[str, Any]:
+    """Which account id Terraform-created IAM identities get, and where it came from."""
+    accounts = set()
+    for role in iam_roles or []:
+        arn = _role_field(role, "role_arn")
+        parts = arn.split(":") if isinstance(arn, str) else []
+        if len(parts) > 4 and _ACCOUNT_RE.match(parts[4]):
+            accounts.add(parts[4])
+    if len(accounts) == 1:
+        account, source = next(iter(accounts)), "base"
+    elif _plan_account_id(plan):
+        account, source = _plan_account_id(plan), "plan"
+    else:
+        account, source = _PLACEHOLDER_ACCOUNT, "placeholder"
+    return {"account": account, "source": source}
+
+
+def _role_create_arn(item: dict, iam: dict[str, Any], unknown: list[dict]) -> str | None:
+    """The ARN of a role being created. AWS builds it from account, path and name; Terraform
+    leaves it unknown until apply, so it is rebuilt here (None when the name or path is unknown)."""
+    change = item.get("change") or {}
+    after, after_unknown = change.get("after") or {}, change.get("after_unknown") or {}
+    address = item.get("address", "")
+    arn = after.get("arn")
+    if isinstance(arn, str) and arn.startswith("arn:") and "arn" not in after_unknown:
+        return arn
+    name = after.get("name")
+    if "name" in after_unknown or not isinstance(name, str) or not name:
+        unknown.append({"address": address, "field": "name", "reason": "unknown Terraform value"})
+        return None
+    path = after.get("path", "/")
+    if "path" in after_unknown or not isinstance(path, str) or not path.startswith("/") or not path.endswith("/"):
+        unknown.append({"address": address, "field": "path", "reason": "unknown Terraform value"})
+        return None
+    if iam["source"] == "placeholder":
+        unknown.append({"address": address, "field": "arn", "reason": _PLACEHOLDER_REASON})
+    return f"arn:aws:iam::{iam['account']}:role{path}{name}"
 
 
 def _unknown(change: dict, address: str, field: str, unknown: list[dict], reason: str | None = None) -> bool:
@@ -400,7 +469,7 @@ def _nacl_changes(item: dict, nacls: dict[str, Any], config_resources: dict[str,
     return [], None
 
 
-def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[str, Any] | None = None, config_resources: dict[str, dict] | None = None, created_ids: dict[str, str] | None = None, nacls: dict[str, Any] | None = None, acl_counter: list[int] | None = None) -> tuple[list[Change], dict | None]:
+def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[str, Any] | None = None, config_resources: dict[str, dict] | None = None, created_ids: dict[str, str] | None = None, nacls: dict[str, Any] | None = None, acl_counter: list[int] | None = None, iam: dict[str, Any] | None = None) -> tuple[list[Change], dict | None]:
     if item.get("mode", "managed") != "managed":
         return [], None
     address = item.get("address", "")
@@ -472,7 +541,15 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
                 fields = {"db_instance_id": db_identifier}
             else:
                 fields = {}
-        result.append(Change(op="add", resource_type=resource, resource_id=str((after or {}).get(id_key, resource_id) or ""), fields=fields))
+        add_id = str((after or {}).get(id_key, resource_id) or "")
+        if typ == "aws_iam_role":
+            add_id = _role_create_arn(item, iam or _iam_context({}, None), unknown_fields)
+            if add_id is None:
+                return result, {"address": address, "type": typ, "actions": actions,
+                                "provider_name": provider_name if isinstance(provider_name, str) else None,
+                                "outside_view": False, "unseen": True,
+                                "detail": "the role name or path is unknown at plan time, so its identity cannot be built"}
+        result.append(Change(op="add", resource_type=resource, resource_id=add_id, fields=fields))
     elif actions == ["update"]:
         fields = _fields(typ, change, address, unknown_fields, update=True)
         supported = {"aws_security_group": {"ingress"}, "aws_db_instance": {"backup_retention_period", "deletion_protection"}, "aws_iam_role": {"assume_role_policy"}}
@@ -487,7 +564,8 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
     return result, None
 
 
-def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dict[str, Any] | None = None) -> dict[str, Any]:
+def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dict[str, Any] | None = None,
+                   iam_roles: Any = None) -> dict[str, Any]:
     if not isinstance(plan, dict):
         raise ValueError("Terraform plan must be a JSON object")
     if not isinstance(plan.get("format_version"), str) or not plan["format_version"].startswith("1."):
@@ -505,6 +583,7 @@ def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dic
     }
     created_ids = {}
     acl_counter = [0]
+    iam = _iam_context(plan, iam_roles)
     for resource in plan["resource_changes"]:
         if isinstance(resource, dict) and resource.get("type") == "aws_security_group":
             after = (resource.get("change") or {}).get("after") or {}
@@ -524,7 +603,7 @@ def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dic
             raise ValueError("Terraform plan change actions must be a non-empty list of strings")
         changes, unsupported = _translate_item(item, unknown_fields, sg_rules=sg_rules,
                                                  config_resources=config_resources, created_ids=created_ids,
-                                                 nacls=nacls, acl_counter=acl_counter)
+                                                 nacls=nacls, acl_counter=acl_counter, iam=iam)
         if unsupported:
             unmodeled.append(unsupported)
         for change in changes:

@@ -55,7 +55,7 @@ def test_api_round_trip_three_ops():
 
 def test_terraform_iam_role_and_user():
     created = translate_plan(plan('create', 'aws_iam_role', {'name': 'new', 'arn': None, 'assume_role_policy': json.dumps(POLICY)}))
-    assert created['changes'][0] == Change(op='add', resource_type='iam_role', resource_id='new', fields={'trust_policy': POLICY})
+    assert created['changes'][0] == Change(op='add', resource_type='iam_role', resource_id=ROLE_ARN, fields={'trust_policy': POLICY})
     unknown = translate_plan(plan('create', 'aws_iam_role', {'name': 'new', 'assume_role_policy': None}, unknown=['assume_role_policy']))
     assert unknown['changes'][0].fields == {}
     before = {'name': 'old', 'assume_role_policy': json.dumps({'Statement': []})}

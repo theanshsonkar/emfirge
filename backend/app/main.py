@@ -1691,7 +1691,8 @@ def _terraform_translator(branch_id: str, document):
         group.id: {"rules": copy.deepcopy(group.rules), "egress_rules": copy.deepcopy(group.egress_rules)}
         for group in state.ec2.security_groups
     }
-    return translate_plan(document, sg_rules=sg_rule_map, nacls={acl.id: acl for acl in state.vpc.nacls})
+    return translate_plan(document, sg_rules=sg_rule_map, nacls={acl.id: acl for acl in state.vpc.nacls},
+                          iam_roles=state.iam.role_policies)
 
 
 @app.post('/branches/{branch_id}/plans/terraform', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
