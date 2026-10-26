@@ -19,6 +19,8 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Iterable
 
 from pydantic import BaseModel
@@ -226,6 +228,38 @@ TF_TO_EMFIRGE: dict[str, str] = {
 }
 
 
+_READS_PATH = Path(__file__).resolve().parent / "data" / "scanner_check_reads.json"
+
+
+@lru_cache(maxsize=1)
+def check_read_rows() -> tuple[dict[str, Any], ...]:
+    """Rows {check_id, tf_type, reads, source} of Checkov checks that read attributes, from the check source."""
+    try:
+        rows = json.loads(_READS_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ()
+    return tuple(
+        row for row in rows if isinstance(row, dict) and row.get("check_id") and row.get("tf_type")
+        and isinstance(row.get("reads"), list)
+    ) if isinstance(rows, list) else ()
+
+
+def unmodeled_attributes(tf_type: str) -> dict[str, str]:
+    """Terraform attributes of an emitted type that the model has no field for, with the reason.
+
+    Those listed in UNMODELED, plus every attribute a known check reads (scanner_check_reads.json)
+    that the serializer does not emit.
+    """
+    out = dict(UNMODELED.get(tf_type, {}))
+    emitted = attribute_fields(tf_type)
+    for row in check_read_rows():
+        if row["tf_type"] == tf_type:
+            for attribute in row["reads"]:
+                if attribute not in emitted and attribute not in out:
+                    out[attribute] = "not modeled"
+    return out
+
+
 def attribute_fields(tf_type: str) -> dict[str, list[str]]:
     """Terraform attribute (or sub-resource) -> the model fields it carries, for a Terraform type."""
     out: dict[str, list[str]] = {}
@@ -422,6 +456,10 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
     def omitted_field(resource_type: str, rid: Any, field_name: str, reason: str) -> None:
         lose(resource_type, rid, reason, field_name, kind="omitted_field")
 
+    def unmodeled(tf_type: str, resource_type: str, rid: Any) -> None:
+        for attribute, reason in unmodeled_attributes(tf_type).items():
+            omitted_field(resource_type, rid, attribute, reason)
+
     def synthesized(resource_type: str, rid: Any, field_name: str, value: Any, reason: str) -> None:
         lose(resource_type, rid, reason, field_name, kind="synthesized", value=value)
 
@@ -491,6 +529,7 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
             args["tags"] = dict(instance.tags)
             emitted.add("tags")
         add("aws_instance", EC2_INSTANCE, instance.id, args)
+        unmodeled("aws_instance", EC2_INSTANCE, instance.id)
         report_fields(EC2_INSTANCE, instance.id, instance, emitted)
 
     for group in infra.ec2.security_groups:
@@ -508,6 +547,7 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
             args["tags"] = dict(group.tags)
             emitted.add("tags")
         add("aws_security_group", SECURITY_GROUP, group.id, args)
+        unmodeled("aws_security_group", SECURITY_GROUP, group.id)
         report_fields(SECURITY_GROUP, group.id, group, emitted)
         for label, rules, group_key in (
             ("rules", group.rules, "source_sg_ids"), ("egress_rules", group.egress_rules, "dest_sg_ids"),
@@ -525,6 +565,7 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
             bucket_args["tags"] = dict(bucket.tags)
             emitted.add("tags")
         bname = add("aws_s3_bucket", S3_BUCKET, bucket.name, bucket_args)
+        unmodeled("aws_s3_bucket", S3_BUCKET, bucket.name)
         link = _ref("aws_s3_bucket", bname)
 
         known = {flag: getattr(bucket, flag) for flag in _BPA_FLAGS if getattr(bucket, flag) is not None}
@@ -589,6 +630,7 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
             args["tags"] = dict(database.tags)
             emitted.add("tags")
         add("aws_db_instance", RDS_INSTANCE, database.id, args)
+        unmodeled("aws_db_instance", RDS_INSTANCE, database.id)
         report_fields(RDS_INSTANCE, database.id, database, emitted)
 
     role_names: dict[str, str] = {}  # role ARN -> Terraform name of its aws_iam_role
@@ -606,8 +648,7 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
             })
         for problem in problems:
             omitted_field(ROLE_POLICY, role.role_name, "access_statements", problem)
-        for attribute, reason in UNMODELED["aws_iam_role"].items():
-            omitted_field(ROLE_POLICY, role.role_name, attribute, reason)
+        unmodeled("aws_iam_role", ROLE_POLICY, role.role_name)
         report_fields(ROLE_POLICY, role.role_name, role, {"role_name", "role_arn", "access_statements", "policy_documents"})
 
     vpc_ids = {
@@ -630,8 +671,7 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
         if vpc_id not in no_flow_logs:
             omitted_field(VPC, vpc_id, "flow_logs", "flow log state unknown: not listed as lacking flow logs, "
                           "which does not show that one exists; no aws_flow_log is emitted")
-        for attribute, reason in UNMODELED["aws_vpc"].items():
-            omitted_field(VPC, vpc_id, attribute, reason)
+        unmodeled("aws_vpc", VPC, vpc_id)
     unlisted_vpcs = infra.vpc.total_vpcs - len(vpc_ids)
     if unlisted_vpcs > 0:
         lose(VPC, "unlisted", f"{unlisted_vpcs} VPC(s) are known only as a count; not serialized", kind="omitted_resource")
@@ -649,8 +689,7 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
         else:
             omitted_field(VPC_SUBNET, subnet.id, "availability_zone", "value not collected (unknown); omitted rather than guessed")
         add("aws_subnet", VPC_SUBNET, subnet.id, args)
-        for attribute, reason in UNMODELED["aws_subnet"].items():
-            omitted_field(VPC_SUBNET, subnet.id, attribute, reason)
+        unmodeled("aws_subnet", VPC_SUBNET, subnet.id)
         report_fields(VPC_SUBNET, subnet.id, subnet, emitted)
 
     for function in infra.lambda_data.functions:
@@ -681,8 +720,7 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
             args["tags"] = dict(function.tags)
             emitted.add("tags")
         add("aws_lambda_function", LAMBDA_FUNCTION, function.name, args)
-        for attribute, reason in UNMODELED["aws_lambda_function"].items():
-            omitted_field(LAMBDA_FUNCTION, function.name, attribute, reason)
+        unmodeled("aws_lambda_function", LAMBDA_FUNCTION, function.name)
         report_fields(LAMBDA_FUNCTION, function.name, function, emitted)
 
     # KMS: the model lists only enabled keys WITHOUT rotation and keys pending
@@ -693,8 +731,7 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
         if duplicate(KMS_KEY, key_id):
             continue
         add("aws_kms_key", KMS_KEY, key_id, {"enable_key_rotation": False})
-        for attribute, reason in UNMODELED["aws_kms_key"].items():
-            omitted_field(KMS_KEY, key_id, attribute, reason)
+        unmodeled("aws_kms_key", KMS_KEY, key_id)
     for key_id in dict.fromkeys(str(k) for k in infra.kms.cmks_pending_deletion):
         if (KMS_KEY, key_id) not in seen:
             lose(KMS_KEY, key_id, "key is pending deletion; rotation state unknown, not serialized", kind="omitted_resource")
@@ -722,8 +759,7 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
             else:
                 trail_args[tf_arg] = False
         add("aws_cloudtrail", CLOUDTRAIL, trail.trail_arn, trail_args)
-        for attribute, reason in UNMODELED["aws_cloudtrail"].items():
-            omitted_field(CLOUDTRAIL, trail.trail_arn, attribute, reason)
+        unmodeled("aws_cloudtrail", CLOUDTRAIL, trail.trail_arn)
         report_fields(CLOUDTRAIL, trail.trail_arn, trail, {"trail_arn", "is_enabled", "is_multi_region", "has_log_file_validation"})
     elif trail.is_enabled or trail.is_multi_region or trail.has_log_file_validation:
         lose(CLOUDTRAIL, "none", "CloudTrail state is recorded without a logging trail ARN; not serialized", kind="omitted_resource")

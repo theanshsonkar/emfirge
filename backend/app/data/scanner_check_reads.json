@@ -1,0 +1,456 @@
+[
+  {
+    "check_id": "CKV_AWS_35",
+    "tf_type": "aws_cloudtrail",
+    "reads": [
+      "kms_key_id"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/CloudtrailEncryptionWithCMK.py"
+  },
+  {
+    "check_id": "CKV_AWS_67",
+    "tf_type": "aws_cloudtrail",
+    "reads": [
+      "is_multi_region_trail"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/CloudtrailMultiRegion.py"
+  },
+  {
+    "check_id": "CKV_AWS_251",
+    "tf_type": "aws_cloudtrail",
+    "reads": [
+      "enable_logging"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/CloudtrailEnableLogging.py"
+  },
+  {
+    "check_id": "CKV_AWS_252",
+    "tf_type": "aws_cloudtrail",
+    "reads": [
+      "sns_topic_name"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/CloudtrailDefinesSNSTopic.py"
+  },
+  {
+    "check_id": "CKV2_AWS_10",
+    "tf_type": "aws_cloudtrail",
+    "reads": [
+      "cloud_watch_logs_group_arn"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/CloudtrailHasCloudwatch.json"
+  },
+  {
+    "check_id": "CKV_AWS_17",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "publicly_accessible"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/RDSPubliclyAccessible.py"
+  },
+  {
+    "check_id": "CKV_AWS_211",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "ca_cert_identifier"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/RDSCACertIsRecent.py"
+  },
+  {
+    "check_id": "CKV_AWS_250",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "engine",
+      "engine_version"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/RDSPostgreSQLLogFDWExtension.py"
+  },
+  {
+    "check_id": "CKV_AWS_353",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "performance_insights_enabled",
+      "engine",
+      "instance_class"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/RDSInstancePerformanceInsights.py"
+  },
+  {
+    "check_id": "CKV_AWS_354",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "performance_insights_enabled",
+      "performance_insights_kms_key_id"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/RDSInstancePerfInsightsEncryptionWithCMK.py"
+  },
+  {
+    "check_id": "CKV_AWS_388",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "engine",
+      "engine_version"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/UnpatchedAuroraPostgresDB.py"
+  },
+  {
+    "check_id": "CKV2_AWS_30",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "aws_db_parameter_group"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/PostgresDBHasQueryLoggingEnabled.json"
+  },
+  {
+    "check_id": "CKV2_AWS_60",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "copy_tags_to_snapshot",
+      "engine"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/RDSEnableCopyTagsToSnapshot.json"
+  },
+  {
+    "check_id": "CKV2_AWS_69",
+    "tf_type": "aws_db_instance",
+    "reads": [
+      "aws_db_parameter_group"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/RDSEncryptionInTransit.json"
+  },
+  {
+    "check_id": "CKV_AWS_135",
+    "tf_type": "aws_instance",
+    "reads": [
+      "ebs_optimized"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/EC2EBSOptimized.py"
+  },
+  {
+    "check_id": "CKV_AWS_8",
+    "tf_type": "aws_instance",
+    "reads": [
+      "root_block_device",
+      "ebs_block_device"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/LaunchConfigurationEBSEncryption.py"
+  },
+  {
+    "check_id": "CKV_AWS_88",
+    "tf_type": "aws_instance",
+    "reads": [
+      "associate_public_ip_address"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/EC2PublicIP.py"
+  },
+  {
+    "check_id": "CKV_AWS_46",
+    "tf_type": "aws_instance",
+    "reads": [
+      "user_data"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/EC2Credentials.py"
+  },
+  {
+    "check_id": "CKV_AWS_23",
+    "tf_type": "aws_security_group",
+    "reads": [
+      "description"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/SecurityGroupRuleDescription.py"
+  },
+  {
+    "check_id": "CKV_AWS_260",
+    "tf_type": "aws_security_group",
+    "reads": [
+      "ingress"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/SecurityGroupUnrestrictedIngress80.py"
+  },
+  {
+    "check_id": "CKV_AWS_382",
+    "tf_type": "aws_security_group",
+    "reads": [
+      "egress"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/SecurityGroupUnrestrictedEgressAny.py"
+  },
+  {
+    "check_id": "CKV_AWS_18",
+    "tf_type": "aws_s3_bucket",
+    "reads": [
+      "logging",
+      "aws_s3_bucket_logging"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/S3BucketLogging.json"
+  },
+  {
+    "check_id": "CKV_AWS_19",
+    "tf_type": "aws_s3_bucket",
+    "reads": [
+      "aws_s3_bucket_server_side_encryption_configuration"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/S3BucketEncryption.json"
+  },
+  {
+    "check_id": "CKV_AWS_20",
+    "tf_type": "aws_s3_bucket",
+    "reads": [
+      "acl",
+      "aws_s3_bucket_acl"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/S3PublicACLRead.json"
+  },
+  {
+    "check_id": "CKV_AWS_57",
+    "tf_type": "aws_s3_bucket",
+    "reads": [
+      "acl",
+      "aws_s3_bucket_acl"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/S3PublicACLWrite.json"
+  },
+  {
+    "check_id": "CKV_AWS_143",
+    "tf_type": "aws_s3_bucket",
+    "reads": [
+      "object_lock_configuration"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/S3BucketObjectLock.py"
+  },
+  {
+    "check_id": "CKV_AWS_144",
+    "tf_type": "aws_s3_bucket",
+    "reads": [
+      "replication_configuration",
+      "aws_s3_bucket_replication_configuration"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/S3BucketReplicationConfiguration.json"
+  },
+  {
+    "check_id": "CKV2_AWS_6",
+    "tf_type": "aws_s3_bucket",
+    "reads": [
+      "aws_s3_bucket_public_access_block"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/S3BucketHasPublicAccessBlock.json"
+  },
+  {
+    "check_id": "CKV2_AWS_61",
+    "tf_type": "aws_s3_bucket",
+    "reads": [
+      "lifecycle_rule",
+      "aws_s3_bucket_lifecycle_configuration"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/S3BucketLifecycle.json"
+  },
+  {
+    "check_id": "CKV2_AWS_62",
+    "tf_type": "aws_s3_bucket",
+    "reads": [
+      "aws_s3_bucket_notification"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/S3BucketEventNotifications.json"
+  },
+  {
+    "check_id": "CKV2_AWS_64",
+    "tf_type": "aws_kms_key",
+    "reads": [
+      "policy",
+      "aws_kms_key_policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/KmsKeyPolicyIsDefined.json"
+  },
+  {
+    "check_id": "CKV_AWS_45",
+    "tf_type": "aws_lambda_function",
+    "reads": [
+      "environment"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/LambdaEnvironmentCredentials.py"
+  },
+  {
+    "check_id": "CKV_AWS_50",
+    "tf_type": "aws_lambda_function",
+    "reads": [
+      "tracing_config"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/LambdaXrayEnabled.py"
+  },
+  {
+    "check_id": "CKV_AWS_115",
+    "tf_type": "aws_lambda_function",
+    "reads": [
+      "reserved_concurrent_executions"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/LambdaFunctionLevelConcurrentExecutionLimit.py"
+  },
+  {
+    "check_id": "CKV_AWS_116",
+    "tf_type": "aws_lambda_function",
+    "reads": [
+      "dead_letter_config"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/LambdaDLQConfigured.py"
+  },
+  {
+    "check_id": "CKV_AWS_173",
+    "tf_type": "aws_lambda_function",
+    "reads": [
+      "environment",
+      "kms_key_arn"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/LambdaEnvironmentEncryptionSettings.py"
+  },
+  {
+    "check_id": "CKV_AWS_272",
+    "tf_type": "aws_lambda_function",
+    "reads": [
+      "code_signing_config_arn"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/LambdaCodeSigningConfigured.py"
+  },
+  {
+    "check_id": "CKV_AWS_363",
+    "tf_type": "aws_lambda_function",
+    "reads": [
+      "runtime"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/DeprecatedLambdaRuntime.py"
+  },
+  {
+    "check_id": "CKV2_AWS_75",
+    "tf_type": "aws_lambda_function",
+    "reads": [
+      "aws_lambda_function_url"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/LambdaOpenCorsPolicy.json"
+  },
+  {
+    "check_id": "CKV_AWS_60",
+    "tf_type": "aws_iam_role",
+    "reads": [
+      "assume_role_policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/IAMRoleAllowsPublicAssume.py"
+  },
+  {
+    "check_id": "CKV_AWS_61",
+    "tf_type": "aws_iam_role",
+    "reads": [
+      "assume_role_policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/IAMRoleAllowAssumeFromAccount.py"
+  },
+  {
+    "check_id": "CKV_AWS_274",
+    "tf_type": "aws_iam_role",
+    "reads": [
+      "managed_policy_arns"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/IAMManagedAdminPolicy.py"
+  },
+  {
+    "check_id": "CKV_AWS_393",
+    "tf_type": "aws_iam_role",
+    "reads": [
+      "assume_role_policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/GithubActionsOIDCTrustPolicyOnRole.py"
+  },
+  {
+    "check_id": "CKV2_AWS_56",
+    "tf_type": "aws_iam_role",
+    "reads": [
+      "managed_policy_arns"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/IAMManagedIAMFullAccessPolicy.json"
+  },
+  {
+    "check_id": "CKV_AWS_62",
+    "tf_type": "aws_iam_role_policy",
+    "reads": [
+      "policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/IAMAdminPolicyDocument.py"
+  },
+  {
+    "check_id": "CKV_AWS_63",
+    "tf_type": "aws_iam_role_policy",
+    "reads": [
+      "policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/IAMStarActionPolicyDocument.py"
+  },
+  {
+    "check_id": "CKV_AWS_355",
+    "tf_type": "aws_iam_role_policy",
+    "reads": [
+      "policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/IAMStarResourcePolicyDocument.py"
+  },
+  {
+    "check_id": "CKV_AWS_286",
+    "tf_type": "aws_iam_role_policy",
+    "reads": [
+      "policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/IAMPrivilegeEscalation.py"
+  },
+  {
+    "check_id": "CKV_AWS_287",
+    "tf_type": "aws_iam_role_policy",
+    "reads": [
+      "policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/IAMCredentialsExposure.py"
+  },
+  {
+    "check_id": "CKV_AWS_288",
+    "tf_type": "aws_iam_role_policy",
+    "reads": [
+      "policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/IAMDataExfiltration.py"
+  },
+  {
+    "check_id": "CKV_AWS_289",
+    "tf_type": "aws_iam_role_policy",
+    "reads": [
+      "policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/IAMPermissionsManagement.py"
+  },
+  {
+    "check_id": "CKV_AWS_290",
+    "tf_type": "aws_iam_role_policy",
+    "reads": [
+      "policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/IAMWriteAccess.py"
+  },
+  {
+    "check_id": "CKV2_AWS_40",
+    "tf_type": "aws_iam_role_policy",
+    "reads": [
+      "policy"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/IAMPolicyNotAllowFullIAMAccess.json"
+  },
+  {
+    "check_id": "CKV2_AWS_12",
+    "tf_type": "aws_vpc",
+    "reads": [
+      "aws_default_security_group"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/graph_checks/aws/VPCHasRestrictedSG.json"
+  },
+  {
+    "check_id": "CKV_AWS_130",
+    "tf_type": "aws_subnet",
+    "reads": [
+      "map_public_ip_on_launch"
+    ],
+    "source": "checkov 3.3.19 checkov/terraform/checks/resource/aws/SubnetPublicIP.py"
+  }
+]

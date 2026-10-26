@@ -24,7 +24,9 @@ from pydantic import BaseModel, Field
 from app.models import AWSInfrastructure
 import json as _json
 
-from app.serializer import attribute_fields, build_terraform, loss_summary  # noqa: F401 (loss_summary re-exported)
+from app.serializer import (  # noqa: F401 (loss_summary re-exported)
+    attribute_fields, build_terraform, check_read_rows, loss_summary, unmodeled_attributes,
+)
 
 
 class ScannerFinding(BaseModel):
@@ -173,16 +175,25 @@ def _trivy_findings(payload: Any) -> list[ScannerFinding]:
 
 
 def check_reads() -> dict[str, tuple[str, tuple[str, ...]]]:
-    """check_id -> (Terraform type, attributes the check reads), from the crosswalk table."""
-    return {
+    """check_id -> (Terraform type, attributes the check reads).
+
+    The severity crosswalk first; checks it does not list with ``reads`` come
+    from scanner_check_reads.json (read from the Checkov check source, no severities).
+    """
+    table = {
+        str(row["check_id"]): (str(row["tf_type"]), tuple(row["reads"]))
+        for row in check_read_rows()
+    }
+    table.update({
         check_id: (str(row["tf_type"]), tuple(row["reads"]))
         for check_id, row in _crosswalk_rows().items()
         if isinstance(row.get("reads"), list) and row.get("tf_type")
-    }
+    })
+    return table
 
 
 def skip_unknown_input(result: "ScanResult", loss: list[dict[str, Any]]) -> "ScanResult":
-    """Drop findings whose checked attribute was omitted as not collected.
+    """Drop findings whose checked attribute was omitted as not collected or is not modeled.
 
     A check that reads an attribute the serializer left out fires on the
     missing value, not on the resource.  Such a finding is removed and listed
@@ -203,9 +214,11 @@ def skip_unknown_input(result: "ScanResult", loss: list[dict[str, Any]]) -> "Sca
         if mapped is not None and read is not None:
             tf_type, attributes = read
             carried = attribute_fields(tf_type)
+            unmodeled = unmodeled_attributes(tf_type)
+            recorded = omitted.get((mapped["resource_type"], mapped["id"]), set())
             unknown = sorted(
                 attribute for attribute in attributes
-                if omitted.get((mapped["resource_type"], mapped["id"]), set()) & set(carried.get(attribute, ()))
+                if recorded & set(carried.get(attribute, ())) or (attribute in unmodeled and attribute in recorded)
             )
             if unknown:
                 skipped.append({
