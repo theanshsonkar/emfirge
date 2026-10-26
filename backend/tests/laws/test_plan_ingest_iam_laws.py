@@ -196,3 +196,17 @@ def test_every_emitted_iam_change_applies_cleanly_in_order():
     result, branch = apply_all(plan(role(), inline, attach))
     assert len(role_policy(branch, "r").access_statements) == 2
     assert result["unmodeled"] == []
+
+
+def test_collection_and_identity_cover_every_emitted_change_type():
+    from app.mutations import _collection, _identity
+    inline = resource("aws_iam_role_policy", "p", {"name": "p", "role": "r", "policy": S3_READ})
+    profile = resource("aws_iam_instance_profile", "prof", {"name": "prof", "path": "/", "role": "r"}, unknown={"arn": True})
+    result = translate_plan(plan(role(), user(), inline, profile))
+    branch = AWSInfrastructure(region="us-east-1")
+    for change in result["changes"]:
+        for item in _collection(branch, change.resource_type):
+            _identity(change.resource_type, item)
+        branch = apply_change(branch, change)
+    modify = next(c for c in result["changes"] if c.resource_type == "iam_role_policy")
+    assert [_identity("iam_role_policy", i) for i in _collection(branch, "iam_role_policy")] == [modify.resource_id]

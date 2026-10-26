@@ -494,8 +494,10 @@ def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
         return infra.s3.buckets
     if resource_type == "network_acl":
         return infra.vpc.nacls
-    if resource_type == "iam_role":
+    if resource_type in {"iam_role", "iam_role_policy"}:
         return infra.iam.role_policies
+    if resource_type == "iam_instance_profile":
+        return []  # profiles are a mapping on infra.iam, not a model collection
     if resource_type == "iam_user":
         return infra.iam.iam_users
     if resource_type == "nat_gateway":
@@ -508,7 +510,7 @@ def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
 def _identity(resource_type: str, resource: BaseModel) -> str:
     if resource_type in {"s3_bucket", "lambda_function"}:
         return resource.name
-    if resource_type == "iam_role":
+    if resource_type in {"iam_role", "iam_role_policy"}:
         return resource.role_arn
     if resource_type == "iam_user":
         return resource.username
