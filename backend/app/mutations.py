@@ -557,6 +557,25 @@ def _sync_s3_public_buckets(infra: AWSInfrastructure) -> None:
     infra.s3.public_buckets = [bucket.name for bucket in infra.s3.buckets if bucket.is_public]
 
 
+_S3_SUMMARY_FIELDS = ("encrypted", "versioning_enabled", "logging_enabled")
+
+
+def _sync_s3_summaries(infra: AWSInfrastructure, name: str) -> None:
+    """Keep the collector's per-setting bucket lists aligned with the bucket models.
+
+    Only a known value (True/False) moves a bucket; None (not collected / unknown) leaves the lists alone."""
+    for bucket in (b for b in infra.s3.buckets if b.name == name):
+        for value, listing, bad in ((bucket.encrypted, infra.s3.unencrypted_buckets, False),
+                                    (bucket.versioning_enabled, infra.s3.buckets_without_versioning, False),
+                                    (bucket.logging_enabled, infra.s3.buckets_without_logging, False)):
+            if value is None:
+                continue
+            if value == bad:
+                _append_unique(listing, bucket.name)
+            else:
+                _remove_value(listing, bucket.name)
+
+
 _S3_PUBLIC_INPUTS = frozenset({"policy", "acl_public", "ignore_public_acls", "restrict_public_buckets", "block_public_policy"})
 
 
@@ -1221,6 +1240,7 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
             return recompute_derived_state(result)
 
     model_type = _model_for(resource_type)
+    s3_changed = set(_S3_SUMMARY_FIELDS) & set(change.fields) if change.op == "add" else set()
 
     if change.op == "add":
         if resource_type == "rds_snapshot":
@@ -1264,12 +1284,15 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         collection[index] = model_type.model_validate(updated_data)
         if resource_type == "s3_bucket":
             _recompute_s3_public(target, collection[index], change)
+            s3_changed = {f for f in _S3_SUMMARY_FIELDS if f in change.fields and getattr(target, f) != change.fields[f]}
     else:
         _delete(result, resource_type, change.resource_id)
 
     _sync_counts(result)
     if resource_type == "s3_bucket":
         _sync_s3_public_buckets(result)
+        if change.op != "delete" and s3_changed:
+            _sync_s3_summaries(result, change.resource_id or result.s3.buckets[-1].name)
     return recompute_derived_state(
         result,
         reconcile_security_group_attachments=resource_type in {"ec2_instance", "security_group"}

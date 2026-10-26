@@ -560,9 +560,6 @@ class IamModel:
         states: dict[tuple[str, str], dict | None] = {}
         claimed: set[str] = set()
 
-        def tag(item: dict) -> dict:
-            return {**item, "_iam_seq": len(out)}
-
         for contrib in self.contribs:
             item, principal = contrib["item"], contrib["principal"]
             address = item.get("address", "")
@@ -571,7 +568,7 @@ class IamModel:
                     unmodeled.append(self._unmodeled(item, f"the user {principal[1]} is not in the snapshot or created by this plan"))
                     continue
                 change = Change(op="modify", resource_type="iam_user", resource_id=principal[1], fields={contrib["key"]: True})
-                out.append((change, address, tag(item)))
+                out.append((change, address, item))
                 continue
             if principal not in states:
                 states[principal] = self._initial_state(principal)
@@ -602,11 +599,11 @@ class IamModel:
                     unknown.append({"address": address, "field": "policy", "reason": "no_matching_policy"})
                     continue
             change = self._change(principal, state)
-            out.append((change, address, tag(item)))
+            out.append((change, address, item))
             entry = contrib["policy_entry"]
             if entry is not None and entry["address"] not in claimed:
                 claimed.add(entry["address"])
-                out.append((change.model_copy(deep=True), entry["address"], tag(entry["item"])))
+                out.append((change.model_copy(deep=True), entry["address"], entry["item"]))
         return out
 
     def _user_exists(self, name: str) -> bool:

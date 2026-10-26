@@ -77,6 +77,7 @@ class S3Bucket(BaseModel):
     ignore_public_acls: Optional[bool] = None
     block_public_policy: Optional[bool] = None
     restrict_public_buckets: Optional[bool] = None
+    logging_enabled: Optional[bool] = Field(default=None, exclude_if=lambda value: value is None)  # server access logging; None = not collected
     tags: Optional[Dict[str, str]] = None  # None = not collected
 
 class RDSInstance(BaseModel):

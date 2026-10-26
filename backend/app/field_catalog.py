@@ -98,6 +98,7 @@ CATALOG: dict[str, dict[str, Source]] = {
         "ignore_public_acls": Aws("s3", "PutPublicAccessBlock", "PublicAccessBlockConfiguration.IgnorePublicAcls"),
         "block_public_policy": Aws("s3", "PutPublicAccessBlock", "PublicAccessBlockConfiguration.BlockPublicPolicy"),
         "restrict_public_buckets": Aws("s3", "PutPublicAccessBlock", "PublicAccessBlockConfiguration.RestrictPublicBuckets"),
+        "logging_enabled": Normalized("PutBucketLogging", "true when server access logging is configured"),
         "tags": _TAGS,
     },
     "lambda_function": {

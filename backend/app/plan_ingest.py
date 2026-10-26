@@ -7,6 +7,7 @@ import json
 
 from app.mutations import Change
 from app.aws_api_ingest import remove_security_group_rule
+from app.plan_ingest_s3 import S3_SEPARATE_TYPES, S3Model, inline_fields as s3_inline_fields, order_key as s3_order_key
 from app.plan_ingest_iam import IAM_POLICY_TYPES, IamModel, iam_context, identity_arn
 
 _AWS_PROVIDER_TYPES = {"aws", "awscc"}
@@ -401,7 +402,7 @@ def _nacl_changes(item: dict, nacls: dict[str, Any], config_resources: dict[str,
     return [], None
 
 
-def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[str, Any] | None = None, config_resources: dict[str, dict] | None = None, created_ids: dict[str, str] | None = None, nacls: dict[str, Any] | None = None, acl_counter: list[int] | None = None, iam: IamModel | None = None, unmodeled_sink: list[dict] | None = None) -> tuple[list[Change], dict | None]:
+def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[str, Any] | None = None, config_resources: dict[str, dict] | None = None, created_ids: dict[str, str] | None = None, nacls: dict[str, Any] | None = None, acl_counter: list[int] | None = None, iam: IamModel | None = None, s3: S3Model | None = None, unmodeled_sink: list[dict] | None = None) -> tuple[list[Change], dict | None]:
     if item.get("mode", "managed") != "managed":
         return [], None
     address = item.get("address", "")
@@ -447,6 +448,8 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         if unmodeled_sink is not None:
             unmodeled_sink.extend(sink[1:])
         return [], (sink[0] if sink else None)
+    if typ in S3_SEPARATE_TYPES and s3 is not None:
+        return s3.separate(item, unknown_fields)
     if typ == "aws_iam_instance_profile" and iam is not None:
         return iam.profile_change(item, unknown_fields)
     if typ not in _RESOURCE_MAP:
@@ -471,7 +474,10 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         result.append(Change(op="delete", resource_type=resource, resource_id=str(resource_id or ""), fields=options))
     if actions == ["create"] or actions in (["delete", "create"], ["create", "delete"]):
         fields = _fields(typ, change, address, unknown_fields)
-        if resource in {"lambda_function", "s3_bucket", "ebs_snapshot"}:
+        if resource == "s3_bucket":
+            fields = {key: value for key, value in fields.items() if key == "tags"}
+            fields.update(s3_inline_fields(item, unknown_fields))
+        elif resource in {"lambda_function", "ebs_snapshot"}:
             fields = {key: value for key, value in fields.items() if key == "tags"}
         elif resource in {"nat_gateway", "ebs_volume"}:
             fields = {key: value for key, value in fields.items() if value is not None}
@@ -533,6 +539,7 @@ def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dic
     }
     created_ids = {}
     acl_counter = [0]
+    s3 = S3Model(plan)
     iam = IamModel(plan, iam_context(plan, iam_roles), iam_roles, iam_users, instance_profiles)
     for resource in plan["resource_changes"]:
         if isinstance(resource, dict) and resource.get("type") == "aws_security_group":
@@ -553,14 +560,19 @@ def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dic
             raise ValueError("Terraform plan change actions must be a non-empty list of strings")
         changes, unsupported = _translate_item(item, unknown_fields, sg_rules=sg_rules,
                                                  config_resources=config_resources, created_ids=created_ids,
-                                                 nacls=nacls, acl_counter=acl_counter, iam=iam, unmodeled_sink=unmodeled)
+                                                 nacls=nacls, acl_counter=acl_counter, iam=iam, s3=s3, unmodeled_sink=unmodeled)
         if unsupported:
             unmodeled.append(unsupported)
         for change in changes:
             target = deletes if change.op == "delete" else modifies if change.op == "modify" else adds
-            target.append((change, item.get("address", ""), item))
-    for change, address, source in iam.finalize(unknown_fields, unmodeled):
-        modifies.append((change, address, source))
+            late_item = {**item, "_late": True} if (item.get("type") in S3_SEPARATE_TYPES and change.op == "modify") else item
+            target.append((change, item.get("address", ""), late_item))
+    # Settings that land on a resource created in the same plan, and permissions, are applied last, in this order.
+    late = sorted((entry for entry in modifies if entry[2].get("_late") is True), key=lambda entry: s3_order_key(entry[0]))
+    modifies = [entry for entry in modifies if entry[2].get("_late") is not True]
+    late += [(c, a, i) for c, a, i in iam.finalize(unknown_fields, unmodeled)]
+    late = [(c, a, {**i, "_late_seq": n}) for n, (c, a, i) in enumerate(late)]
+    modifies.extend(late)
     sg_delete = {c.resource_id: (c, a, i) for c, a, i in deletes if c.resource_type == "security_group"}
     ordered_sg: list[tuple[Change, str, dict]] = []
     remaining = dict(sg_delete)
@@ -579,10 +591,10 @@ def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dic
         modifies + adds,
         key=lambda item: (
             0 if item[0].op == "add" and item[0].resource_type == "security_group" else
-            3 if item[2].get("_iam_seq") is not None else
+            3 if item[2].get("_late_seq") is not None else
             1 if item[0].op == "modify" else 2,
             # permission changes keep their emission order: each carries the complete list so far
-            f"{item[2]['_iam_seq']:09d}" if item[2].get("_iam_seq") is not None else item[1],
+            f"{item[2]['_late_seq']:09d}" if item[2].get("_late_seq") is not None else item[1],
         ),
     )
     return {"changes": [c for c, _, _ in ordered], "addresses": [a for _, a, _ in ordered],

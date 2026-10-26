@@ -119,6 +119,7 @@ FIELD_MAP: dict[str, dict[str, tuple]] = {
         "ignore_public_acls": ("emit", "aws_s3_bucket_public_access_block", True),
         "block_public_policy": ("emit", "aws_s3_bucket_public_access_block", True),
         "restrict_public_buckets": ("emit", "aws_s3_bucket_public_access_block", True),
+        "logging_enabled": ("loss", "the logging target bucket is not modeled; only the on/off flag is kept"),
         "tags": ("emit", "tags", True),
     },
     RDS_INSTANCE: {
