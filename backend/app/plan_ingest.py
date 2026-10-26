@@ -7,6 +7,7 @@ import json
 
 from app.mutations import Change
 from app.aws_api_ingest import remove_security_group_rule
+from app.plan_ingest_compute import instance_fields, lambda_fields
 from app.plan_ingest_s3 import S3_SEPARATE_TYPES, S3Model, inline_fields as s3_inline_fields, order_key as s3_order_key
 from app.plan_ingest_iam import IAM_POLICY_TYPES, IamModel, iam_context, identity_arn
 
@@ -243,10 +244,6 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
     if resource == "aws_iam_user":
         return fields
     if resource == "aws_instance":
-        if "metadata_options" in after and not update and not _unknown(change, address, "metadata_options", unknown):
-            metadata = after.get("metadata_options") or {}
-            if "http_tokens" in metadata and not _unknown(change, address, "metadata_options.http_tokens", unknown):
-                fields["imdsv2_required"] = metadata.get("http_tokens") == "required"
         if not update:
             fields.setdefault("state", "running")
     return fields
@@ -477,6 +474,9 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         if resource == "s3_bucket":
             fields = {key: value for key, value in fields.items() if key == "tags"}
             fields.update(s3_inline_fields(item, unknown_fields))
+        elif resource == "lambda_function" and iam is not None:
+            fields = {key: value for key, value in fields.items() if key == "tags"}
+            fields.update(lambda_fields(item, iam, unknown_fields))
         elif resource in {"lambda_function", "ebs_snapshot"}:
             fields = {key: value for key, value in fields.items() if key == "tags"}
         elif resource in {"nat_gateway", "ebs_volume"}:
@@ -500,6 +500,7 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
             unknown_fields.extend(notes)
             add_id = role_arn
         if typ == "aws_instance" and iam is not None:
+            fields.update(instance_fields(item, iam.config, unknown_fields))
             profile = iam.profile_arn_for_instance(item, unknown_fields)
             if profile:
                 fields["instance_profile_arn"] = profile

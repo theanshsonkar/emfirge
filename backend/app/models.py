@@ -27,7 +27,8 @@ class EC2Instance(BaseModel):
     sg_ids: List[str] = []
     subnet_id: Optional[str] = None
     state: str
-    imdsv2_required: bool = False
+    imdsv2_required: Optional[bool] = False  # None = unknown (e.g. metadata_options not known at plan time); no IMDS finding
+    user_data_has_secrets: Optional[bool] = Field(default=None, exclude_if=lambda value: value is None)  # raw user data is never stored; None = not known
     has_public_ip: Optional[bool] = None
     instance_profile_arn: Optional[str] = None
     detailed_monitoring: Optional[bool] = None  # None = not collected

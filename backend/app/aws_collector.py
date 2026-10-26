@@ -1041,6 +1041,17 @@ def _parse_role_trust_policy(document, role_arn):
 
     return trusted_role_arns, trusted_services, trust_allows_external, trust_has_conditions
 
+def lambda_secret_refs(env_vars: dict) -> list:
+    """Secret-looking variable names and Secrets Manager ARNs in a Lambda's environment."""
+    secret_refs = []
+    for k, value in (env_vars or {}).items():
+        if any(word in k.upper() for word in ['SECRET', 'PASSWORD', 'TOKEN', 'API_KEY', 'CREDENTIAL']):
+            secret_refs.append(f"env:{k}")
+        elif isinstance(value, str) and value.startswith('arn:aws:secretsmanager'):
+            secret_id = value.split(':')[-1]
+            secret_refs.append(secret_id)
+    return secret_refs
+
 def collect_iam(key, secret, token, region, warnings) -> IAMData:
     root_has_keys = False
     users_without_mfa = []
@@ -1688,14 +1699,7 @@ def collect_lambda(key, secret, token, region, warnings) -> LambdaData:
                     functions_with_no_timeout.append(fn_name)
 
                 # Add to relationship tracking
-                secret_refs = []
-                env_vars = fn.get('Environment', {}).get('Variables', {})
-                for k, value in env_vars.items():
-                    if any(word in k.upper() for word in ['SECRET', 'PASSWORD', 'TOKEN', 'API_KEY', 'CREDENTIAL']):
-                        secret_refs.append(f"env:{k}")
-                    elif isinstance(value, str) and value.startswith('arn:aws:secretsmanager'):
-                        secret_id = value.split(':')[-1]
-                        secret_refs.append(secret_id)
+                secret_refs = lambda_secret_refs(fn.get('Environment', {}).get('Variables', {}))
 
                 functions.append({
                     'name': fn_name,

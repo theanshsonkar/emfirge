@@ -208,6 +208,7 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
             if field == "state" and value in {"stopped", "running"}: result.append(call("ec2", "StopInstances" if value == "stopped" else "StartInstances", {"InstanceIds": [ident]}))
             elif field == "sg_ids": result.append(call("ec2", "ModifyInstanceAttribute", {"InstanceId": ident, "Groups": value}))
             elif field == "type": result.append(call("ec2", "ModifyInstanceAttribute", {"InstanceId": ident, "InstanceType": {"Value": value}}))
+            elif field == "imdsv2_required" and value is None: err("field_not_mapped: imdsv2_required is unknown")
             elif field == "imdsv2_required": result.append(call("ec2", "ModifyInstanceMetadataOptions", {"InstanceId": ident, "HttpTokens": "required" if value else "optional"}))
             elif field == "instance_profile_arn" and value and not _resource(before, typ, ident).instance_profile_arn:
                 result.append(call("ec2", "AssociateIamInstanceProfile", {"InstanceId": ident, "IamInstanceProfile": {"Arn": value}}))

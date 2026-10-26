@@ -56,6 +56,7 @@ CATALOG: dict[str, dict[str, Source]] = {
         "sg_ids": Aws("ec2", "RunInstances", "SecurityGroupIds"),
         "state": Aws("ec2", "", "", shape="InstanceStateName"),
         "imdsv2_required": Normalized("RunInstances / ModifyInstanceMetadataOptions MetadataOptions.HttpTokens", "true when HttpTokens is required"),
+        "user_data_has_secrets": Normalized("RunInstances UserData", "true when the user data holds a literal secret; the user data itself is never stored"),
         "has_public_ip": Normalized("RunInstances NetworkInterfaces[].AssociatePublicIpAddress"),
         "instance_profile_arn": Aws("ec2", "RunInstances", "IamInstanceProfile.Arn"),
         "detailed_monitoring": Aws("ec2", "RunInstances", "Monitoring.Enabled"),

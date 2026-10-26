@@ -72,7 +72,7 @@ def iam_context(plan: dict, iam_roles: Any) -> dict[str, Any]:
 
 def _is_unknown(after_unknown: Any, field: str) -> bool:
     if isinstance(after_unknown, dict):
-        return bool(after_unknown.get(field))
+        return after_unknown.get(field) is True  # a list/dict value is a partly known block, not an unknown one
     return isinstance(after_unknown, list) and field in after_unknown
 
 

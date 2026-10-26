@@ -89,7 +89,8 @@ FIELD_MAP: dict[str, dict[str, tuple]] = {
         "sg_ids": ("emit", "vpc_security_group_ids", False),
         "subnet_id": ("emit", "subnet_id", False),
         "state": ("loss", "instance state has no Terraform equivalent"),
-        "imdsv2_required": ("emit", "metadata_options", False),
+        "imdsv2_required": ("emit", "metadata_options", True),
+        "user_data_has_secrets": ("loss", "raw user data is never stored, only whether it holds a secret"),
         "has_public_ip": ("emit", "associate_public_ip_address", True),
         # None means no profile attached or not collected (the collector cannot tell them apart), so it is not reported.
         "instance_profile_arn": ("emit", "iam_instance_profile", False),
@@ -509,7 +510,8 @@ def build_terraform(infra: AWSInfrastructure) -> TerraformOutput:
             emitted.add("sg_ids")
         if instance.imdsv2_required:
             args["metadata_options"] = [{"http_tokens": "required"}]
-        emitted.add("imdsv2_required")
+        if instance.imdsv2_required is not None:
+            emitted.add("imdsv2_required")  # None stays unreported-as-emitted: reported as unknown below
         if instance.has_public_ip is not None:
             args["associate_public_ip_address"] = instance.has_public_ip
             emitted.add("has_public_ip")
