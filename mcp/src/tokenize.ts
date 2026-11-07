@@ -340,6 +340,8 @@ const NEVER_SENSITIVE_PATTERNS = [
   /^(?:instance|security[-_ ]?group|subnet|vpc|bucket|role|user|policy|function|database|volume|network[-_ ]?interface|route[-_ ]?table)$/i,
   /^(?:\d{1,5})$/,
   /^(?:\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/,
+  // IPv6 CIDR ("::/0"): a range, like the IPv4 one above, not a host identifier
+  /^(?=[0-9a-f:]*:)[0-9a-f:]+\/\d{1,3}$/i,
 ];
 
 function isNeverSensitive(value: string, key = ""): boolean {
@@ -386,6 +388,7 @@ const IDENTIFIER_KEYS = new Set([
   "attack_path",
   "path",
   "resource_ids",
+  "recovery_resource_ids",
   "from",
   "to",
   "resources",

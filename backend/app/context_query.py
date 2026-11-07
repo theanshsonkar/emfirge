@@ -80,11 +80,14 @@ class SourceInfo(_Strict):
 class KnownItem(_Strict):
     topic: str
     detail: str
+    # the resource a note is about; never put an id or name inside topic/detail
+    resource_id: Optional[str] = None
 
 
 class UnknownItem(_Strict):
     topic: str
     reason: str
+    resource_id: Optional[str] = None
 
 
 class InventoryFact(_Strict):
@@ -264,7 +267,7 @@ class _Ctx:
     nodes: dict[str, Any]
 
 
-_Result = tuple[list[Any], list[tuple[str, str]], list[tuple[str, str]]]
+_Result = tuple[list[Any], list[tuple[str, ...]], list[tuple[str, ...]]]
 
 # What no snapshot can show, per question. Provider-neutral wording.
 _FIXED_UNKNOWN: dict[str, tuple[tuple[str, str], ...]] = {
@@ -389,7 +392,7 @@ def _cost(ctx: _Ctx) -> _Result:
     facts = [CostFact(resource_id=l.resource_id, resource_type=l.resource_type,
                       monthly_usd=l.monthly_usd, basis=l.basis) for l in lines]
     facts.sort(key=lambda f: (f.resource_type, f.resource_id))
-    unknown = [(f"cost:{l.resource_id}", l.unknown_reason or "price is not available")
+    unknown = [("cost", l.unknown_reason or "price is not available", l.resource_id)
                for l in lines if l.monthly_usd is None]
     priced = [l.monthly_usd for l in lines if l.monthly_usd is not None]
     known = [("pricing", f"{len(priced)} of {len(lines)} resources priced; known monthly total {sum(priced):.2f} USD")]
@@ -401,7 +404,7 @@ def _live(ctx: _Ctx) -> _Result:
     facts = [LiveFact(resource_id=l.resource_id, used=l.used, last_used_at=l.last_used_at,
                       window_days=l.window_days, basis=l.basis) for l in lines]
     facts.sort(key=lambda f: (f.resource_id, f.basis))
-    unknown = [(l.unknown_topic or f"recent_use:{l.resource_id}", l.unknown_reason)
+    unknown = [(l.unknown_topic or "recent_use", l.unknown_reason, l.resource_id)
                for l in lines if l.unknown_reason]
     known = [("recent_use", f"{len(facts)} resources have a recorded last-used")]
     return facts, known, unknown
@@ -431,9 +434,9 @@ _PER_QUESTION: dict[str, Callable[[_Ctx], _Result]] = {
 }
 
 
-def _coverage(question: str, bundle: FactsBundle) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
-    known: list[tuple[str, str]] = []
-    unknown: list[tuple[str, str]] = []
+def _coverage(question: str, bundle: FactsBundle) -> tuple[list[tuple[str, ...]], list[tuple[str, ...]]]:
+    known: list[tuple[str, ...]] = []
+    unknown: list[tuple[str, ...]] = []
     for source in sorted(set(bundle.needs.get(question, ()))):
         status = bundle.collection.get(source)
         if status == "ok":
@@ -465,8 +468,8 @@ def _baseline(ctx: _Ctx) -> _Result:
     for edge in ctx.graph.edges:
         key = f"relationships:{edge.relationship.value}"
         counts[key] = counts.get(key, 0) + 1
-    known: list[tuple[str, str]] = []
-    unknown: list[tuple[str, str]] = []
+    known: list[tuple[str, ...]] = []
+    unknown: list[tuple[str, ...]] = []
     results: dict[str, _Result] = {}
     for question in ("inventory", "reachable", "access", "data", "cost", "live", "marks"):
         results[question] = _run(question, ctx)
@@ -496,6 +499,12 @@ def _baseline(ctx: _Ctx) -> _Result:
     return facts, known, unknown
 
 
+def _padded(notes: Sequence[tuple[str, ...]]) -> list[tuple[str, str, Optional[str]]]:
+    """Notes are (topic, text) or (topic, text, resource_id); unique and in a stable order."""
+    full = {(n[0], n[1], n[2] if len(n) > 2 else None) for n in notes}
+    return sorted(full, key=lambda n: (n[0], n[1], n[2] or ""))
+
+
 def answer(question: str, graph: Graph, bundle: FactsBundle, resource_id: Optional[str] = None) -> ContextResponse:
     """Answer one question from the snapshot graph and the neutral facts bundle."""
     if question not in QUESTIONS:
@@ -512,6 +521,6 @@ def answer(question: str, graph: Graph, bundle: FactsBundle, resource_id: Option
     facts, known, unknown = _baseline(ctx) if question == "baseline" else _run(question, ctx)
     return ContextResponse(
         question=question, source=bundle.source, facts=facts,
-        known=[KnownItem(topic=t, detail=d) for t, d in sorted(set(known))],
-        unknown=[UnknownItem(topic=t, reason=r) for t, r in sorted(set(unknown))],
+        known=[KnownItem(topic=t, detail=d, resource_id=r) for t, d, r in _padded(known)],
+        unknown=[UnknownItem(topic=t, reason=d, resource_id=r) for t, d, r in _padded(unknown)],
     )

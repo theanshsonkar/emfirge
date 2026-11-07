@@ -22,6 +22,7 @@ import ast
 import copy
 import json
 import random
+import re
 import typing
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -158,8 +159,8 @@ def test_L73a_every_answer_has_known_and_unknown(infra_case):
         assert set(body) == {"question", "source", "facts", "known", "unknown"}
         assert body["known"], (name, question)
         assert body["unknown"], (name, question)
-        assert all(set(k) == {"topic", "detail"} for k in body["known"])
-        assert all(set(u) == {"topic", "reason"} for u in body["unknown"])
+        assert all(set(k) == {"topic", "detail", "resource_id"} for k in body["known"])
+        assert all(set(u) == {"topic", "reason", "resource_id"} for u in body["unknown"])
 
 
 def test_L73a_degraded_collection_sources_are_unknown():
@@ -256,7 +257,7 @@ def test_L73a_marks_always_say_owner_intent_is_unknown(infra_case):
     """L73a: marks always carries the owner_intent unknown (emfirge.md is not built yet)."""
     _, infra = infra_case
     body = _dump(_ask("marks", infra))
-    assert {"topic": "owner_intent",
+    assert {"topic": "owner_intent", "resource_id": None,
             "reason": "emfirge.md is not built yet; only resource tags are shown"} in body["unknown"]
 
 
@@ -394,8 +395,8 @@ def test_L73c_lists_are_sorted():
     body = _dump(_ask("inventory", infra))
     keys = [(f["resource_type"], f["resource_id"]) for f in body["facts"]]
     assert keys == sorted(keys)
-    assert body["unknown"] == sorted(body["unknown"], key=lambda u: (u["topic"], u["reason"]))
-    assert body["known"] == sorted(body["known"], key=lambda k: (k["topic"], k["detail"]))
+    assert body["unknown"] == sorted(body["unknown"], key=lambda u: (u["topic"], u["reason"], u["resource_id"] or ""))
+    assert body["known"] == sorted(body["known"], key=lambda k: (k["topic"], k["detail"], k["resource_id"] or ""))
 
 
 # ── L73d: one truth ───────────────────────────────────────────────
@@ -563,12 +564,12 @@ def test_L73d_cost_equals_cost_estimate():
     for rid, record in priced.items():
         assert facts[rid]["monthly_usd"] == record.monthly_usd, rid
         assert facts[rid]["basis"] == record.basis
-    unknown_topics = {u["topic"]: u["reason"] for u in body["unknown"]}
+    unknown_costs = {u["resource_id"]: u["reason"] for u in body["unknown"] if u["topic"] == "cost"}
     nulls = [f for f in body["facts"] if f["monthly_usd"] is None]
     assert nulls, "fixture must have an unpriced resource (rds / s3)"
     for f in nulls:
-        assert f"cost:{f['resource_id']}" in unknown_topics, f
-        assert unknown_topics[f"cost:{f['resource_id']}"]
+        assert f["resource_id"] in unknown_costs, f
+        assert unknown_costs[f["resource_id"]]
 
 
 def test_L73d_access_escalation_equals_iam_escalation():
@@ -881,6 +882,135 @@ def test_L73h_branch_live_uses_stored_evidence_rows(selfhost_client):
     assert by_id[("i-dl-web", "branch:evidence")]["window_days"] == 14
     assert by_id[("i-dl-web", "branch:evidence")]["last_used_at"] == "2026-10-01T10:00:00Z"
     assert by_id[("db-dl-prod", "branch:evidence")]["used"] is None
-    assert any(u["topic"] == "evidence:db-dl-prod" and "denied" in u["reason"] for u in body["unknown"])
+    assert any(u["topic"] == "evidence" and u["resource_id"] == "db-dl-prod" and "denied" in u["reason"] for u in body["unknown"])
     scan = selfhost_client.post("/context", json={"question": "live", "analysis_id": "bad-scan"}).json()
     assert all(f["basis"] == "scan:last_used" for f in scan["facts"])
+
+
+# ── L73i: no customer identifier in free text ─────────────────────
+# The MCP privacy layer masks friendly names only under known key names; in free
+# text it catches AWS-shaped ids alone. So a /context response may carry a
+# resource id or name ONLY as the whole value of an identifier key.
+
+TOKENIZE_TS = Path(__file__).resolve().parents[3] / "mcp" / "src" / "tokenize.ts"
+# keys under which a response may carry a resource id or name (edges use source/target)
+ID_KEYS = {"resource_id", "node_id", "resource_ids", "node_ids", "path", "source", "target", "name",
+           "recovery_resource_ids"}
+
+PLANTED = {
+    "dl-data-bucket": "zz-planted-bucket-7731",
+    "DlAppRole": "zzPlantedRoleApp7731",
+    "DlWorkerRole": "zzPlantedRoleWorker7731",
+    "DlBatchRole": "zzPlantedRoleBatch7731",
+    "dl-worker": "zz-planted-lambda-worker-7731",
+    "dl-batch": "zz-planted-lambda-batch-7731",
+    "i-dl-web": "zz-planted-instance-7731",
+    "db-dl-prod": "zz-planted-db-prod-7731",
+    "db-dl-reports": "zz-planted-db-reports-7731",
+}
+PLANTED_USER = "zz-planted-user-7731"
+
+
+def _planted_infra():
+    from app.models import AWSInfrastructure
+    text = _delete_base().model_dump_json()
+    for old, new in PLANTED.items():
+        text = text.replace(old, new)
+    infra = AWSInfrastructure.model_validate_json(text)
+    infra.iam.role_policies[0].last_used_at = "not-a-timestamp"  # unreadable: last-used is unknown
+    infra.warnings = [
+        "IAM scan skipped: insufficient permissions",
+        f"S3 scan skipped: unexpected error — User: arn:aws:iam::123456789012:user/{PLANTED_USER} "
+        f"is not authorized to perform s3:ListBucket on resource: {PLANTED['dl-data-bucket']}",
+    ]
+    return infra
+
+
+def _planted_evidence(infra):
+    from app.evidence_models import EvidenceRecord
+    return [EvidenceRecord(resource_id=PLANTED[old], resource_type=rtype, source="cloudwatch_metrics",
+                           status="denied", used=None, window_days=14, observed_at="2026-10-02T00:00:00Z")
+            for old, rtype in (("i-dl-web", "ec2_instance"), ("db-dl-prod", "rds_instance"),
+                               ("dl-data-bucket", "s3_bucket"), ("dl-worker", "lambda_function"))]
+
+
+def _leaks(node, names, known_ids, key="", path="$"):
+    """Every place a planted name is NOT the whole value of an identifier key."""
+    found = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if any(n in k for n in names):
+                found.append(f"{path}: dict key {k!r}")
+            found += _leaks(v, names, known_ids, k, f"{path}.{k}")
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            found += _leaks(v, names, known_ids, key, f"{path}[{i}]")
+    elif isinstance(node, str) and any(n in node for n in names):
+        whole_id = node in known_ids or re.fullmatch(r"arn:aws:\S+", node)  # an ARN is one id; the tokenizer masks it whole
+        if key not in ID_KEYS or not whole_id:
+            found.append(f"{path}: {node!r}")
+    return found
+
+
+def _all_answers(infra, **kw):
+    ids = _ids(infra)
+    for question in QUESTIONS:
+        if question not in NEEDS_ID:
+            yield question, None, _dump(_ask(question, infra, **kw))
+    for question in QUESTIONS:
+        if question == "baseline":
+            continue
+        for rid in ids:
+            yield question, rid, _dump(_ask(question, infra, resource_id=rid, **kw))
+
+
+def test_L73i_identifier_keys_are_masked_by_the_mcp_tokenizer():
+    """L73i: one truth: every key allowed to carry an id is in the MCP tokenizer's key sets."""
+    src = TOKENIZE_TS.read_text()
+    masked = set()
+    for name in ("SENSITIVE_KEYS", "IDENTIFIER_KEYS"):
+        body = re.search(rf"const {name} = new Set\(\[(.*?)\]\)", src, re.S).group(1)
+        masked |= set(re.findall(r'"([^"]+)"', body))
+    assert ID_KEYS <= masked, sorted(ID_KEYS - masked)
+    assert "escalation" not in masked  # pathfinding ids are not customer identifiers
+
+
+def test_L73i_planted_names_only_appear_as_whole_values_of_identifier_keys_on_a_scan():
+    """L73i: scan answers never put a resource id or name inside a topic, detail, reason or tag text."""
+    infra = _planted_infra()
+    names = list(PLANTED.values()) + [PLANTED_USER]
+    known_ids = set(_ids(infra)) | set(names)
+    seen = set()
+    for question, rid, body in _all_answers(infra):
+        assert not _leaks(body, names, known_ids), (question, rid, _leaks(body, names, known_ids))
+        seen.add(json.dumps(body))
+    blob = " ".join(seen)
+    for name in PLANTED.values():
+        assert name in blob  # positive control: the names are really in the answers
+    assert PLANTED_USER not in blob  # an exception text may name a user: it is withheld entirely
+
+
+def test_L73i_planted_names_only_appear_as_whole_values_of_identifier_keys_on_a_branch():
+    """L73i: branch answers (stored evidence rows included) obey the same rule."""
+    infra = _planted_infra()
+    names = list(PLANTED.values()) + [PLANTED_USER]
+    known_ids = set(_ids(infra)) | set(names)
+    kw = dict(branch_id="b" * 8, base_infra=_planted_infra(), evidence=_planted_evidence(infra))
+    for question, rid, body in _all_answers(infra, **kw):
+        assert not _leaks(body, names, known_ids), (question, rid, _leaks(body, names, known_ids))
+
+
+def test_L73i_unknown_and_known_carry_the_id_in_their_own_field():
+    """L73i: an id-specific note says what (generic topic) and which resource (resource_id)."""
+    infra = _planted_infra()
+    kw = dict(branch_id="b" * 8, evidence=_planted_evidence(infra))
+    cost = _dump(_ask("cost", infra))["unknown"]
+    assert any(u["topic"] == "cost" and u["resource_id"] for u in cost)
+    live = _dump(_ask("live", infra, **kw))["unknown"]
+    assert any(u["topic"] == "last_used" and u["resource_id"] for u in live)
+    assert any(u["topic"] == "evidence" and u["resource_id"] == PLANTED["i-dl-web"] for u in live)
+    for question, rid, body in _all_answers(infra, **kw):
+        for item in body["known"] + body["unknown"]:
+            assert set(item) in ({"topic", "detail", "resource_id"}, {"topic", "reason", "resource_id"})
+            assert item["resource_id"] is None or isinstance(item["resource_id"], str)
+            assert ":" not in item["topic"] or item["topic"].split(":", 1)[0] == "tags", item

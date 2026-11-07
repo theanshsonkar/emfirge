@@ -24,6 +24,7 @@ import {
 import { simulateSchema, simulateZodObject, simulateHandler } from "./tools/simulate.js";
 import { policyChecksSchema, policyChecksZodObject, policyChecksHandler } from "./tools/policy-checks.js";
 import { inUseEvidenceSchema, inUseEvidenceZodObject, inUseEvidenceHandler } from "./tools/evidence.js";
+import { contextSchema, contextZodObject, contextHandler, CONTEXT_DESCRIPTION } from "./tools/context.js";
 import { planVerdictSchema, planVerdictZodObject, planVerdictHandler } from "./tools/plan-verdict.js";
 import { branchHandbackSchema, branchHandbackZodObject, branchHandbackHandler } from "./tools/branch-handback.js";
 import {
@@ -269,6 +270,13 @@ export const tools: ToolRegistration[] = [
     schema: policyChecksSchema as Record<string, z.ZodTypeAny>,
     zodObject: policyChecksZodObject as z.ZodObject<z.ZodRawShape>,
     handler: policyChecksHandler,
+  },
+  {
+    name: "emfirge_context",
+    description: CONTEXT_DESCRIPTION,
+    schema: contextSchema as Record<string, z.ZodTypeAny>,
+    zodObject: contextZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: contextHandler,
   },
 ];
 

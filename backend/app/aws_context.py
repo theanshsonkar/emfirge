@@ -15,6 +15,7 @@ already-stored rows; ``in_use_evidence.read_evidence`` is never called.
 """
 from __future__ import annotations
 
+import re
 from typing import Optional, Sequence
 
 from app.context_query import (
@@ -44,6 +45,14 @@ QUESTION_SOURCES: dict[str, tuple[str, ...]] = {
 }
 # Which snapshot source must be readable before "no recovery point" can be said.
 _SNAPSHOT_SOURCE = {"ebs_volume": "ebs_snapshots", "rds_instance": "rds_snapshots"}
+
+
+_ERROR_DETAIL = re.compile(r"(unexpected error)\s*[\u2014-].*", re.S)
+
+
+def _safe_warning(text: str) -> str:
+    """A collector warning minus any exception text, which can name users, roles and buckets."""
+    return _ERROR_DETAIL.sub(r"\1", str(text))
 
 
 def _node_id(graph: Graph, resource_type: str, name: str) -> str:
@@ -110,7 +119,7 @@ def _role_use_lines(infra: AWSInfrastructure, graph: Graph) -> list[UseLine]:
         used = role_recent_use(infra, role, reference)
         topic = reason = None
         if status_ok and used is None:
-            topic = f"last_used:{node_id}"
+            topic = "last_used"
             reason = ("scan has no collected_at to measure the window from" if reference is None
                       else "last-used timestamp could not be read")
         lines.append(UseLine(node_id, used, role.last_used_at if status_ok else None,
@@ -131,7 +140,7 @@ def _evidence_use_lines(graph: Graph, evidence: Sequence[EvidenceRecord]) -> lis
         stamps = [r.last_event_at for r in records if r.last_event_at]
         reasons = [f"{r.source} evidence status is '{r.status}'" for r in records if r.used is None]
         lines.append(UseLine(node_id, used, max(stamps) if stamps else None, max(r.window_days for r in records),
-                             "branch:evidence", f"evidence:{node_id}" if reasons else None,
+                             "branch:evidence", "evidence" if reasons else None,
                              "; ".join(reasons) if reasons else None))
     return lines
 
@@ -163,7 +172,7 @@ def build_bundle(infra: AWSInfrastructure, graph: Graph, *, source: SourceInfo,
         source=source,
         collection=dict(infra.collection),
         needs=QUESTION_SOURCES,
-        warnings=tuple(infra.warnings),
+        warnings=tuple(_safe_warning(w) for w in infra.warnings),
         tags=_tag_lines(infra, graph),
         data=_data_lines(infra, graph),
         costs=cost_lines,
