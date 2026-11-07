@@ -38,7 +38,7 @@ def save_report(analysis_id: str, report_data: dict) -> str:
         Body=json.dumps(report_data, indent=2, default=str),
         ContentType='application/json'
     )
-    print(f'Report saved to S3: {s3_key}')
+    print(f'Report saved to S3 for analysis {analysis_id}')
     return s3_key
 
 def get_report_url(s3_key: str) -> str:

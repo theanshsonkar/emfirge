@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from botocore.exceptions import ClientError, NoCredentialsError
 from typing import Optional
 import boto3
+from app.log_safe import safe_exc
 import os
 import time
 import uuid
@@ -201,7 +202,7 @@ def _load_analysis_record(analysis_id: str, caller: Caller | None = None, db=Non
             except Exception:
                 continue
     except Exception as exc:
-        logger.error(f'analysis load failed: {exc}')
+        logger.error(f'analysis load failed: {safe_exc(exc)}')
     finally:
         if close_session:
             session.close()
@@ -315,7 +316,7 @@ def _lookup_resource_name(resource_id: str, resource_type: str) -> Optional[str]
         # S3: bucket name IS the resource_id in our system, so no lookup needed
         return None
     except Exception as e:
-        print(f"[_lookup_resource_name] Error: {e}")
+        print(f"[_lookup_resource_name] Error: {safe_exc(e)}")
         return None
 
 # Raw mode = caller is an LLM host (MCP, etc.) so we skip Gemini/Claude calls.
@@ -451,7 +452,7 @@ def link_project(request: Request, db=Depends(get_db)):
         if current is not None and current.name == f'sb-{sub}':
             db.delete(current)
         db.commit()
-        logger.info('Supabase project link: project_id=%s target_project_id=%s', current.id if current is not None else target.id, target.id)
+        logger.info('Supabase project link completed')
         return {'linked': True, 'project': target.name}
     except HTTPException:
         raise
@@ -515,7 +516,7 @@ def unbind_account(aws_account_id: str, request: Request, db=Depends(get_db)):
     db.add(AccountBindingEvent(aws_account_id=aws_account_id, project_id=project_id,
                                action='unbind', actor='admin'))
     db.commit()
-    logger.warning('Admin unbound AWS account %s', aws_account_id)
+    logger.warning('Admin unbound an AWS account')
     return {'unbound': unbound}
 
 @app.get('/drift/events')
@@ -822,7 +823,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
         finally:
             session.close()
     except Exception as e:
-        logger.error(f"simulate: DB load failed: {e}")
+        logger.error(f"simulate: DB load failed: {safe_exc(e)}")
 
     if not infrastructure:
         async def error_stream():
@@ -1150,7 +1151,7 @@ Respond with ONLY JSON (no markdown):
                     haiku_data = identifiers.tokenize_obj(json.loads(haiku_raw), customer_ids)
                     break  # success
                 except Exception as e:
-                    logger.warning(f"simulate: Haiku attempt {attempt + 1} failed: {e}")
+                    logger.warning(f"simulate: Haiku attempt {attempt + 1} failed: {safe_exc(e)}")
                     if attempt == 0:
                         # Retry with even shorter prompt
                         haiku_prompt = f"""AWS security query: "{safe_query}"
@@ -1197,7 +1198,7 @@ Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical
             try:
                 save_simulation_log(aws_account_id, request.analysis_id, request.query)
             except Exception as sim_log_err:
-                logger.warning(f"simulate: failed to save simulation log: {sim_log_err}")
+                logger.warning(f"simulate: failed to save simulation log: {safe_exc(sim_log_err)}")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -1336,7 +1337,7 @@ Respond with valid JSON only — no markdown, no code fences:
         )
     except Exception as e:
         # Graceful fallback — never surface an error to the frontend
-        logger.warning(f"Gemini insight generation failed for {request.resource_id}: {type(e).__name__}: {e}")
+        logger.warning(f"Gemini insight generation failed: {safe_exc(e)}")
         return RemediationInsightResponse(
             what_this_fixes=request.recommendation,
             why_it_matters=f'This {request.severity.lower()} security issue in {request.aws_service} could expose your infrastructure to unauthorized access or data loss if left unresolved.'
@@ -1518,7 +1519,7 @@ resource "aws_vpc_security_group_ingress_rule" "fix_ssh" {{
 
         return TerraformGenerateResponse(hcl=hcl, filename=filename, valid=valid, errors=errors)
     except Exception as e:
-        logger.error(f"Terraform generation failed for {request.rule_id}: {type(e).__name__}: {e}")
+        logger.error(f"Terraform generation failed for {request.rule_id}: {safe_exc(e)}")
         return TerraformGenerateResponse(hcl='', filename='fix.tf', valid=False, errors=str(e))
 
 
@@ -2639,7 +2640,7 @@ def unified_fix(request: TerraformGenerateRequest, http_request: Request, raw: b
             finally:
                 session.close()
         except Exception as e:
-            logger.error(f"unified_fix: DB load failed: {e}")
+            logger.error(f"unified_fix: DB load failed: {safe_exc(e)}")
 
     # ── GENERATE HCL (Claude) ─────────────────────────────────────
     # ── GENERATE HCL (Claude) ─────────────────────────────────────
@@ -2700,7 +2701,7 @@ CRITICAL RULES:
             save_llm_usage(account_id, "terraform")
 
       except Exception as e:
-        logger.error(f"unified_fix: HCL generation failed: {e}")
+        logger.error(f"unified_fix: HCL generation failed: {safe_exc(e)}")
         hcl = f"# Generation failed: {str(e)[:50]}"
 
     # ── VERIFY THE FIX ────────────────────────────────────────────
@@ -2748,7 +2749,7 @@ CRITICAL RULES:
                 if applied:
                     verification["method"] = "llm_simulated"
             except Exception as e:
-                logger.warning(f"unified_fix: rule-based mutation failed: {e}")
+                logger.warning(f"unified_fix: rule-based mutation failed: {safe_exc(e)}")
 
             # Fallback: try parsing Claude's HCL if rule-based didn't work
             if not applied:
@@ -2796,7 +2797,7 @@ CRITICAL RULES:
                         if applied:
                             verification["method"] = "llm_simulated"
                 except Exception as e:
-                    logger.warning(f"unified_fix: HCL parse fallback failed: {e}")
+                    logger.warning(f"unified_fix: HCL parse fallback failed: {safe_exc(e)}")
 
         # Run simulation if mutation was applied
         if applied:
@@ -2852,7 +2853,7 @@ CRITICAL RULES:
                     "safe_to_apply": safe,
                 }
             except Exception as e:
-                logger.error(f"unified_fix: simulation failed: {e}")
+                logger.error(f"unified_fix: simulation failed: {safe_exc(e)}")
 
     return {
         "verification": verification,
@@ -2968,7 +2969,7 @@ async def github_webhook(http_request: Request):
     payload = json.loads(body)
     if payload.get('action') == 'closed' and payload.get('pull_request', {}).get('merged'):
         pr_url = payload['pull_request']['html_url']
-        logger.info(f"Emfirge PR merged: {pr_url}")
+        logger.info("Emfirge PR merged")
 
     # ── PULL REQUEST EVENTS — Auto-analyze .tf changes ────────────
     if payload.get('action') in ('opened', 'synchronize') and 'pull_request' in payload:
@@ -2980,7 +2981,7 @@ async def github_webhook(http_request: Request):
 
         # Skip analysis on Emfirge's own fix PRs (avoid analyzing our own fixes)
         if head_branch.startswith('emfirge/fix-'):
-            logger.info(f"Skipping CI analysis on Emfirge fix branch: {head_branch}")
+            logger.info("Skipping CI analysis on an Emfirge fix branch")
         elif installation_id and repo_full_name:
             import threading
             def _run_ci_on_pr():
@@ -3226,12 +3227,12 @@ async def github_webhook(http_request: Request):
                     try:
                         create_check_run(gh, repo_full_name, head_sha, status, summary_text, comment_body)
                     except Exception as e:
-                        logger.warning(f"Check run creation failed (may need 'checks:write' permission): {e}")
+                        logger.warning(f"Check run creation failed (may need 'checks:write' permission): {safe_exc(e)}")
 
-                    logger.info(f"CI auto-review posted on {repo_full_name}#{pr_number}: {status}")
+                    logger.info(f"CI auto-review posted: {status}")
 
                 except Exception as e:
-                    logger.error(f"Auto CI review failed for {repo_full_name}#{pr_number}: {e}")
+                    logger.error(f"Auto CI review failed: {safe_exc(e)}")
 
             # Run in background thread so webhook returns quickly
             threading.Thread(target=_run_ci_on_pr, daemon=True).start()
@@ -3255,9 +3256,9 @@ async def github_webhook(http_request: Request):
                     gh = get_github_client(installation_id)
                     resources = build_index_for_installation(gh, installation_id, repo_full_name)
                     save_tf_index(installation_id, repo_full_name, resources)
-                    logger.info(f"Re-indexed {len(resources)} TF resources for {repo_full_name}")
+                    logger.info(f"Re-indexed {len(resources)} TF resources")
                 except Exception as e:
-                    logger.error(f"TF re-index failed for {repo_full_name}: {e}")
+                    logger.error(f"TF re-index failed: {safe_exc(e)}")
 
     return {"status": "ok"}
 
@@ -3681,7 +3682,7 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
         )
 
     except Exception as e:
-        logger.error(f"CI/CD analysis failed: {e}")
+        logger.error(f"CI/CD analysis failed: {safe_exc(e)}")
         return CIAnalyzeResponse(
             status="skip",
             summary=f"Analysis failed: {str(e)[:100]}",
@@ -3840,7 +3841,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
                     credentials.region
                 )
             except Exception as gemini_error:
-                print(f'Gemini failed: {gemini_error}')
+                print(f'Gemini failed: {safe_exc(gemini_error)}')
                 warnings.append('AI summary unavailable — Gemini failed. Priority actions may be empty.')
                 ai_result = {
                     'ai_summary': 'AI summary temporarily unavailable. Please review the findings manually.',
@@ -3933,11 +3934,11 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
             db_result, db_error = db_future.result()
 
         if s3_error:
-            print(f'S3 save failed: {s3_error}')
+            print(f'S3 save failed: {safe_exc(s3_error)}')
             warnings.append('Report could not be saved to S3. Download link unavailable.')
 
         if db_error:
-            print(f'Database save failed: {db_error}')
+            print(f'Database save failed: {safe_exc(db_error)}')
         elif db_result == -1:
             warnings.append('Scan result could not be saved to database. Graph will not be available for this scan.')
 
@@ -3950,9 +3951,9 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
                     prev_all = prev_report.get('critical_risks', []) + prev_report.get('moderate_risks', [])
                     curr_all = [f.dict() for f in critical_risks + moderate_risks]
                     new_f, fixed_f, _severity_changed = compare_findings(curr_all, prev_all)
-                    logger.info(f"Drift: {len(new_f)} new, {len(fixed_f)} fixed vs scan {prev['id']}")
-                    logger.info(f"Drift new_f: {[{'rule_id': f.get('rule_id'), 'resource_id': f.get('resource_id'), 'severity': f.get('severity')} for f in new_f]}")
-                    logger.info(f"Drift fixed_f: {[{'rule_id': f.get('rule_id'), 'resource_id': f.get('resource_id'), 'severity': f.get('severity')} for f in fixed_f]}")
+                    logger.info(f"Drift: {len(new_f)} new, {len(fixed_f)} fixed vs previous scan")
+                    logger.info(f"Drift new findings: {len(new_f)} (resource ids not logged)")
+                    logger.info(f"Drift fixed findings: {len(fixed_f)} (resource ids not logged)")
                     drift_rows = []
                     for f in new_f:
                         drift_rows.append({'aws_account_id': account_id, 'change_type': 'new_finding',
@@ -3974,8 +3975,8 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
                         if fixed_count > 0:
                             warnings.append(f"✅ Drift: {fixed_count} finding(s) resolved since last scan")
         except Exception as drift_err:
-            logger.warning(f"Drift detection skipped: {drift_err}")
-            print(f"DRIFT ERROR: {drift_err}")
+            logger.warning(f"Drift detection skipped: {safe_exc(drift_err)}")
+            print(f"DRIFT ERROR: {safe_exc(drift_err)}")
 
         # STEP 6.7 — Simulation baseline
         from app.models import SimulationBaseline
@@ -4291,7 +4292,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
                 try:
                     ai_result = generate_explanation(findings, scores['overall_risk_score'], credentials.region)
                 except Exception as gemini_error:
-                    logger.warning(f'Gemini failed in stream: {gemini_error}')
+                    logger.warning(f'Gemini failed in stream: {safe_exc(gemini_error)}')
                     local_warnings.append('AI summary unavailable — Gemini failed.')
                     ai_result = {
                         'ai_summary': 'AI summary temporarily unavailable.',
@@ -4379,7 +4380,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
             if s3_error:
                 local_warnings.append('Report could not be saved to S3.')
             if db_error:
-                logger.warning(f'DB save failed in stream: {db_error}')
+                logger.warning(f'DB save failed in stream: {safe_exc(db_error)}')
             elif db_result == -1:
                 local_warnings.append('Scan result could not be saved to database.')
 
@@ -4413,7 +4414,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
                             if fixed_count > 0:
                                 local_warnings.append(f"✅ Drift: {fixed_count} finding(s) resolved since last scan")
             except Exception as drift_err:
-                logger.warning(f"Drift detection skipped in stream: {drift_err}")
+                logger.warning(f"Drift detection skipped in stream: {safe_exc(drift_err)}")
 
             # ── Simulation baseline ───────────────────────────────
             public_count = 0
@@ -4469,7 +4470,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
             yield "\n"
 
         except Exception as e:
-            logger.error(f"analyze/stream error: {e}")
+            logger.error(f"analyze/stream error: {safe_exc(e)}")
             yield _emit("error", {"message": "Request could not be completed"})
 
     return StreamingResponse(
@@ -4541,7 +4542,7 @@ def simulate_component(request: ComponentRequest, http_request: Request, caller:
         finally:
             session.close()
     except Exception as e:
-        logger.error(f"simulate_component: DB load failed: {e}")
+        logger.error(f"simulate_component: DB load failed: {safe_exc(e)}")
 
     if not infrastructure:
         raise HTTPException(status_code=404, detail='Scan data not found for this analysis ID. Please run a new scan first.')
@@ -4831,7 +4832,7 @@ Respond with ONLY this JSON (no markdown):
         narrative = json.loads(raw)
     except Exception as e:
         if not isinstance(e, _RawModeNoLLM):
-            logger.warning(f"simulate_component: Claude narrative failed (non-fatal): {e}")
+            logger.warning(f"simulate_component: Claude narrative failed (non-fatal): {safe_exc(e)}")
         # Fallback: generate narrative from facts
         if new_findings:
             max_sev = 'critical' if any(f.get('severity') == 'Critical' for f in new_findings) else 'medium'
@@ -4854,7 +4855,7 @@ Respond with ONLY this JSON (no markdown):
         try:
             save_simulation_log(aws_account_id, request.analysis_id, f"[add_component] {component_type}")
         except Exception as sim_log_err:
-            logger.warning(f"simulate_component: failed to save simulation log: {sim_log_err}")
+            logger.warning(f"simulate_component: failed to save simulation log: {safe_exc(sim_log_err)}")
 
     # ── RETURN RESPONSE ───────────────────────────────────────────
     return {

@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 import os
 import json
 import hashlib
+from app.log_safe import safe_exc
 
 load_dotenv()
 
@@ -286,7 +287,7 @@ def save_analysis(data: dict) -> int:
         return log.id
     except Exception as e:
         session.rollback()
-        print(f'Error saving analysis: {e}')
+        print(f'Error saving analysis: {safe_exc(e)}')
         return -1
     finally:
         session.close()
@@ -323,7 +324,7 @@ def get_recent_logs(limit: int = 20, account_id: str = None,
             for log in logs
         ]
     except Exception as e:
-        print(f'Error fetching logs: {e}')
+        print(f'Error fetching logs: {safe_exc(e)}')
         return []
     finally:
         session.close()
@@ -362,7 +363,7 @@ def get_log_by_id(log_id: int, account_id: str = None,
             'prompt_version': log.prompt_version
         }
     except Exception as e:
-        print(f'Error fetching log: {e}')
+        print(f'Error fetching log: {safe_exc(e)}')
         return {}
     finally:
         session.close()
@@ -401,7 +402,7 @@ def get_scan_count_today(account_id: str) -> int:
         ).count()
         return count
     except Exception as e:
-        print(f'Error checking scan count: {e}')
+        print(f'Error checking scan count: {safe_exc(e)}')
         return 0
     finally:
         session.close()
@@ -417,7 +418,7 @@ def get_previous_scan_for_account(account_id: str, exclude_id: int) -> dict:
             return {}
         return {'id': log.id, 'findings_json': log.findings_json, 'risk_score': log.risk_score}
     except Exception as e:
-        print(f"get_previous_scan error: {e}")
+        print(f"get_previous_scan error: {safe_exc(e)}")
         return {}
     finally:
         session.close()
@@ -430,7 +431,7 @@ def save_drift_events(events: list) -> None:
         session.commit()
     except Exception as ex:
         session.rollback()
-        print(f"save_drift_events error: {ex}")
+        print(f"save_drift_events error: {safe_exc(ex)}")
     finally:
         session.close()
 
@@ -473,7 +474,7 @@ def save_simulation_log(aws_account_id: str, analysis_id: str, query: str) -> No
         session.commit()
     except Exception as e:
         session.rollback()
-        print(f'Error saving simulation log: {e}')
+        print(f'Error saving simulation log: {safe_exc(e)}')
     finally:
         session.close()
 
@@ -486,7 +487,7 @@ def get_simulation_count_today(aws_account_id: str) -> int:
         ).count()
         return count
     except Exception as e:
-        print(f'Error checking simulation count: {e}')
+        print(f'Error checking simulation count: {safe_exc(e)}')
         return 0
     finally:
         session.close()
@@ -502,7 +503,7 @@ def save_feedback(message: str, name: str = '', email: str = '', aws_account_id:
         return fb.id
     except Exception as e:
         session.rollback()
-        print(f'Error saving feedback: {e}')
+        print(f'Error saving feedback: {safe_exc(e)}')
         return -1
     finally:
         session.close()
@@ -532,7 +533,7 @@ def save_llm_usage(aws_account_id: str, endpoint_type: str) -> None:
         session.commit()
     except Exception as e:
         session.rollback()
-        print(f'Error saving LLM usage: {e}')
+        print(f'Error saving LLM usage: {safe_exc(e)}')
     finally:
         session.close()
 
@@ -547,7 +548,7 @@ def get_llm_usage_count_today(aws_account_id: str, endpoint_type: str) -> int:
         ).count()
         return count
     except Exception as e:
-        print(f'Error checking LLM usage count: {e}')
+        print(f'Error checking LLM usage count: {safe_exc(e)}')
         return 0
     finally:
         session.close()
@@ -584,7 +585,7 @@ def save_tf_index(installation_id: int, repo_full_name: str, resources: list[dic
         return len(resources)
     except Exception as e:
         session.rollback()
-        print(f'Error saving TF index: {e}')
+        print(f'Error saving TF index: {safe_exc(e)}')
         return 0
     finally:
         session.close()
@@ -609,7 +610,7 @@ def get_tf_index(installation_id: int, repo_full_name: str) -> list[dict]:
             'indexed_at': str(r.indexed_at),
         } for r in rows]
     except Exception as e:
-        print(f'Error getting TF index: {e}')
+        print(f'Error getting TF index: {safe_exc(e)}')
         return []
     finally:
         session.close()
@@ -650,7 +651,7 @@ def create_ci_api_key(installation_id: int, repo_full_name: str) -> str:
         return api_key
     except Exception as e:
         session.rollback()
-        print(f'Error creating CI API key: {e}')
+        print(f'Error creating CI API key: {safe_exc(e)}')
         return ''
     finally:
         session.close()
@@ -677,7 +678,7 @@ def validate_ci_api_key(api_key: str) -> Optional[dict]:
             'repo_full_name': row.repo_full_name,
         }
     except Exception as e:
-        print(f'Error validating CI API key: {e}')
+        print(f'Error validating CI API key: {safe_exc(e)}')
         return None
     finally:
         session.close()
@@ -695,7 +696,7 @@ def revoke_ci_api_key(api_key: str) -> bool:
         return True
     except Exception as e:
         session.rollback()
-        print(f'Error revoking CI API key: {e}')
+        print(f'Error revoking CI API key: {safe_exc(e)}')
         return False
     finally:
         session.close()

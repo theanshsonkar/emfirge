@@ -2,6 +2,7 @@ from google import genai
 import os
 import json
 import time
+from app.log_safe import safe_exc
 from typing import Optional
 
 PROMPT_VERSION = 'v3.1'
@@ -218,7 +219,7 @@ Context-aware fix rules you MUST follow:
             return result
         # Empty priority_actions — use fallback immediately
     except Exception as e:
-        print(f'Gemini failed: {e}')
+        print(f'Gemini failed: {safe_exc(e)}')
         # Fall through to fallback
     
     # Fallback: Build priority_actions from critical and moderate findings
