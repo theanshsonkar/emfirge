@@ -6,6 +6,7 @@ from typing import Optional
 from dotenv import load_dotenv
 import os
 import json
+import base64
 import hashlib
 from app.log_safe import safe_exc
 
@@ -173,7 +174,7 @@ class CIAPIKey(Base):
     __tablename__ = 'ci_api_keys'
     id               = Column(Integer, primary_key=True, autoincrement=True)
     installation_id  = Column(Integer, index=True)
-    api_key          = Column(String(80), unique=True, index=True)  # 'sha256:' + hex digest, never the raw key
+    api_key          = Column(String(64), unique=True, index=True)  # 'sha256:' + base64url digest (50 chars), never the raw key
     repo_full_name   = Column(String(200))
     created_at       = Column(DateTime, default=datetime.utcnow)
     last_used_at     = Column(DateTime, nullable=True)
@@ -195,20 +196,13 @@ CI_KEY_PREFIX = 'sha256:'
 
 
 def hash_ci_key(raw: str) -> str:
-    """Stored form of a CI key: 'sha256:' + the same digest auth.hash_key gives."""
-    return CI_KEY_PREFIX + hashlib.sha256(raw.encode('utf-8')).hexdigest()
+    """Stored form of a CI key: 'sha256:' + unpadded base64url of the raw sha256 digest bytes (50 chars)."""
+    digest = hashlib.sha256(raw.encode('utf-8')).digest()
+    return CI_KEY_PREFIX + base64.urlsafe_b64encode(digest).rstrip(b'=').decode('ascii')
 
 
 def run_privacy_migrations():
     """Idempotent startup data fixes (the schema is never altered here beyond create_all)."""
-    if engine.dialect.name == 'postgresql':
-        # The hashed form is 71 characters; older databases created the column as varchar(64).
-        try:
-            with engine.begin() as conn:
-                conn.exec_driver_sql('ALTER TABLE ci_api_keys ALTER COLUMN api_key TYPE VARCHAR(80)')
-        except Exception as err:
-            import logging
-            logging.getLogger(__name__).warning('ci_api_keys column widening failed: %s', err)
     session = SessionLocal()
     try:
         for row in session.query(CIAPIKey).filter(~CIAPIKey.api_key.like(CI_KEY_PREFIX + '%')).all():
