@@ -18,7 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from app import cost
-from app.database import BranchEvidenceLog, BranchLog, PlanLog, SessionLocal
+from app.database import BranchEvidenceLog, BranchLog, BranchOwner, BranchPolicyCheckLog, PlanLog, SessionLocal
 from app.in_use_evidence import EvidenceRecord
 from app.diffing import DiffResult, diff_infrastructure, modeled_state_unchanged
 from app.egraph import GRAPH_SCHEMA_VERSION, build_graph
@@ -37,14 +37,17 @@ class ForkResult:
         yield self.num_changes
 
 
-def save_plan(plan_id: str, branch_id: str, input_sha256: str, raw_input: str,
+def save_plan(plan_id: str, branch_id: str, input_sha256: str,
               branch_revision_after: str, rejected: list, unmodeled: list,
               unknown_fields: list) -> None:
-    """Persist one raw plan and its ingest outcome."""
+    """Persist a plan's fingerprint and ingest outcome. The plan text is never stored.
+
+    plan_logs.raw_input cannot be dropped (no migrations), so it holds an empty string.
+    """
     def operation(session):
         session.add(PlanLog(
             plan_id=plan_id, branch_id=branch_id, input_sha256=input_sha256,
-            raw_input=raw_input, branch_revision_after=branch_revision_after,
+            raw_input="", branch_revision_after=branch_revision_after,
             rejected_json=json.dumps(rejected, separators=(",", ":")),
             unmodeled_json=json.dumps(unmodeled, separators=(",", ":")),
             unknown_fields_json=json.dumps(unknown_fields, separators=(",", ":")),
@@ -63,7 +66,6 @@ def get_plan(plan_id: str) -> dict | None:
             "plan_id": row.plan_id,
             "branch_id": row.branch_id,
             "input_sha256": row.input_sha256,
-            "raw_input": row.raw_input,
             "branch_revision_after": row.branch_revision_after,
         }
     except OperationalError:
@@ -384,7 +386,7 @@ def fork_branch(
                 plan_id=child_plan_id,
                 branch_id=child_id,
                 input_sha256=parent_plan.input_sha256,
-                raw_input=parent_plan.raw_input,
+                raw_input="",
                 branch_revision_after=parent_plan.branch_revision_after,
                 rejected_json=parent_plan.rejected_json,
                 unmodeled_json=parent_plan.unmodeled_json,
@@ -548,12 +550,20 @@ def _prune_plan_receipts(session, row: BranchLog, changes: list[dict]) -> None:
     ).delete(synchronize_session=False)
 
 
+def _delete_branch_rows(session, branch_id: str) -> None:
+    """Delete the branch and every row linked to it (same transaction as the caller)."""
+    for model in (PlanLog, BranchEvidenceLog, BranchPolicyCheckLog, BranchOwner):
+        session.query(model).filter(model.branch_id == branch_id).delete(synchronize_session=False)
+    session.query(BranchLog).filter(BranchLog.branch_id == branch_id).delete(synchronize_session=False)
+    session.expire_all()
+
+
 def discard_branch(
     branch_id: str,
     expected_change_count: Optional[int] = None,
     expected_branch_revision: Optional[str] = None,
 ) -> Branch:
-    """Discard an open branch, optionally guarding the observed change count."""
+    """Discard an open branch and delete it with all linked rows, optionally guarding the observed change count."""
     def operation(session):
         row = _load_branch(session, branch_id)
         previous_json = row.changes_json or '[]'
@@ -567,7 +577,10 @@ def discard_branch(
             raise BranchConflictError("Branch revision is stale; reload the branch and retry")
         if row.status != 'open':
             if expected_change_count is None and row.status == 'discarded':
-                return _decode(row)
+                # Left over from before discard deleted data: finish deleting it now.
+                result = _decode(row)
+                _delete_branch_rows(session, branch_id)
+                return result
             raise BranchConflictError(f"Branch is not open: {branch_id}")
         updated = session.query(BranchLog).filter(
             BranchLog.branch_id == branch_id,
@@ -577,7 +590,9 @@ def discard_branch(
         if updated != 1:
             raise BranchConflictError("Branch changed during discard; reload it and retry")
         session.expire(row)
-        return _decode(row)
+        result = _decode(row)
+        _delete_branch_rows(session, branch_id)
+        return result
 
     return _with_session(operation)
 

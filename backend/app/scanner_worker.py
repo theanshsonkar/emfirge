@@ -149,7 +149,7 @@ def handle_scan(
         try:
             findings = scan(terraform, checks)
         except Exception as exc:  # noqa: BLE001 - always answer in JSON
-            logger.exception("scan failed")
+            logger.error("scan failed: %s", type(exc).__name__)
             raise ScanError(500, f"scan failed: {type(exc).__name__}: {exc}") from exc
     finally:
         _SCAN_LOCK.release()
@@ -165,7 +165,7 @@ def make_handler(
         protocol_version = "HTTP/1.1"
 
         def log_message(self, fmt: str, *args: Any) -> None:  # quiet by default
-            logger.debug(fmt, *args)
+            logger.debug("scanner worker handled a request")
 
         def _send(self, status: int, payload: dict[str, Any]) -> None:
             data = json.dumps(payload).encode("utf-8")
@@ -223,7 +223,7 @@ def main() -> None:
         warm_up()
         logger.info("checkov warm (version %s)", checkov_version())
     except Exception:  # noqa: BLE001 - /health still answers; /scan reports the failure
-        logger.exception("warm-up failed")
+        logger.error("warm-up failed")
     server = ThreadingHTTPServer((host, port), make_handler(max_body=max_body, lock_timeout_s=lock_s))
     server.daemon_threads = True
     logger.info("scanner worker listening on %s:%s", host, port)

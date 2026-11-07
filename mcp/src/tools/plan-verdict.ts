@@ -37,6 +37,13 @@ type PlanHandback = {
   [key: string]: unknown;
 };
 
+// Emfirge keeps only a sha256 of the plan, never its text, so the caller applies its own copy.
+export const PLAN_BINDING_NOTE =
+  "Emfirge does not store plan text. Apply your own original plan, not anything returned here; " +
+  "input_sha256 is the sha256 of the exact JSON this tool sent (JSON.stringify of `plan`; for an aws-cli " +
+  "list, {\"format\":\"aws-cli/1\",\"commands\":[...]}). A plan whose sha256 differs is not the one this " +
+  "verdict covers; re-run emfirge_plan_verdict on it.";
+
 function ok(result: unknown) {
   return {
     content: [
@@ -84,5 +91,6 @@ export async function planVerdictHandler(args: PlanVerdictArgs) {
     verdict_id: handback.verdict_id,
     branch_revision: handback.branch_revision,
     handback,
+    next_step: PLAN_BINDING_NOTE,
   });
 }

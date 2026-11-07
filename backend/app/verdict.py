@@ -151,11 +151,22 @@ def _cost_details(base_infra: AWSInfrastructure, branch_infra: AWSInfrastructure
         return details, None, [details["reason"]]
 
 
+def _user_ids_with_privilege_escalation(infra: AWSInfrastructure) -> set[str]:
+    """Users are principals too; they have no graph node, so their statements are matched directly."""
+    return {
+        f"iam-user-{user.username}"
+        for user in infra.iam.iam_users
+        if user.access_statements and matching_paths(user.access_statements)
+    }
+
+
 def _graph_escalation_details(base_infra: AWSInfrastructure, branch_infra: AWSInfrastructure) -> tuple[set[str], set[str]]:
     try:
         base_graph, branch_graph = _comparison_graphs(base_infra, branch_infra)
         base_escalating = _role_ids_with_privilege_escalation(base_graph)
         branch_escalating = _role_ids_with_privilege_escalation(branch_graph)
+        branch_escalating = branch_escalating | _user_ids_with_privilege_escalation(branch_infra)
+        base_escalating = base_escalating | _user_ids_with_privilege_escalation(base_infra)
         return branch_escalating - base_escalating, set(get_internet_reachable_set(branch_graph))
     except Exception:
         return set(), set()
@@ -424,6 +435,11 @@ def combined_verdict(
         escalation_paths.extend(
             {key: path[key] for key in ("id", "name", "category")}
             for path in matching_paths(statements)
+        )
+    for user in branch_infra.iam.iam_users:
+        escalation_paths.extend(
+            {key: path[key] for key in ("id", "name", "category")}
+            for path in matching_paths(user.access_statements or [])
         )
     escalation_paths = sorted({path["id"]: path for path in escalation_paths}.values(), key=lambda path: path["id"])
     introduces_privilege_escalation = bool(introduced_escalating_roles)

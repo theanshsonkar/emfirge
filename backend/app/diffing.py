@@ -380,11 +380,20 @@ def _iam_policy_changed(base_infra: Any, branch_infra: Any) -> bool:
     return policies(base_infra) != policies(branch_infra)
 
 
+def _instance_profile_arns(infra: Any) -> set[str]:
+    profiles = _value(_value(infra, "iam", {}), "instance_profile_roles", {}) or {}
+    return {str(key) for key in profiles if str(key).startswith("arn:")}
+
+
 def _model_only_diff(base_infra: Any, branch_infra: Any) -> tuple[list[dict], list[dict], list[dict]]:
     """Diff mutable model collections that have no graph node representation."""
     added: list[dict] = []
     removed: list[dict] = []
     modified: list[dict] = []
+    base_profiles = _instance_profile_arns(base_infra)
+    branch_profiles = _instance_profile_arns(branch_infra)
+    added.extend({"id": arn, "resource_type": "iam_instance_profile"} for arn in sorted(branch_profiles - base_profiles))
+    removed.extend({"id": arn, "resource_type": "iam_instance_profile"} for arn in sorted(base_profiles - branch_profiles))
     for resource_type in sorted(MODEL_ONLY_TYPES):
         base_items = {_identity(resource_type, item): item for item in _collection(base_infra, resource_type)}
         branch_items = {_identity(resource_type, item): item for item in _collection(branch_infra, resource_type)}

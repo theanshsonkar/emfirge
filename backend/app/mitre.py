@@ -9,6 +9,7 @@ MITRE_MAPPING: dict[str, tuple[str, str]] = {
     'EMFIRGE-EC2-014':    ('T1190',     'Exploit Public-Facing Application'),
     'EMFIRGE-EC2-015':    ('T1190',     'Exploit Public-Facing Application'),
     'EMFIRGE-EC2-016':    ('T1552.005', 'Unsecured Credentials: Cloud Instance Metadata API'),
+    'EMFIRGE-EC2-019':    ('T1552.001', 'Unsecured Credentials: Credentials In Files'),
     'EMFIRGE-S3-001':     ('T1530',     'Data from Cloud Storage'),
     'EMFIRGE-S3-002':     ('T1565.001', 'Stored Data Manipulation'),
     'EMFIRGE-S3-003':     ('T1485',     'Data Destruction'),

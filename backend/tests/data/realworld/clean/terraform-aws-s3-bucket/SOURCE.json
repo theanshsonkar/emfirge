@@ -1,0 +1,73 @@
+{
+  "repo": "https://github.com/terraform-aws-modules/terraform-aws-s3-bucket",
+  "commit": "9afa4fc8c8f1e0b3fd913474c1bef8d0c454b235",
+  "license": "Apache-2.0",
+  "license_file": "LICENSE",
+  "license_sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+  "entrypoint": "examples/complete",
+  "registry_modules_downloaded_by_terraform_init": {
+    "terraform-aws-modules/kms/aws": "~> 4.0"
+  },
+  "files": [
+    {
+      "path": "main.tf",
+      "upstream_path": "main.tf",
+      "sha256": "8da110529d67b8712778929157064e38b6d82d8e77d6c1391b89e516f589379e"
+    },
+    {
+      "path": "outputs.tf",
+      "upstream_path": "outputs.tf",
+      "sha256": "de2c16bff241bc10a7f73fa7e313acdced98e30ad0570fba0a7165b17228ba8b"
+    },
+    {
+      "path": "variables.tf",
+      "upstream_path": "variables.tf",
+      "sha256": "e7f31a25dc4d7e28dae4fa0388371337253d7e7dd763c072f8e93b2ce0786a0f"
+    },
+    {
+      "path": "versions.tf",
+      "upstream_path": "versions.tf",
+      "sha256": "1d53d1fe4d206e5ecf041f5025047a62065f37ff3cf871523a8e87953a0c53e2"
+    },
+    {
+      "path": "examples/complete/main.tf",
+      "upstream_path": "examples/complete/main.tf",
+      "sha256": "e1e9eda0c1d4108279335d3667772b137fab84e946bffa4921edd7cfa8291bbf"
+    },
+    {
+      "path": "examples/complete/outputs.tf",
+      "upstream_path": "examples/complete/outputs.tf",
+      "sha256": "7248963c3a66634223b3cbf8e9afce52fc044e8b1a4b44b7e184cfc6c2d65159"
+    },
+    {
+      "path": "examples/complete/variables.tf",
+      "upstream_path": "examples/complete/variables.tf",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "examples/complete/versions.tf",
+      "upstream_path": "examples/complete/versions.tf",
+      "sha256": "8bb5a65b2fc92808794d8608d9c361187383291891110c4e79c16e0618cca8ea"
+    },
+    {
+      "path": "modules/file-system/main.tf",
+      "upstream_path": "modules/file-system/main.tf",
+      "sha256": "eac3afeb775cd49f36f72e897db476d87fe2184796194d2fd6a3a9c22f346c32"
+    },
+    {
+      "path": "modules/file-system/outputs.tf",
+      "upstream_path": "modules/file-system/outputs.tf",
+      "sha256": "fa380546231dbbe7184c67e5ce51b300d7c8d922f79776ea5b4bc188188f2928"
+    },
+    {
+      "path": "modules/file-system/variables.tf",
+      "upstream_path": "modules/file-system/variables.tf",
+      "sha256": "5dd754bd029fb66449eb447051bfcd59107efdffb24ac8f85c73037f7456fdbd"
+    },
+    {
+      "path": "modules/file-system/versions.tf",
+      "upstream_path": "modules/file-system/versions.tf",
+      "sha256": "1d53d1fe4d206e5ecf041f5025047a62065f37ff3cf871523a8e87953a0c53e2"
+    }
+  ]
+}

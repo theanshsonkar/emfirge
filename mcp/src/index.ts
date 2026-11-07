@@ -12,7 +12,8 @@ import {
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { existsSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { writePrivateFile } from "./private-file.js";
 
 import { getBaseUrl } from "./client.js";
 import { privacyMode } from "./tokenize.js";
@@ -98,8 +99,7 @@ function maybeShowFirstRunNotice(): void {
   );
 
   try {
-    if (!existsSync(flagDir)) mkdirSync(flagDir, { recursive: true });
-    writeFileSync(flagFile, new Date().toISOString());
+    writePrivateFile(flagDir, flagFile, new Date().toISOString());
   } catch {
     // non-fatal, will show again next time
   }

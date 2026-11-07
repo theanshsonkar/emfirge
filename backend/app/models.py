@@ -27,7 +27,8 @@ class EC2Instance(BaseModel):
     sg_ids: List[str] = []
     subnet_id: Optional[str] = None
     state: str
-    imdsv2_required: bool = False
+    imdsv2_required: Optional[bool] = False  # None = unknown (e.g. metadata_options not known at plan time); no IMDS finding
+    user_data_has_secrets: Optional[bool] = Field(default=None, exclude_if=lambda value: value is None)  # raw user data is never stored; None = not known
     has_public_ip: Optional[bool] = None
     instance_profile_arn: Optional[str] = None
     detailed_monitoring: Optional[bool] = None  # None = not collected
@@ -77,6 +78,7 @@ class S3Bucket(BaseModel):
     ignore_public_acls: Optional[bool] = None
     block_public_policy: Optional[bool] = None
     restrict_public_buckets: Optional[bool] = None
+    logging_enabled: Optional[bool] = Field(default=None, exclude_if=lambda value: value is None)  # server access logging; None = not collected
     tags: Optional[Dict[str, str]] = None  # None = not collected
 
 class RDSInstance(BaseModel):
@@ -244,10 +246,6 @@ class RDSData(BaseModel):
     rds_snapshots: List[RDSSnapshot] = []
     collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
 
-class IAMUser(BaseModel):
-    username: str
-    has_console_access: Optional[bool] = None
-
 class AccessStatement(BaseModel):
     """A normalized IAM identity-policy access statement."""
     effect: str
@@ -264,6 +262,16 @@ class PolicyDocumentRecord(BaseModel):
     kind: Literal['inline', 'managed']
     arn: Optional[str] = None
     statements: List[AccessStatement] = Field(default_factory=list)
+
+
+class IAMUser(BaseModel):
+    username: str
+    has_console_access: Optional[bool] = None
+    # None = not collected (the collector does not read user policies); a list is the complete
+    # normalized statement view and policy_documents, when present, is its breakdown.
+    access_statements: Optional[List[AccessStatement]] = Field(default=None, exclude_if=lambda value: value is None)
+    policy_documents: Optional[List[PolicyDocumentRecord]] = Field(default=None, exclude_if=lambda value: value is None)
+    has_access_keys: Optional[bool] = Field(default=None, exclude_if=lambda value: value is None)  # None = not collected
 
 
 def merge_policy_statements(records: List[PolicyDocumentRecord]) -> List[AccessStatement]:

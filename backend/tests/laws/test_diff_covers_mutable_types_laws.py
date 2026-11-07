@@ -31,8 +31,9 @@ def _add_samples(base):
     samples = {}
     samples['iam_role'] = Change(op='add', resource_type='iam_role', resource_id='arn:aws:iam::000000000000:role/law-add', fields={'trust_policy': {'Statement': [{'Effect': 'Allow', 'Principal': {'Service': 'ec2.amazonaws.com'}, 'Action': 'sts:AssumeRole'}]}})
     samples['iam_user'] = Change(op='add', resource_type='iam_user', resource_id='law-user-add', fields={})
+    samples['iam_instance_profile'] = Change(op='add', resource_type='iam_instance_profile', resource_id='arn:aws:iam::000000000000:instance-profile/law-add', fields={'role_arn': 'arn:aws:iam::000000000000:role/law-add'})
     for resource_type, capability in _MUTATION_CAPABILITIES.items():
-        if resource_type in {'iam_role', 'iam_user'}:
+        if resource_type in {'iam_role', 'iam_user', 'iam_instance_profile'}:
             continue
         if "add" not in capability["operations"]:
             continue

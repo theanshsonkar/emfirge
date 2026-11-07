@@ -11,6 +11,8 @@ import json
 import os
 from datetime import datetime
 
+REPORTS_PREFIX = 'reports/'  # the only S3 prefix Emfirge writes (PRIVACY.md storage table is checked against it)
+
 
 def save_report(analysis_id: str, report_data: dict) -> str:
     """Upload a scan report to S3 and return the object key."""
@@ -29,7 +31,7 @@ def save_report(analysis_id: str, report_data: dict) -> str:
 
     # Create file path like: reports/2026-03-06/analysis-abc123.json
     date_str = datetime.utcnow().strftime('%Y-%m-%d')
-    s3_key = f'reports/{date_str}/analysis-{analysis_id}.json'
+    s3_key = f'{REPORTS_PREFIX}{date_str}/analysis-{analysis_id}.json'
 
     # Convert report data to JSON and upload to S3
     s3.put_object(
@@ -38,7 +40,7 @@ def save_report(analysis_id: str, report_data: dict) -> str:
         Body=json.dumps(report_data, indent=2, default=str),
         ContentType='application/json'
     )
-    print(f'Report saved to S3: {s3_key}')
+    print(f'Report saved to S3 for analysis {analysis_id}')
     return s3_key
 
 def get_report_url(s3_key: str) -> str:

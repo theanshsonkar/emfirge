@@ -524,6 +524,15 @@ def check_default_sg_open(infra: AWSInfrastructure, graph: Optional[Graph] = Non
                 break  # one finding per default SG, not one per rule
     return findings
 
+def check_ec2_user_data_secrets(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> List[RiskFinding]:
+    # User data is readable by anyone who can describe the instance or reach its metadata service.
+    return [RiskFinding(
+        rule_id='EMFIRGE-EC2-019', category='Security', severity='High', raw_severity='High', confidence='HIGH',
+        issue='EC2 user data contains a hard-coded secret or credential',
+        recommendation='Remove secrets from user data; fetch them at boot from Secrets Manager or SSM Parameter Store using the instance role.',
+        aws_service='EC2', resource_id=instance.id, resource_type='ec2_instance', region=infra.region)
+        for instance in infra.ec2.instances if instance.user_data_has_secrets is True]
+
 def check_imdsv1_enabled(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> List[RiskFinding]:
     # IMDSv1 allows unauthenticated HTTP requests to the metadata service
     # Exploitable via SSRF — used in the Capital One breach to steal IAM credentials
@@ -534,6 +543,8 @@ def check_imdsv1_enabled(infra: AWSInfrastructure, graph: Optional[Graph] = None
     has_subnet_data = ctx.has_subnet_data if ctx else (len(infra.vpc.subnets) > 0 if graph else False)
 
     for instance in infra.ec2.instances:
+        if instance.imdsv2_required is None:
+            continue  # unknown (e.g. metadata options not known at plan time): no finding
         if not instance.imdsv2_required:
             # Default: Moderate (as before)
             severity = 'Moderate'
@@ -1106,6 +1117,20 @@ def check_iam_escalation_paths(infra: AWSInfrastructure, ctx: Optional['GraphCon
             recommendation='Remove the permissions completing these known IAM escalation paths or scope them to the minimum required resources.',
             aws_service='IAM', resource_id=role.role_name if not isinstance(role, dict) else role.get('role_name'),
             resource_type='iam_role', region='global'))
+    # Users are principals too. A user whose policies were not collected (None) says nothing either way.
+    for user in infra.iam.iam_users:
+        statements = user.access_statements if not isinstance(user, dict) else user.get('access_statements')
+        paths = matching_paths(statements) if statements else []
+        if not paths:
+            continue
+        labels = ', '.join(f"{path['id']} ({path['name']})" for path in paths)
+        references = ', '.join(f"pathfinding.cloud {path['id']}" for path in paths)
+        findings.append(RiskFinding(
+            rule_id='EMFIRGE-IAM-007', category='Security', severity='Critical', raw_severity='Critical', confidence='HIGH',
+            issue=f"IAM user can escalate privileges: {labels}; source/reference: {references}",
+            recommendation='Remove the permissions completing these known IAM escalation paths or scope them to the minimum required resources.',
+            aws_service='IAM', resource_id=user.username if not isinstance(user, dict) else user.get('username'),
+            resource_type='iam_user', region='global'))
     return findings
 
 def check_iam_high_risk_users(infra: AWSInfrastructure, graph: Optional[Graph] = None, ctx: Optional['GraphContext'] = None) -> List[RiskFinding]:
@@ -2371,6 +2396,7 @@ def run_all_checks(infrastructure: AWSInfrastructure, graph: Optional[Graph] = N
         check_public_s3_context_aware,
         check_iam_high_risk_users,
         check_imdsv1_enabled,
+        check_ec2_user_data_secrets,
         check_dangerous_open_ports,
         check_default_sg_open,
         check_iam_wildcard_policy,

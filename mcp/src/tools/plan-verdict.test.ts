@@ -52,7 +52,6 @@ const handback = {
   input_sha256: "a".repeat(64),
   verdict_id: "c".repeat(64),
   branch_revision: "b".repeat(64),
-  plan_text: '{"example":"value"}',
 };
 
 const cases = [
@@ -111,7 +110,18 @@ test("plan verdict returns the ingest, verdict, and handback result", async () =
     verdict_id: handback.verdict_id,
     branch_revision: handback.branch_revision,
     handback,
+    next_step: planVerdict.PLAN_BINDING_NOTE,
   });
+});
+
+test("plan verdict tells the agent to apply its own plan, never returns plan text", async () => {
+  stubFetch([{ body: ingest }, { body: verdict }, { body: { ...handback, instruction: "Apply your own original plan file" } }]);
+  const result = JSON.parse(textOf(await planVerdict.planVerdictHandler({
+    branch_id: "b1", format: "terraform", plan: { format_version: "1.0" },
+  })));
+  assert.equal("plan_text" in result.handback, false);
+  assert.match(result.next_step, /Apply your own original plan/);
+  assert.match(result.next_step, /input_sha256/);
 });
 
 test("plan verdict surfaces backend validation detail", async () => {

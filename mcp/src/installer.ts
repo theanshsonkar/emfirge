@@ -11,6 +11,7 @@ import {
   unlinkSync,
 } from "node:fs";
 
+import { authHeaderIfSignedIn } from "./client.js";
 import { clearTokenStore, listTokens, tokenStorePath } from "./tokenize.js";
 
 export type Subcommand = "install" | "uninstall" | "status" | "tokens" | "purge" | "privacy";
@@ -551,6 +552,19 @@ async function runPurge(args: string[]): Promise<void> {
 
   const baseUrl = process.env.EMFIRGE_BASE_URL ?? "https://emfirge.cloud/api";
 
+  let authorization: string | null = null;
+  try {
+    authorization = await authHeaderIfSignedIn();
+  } catch {
+    authorization = null;
+  }
+  if (!authorization) {
+    console.error("You are not signed in to Emfirge, so nothing was sent.");
+    console.error("Sign in first (run the emfirge_login tool in your MCP client, or set EMFIRGE_API_KEY), then re-run this command.");
+    console.error("Local token store NOT cleared.");
+    process.exit(1);
+  }
+
   console.log(`Purging Emfirge data for ${roleArn}...`);
   console.log(`Backend: ${baseUrl}\n`);
 
@@ -561,6 +575,7 @@ async function runPurge(args: string[]): Promise<void> {
       headers: {
         "Content-Type": "application/json",
         "X-Source": "mcp-cli",
+        Authorization: authorization,
       },
       body: JSON.stringify({ role_arn: roleArn, region }),
     });

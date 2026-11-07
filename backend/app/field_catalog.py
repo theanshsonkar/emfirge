@@ -56,6 +56,7 @@ CATALOG: dict[str, dict[str, Source]] = {
         "sg_ids": Aws("ec2", "RunInstances", "SecurityGroupIds"),
         "state": Aws("ec2", "", "", shape="InstanceStateName"),
         "imdsv2_required": Normalized("RunInstances / ModifyInstanceMetadataOptions MetadataOptions.HttpTokens", "true when HttpTokens is required"),
+        "user_data_has_secrets": Normalized("RunInstances UserData", "true when the user data holds a literal secret; the user data itself is never stored"),
         "has_public_ip": Normalized("RunInstances NetworkInterfaces[].AssociatePublicIpAddress"),
         "instance_profile_arn": Aws("ec2", "RunInstances", "IamInstanceProfile.Arn"),
         "detailed_monitoring": Aws("ec2", "RunInstances", "Monitoring.Enabled"),
@@ -98,6 +99,7 @@ CATALOG: dict[str, dict[str, Source]] = {
         "ignore_public_acls": Aws("s3", "PutPublicAccessBlock", "PublicAccessBlockConfiguration.IgnorePublicAcls"),
         "block_public_policy": Aws("s3", "PutPublicAccessBlock", "PublicAccessBlockConfiguration.BlockPublicPolicy"),
         "restrict_public_buckets": Aws("s3", "PutPublicAccessBlock", "PublicAccessBlockConfiguration.RestrictPublicBuckets"),
+        "logging_enabled": Normalized("PutBucketLogging", "true when server access logging is configured"),
         "tags": _TAGS,
     },
     "lambda_function": {
@@ -149,6 +151,12 @@ CATALOG: dict[str, dict[str, Source]] = {
     },
     "iam_user": {
         "has_console_access": Normalized("CreateLoginProfile / DeleteLoginProfile"),
+        "access_statements": Normalized("PutUserPolicy / AttachUserPolicy", "complete normalized statement list"),
+        "policy_documents": Normalized("PutUserPolicy / AttachUserPolicy", "normalized policy documents"),
+        "has_access_keys": Normalized("CreateAccessKey / DeleteAccessKey", "true when the user has programmatic credentials"),
+    },
+    "iam_instance_profile": {
+        "role_arn": Normalized("CreateInstanceProfile / AddRoleToInstanceProfile", "the one role the profile carries; the profile ARN is the change's resource_id"),
     },
     "iam_role_policy": {
         "access_statements": Normalized("PutRolePolicy / AttachRolePolicy", "complete normalized statement list"),
