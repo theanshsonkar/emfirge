@@ -4,7 +4,8 @@
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { tightenIfOpen, writePrivateFile } from "./private-file.js";
 
 export type PrivacyMode = "strict" | "balanced" | "off";
 
@@ -26,6 +27,8 @@ let store: TokenStore = { realToToken: {}, tokenToReal: {}, counters: {} };
 
 function load(): void {
   if (!existsSync(TOKEN_FILE)) return;
+  tightenIfOpen(TOKEN_DIR, 0o700);
+  tightenIfOpen(TOKEN_FILE, 0o600);
   try {
     const data = JSON.parse(readFileSync(TOKEN_FILE, "utf-8"));
     if (data && typeof data === "object") {
@@ -42,8 +45,7 @@ function load(): void {
 
 function save(): void {
   try {
-    if (!existsSync(TOKEN_DIR)) mkdirSync(TOKEN_DIR, { recursive: true });
-    writeFileSync(TOKEN_FILE, JSON.stringify(store, null, 2));
+    writePrivateFile(TOKEN_DIR, TOKEN_FILE, JSON.stringify(store, null, 2));
   } catch {
     // disk full or perms - in-memory tokens still work this session
   }
