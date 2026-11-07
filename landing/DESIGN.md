@@ -187,3 +187,4 @@ Footer: logo, "The harness for cloud agents.", links (Docs, GitHub, Privacy, Sec
 - "Private by default" while PRIVACY.md audit findings (roadmap §5) are open.
 - Coverage of CloudFront, DynamoDB, EventBridge Scheduler (not modeled yet).
 - The numbers in the terminal demo are illustrative.
+- v4: FAQ answer "there will always be a free tier for one account" (post-beta pricing) is a commitment not yet decided; the hero and tab terminal transcripts, resource names and numbers are illustrative.

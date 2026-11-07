@@ -1,267 +1,302 @@
-/* All page copy lives here. Components only lay it out. */
-
+// All copy for the v4 landing page. See DESIGN-v4.md.
 export const LINKS = {
-  home: "https://emfirge.cloud",
   docs: "https://emfirge.cloud/docs",
+  quickstart: "https://emfirge.cloud/docs/quickstart",
   github: "https://github.com/theanshsonkar/emfirge",
+  ansh: "https://github.com/theanshsonkar",
   changelog: "https://github.com/theanshsonkar/emfirge/releases",
   privacy: "https://github.com/theanshsonkar/emfirge/blob/main/PRIVACY.md",
   security: "https://github.com/theanshsonkar/emfirge/blob/main/SECURITY.md",
-  email: "mailto:ansh@emfirge.cloud",
-} as const;
-
-export const CONNECT_CMD = "npx @emfirge/cli connect";
-
-export interface LinkItem {
-  label: string;
-  href: string;
-}
-
-export const SITE = {
-  title: "Emfirge: the harness for cloud agents",
-  description:
-    "Emfirge gives your coding agent a true model of your AWS, a branch to try changes on, and facts about what would break, before anything reaches production.",
 };
 
-export const ANNOUNCE = {
-  text: "New: the emfirge CLI. Six verbs, any agent.",
-  link: { label: "Read the docs", href: LINKS.docs },
-  dismiss: "Dismiss announcement",
+export const SITE = {
+  title: "emfirge. let your agent touch your aws",
+  description:
+    "Your agent tries every change on a branch of your cloud, sees what would break, and fixes its own plan before production ever sees it.",
 };
 
 export const NAV = {
-  home: "Emfirge home",
+  skip: "skip to content",
   items: [
-    { label: "Product", href: "#product" },
-    { label: "Docs", href: LINKS.docs },
-    { label: "GitHub", href: LINKS.github },
-    { label: "Changelog", href: LINKS.changelog },
-  ] satisfies LinkItem[],
-  signIn: { label: "Sign in", href: LINKS.home },
-  start: { label: "Get started", href: "#get-started" },
-  skip: "Skip to content",
-  menu: { open: "Menu", close: "Close", label: "Main menu" },
+    { id: "top", label: "emfirge", href: "#top", strong: true },
+    { id: "how", label: "how it works", href: "#how" },
+    { id: "why", label: "why", href: "#why" },
+    { id: "pricing", label: "pricing", href: "#pricing" },
+    { id: "faq", label: "faq", href: "#faq" },
+    { id: "docs", label: "docs", href: LINKS.docs, external: true },
+  ],
 };
 
-export const HERO = {
-  title: "The harness for cloud agents",
-  body: "Your agent gets a true model of your AWS, a branch to try changes on, and facts about what would break. Production never sees a guess.",
-  primary: { label: "Get started", href: "#get-started" },
-  secondary: { label: "Read the docs", href: LINKS.docs },
-  copy: "Copy command",
-  copied: "Copied",
-};
+/* ---------- terminal scripts ---------- */
+export type TKind = "prompt" | "user" | "agent" | "cmd" | "out" | "fail" | "blank";
+export type TLine = { k: TKind; t: string };
 
-export const FORK = {
-  alt: "A trunk line labelled live runs left to right with commit dots. Branch number 1 forks off, is tried, and ends in a red cross. Branch number 2 forks off, ends in a green check, and merges back into the trunk.",
-  trunk: "live",
-  branch1: "branch #1",
-  branch2: "branch #2",
-  live: "14 resources",
-  alt2: "A vertical trunk labelled live, 14 resources, runs top to bottom. Branch number 1 deletes orders-db and legacy-reports-db and ends in a red cross: block, 2 of 6 checks failed. Branch number 2 deletes legacy-reports-db and ends in a green check: pass, 6 of 6. It merges back into the trunk: applied, verified in CloudTrail.",
-  b1: ["delete orders-db, legacy-reports-db", "block · 2 of 6 checks failed"],
-  b2: ["delete legacy-reports-db", "pass · 6 of 6"],
-  applied: "applied · verified in CloudTrail",
-};
+export const HERO_SCRIPT: TLine[] = [
+  { k: "prompt", t: "~/infra % claude" },
+  { k: "user", t: "clean up the unused databases in ap-south-1" },
+  { k: "blank", t: "" },
+  { k: "agent", t: "I'll try it on a branch first." },
+  { k: "cmd", t: "emfirge branch new cleanup-dbs" },
+  { k: "out", t: "branch #1 forked from live · 0 changes" },
+  { k: "cmd", t: "emfirge try --delete rds:orders-db rds:legacy-reports-db" },
+  { k: "out", t: "2 changes on branch #1" },
+  { k: "cmd", t: "emfirge check" },
+  { k: "out", t: "block · 2 of 6 checks failed" },
+  { k: "fail", t: "data          orders-db has no recovery point" },
+  { k: "fail", t: "availability  orders-db served 1,240 queries/day" },
+  { k: "agent", t: "orders-db is live. Keeping it and retrying with legacy-reports-db only." },
+  { k: "cmd", t: "emfirge check --branch 2" },
+  { k: "out", t: "pass · 6 of 6 · saves $41.20/mo" },
+  { k: "agent", t: "Safe to apply. Want me to delete legacy-reports-db?" },
+];
 
-export const WORKS_WITH = {
-  heading: "Works with the agent you already use.",
-  agents: ["Claude Code", "Codex", "Cursor", "Gemini CLI", "Kiro", "Cline"],
-};
-
-export type LineTone = "cmd" | "out" | "block" | "pass";
-export interface TermLine {
-  tone: LineTone;
-  text: string;
-}
-export type Signal = "block" | "pass";
-export interface LogRow {
-  time: string;
-  signal: Signal;
-  area: string;
-  text: string;
-}
-
-export const SPLIT = {
-  id: "product",
-  title: "Your agent tries it on a branch. You read one result.",
-  body: "Before anything touches production, the change runs against a copy of your live AWS. Six questions about the result come back as facts. Your agent fixes its own plan.",
-  agent: {
-    label: "Agent view",
-    title: "Your terminal. One command.",
-    mockLabel: "Terminal mock: an agent tries a delete, is blocked, forks a second branch and passes",
-    path: "~/cloud-cleanup",
+export const TABS: { id: string; label: string; lines: TLine[] }[] = [
+  {
+    id: "everyone",
+    label: "everyone",
     lines: [
-      { tone: "cmd", text: "emfirge try --delete rds:orders-db rds:legacy-reports-db" },
-      { tone: "out", text: "2 changes on branch #1" },
-      { tone: "cmd", text: "emfirge check" },
-      { tone: "block", text: "block · 2 of 6 checks failed" },
-      { tone: "cmd", text: "emfirge branch fork --keep rds:orders-db" },
-      { tone: "out", text: "branch #2 · 1 change" },
-      { tone: "cmd", text: "emfirge check" },
-      { tone: "pass", text: "pass · 6 of 6 checks" },
-    ] satisfies TermLine[],
+      { k: "prompt", t: "~/infra % claude" },
+      { k: "user", t: "clean up the unused databases in ap-south-1" },
+      { k: "agent", t: "I'll try it on a branch first." },
+      { k: "cmd", t: "emfirge try --delete rds:orders-db rds:legacy-reports-db" },
+      { k: "out", t: "block · orders-db has no recovery point and serves 1,240 queries/day" },
+      { k: "agent", t: "orders-db is live. Retrying with legacy-reports-db only." },
+      { k: "cmd", t: "emfirge check --branch 2" },
+      { k: "out", t: "pass · 6 of 6 · saves $41.20/mo" },
+    ],
   },
-  branch: {
-    label: "The branch",
-    title: "Six checks. Every change.",
-    mockLabel: "Console mock: the six checks on branch number 1, two block and four pass",
-    pills: { block: "Block", pass: "Pass" } satisfies Record<Signal, string>,
-    rows: [
-      { time: "14:02:36.04", signal: "block", area: "data", text: "orders-db has no recovery point" },
-      { time: "14:02:36.05", signal: "block", area: "availability", text: "orders-db served 1,240 queries/day" },
-      { time: "14:02:36.05", signal: "pass", area: "exposure", text: "nothing newly reachable" },
-      { time: "14:02:36.06", signal: "pass", area: "money", text: "−$41.20/mo" },
-      { time: "14:02:36.06", signal: "pass", area: "control", text: "no access or logging lost" },
-      { time: "14:02:36.07", signal: "pass", area: "outside world", text: "no external side effects" },
-    ] satisfies LogRow[],
+  {
+    id: "cleanup",
+    label: "cleanup",
+    lines: [
+      { k: "user", t: "delete legacy-reports-db, nobody uses it" },
+      { k: "agent", t: "Trying the delete on a branch." },
+      { k: "cmd", t: "emfirge try --delete rds:legacy-reports-db" },
+      { k: "cmd", t: "emfirge check" },
+      { k: "out", t: "pass · 6 of 6" },
+      { k: "out", t: "data           recovery point exists" },
+      { k: "out", t: "availability   nothing live depends on it" },
+    ],
   },
+  {
+    id: "cost",
+    label: "cost",
+    lines: [
+      { k: "user", t: "make staging cheaper" },
+      { k: "agent", t: "I'll try a smaller instance class on a branch." },
+      { k: "cmd", t: "emfirge try --modify rds:staging-db --class db.t4g.small" },
+      { k: "cmd", t: "emfirge check" },
+      { k: "out", t: "money         −$62.10/mo" },
+      { k: "out", t: "availability  nothing live depends on it" },
+      { k: "out", t: "pass · 6 of 6" },
+    ],
+  },
+  {
+    id: "security",
+    label: "security",
+    lines: [
+      { k: "user", t: "is anything public that shouldn't be?" },
+      { k: "cmd", t: "emfirge context --exposure" },
+      { k: "out", t: "1 security group is open to the internet on port 22" },
+      { k: "agent", t: "I'll close it on a branch and check." },
+      { k: "cmd", t: "emfirge try --revoke sg:ssh-open 0.0.0.0/0:22" },
+      { k: "cmd", t: "emfirge check" },
+      { k: "out", t: "pass · 6 of 6 · nothing newly reachable" },
+    ],
+  },
+  {
+    id: "incidents",
+    label: "incidents",
+    lines: [
+      { k: "user", t: "the feed is 404ing, fix it" },
+      { k: "agent", t: "Trying the cache-policy change on a branch." },
+      { k: "cmd", t: "emfirge try --modify cloudfront:feed-cdn --cache-policy forward-all" },
+      { k: "cmd", t: "emfirge check" },
+      { k: "out", t: "block · availability: feed.xml → S3 (OAC) receives Host header · predicted 404" },
+      { k: "agent", t: "That would break it. Retrying with a managed policy." },
+      { k: "cmd", t: "emfirge try --modify cloudfront:feed-cdn --cache-policy managed:caching-optimized" },
+      { k: "out", t: "pass · 6 of 6" },
+    ],
+  },
+  {
+    id: "what-if",
+    label: "what-if",
+    lines: [
+      { k: "user", t: "rds public vs private?" },
+      { k: "agent", t: "Forking two branches to compare." },
+      { k: "cmd", t: "emfirge branch new public --modify rds:app-db --public" },
+      { k: "cmd", t: "emfirge branch new private --modify rds:app-db --private" },
+      { k: "cmd", t: "emfirge compare 1 2" },
+      { k: "out", t: "#2 private   pass · 6 of 6" },
+      { k: "out", t: "#1 public    block · exposure: database newly reachable from the internet" },
+    ],
+  },
+];
+
+export const HOW = {
+  title: "built for *every* kind of cloud work.",
+  sub: "pick a kind of work. watch the agent try it on a branch first.",
 };
 
-export type WorldMock =
-  | { kind: "table"; head: string[]; rows: string[][] }
-  | { kind: "branches"; rows: { name: string; branch: string; state: "block" | "pass" | "live" }[] }
-  | { kind: "doc"; lines: { text: string; hard?: boolean }[] }
-  | { kind: "timeline"; rows: { time: string; text: string }[] };
-
-export interface WorldCard {
-  title: string;
-  body: string;
-  tone: "dark" | "light";
-  mockLabel: string;
-  mock: WorldMock;
-}
-
-export const WORLD = {
-  title: "The world your agent works in.",
-  body: "Coding agents got files, branches, tests and a log. Cloud agents get the same.",
-  cards: [
-    {
-      title: "Context. Ask what's true.",
-      body: "What exists, what's live, what depends on what.",
-      tone: "dark",
-      mockLabel: "Mock: a table of three resources with state, load and dependents",
-      mock: {
-        kind: "table",
-        head: ["resource", "type", "state", "load", "dependents"],
-        rows: [
-          ["orders-db", "rds", "live", "1,240 q/day", "3"],
-          ["checkout-api", "lambda", "live", "8,900 req/day", "5"],
-          ["legacy-reports-db", "rds", "idle", "0 q/day", "0"],
-        ],
-      },
-    },
-    {
-      title: "Branch. Try anything.",
-      body: "A copy of your live AWS. Fork it, compare it, throw it away.",
-      tone: "dark",
-      mockLabel: "Mock: a list of branches with their result, next to live",
-      mock: {
-        kind: "branches",
-        rows: [
-          { name: "#1", branch: "cleanup-dbs", state: "block" },
-          { name: "#2", branch: "cleanup-dbs", state: "pass" },
-          { name: "live", branch: "", state: "live" },
-        ],
-      },
-    },
-    {
-      title: "Boundaries. Write your intent once.",
-      body: "Plain English in emfirge.md. Hard lines are enforced.",
-      tone: "light",
-      mockLabel: "Mock: an emfirge.md file with a heading and four rules",
-      mock: {
-        kind: "doc",
-        lines: [
-          { text: "# my cloud" },
-          { text: "- prod-* is production. Never delete without me." },
-          { text: "- The nightly-sync schedule is paused on purpose." },
-          { text: "- Tell me about any support case or quota request." },
-          { text: "- Budget: $30/month." },
-        ],
-      },
-    },
-    {
-      title: "Record. Know what happened.",
-      body: "Every applied change, checked against CloudTrail.",
-      tone: "light",
-      mockLabel: "Mock: a three-line timeline of an applied change",
-      mock: {
-        kind: "timeline",
-        rows: [
-          { time: "14:09", text: "applied cleanup-dbs #2 by claude-code" },
-          { time: "14:09", text: "CloudTrail matched, 1 event, 0 unexpected" },
-          { time: "14:10", text: "recorded, 1 resource removed" },
-        ],
-      },
-    },
-  ] satisfies WorldCard[],
+/* ---------- hero ---------- */
+export const HERO = {
+  lead: "meet",
+  name: "emfirge",
+  subA: ["let your agent", " touch your aws,"],
+  subB: ["without", " losing sleep over it."],
+  cta: { label: "get started", href: LINKS.quickstart },
+  meta: "free while in beta · works with any agent · read-only access",
+  lock: "your ids are tokenized before any model sees them",
+  built: { pre: "built in public by ", name: "ansh", href: LINKS.ansh },
+  toast: {
+    chip: "placeholder",
+    text: "“your tweet here. try emfirge and tell us what it caught.”",
+    handle: "— you, @yourhandle",
+  },
+  hand: "watch it catch a mistake",
 };
 
-export const PRINCIPLES = {
-  title: "Built so you can trust it.",
+/* ---------- branch window ---------- */
+export const BRANCH = {
+  title: "your cloud on a branch. *zero* risk to prod.",
+  sidebar: ["live", "#1 cleanup-dbs", "#2 cleanup-dbs"],
+  selected: 2,
+  card: { title: "branch #2 · cleanup-dbs", sub: "1 change · forked from live 2 min ago", right: "6 of 6 checks passed" },
+  legend: ["data", "exposure", "money", "availability", "control", "outside world"],
+  top: { title: "emfirge · safe to apply", sub: "checked against your live account", value: "pass" },
+  rows: [
+    { key: "data", name: "data", value: "recovery point exists" },
+    { key: "exposure", name: "exposure", value: "nothing newly reachable" },
+    { key: "money", name: "money", value: "−$41.20/mo" },
+    { key: "availability", name: "availability", value: "nothing live depends on it" },
+    { key: "control", name: "control", value: "no access lost" },
+    { key: "world", name: "outside world", value: "no side effects" },
+  ],
+  lines: [
+    "a branch is a private copy of your cloud as it is right now. nothing on it touches production.",
+    "your agent tries the change there, and six checks say what would break, with the evidence.",
+    "when a plan passes, you apply it. when it blocks, the agent fixes its own plan first.",
+  ],
+};
+
+/* ---------- notifications ---------- */
+export const FAMILIAR = {
+  title: "sound *familiar*?",
+  items: [
+    { icon: "support", app: "aws support", body: "case opened: lambda concurrency quota increase. you didn't ask for this." },
+    { icon: "feed", app: "feed.xml", body: "returned 404 after a cache policy change" },
+    { icon: "schedule", app: "eventbridge scheduler", body: "nightly-sync is ENABLED again after a redeploy" },
+    { icon: "budget", app: "budget", body: "your agent's test run counted the whole account" },
+  ],
+  line: "every one of these happened to me in one week. the agent wasn't dumb. it just had nowhere safe to try.",
+};
+
+/* ---------- why ---------- */
+export const WHY = {
+  title: "why *emfirge*?",
+  without: "without emfirge",
+  with: "with emfirge",
+  rows: [
+    ["every aws command is the real thing", "every change is tried on a branch first"],
+    ["you find out from a support email", "nothing leaves the cloud without asking you"],
+    ["“trust me, it's safe”", "six checks, as facts, with evidence"],
+    ["a wall of api calls", "one record, checked against cloudtrail"],
+    ["you watch over its shoulder", "you write your rules once in emfirge.md"],
+  ],
+};
+
+/* ---------- placeholder wall ---------- */
+export const WALL = {
+  title: "loved by *early* builders.",
+  lead: "emfirge is brand new. try it and be the first one here.",
+  link: { label: "read the docs", href: LINKS.docs },
+  card: { chip: "placeholder", text: "your tweet here", name: "your name", handle: "@yourhandle" },
+  count: 6,
+};
+
+/* ---------- founder note (draft for Ansh to edit; keep verbatim) ---------- */
+export const NOTE = {
+  title: "why i built emfirge.",
+  app: "notes",
+  paragraphs: [
+    "hey, i'm ansh 👋. i build things with ai agents every day.",
+    "a few weeks ago i gave claude code my aws to ship a small podcast project. it was good at it. it was also quiet about things. 🤐",
+    "it asked aws for a lambda quota increase without telling me. i found out from a support case email. a cache policy change sent my feed to a 404. a deploy script turned a paused schedule back on.",
+    "none of it was the agent being dumb. it just had no safe place to try a change, and i had no way to see what it was about to do.",
+    "so i built what i wanted: ==emfirge. your agent tries every change on a branch of your cloud, sees what would break, and fixes its own plan before production ever sees it.==",
+    "it's early. try it, and tell me what breaks. ✌️",
+  ],
+  author: { initial: "a", name: "ansh,", role: "founder" },
+  signature: "emfirge",
+};
+
+/* ---------- pricing ---------- */
+export const PRICING = {
+  title: "one plan. *free* while in beta.",
+  badge: "beta",
+  sub: "everything, for one aws account",
+  price: "$0",
+  per: "/month while in beta",
+  note: "no card needed. we'll tell you before anything changes.",
+  features: [
+    { icon: "terminal", t: "works with any agent that runs a shell" },
+    { icon: "branch", t: "branches of your live aws" },
+    { icon: "checks", t: "six checks on every change" },
+    { icon: "code", t: "terraform, cloudformation, cli and api changes" },
+    { icon: "key", t: "read-only role, revoke any time" },
+    { icon: "lock", t: "ids tokenized on your machine" },
+    { icon: "file", t: "emfirge.md boundaries" },
+    { icon: "record", t: "record checked against cloudtrail" },
+    { icon: "open", t: "open source engine" },
+  ],
+  cta: { label: "get started", href: LINKS.quickstart },
+};
+
+/* ---------- faq ---------- */
+export const FAQ = {
+  title: "questions, *answered*.",
   items: [
     {
-      title: "Read-only. Always.",
-      body: "Emfirge never writes to your cloud. Your agent applies with its own access, and Emfirge records it.",
+      q: "does emfirge change my aws?",
+      a: "no. it connects with a read-only role, so it can look but not touch. every change is tried on a branch, a private copy that never reaches your real account. you apply a plan yourself, when you decide to.",
     },
     {
-      title: "No AI inside.",
-      body: "The same branch always gives the same answer. Nothing can talk it into a pass.",
+      q: "which agents work?",
+      a: "any agent that can run a shell command. emfirge is a command line tool, so there is nothing to plug in. if your agent can type `emfirge check`, it works.",
     },
     {
-      title: "Unknown never passes.",
-      body: "If a change can't be modeled, the result says so. A missing check is reported, not hidden.",
+      q: "which clouds?",
+      a: "aws, for now. it's what i use every day, so it's the one i'm making solid first.",
+    },
+    {
+      q: "is a pass a guarantee?",
+      a: "no. a pass means that on the six checks, nothing on the branch predicts damage, and you can see the evidence. it's a fact about the plan, not a promise about the world. you still decide whether to apply it.",
+    },
+    {
+      q: "what does it cost after beta?",
+      a: "we'll tell you well before beta ends. there will always be a free tier for one account.",
+    },
+    {
+      q: "is it open source?",
+      a: "the engine is open source (AGPL-3.0) and the cli is Apache-2.0. the code is on github.",
     },
   ],
 };
 
-export const NUMBERS = {
-  label: "Numbers from the repository",
-  items: [
-    { figure: "48", label: "laws every release must pass" },
-    { figure: "2,428", label: "engine tests" },
-    { figure: "92", label: "IAM escalation paths, from pathfinding.cloud" },
-  ],
-};
-
+/* ---------- final cta + footer ---------- */
 export const CTA = {
-  id: "get-started",
-  title: "Give your agent a branch of your cloud.",
-  primary: { label: "Get started", href: LINKS.docs },
-  secondary: { label: "Read the docs", href: LINKS.docs },
+  title: "stop *babysitting* your agent in the cloud.",
+  button: { label: "get started", href: LINKS.quickstart },
 };
 
 export const FOOTER = {
-  tagline: "The harness for cloud agents.",
-  columns: [
-    {
-      title: "Product",
-      links: [
-        { label: "CLI", href: LINKS.docs },
-        { label: "Docs", href: LINKS.docs },
-        { label: "Changelog", href: LINKS.changelog },
-      ],
-    },
-    {
-      title: "Open source",
-      links: [
-        { label: "GitHub", href: LINKS.github },
-        { label: "Engine (AGPL-3.0)", href: LINKS.github },
-        { label: "CLI (Apache-2.0)", href: LINKS.github },
-      ],
-    },
-    {
-      title: "Trust",
-      links: [
-        { label: "Privacy", href: LINKS.privacy },
-        { label: "Security", href: LINKS.security },
-      ],
-    },
-    {
-      title: "Contact",
-      links: [{ label: "ansh@emfirge.cloud", href: LINKS.email }],
-    },
-  ] satisfies { title: string; links: LinkItem[] }[],
-  legal: "© 2026 Emfirge · Built by Ansh Sonkar",
+  links: [
+    { label: "privacy", href: LINKS.privacy },
+    { label: "security", href: LINKS.security },
+    { label: "docs", href: LINKS.docs },
+    { label: "github", href: LINKS.github },
+    { label: "changelog", href: LINKS.changelog },
+  ],
+  copy: "© 2026 emfirge",
+  built: { pre: "built by ansh ", heart: "❤️", href: LINKS.ansh },
 };

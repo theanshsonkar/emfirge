@@ -1,53 +1,50 @@
 @import "tailwindcss";
 
-/* Design tokens: v3, see DESIGN-v3.md */
+/* Design tokens: v4, see DESIGN-v4.md */
 @theme {
-  --color-paper: #f7f8f7;
-  --color-white: #ffffff;
-  --color-ink: #15201c;
-  --color-ink-2: #3a4641;
-  --color-ink-3: #66716c;
-  --color-line: #dde2df;
-  --color-forest: #0c2a22;
-  --color-forest-deep: #081d17;
-  --color-forest-line: #1f4538;
-  --color-trunk: #2e5a4b;
-  --color-mist: #e8efec;
-  --color-mist-2: #8fa39b;
-  --color-brand: #0a8754;
-  --color-brand-hover: #086f45;
+  --color-bg: #f4f4f4;
+  --color-surface: #ffffff;
+  --color-ink: #000000;
+  --color-ink-2: rgba(0, 0, 0, 0.64);
+  --color-ink-3: rgba(0, 0, 0, 0.48);
+  --color-pass: #0a8754;
   --color-block: #d93f3f;
   --color-warn: #d98a0b;
-  /* Signal text on forest panels, lightened to keep contrast */
-  --color-pass-on-dark: #3fcf8e;
-  --color-block-on-dark: #f27f7f;
-  --shadow-mock: 0 30px 60px -20px rgba(12, 42, 34, 0.25);
-  --font-sans: var(--font-instrument-sans), system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --color-hl: #fff3b0;
+  --color-sidebar: #efeff0;
+  --color-titlebar: #f6f6f6;
+  --color-tl-red: #ff5f57;
+  --color-tl-yellow: #febc2e;
+  --color-tl-green: #28c840;
+  --shadow-hairline: 0 0 0 0.5px rgba(0, 0, 0, 0.12);
+  --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 20px 50px -20px rgba(0, 0, 0, 0.18);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-geist), system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", var(--font-geist-mono), monospace;
+  --font-hand: var(--font-caveat), cursive;
 }
 
 @layer base {
   html {
-    background: var(--color-paper);
+    background: var(--color-bg);
     scroll-behavior: smooth;
     scroll-padding-top: 72px;
+    -webkit-text-size-adjust: 100%;
   }
   body {
-    background: var(--color-paper);
-    color: var(--color-ink-2);
+    background: var(--color-bg);
+    color: var(--color-ink);
     font-family: var(--font-sans);
     font-size: 16px;
-    line-height: 1.6;
+    line-height: 24px;
     -webkit-font-smoothing: antialiased;
     overflow-x: clip;
   }
   :focus-visible {
-    outline: 2px solid var(--color-brand);
+    outline: 2px solid #0a67f5;
     outline-offset: 2px;
-    border-radius: 4px;
   }
-  .on-dark :focus-visible {
-    outline-color: var(--color-mist);
+  summary::-webkit-details-marker {
+    display: none;
   }
   @media (prefers-reduced-motion: reduce) {
     html {
@@ -56,23 +53,41 @@
   }
 }
 
-/* The fork: drawn once. Without the .fork-play class the final drawing is shown. */
-.fork-play .draw {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
-  animation: fork-draw var(--d, 0.4s) var(--t, 0s) cubic-bezier(0.4, 0, 0.2, 1) forwards;
+.no-scrollbar {
+  scrollbar-width: none;
 }
-.fork-play .pop {
-  opacity: 0;
-  animation: fork-pop 0.25s var(--t, 0s) ease-out forwards;
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
-@keyframes fork-draw {
-  to {
-    stroke-dashoffset: 0;
+
+/* Terminal cursor: blinks only while the hero script is typing */
+@keyframes blink {
+  50% {
+    opacity: 0;
   }
 }
-@keyframes fork-pop {
-  to {
-    opacity: 1;
+.cursor {
+  animation: blink 1s steps(1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cursor {
+    animation: none;
+  }
+}
+
+/* Notification stack fans in once, on view */
+.notif {
+  transition:
+    transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 0.45s ease-out;
+  transition-delay: var(--d, 0ms);
+}
+.notif-armed:not(.notif-in) .notif {
+  opacity: 0;
+  transform: translateY(-16px) scale(0.97);
+}
+@media (prefers-reduced-motion: reduce) {
+  .notif {
+    transition: none;
   }
 }
