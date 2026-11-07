@@ -9,6 +9,7 @@ from app.tags import tag_map
 from app.scheduler_schedule import DEFAULT_GROUP, api_fields as scheduler_api_fields, split_identity as scheduler_split_identity, unsupported_members as scheduler_unsupported
 from app.cloudfront_distribution import config_to_fields as cloudfront_fields
 import copy
+import functools
 import re
 
 
@@ -18,6 +19,30 @@ _RISKY_PUT = re.compile(r"^Put[A-Za-z0-9]*(Policy|Acl)$")
 _READ_ONLY_PREFIXES = ("Describe", "List", "Get", "Head")
 _INVALID_MESSAGE = "Invalid AWS API calls document"
 _GLOBAL_SERVICES = frozenset({"iam", "route53", "cloudfront", "s3"})
+
+
+@functools.lru_cache(maxsize=1)
+def _service_aliases() -> dict[str, str]:
+    """Endpoint prefix -> botocore service name, from botocore's own service models.
+
+    Only unambiguous prefixes are kept, and a name that already is a botocore
+    service name always means itself.
+    """
+    import botocore.session
+    session = botocore.session.get_session()
+    names = set(session.get_available_services())
+    seen: dict[str, set[str]] = {}
+    for name in names:
+        prefix = session.get_service_model(name).endpoint_prefix
+        if prefix and prefix not in names:
+            seen.setdefault(prefix.lower(), set()).add(name)
+    return {prefix: next(iter(owners)) for prefix, owners in seen.items() if len(owners) == 1}
+
+
+def canonical_service(service: str) -> str:
+    """The botocore service name for a service written as its name or its endpoint prefix (else unchanged)."""
+    lowered = service.lower()
+    return _service_aliases().get(lowered, lowered)
 
 
 def validate_change_regions(
@@ -277,7 +302,7 @@ def translate_api_calls(
         address = f"calls[{index}] {service}.{operation}"
         if parameters.get("DryRun") is True or operation.startswith(_READ_ONLY_PREFIXES):
             continue
-        lower_service = service.lower()
+        lower_service = canonical_service(service)
         if _sharing_unseen(lower_service, operation, parameters):
             item = _unmodeled(address, lower_service, operation)
             item["unseen"] = True

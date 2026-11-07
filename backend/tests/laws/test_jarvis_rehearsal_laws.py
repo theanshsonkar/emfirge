@@ -248,10 +248,10 @@ def test_L79c_quota_increase_is_an_outside_world_fact_with_source_url(rig):
     branch = rig.branch()
     rig.api(branch, QUOTA_CALL)
     body = rig.check(branch)
-    facts = facts_of(body, "outside_world", action="servicequotas.RequestServiceQuotaIncrease")
+    facts = facts_of(body, "outside_world", action="service-quotas.RequestServiceQuotaIncrease")
     assert len(facts) == 1
     assert set(facts[0]) == {"action", "service", "reason", "source_url", "resource_id"}
-    assert facts[0]["service"] == "servicequotas" and facts[0]["source_url"] == QUOTA_DOCS and facts[0]["reason"]
+    assert facts[0]["service"] == "service-quotas" and facts[0]["source_url"] == QUOTA_DOCS and facts[0]["reason"]
     assert unknown_of(body, "outside_world", "unclassified_action") == []
     # an account action touches no modeled resource
     for damage in ("data", "exposure", "availability"):
@@ -274,11 +274,6 @@ def test_L79c_the_same_request_through_the_cli_is_an_outside_world_fact_too(rig)
     assert via_cli["source_url"] == via_api["source_url"] == QUOTA_DOCS and via_cli["reason"] == via_api["reason"]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "GAP: the CLI spells the service `service-quotas`, the API `servicequotas`; the outside_world fact keeps the "
-    "spelling it was given (action/service 'service-quotas.RequestServiceQuotaIncrease' / 'service-quotas' vs "
-    "'servicequotas.RequestServiceQuotaIncrease' / 'servicequotas'). The signal is true in both, but one incident "
-    "gives different action/service strings per input format."))
 def test_L79c_cli_and_api_give_identical_quota_facts_apart_from_the_plan_address(rig):
     api_branch, cli_branch = rig.branch("api"), rig.branch("cli")
     rig.api(api_branch, QUOTA_CALL)
@@ -447,3 +442,12 @@ def test_L79h_the_fixture_has_no_real_account_identifier(jarvis_infra):
     text = jarvis_infra.model_dump_json()
     for real in ("282027772803", "E35DGPXUEH0T83", "feeds.emfirge.cloud"):
         assert real not in text
+
+
+def test_L79c_api_service_aliases_resolve_to_one_provider_name():
+    """An API call may name a service by botocore's name or by its endpoint prefix; both mean one service."""
+    from app.aws_api_ingest import canonical_service
+    assert canonical_service("servicequotas") == canonical_service("service-quotas") == "service-quotas"
+    assert canonical_service("monitoring") == "cloudwatch"
+    assert canonical_service("s3") == "s3" and canonical_service("lambda") == "lambda"
+    assert canonical_service("not-a-real-service") == "not-a-real-service"

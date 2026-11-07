@@ -694,7 +694,7 @@ def test_L74f_service_quota_increase_is_an_outside_world_fact(plan_client):
     branch = _branch_with_calls(plan_client, [{"service": "servicequotas", "operation": "RequestServiceQuotaIncrease",
                                                "parameters": {"ServiceCode": "ec2", "QuotaCode": "L-1216C47A", "DesiredValue": 1000}}])
     outside = _outside(plan_client, branch)
-    facts = [f for f in outside["facts"] if f["action"] == "servicequotas.RequestServiceQuotaIncrease"]
+    facts = [f for f in outside["facts"] if f["action"] == "service-quotas.RequestServiceQuotaIncrease"]
     assert len(facts) == 1
     assert set(facts[0]) == {"action", "service", "reason", "source_url", "resource_id"}
     assert facts[0]["source_url"].startswith("https://docs.aws.amazon.com/") and facts[0]["reason"]
