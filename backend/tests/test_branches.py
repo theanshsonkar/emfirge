@@ -165,7 +165,8 @@ def test_read_branch_returns_only_ordered_normalized_change_log(branch_db):
     }
     assert not hasattr(detail, "base")
     branches.discard_branch(branch_id)
-    assert branches.read_branch(branch_id).status == "discarded"
+    with pytest.raises(branches.BranchNotFoundError):
+        branches.read_branch(branch_id)
 
 
 def test_branch_revision_is_stable_and_tracks_persisted_state_changes(branch_db):
@@ -253,7 +254,7 @@ def test_fork_requires_open_parent_and_enforces_open_quota(branch_db, monkeypatc
 
     monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 2)
     branches.discard_branch(parent_id)
-    with pytest.raises(ValueError, match="not open"):
+    with pytest.raises(branches.BranchNotFoundError):
         branches.fork_branch(parent_id, "discarded parent")
 
 
@@ -509,8 +510,9 @@ def test_stale_agent_cannot_discard_after_another_append(branch_db):
 
     discarded = branches.discard_branch(branch_id, expected_change_count=2)
     assert discarded.status == "discarded"
-    # The legacy no-body request stays idempotent.
-    assert branches.discard_branch(branch_id).status == "discarded"
+    # Discard deletes the branch, so a repeat discard finds nothing.
+    with pytest.raises(branches.BranchNotFoundError):
+        branches.discard_branch(branch_id)
 
 
 

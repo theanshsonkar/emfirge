@@ -18,7 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
 from app import cost
-from app.database import BranchEvidenceLog, BranchLog, PlanLog, SessionLocal
+from app.database import BranchEvidenceLog, BranchLog, BranchOwner, BranchPolicyCheckLog, PlanLog, SessionLocal
 from app.in_use_evidence import EvidenceRecord
 from app.diffing import DiffResult, diff_infrastructure, modeled_state_unchanged
 from app.egraph import GRAPH_SCHEMA_VERSION, build_graph
@@ -548,12 +548,20 @@ def _prune_plan_receipts(session, row: BranchLog, changes: list[dict]) -> None:
     ).delete(synchronize_session=False)
 
 
+def _delete_branch_rows(session, branch_id: str) -> None:
+    """Delete the branch and every row linked to it (same transaction as the caller)."""
+    for model in (PlanLog, BranchEvidenceLog, BranchPolicyCheckLog, BranchOwner):
+        session.query(model).filter(model.branch_id == branch_id).delete(synchronize_session=False)
+    session.query(BranchLog).filter(BranchLog.branch_id == branch_id).delete(synchronize_session=False)
+    session.expire_all()
+
+
 def discard_branch(
     branch_id: str,
     expected_change_count: Optional[int] = None,
     expected_branch_revision: Optional[str] = None,
 ) -> Branch:
-    """Discard an open branch, optionally guarding the observed change count."""
+    """Discard an open branch and delete it with all linked rows, optionally guarding the observed change count."""
     def operation(session):
         row = _load_branch(session, branch_id)
         previous_json = row.changes_json or '[]'
@@ -567,7 +575,10 @@ def discard_branch(
             raise BranchConflictError("Branch revision is stale; reload the branch and retry")
         if row.status != 'open':
             if expected_change_count is None and row.status == 'discarded':
-                return _decode(row)
+                # Left over from before discard deleted data: finish deleting it now.
+                result = _decode(row)
+                _delete_branch_rows(session, branch_id)
+                return result
             raise BranchConflictError(f"Branch is not open: {branch_id}")
         updated = session.query(BranchLog).filter(
             BranchLog.branch_id == branch_id,
@@ -577,7 +588,9 @@ def discard_branch(
         if updated != 1:
             raise BranchConflictError("Branch changed during discard; reload it and retry")
         session.expire(row)
-        return _decode(row)
+        result = _decode(row)
+        _delete_branch_rows(session, branch_id)
+        return result
 
     return _with_session(operation)
 

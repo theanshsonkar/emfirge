@@ -136,13 +136,13 @@ def test_L41d_child_rollback_does_not_touch_parent(plan_client):
     assert client.get(f"/branches/{parent}/plans/{receipt['plan_id']}/handback").status_code == 200
 
 
-def test_L41e_discard_keeps_receipt_rows(plan_client):
+def test_L41e_discard_deletes_receipt_rows(plan_client):
     client, factory = plan_client
     bid = _branch(client)
     receipt = _plan(client, bid)
     assert client.post(f"/branches/{bid}/discard", json={}).status_code == 200
     session = factory()
     try:
-        assert session.query(database.PlanLog).filter_by(plan_id=receipt["plan_id"]).count() == 1
+        assert session.query(database.PlanLog).filter_by(plan_id=receipt["plan_id"]).count() == 0
     finally:
         session.close()
