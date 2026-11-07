@@ -183,6 +183,14 @@ What is on your disk:         SG_001  -> sg-0a1b2c3d4e5f6789
 | `balanced` | The same, except generic network topology IDs (volume, subnet, VPC, network interface, route table, internet gateway, NAT gateway and ACL IDs) stay as they are |
 | `off` | Nothing. Your own resource names pass through. Presigned download links still have their credentials removed |
 
+Resource tag values are hidden in `strict` and `balanced` mode, in every tool.
+Tag keys such as `owner`, `env` and `Name` stay readable, and every tag value
+(including values of `aws:` tags) becomes a `TAG_` token, so
+`{"owner": "acme-payroll"}` reaches your AI as `{"owner": "TAG_001"}`. The same
+value always gets the same token. If you set tags through a branch change and
+pass a token back, the MCP swaps the real value in locally. In `off` mode tag
+values pass through like your other resource names.
+
 The token map is the file `~/.emfirge/tokens.json` on your machine. The MCP
 never uploads it. When you ask about `SG_001`, the MCP swaps the real ID back
 in locally before it calls the backend.

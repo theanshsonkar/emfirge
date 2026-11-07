@@ -294,6 +294,9 @@ function redactEmbedded(s: string): string {
   const knownNames = Object.keys(store.realToToken)
     .filter((name) => {
       if (name.length < 2 || isNeverSensitive(name)) return false;
+      // Short tag values ("web", "dev") would garble ordinary words in prose;
+      // the tag field itself is masked regardless.
+      if (name.length < 4 && store.realToToken[name]?.startsWith("TAG_")) return false;
       // Skip values that are themselves AWS-pattern matches; those are
       // already handled by EMBEDDED_PATTERNS above.
       for (const [re] of PATTERNS) {
@@ -476,11 +479,88 @@ function collectNames(obj: unknown, parentKey = ""): void {
   }
 
   if (typeof obj === "object") {
+    if (tagPairValueKey(obj as Record<string, unknown>, false) !== undefined) {
+      collectTagValues(obj); // bare AWS {Key, Value} tag item
+      return;
+    }
     for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-      const childKey = k === "tags" || k === "Tags" ? "name" : k;
-      collectNames(v, childKey);
+      if (isTagKey(k)) {
+        collectTagValues(v);
+        continue;
+      }
+      collectNames(v, k);
     }
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// Resource tags. Tag KEYS stay readable (owner, env, Name, aws:...); every tag
+// VALUE is replaced by a token in strict and balanced mode, whatever it looks
+// like -- owners, teams, cost centres and project names are the point of tags.
+// Shapes handled: {k: v} maps, AWS [{Key, Value}] / [{key, value}] lists, and
+// "k=v" strings, under any tag-ish key; plus bare AWS {Key, Value} pairs.
+// The same value always gets the same token, and the token round-trips through
+// expandTokens, so an agent can send it back in a tag-setting branch change.
+// ---------------------------------------------------------------------------
+const TAG_CONTAINER_KEYS = new Set(["tags", "tag", "tagset", "taglist", "resourcetags", "usertags"]);
+
+function isTagKey(key: string): boolean {
+  return TAG_CONTAINER_KEYS.has(key.toLowerCase().replace(/[-_]/g, ""));
+}
+
+function tagValueToken(real: string): string {
+  if (real === "") return real;
+  if (TOKEN_PATTERN.test(real) && store.tokenToReal[real] !== undefined) return real; // already issued
+  const whole = tokenizeWholeId(real); // typed token when it is an id, so it matches the rest of the output
+  if (whole !== null && whole !== real) return whole;
+  return tokenize(real, "TAG");
+}
+
+const TAG_PAIR_EXTRAS = new Set(["propagate_at_launch", "PropagateAtLaunch", "ResourceId", "ResourceType"]);
+
+// An AWS tag item: Key + Value (any one casing) and nothing but ASG extras.
+function tagPairValueKey(o: Record<string, unknown>, allowLower: boolean): string | undefined {
+  const upper = "Key" in o && "Value" in o;
+  const lower = allowLower && "key" in o && "value" in o;
+  if (!upper && !lower) return undefined;
+  const keyName = upper ? "Key" : "key";
+  const valueName = upper ? "Value" : "value";
+  if (!Object.keys(o).every((k) => k === keyName || k === valueName || TAG_PAIR_EXTRAS.has(k))) return undefined;
+  return valueName;
+}
+
+function maskTagLeaf(v: unknown): unknown {
+  if (v == null) return v;
+  if (typeof v === "string") return tagValueToken(v);
+  if (typeof v === "number" || typeof v === "boolean") return tagValueToken(String(v));
+  return maskTagValues(v);
+}
+
+// `v` is the content of a tags container (or a nested piece of one).
+function maskTagValues(v: unknown): unknown {
+  if (v == null) return v;
+  if (typeof v === "string") {
+    const eq = v.indexOf("=");
+    return eq > 0 ? `${v.slice(0, eq + 1)}${tagValueToken(v.slice(eq + 1))}` : tagValueToken(v);
+  }
+  if (Array.isArray(v)) return v.map(maskTagValues);
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    const valueKey = tagPairValueKey(o, true);
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(o)) {
+      out[k] = valueKey !== undefined ? (k === valueKey ? maskTagLeaf(val) : val) : maskTagLeaf(val);
+    }
+    return out;
+  }
+  return maskTagLeaf(v);
+}
+
+// Seed tag values into the dictionary so prose elsewhere in the same response
+// ("owned by acme-payroll") is scrubbed too. Done by masking and discarding.
+function collectTagValues(v: unknown): void {
+  maskTagValues(v);
 }
 
 // Query parameters of a SigV4 presigned URL that carry credential material.
@@ -561,10 +641,13 @@ function redactDeepInner(obj: unknown, parentKey = ""): unknown {
   }
 
   if (typeof obj === "object") {
+    if (tagPairValueKey(obj as Record<string, unknown>, false) !== undefined) {
+      return maskTagValues(obj); // bare AWS {Key, Value} tag item
+    }
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-      if (k === "tags" || k === "Tags") {
-        out[k] = redactDeepInner(v, "name");
+      if (isTagKey(k)) {
+        out[k] = maskTagValues(v);
       } else {
         out[k] = redactDeepInner(v, k);
       }
