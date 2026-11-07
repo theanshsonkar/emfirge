@@ -1,5 +1,4 @@
 import boto3
-import datetime
 import json
 import time as _time_module
 import threading
@@ -251,7 +250,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         network_interfaces=results['ec2'].network_interfaces,
         collection={**collection_status, 'network_interfaces': results['ec2'].network_interfaces_status},
         region=region,
-        collected_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        collected_at=datetime.now(timezone.utc).isoformat(),
         warnings=warnings
     )
 

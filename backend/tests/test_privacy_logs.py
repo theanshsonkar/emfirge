@@ -357,14 +357,7 @@ def test_L71g_b_collector_logs_no_customer_identifiers(mode, monkeypatch, capsys
         assumed = {"AccessKeyId": "testing", "SecretAccessKey": "testing", "SessionToken": "testing"}
         capsys.readouterr()
         with caplog.at_level(logging.DEBUG):
-            try:
-                aws_collector.collect_infrastructure(creds, assumed)
-            except AttributeError as exc:
-                # Pre-existing, unrelated bug in aws_collector: `from datetime import datetime`
-                # shadows `import datetime`, so the final `datetime.datetime.now(...)` raises after
-                # every collector has already run and logged.  Not fixed here (log-lines-only change).
-                if "datetime" not in str(exc):
-                    raise
+            aws_collector.collect_infrastructure(creds, assumed)
 
     captured = capsys.readouterr()
     # Third-party libraries (botocore at DEBUG logs raw request/response bodies) are out of the law's
