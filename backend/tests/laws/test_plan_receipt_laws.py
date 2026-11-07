@@ -43,10 +43,14 @@ def _calls():
             for port in (8080, 8443)]
 
 
+_PLAN_TEXT_BY_SHA = {}  # the caller's own copy of each uploaded plan; the server keeps only the hash
+
+
 def _plan(client, branch_id, calls=None):
-    response = client.post(f"/branches/{branch_id}/plans/aws-api", json={
-        "format": "aws-api-calls/1", "calls": calls or _calls()})
+    raw = json.dumps({"format": "aws-api-calls/1", "calls": calls or _calls()}).encode()
+    response = client.post(f"/branches/{branch_id}/plans/aws-api", content=raw)
     assert response.status_code == 200, response.text
+    _PLAN_TEXT_BY_SHA[response.json()["input_sha256"]] = raw.decode()
     return response.json()
 
 
@@ -66,7 +70,7 @@ def _verify_plan(client, branch_id, plan_id):
     assert handback.status_code == 200, handback.text
     body = handback.json()
     checked = client.post("/handback/verify", json={
-        "plan_id": plan_id, "verdict_id": body["verdict_id"], "plan_text": body["plan_text"],
+        "plan_id": plan_id, "verdict_id": body["verdict_id"], "plan_text": _PLAN_TEXT_BY_SHA[body["input_sha256"]],
         "base_analysis_id": body["base_analysis_id"], "branch_revision": body["branch_revision"]})
     assert checked.status_code == 200, checked.text
     assert checked.json() == {"ok": True}

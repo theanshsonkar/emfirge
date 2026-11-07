@@ -189,8 +189,24 @@ class APIKey(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     last_used_at = Column(DateTime, nullable=True)
 
+def run_privacy_migrations():
+    """Idempotent startup data fixes (the schema is never altered here beyond create_all)."""
+    session = SessionLocal()
+    try:
+        # Plans keep only a sha256 fingerprint; blank any plan text stored by older versions.
+        session.query(PlanLog).filter(PlanLog.raw_input != '').update(
+            {PlanLog.raw_input: ''}, synchronize_session=False)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def create_tables():
     Base.metadata.create_all(engine)
+    run_privacy_migrations()
     print('Database tables created successfully')
 
 class Project(Base):

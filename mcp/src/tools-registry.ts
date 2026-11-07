@@ -207,7 +207,7 @@ export const tools: ToolRegistration[] = [
   {
     name: "emfirge_plan_verdict",
     description:
-      "Check a proposed change on a branch before it is applied. Accepted shapes: aws-api {\"format\":\"aws-api-calls/1\",\"calls\":[{\"service\":\"ec2\",\"operation\":\"AuthorizeSecurityGroupIngress\",\"parameters\":{...},\"region\":\"optional\"}]}; aws-cli a list of command strings or {\"format\":\"aws-cli/1\",\"commands\":[...]}, e.g. \"aws ec2 authorize-security-group-ingress --group-id SG_001 --protocol tcp --port 22 --cidr 0.0.0.0/0\"; terraform JSON of `terraform show -json <plan>`; cloudformation describe-change-set JSON. Emfirge never runs the change. Returns the verdict and the hand-back bound to the exact input by hash.",
+      "Check a proposed change on a branch before it is applied. Accepted shapes: aws-api {\"format\":\"aws-api-calls/1\",\"calls\":[{\"service\":\"ec2\",\"operation\":\"AuthorizeSecurityGroupIngress\",\"parameters\":{...},\"region\":\"optional\"}]}; aws-cli a list of command strings or {\"format\":\"aws-cli/1\",\"commands\":[...]}, e.g. \"aws ec2 authorize-security-group-ingress --group-id SG_001 --protocol tcp --port 22 --cidr 0.0.0.0/0\"; terraform JSON of `terraform show -json <plan>`; cloudformation describe-change-set JSON. Emfirge never runs the change. Returns the verdict and a hand-back bound to the exact input by sha256; Emfirge stores no plan text, so apply your own original plan.",
     schema: planVerdictSchema as Record<string, z.ZodTypeAny>,
     zodObject: planVerdictZodObject as z.ZodObject<z.ZodRawShape>,
     handler: planVerdictHandler,

@@ -1672,7 +1672,7 @@ async def _ingest_plan_endpoint(
             rejected.append({'address': address, 'reason_code': reason, 'op': change.op})
     final_branch = branches.get_branch(branch_id)
     plan_id = str(uuid.uuid4())
-    branches.save_plan(plan_id, branch_id, digest, raw.decode('utf-8', errors='replace'),
+    branches.save_plan(plan_id, branch_id, digest,
                        branches.branch_revision(final_branch), rejected,
                        translated['unmodeled'], translated['unknown_fields'])
     revision = branches.branch_revision(final_branch)
@@ -1993,10 +1993,7 @@ def plan_handback_endpoint(branch_id: str, plan_id: str, request: Request, calle
         branch, result, revision = _current_handback_state(branch_id)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail='Not found') from exc
-    plan_text = plan['raw_input']
-    # A persisted receipt must remain bound to exactly the bytes represented by
-    # its recorded digest; never synthesize or regenerate a plan here.
-    assert hashlib.sha256(plan_text.encode('utf-8')).hexdigest() == plan['input_sha256']
+    # The server keeps only the plan's sha256, never its text; the caller applies its own original file.
     verdict = result.verdict
     verdict_id = _handback_verdict_id(
         plan['input_sha256'], branch.base_analysis_id, revision, verdict,
@@ -2008,7 +2005,11 @@ def plan_handback_endpoint(branch_id: str, plan_id: str, request: Request, calle
         'branch_revision': revision,
         'verdict_id': verdict_id,
         'verdict': verdict,
-        'plan_text': plan_text,
+        'instruction': (
+            'Apply your own original plan file, the exact bytes you uploaded, whose sha256 equals '
+            'input_sha256. Emfirge does not store plan text. Then call /handback/verify with that '
+            'file as plan_text.'
+        ),
     }
 
 

@@ -37,14 +37,17 @@ class ForkResult:
         yield self.num_changes
 
 
-def save_plan(plan_id: str, branch_id: str, input_sha256: str, raw_input: str,
+def save_plan(plan_id: str, branch_id: str, input_sha256: str,
               branch_revision_after: str, rejected: list, unmodeled: list,
               unknown_fields: list) -> None:
-    """Persist one raw plan and its ingest outcome."""
+    """Persist a plan's fingerprint and ingest outcome. The plan text is never stored.
+
+    plan_logs.raw_input cannot be dropped (no migrations), so it holds an empty string.
+    """
     def operation(session):
         session.add(PlanLog(
             plan_id=plan_id, branch_id=branch_id, input_sha256=input_sha256,
-            raw_input=raw_input, branch_revision_after=branch_revision_after,
+            raw_input="", branch_revision_after=branch_revision_after,
             rejected_json=json.dumps(rejected, separators=(",", ":")),
             unmodeled_json=json.dumps(unmodeled, separators=(",", ":")),
             unknown_fields_json=json.dumps(unknown_fields, separators=(",", ":")),
@@ -63,7 +66,6 @@ def get_plan(plan_id: str) -> dict | None:
             "plan_id": row.plan_id,
             "branch_id": row.branch_id,
             "input_sha256": row.input_sha256,
-            "raw_input": row.raw_input,
             "branch_revision_after": row.branch_revision_after,
         }
     except OperationalError:
@@ -384,7 +386,7 @@ def fork_branch(
                 plan_id=child_plan_id,
                 branch_id=child_id,
                 input_sha256=parent_plan.input_sha256,
-                raw_input=parent_plan.raw_input,
+                raw_input="",
                 branch_revision_after=parent_plan.branch_revision_after,
                 rejected_json=parent_plan.rejected_json,
                 unmodeled_json=parent_plan.unmodeled_json,

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import pytest
 
@@ -105,11 +106,12 @@ def test_cli_route_preserves_raw_handback_and_rejects_changed_text(plan_client):
     handback_response = plan_client.get(f"/branches/{branch_id}/plans/{plan_id}/handback")
     assert handback_response.status_code == 200
     handback = handback_response.json()
-    assert handback["plan_text"].encode() == raw
+    assert "plan_text" not in handback and handback["input_sha256"] == hashlib.sha256(raw).hexdigest()
     verified = plan_client.post("/handback/verify", json={
-        "plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": handback["plan_text"], "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"]})
+        "plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": raw.decode(), "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"]})
     assert verified.json() == {"ok": True}
-    changed = handback["plan_text"][:-1] + ("0" if handback["plan_text"][-1] != "0" else "1")
+    original = raw.decode()
+    changed = original[:-1] + ("0" if original[-1] != "0" else "1")
     rejected = plan_client.post("/handback/verify", json={
         "plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": changed, "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"]})
     assert rejected.status_code == 409
