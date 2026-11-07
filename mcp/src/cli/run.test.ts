@@ -240,7 +240,8 @@ test("try --verify-fix calls the verify-fix endpoint", async () => {
 
 // ---- check ----
 const checkReply = {
-  branch_id: "b1", base_analysis_id: "a1", branch_revision: "r", changes: 1,
+  branch_id: "b1", base_analysis_id: "a1", branch_revision: "r",
+  changes: [{ change: "added", resource_ids: [] }, { change: "removed", resource_ids: [] }, { change: "modified", resource_ids: [SG] }],
   answers: ["data", "exposure", "money", "availability", "control", "outside_world"].map((damage) => ({
     damage, facts: damage === "exposure" ? [{ resource_id: SG, state: "open" }] : [], checked: ["x"], unknown: [],
   })),
@@ -283,6 +284,7 @@ test("check --human prints a short readable form, not JSON", async () => {
   assert.match(r.stdout, /exposure/);
   assert.match(r.stdout, /unknown/i);
   assert.equal(r.stdout.includes(SG), false);
+  assert.match(r.stdout, /\(1 change\(s\)\)/);
 });
 
 // ---- report ----

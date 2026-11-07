@@ -39,7 +39,9 @@ type Answer = { damage?: string; facts?: unknown[]; checked?: unknown[]; unknown
 
 function humanCheck(v: Record<string, unknown>): string | null {
   if (!Array.isArray(v.answers)) return null;
-  const lines = [`Branch check: ${scalar(v.branch_id)} (${scalar(v.changes)} change(s))`];
+  const changeGroups = Array.isArray(v.changes) ? (v.changes as Array<{ resource_ids?: unknown[] }>) : [];
+  const changeCount = changeGroups.reduce((n, g) => n + (Array.isArray(g.resource_ids) ? g.resource_ids.length : 0), 0);
+  const lines = [`Branch check: ${scalar(v.branch_id)} (${changeCount} change(s))`];
   for (const a of v.answers as Answer[]) {
     const facts = a.facts?.length ?? 0;
     const unknown = a.unknown?.length ?? 0;
