@@ -325,7 +325,7 @@ def _type_map(verdict: CombinedVerdict, inputs: CheckInputs) -> dict[str, str]:
 # ── the six answers ───────────────────────────────────────────────
 
 _RECOVERY_UNKNOWN = {
-    True: "the item count of this table was not reported, so whether it held data is unknown, and no on-demand backup or point-in-time recovery is known either",
+    True: "the item count of this table was not reliably recorded (not reported, or stored by an older scan that wrote a missing count as 0), so whether it held data is unknown, and no on-demand backup or point-in-time recovery is known either; rescan to know",
     False: "the backup or point-in-time recovery settings of this table could not be read, so whether a recovery point exists is unknown",
 }
 

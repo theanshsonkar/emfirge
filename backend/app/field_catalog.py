@@ -205,6 +205,7 @@ CATALOG: dict[str, dict[str, Source]] = {
         "encryption_type": Derived("collected from DescribeTable SSEDescription; changing it (UpdateTable SSESpecification) is not modeled"),
         "has_backup": Derived("collected from ListBackups: an AVAILABLE on-demand backup exists"),
         "billing_mode": Derived("collected from DescribeTable BillingModeSummary; changing it (UpdateTable BillingMode) is not modeled"),
+        "item_count_reported": Derived("set by the collector when DescribeTable returned ItemCount; absent in scans made before it existed"),
         "item_count": Derived("collected from DescribeTable ItemCount, which AWS refreshes about every six hours"),
     },
     "iam_role_policy": {

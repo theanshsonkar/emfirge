@@ -76,7 +76,7 @@ def arn(name):
 
 
 def table(name=ORDERS, **extra):
-    values = dict(name=name, arn=arn(name), item_count=1200, pitr_enabled=False, has_backup=False,
+    values = dict(name=name, arn=arn(name), item_count=1200, item_count_reported=True, pitr_enabled=False, has_backup=False,
                   deletion_protection_enabled=False, billing_mode="PAY_PER_REQUEST")
     values.update(extra)
     return DynamoDBTable(**values)
@@ -854,3 +854,58 @@ def test_L80l_api_branch_flow_blocks_the_delete_and_lists_the_capability(monkeyp
     assert handback.status_code == 200, handback.text
     assert [(c["service"], c["operation"]) for c in handback.json()["calls"]] == [("dynamodb", "DeleteTable")]
     main._branch_request_log.clear()
+
+
+# ── L80m an old scan's zero is not evidence of an empty table ──────────────────
+
+def _old_format_base():
+    """A snapshot as the old collector stored it: no deletion protection, no marker, a missing ItemCount stored as 0."""
+    legacy = base_with().model_dump(mode="json")
+    legacy["dynamodb"]["tables"] = [{"name": ORDERS, "arn": arn(ORDERS), "encryption_type": "DEFAULT", "pitr_enabled": False,
+                                     "has_backup": False, "billing_mode": "PAY_PER_REQUEST", "item_count": 0}]
+    return AWSInfrastructure.model_validate(json.loads(json.dumps(legacy)))
+
+
+def test_L80m_an_old_snapshots_zero_item_count_is_unknown_never_a_pass():
+    base = _old_format_base()
+    assert find(base).item_count == 0 and find(base).item_count_reported is False
+    branch = apply_change(base, delete())
+    lens = analyze_deletions(base, branch)
+    assert lens.data_lost == [] and lens.recovery_points == []
+    assert [x.resource_id for x in lens.recovery_unknown] == [ORDERS]
+    verdict = combined_verdict(base, branch, run_scanners=False)
+    got = {_code(r): _level(r) for r in verdict.reasons}
+    assert got.get("data_store_deleted_recovery_unknown") == "warn" and verdict.verdict != "pass"
+    body = _dump(_check(base, branch))
+    assert data_facts(body) == [{"resource_id": ORDERS, "resource_type": "dynamodb_table", "change": "deleted",
+                                 "has_recovery_point": None, "recovery_resource_ids": []}]
+    assert "rescan" in data_unknown(body)[("recovery_unknown", ORDERS)]
+    line = next(f for f in answer_for_infra("data", base, analysis_id="a").model_dump(mode="json")["facts"] if f["resource_type"] == "dynamodb_table")
+    assert line["has_recovery_point"] is None
+
+
+def test_L80m_a_real_zero_from_the_new_collector_is_reported_empty(fake_aws):
+    _make(fake_aws)
+    data, _ = _collect()
+    assert data.tables[0].item_count == 0 and data.tables[0].item_count_reported is True
+    base = base_with().model_copy(update={"dynamodb": data})
+    lens = analyze_deletions(base, apply_change(base, delete()))
+    assert [p.kind for p in lens.recovery_points] == ["reported_empty_table"] and lens.recovery_unknown == []
+
+
+def test_L80m_the_marker_survives_branch_changes_and_a_missing_count_is_not_reported(fake_aws, monkeypatch):
+    base = base_with(table(item_count=0))
+    assert find(apply_change(base, modify(pitr_enabled=True))).item_count_reported is True
+    assert find(apply_change(_old_format_base(), modify(deletion_protection_enabled=False))).item_count_reported is False
+    from botocore.client import BaseClient
+    _make(fake_aws)
+    original = BaseClient._make_api_call
+
+    def patched(self, operation_name, params):
+        result = original(self, operation_name, params)
+        if operation_name == "DescribeTable":
+            result["Table"].pop("ItemCount", None)
+        return result
+
+    monkeypatch.setattr(BaseClient, "_make_api_call", patched)
+    assert _collect()[0].tables[0].item_count_reported is False

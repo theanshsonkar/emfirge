@@ -3169,6 +3169,7 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                     has_backup=has_backup,
                     billing_mode=billing_mode,
                     item_count=item_count,
+                    item_count_reported=item_count is not None,
                     deletion_protection_enabled=deletion_protection,
                 ))
 

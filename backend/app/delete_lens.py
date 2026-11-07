@@ -94,9 +94,10 @@ def _table_recovery(rid: str, before: dict) -> tuple[RecoveryPoint | None, str |
     if before.get("pitr_enabled") is True:
         return RecoveryPoint(resource_id=rid, kind="dynamodb_system_backup", source_id=rid), None
     count = before.get("item_count")
-    if count == 0:
+    if count == 0 and before.get("item_count_reported") is True:
         return RecoveryPoint(resource_id=rid, kind="reported_empty_table", source_id=rid), None
-    if count is None:
+    if count is None or count == 0:
+        # None: not reported. 0 without the marker: an older scan stored a missing count as 0.
         return None, HOLDS_DATA_UNKNOWN
     if before.get("has_backup") is None or before.get("pitr_enabled") is None:
         return None, RECOVERY_SOURCE_UNKNOWN

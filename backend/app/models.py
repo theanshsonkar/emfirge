@@ -635,6 +635,8 @@ class DynamoDBTable(BaseModel):
     billing_mode: str = "PROVISIONED" # "PROVISIONED" | "PAY_PER_REQUEST"
     # DescribeTable ItemCount, which AWS updates about every six hours; None = not reported.
     item_count: Optional[int] = None
+    # True only when the scan got ItemCount from DescribeTable. Old scans stored a missing count as 0, so for them 0 proves nothing.
+    item_count_reported: bool = False
     deletion_protection_enabled: Optional[bool] = None  # DescribeTable DeletionProtectionEnabled; None = not reported
 
 class DynamoDBData(BaseModel):
