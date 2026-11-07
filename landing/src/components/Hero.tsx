@@ -3,13 +3,15 @@ import { Button } from "./Button";
 import { CopyCommand } from "./CopyCommand";
 import { Frame } from "./Frame";
 import { HeroFork } from "./HeroFork";
+import { HeroGraph } from "./HeroGraph";
 
 export function Hero() {
   return (
     <section id="top" className="border-b border-line">
       <Frame>
         <div className="on-dark bg-forest text-mist">
-          <div className="px-4 pb-10 pt-14 sm:px-8 sm:pt-20 lg:px-12 lg:pt-24">
+          <div className="lg:grid lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] lg:items-center lg:gap-8 lg:px-12 lg:py-14">
+          <div className="px-4 pb-10 pt-14 sm:px-8 sm:pt-20 lg:px-0 lg:py-0">
             <h1 className="max-w-[18ch] text-balance text-[44px] font-medium leading-[1.02] tracking-[-0.035em] text-white sm:text-6xl lg:text-[72px]">
               {HERO.title}
             </h1>
@@ -23,6 +25,8 @@ export function Hero() {
             <div className="mt-8">
               <CopyCommand />
             </div>
+          </div>
+          <HeroGraph />
           </div>
           <HeroFork />
           <div className="h-6" />

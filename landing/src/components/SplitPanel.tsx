@@ -51,9 +51,9 @@ export function SplitPanel() {
                 className="mt-8 overflow-hidden rounded-xl bg-forest-deep shadow-mock"
               >
                 <Chrome title={agent.path} />
-                <div className="min-h-[220px] space-y-1 px-4 py-4 font-mono text-[13px] leading-6" aria-hidden="true">
-                  {agent.lines.map((l) => (
-                    <p key={l.text} className={cn("break-words", tone[l.tone], l.tone !== "cmd" && "pl-4")}>
+                <div className="space-y-1 px-4 py-4 font-mono text-[13px] leading-6" aria-hidden="true">
+                  {agent.lines.map((l, i) => (
+                    <p key={i} className={cn("break-words", tone[l.tone], l.tone !== "cmd" && "pl-4")}>
                       {l.tone === "cmd" && <span className="mr-2 select-none text-mist-2">$</span>}
                       {l.text}
                     </p>

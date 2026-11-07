@@ -40,6 +40,7 @@ export const NAV = {
   signIn: { label: "Sign in", href: LINKS.home },
   start: { label: "Get started", href: "#get-started" },
   skip: "Skip to content",
+  menu: { open: "Menu", close: "Close", label: "Main menu" },
 };
 
 export const HERO = {
@@ -56,6 +57,11 @@ export const FORK = {
   trunk: "live",
   branch1: "branch #1",
   branch2: "branch #2",
+  live: "14 resources",
+  alt2: "A vertical trunk labelled live, 14 resources, runs top to bottom. Branch number 1 deletes orders-db and legacy-reports-db and ends in a red cross: block, 2 of 6 checks failed. Branch number 2 deletes legacy-reports-db and ends in a green check: pass, 6 of 6. It merges back into the trunk: applied, verified in CloudTrail.",
+  b1: ["delete orders-db, legacy-reports-db", "block · 2 of 6 checks failed"],
+  b2: ["delete legacy-reports-db", "pass · 6 of 6"],
+  applied: "applied · verified in CloudTrail",
 };
 
 export const WORKS_WITH = {
@@ -83,13 +89,17 @@ export const SPLIT = {
   agent: {
     label: "Agent view",
     title: "Your terminal. One command.",
-    mockLabel: "Terminal mock: an agent runs emfirge try, then emfirge check",
+    mockLabel: "Terminal mock: an agent tries a delete, is blocked, forks a second branch and passes",
     path: "~/cloud-cleanup",
     lines: [
       { tone: "cmd", text: "emfirge try --delete rds:orders-db rds:legacy-reports-db" },
       { tone: "out", text: "2 changes on branch #1" },
       { tone: "cmd", text: "emfirge check" },
       { tone: "block", text: "block · 2 of 6 checks failed" },
+      { tone: "cmd", text: "emfirge branch fork --keep rds:orders-db" },
+      { tone: "out", text: "branch #2 · 1 change" },
+      { tone: "cmd", text: "emfirge check" },
+      { tone: "pass", text: "pass · 6 of 6 checks" },
     ] satisfies TermLine[],
   },
   branch: {
@@ -159,14 +169,15 @@ export const WORLD = {
       title: "Boundaries. Write your intent once.",
       body: "Plain English in emfirge.md. Hard lines are enforced.",
       tone: "light",
-      mockLabel: "Mock: an emfirge.md file with four lines",
+      mockLabel: "Mock: an emfirge.md file with a heading and four rules",
       mock: {
         kind: "doc",
         lines: [
-          { text: "# emfirge.md" },
-          { text: "Keep spend under $4,000 a month." },
-          { text: "Ask me before touching IAM." },
-          { text: "hard: nothing becomes publicly reachable", hard: true },
+          { text: "# my cloud" },
+          { text: "- prod-* is production. Never delete without me." },
+          { text: "- The nightly-sync schedule is paused on purpose." },
+          { text: "- Tell me about any support case or quota request." },
+          { text: "- Budget: $30/month." },
         ],
       },
     },
@@ -179,8 +190,8 @@ export const WORLD = {
         kind: "timeline",
         rows: [
           { time: "14:09", text: "applied cleanup-dbs #2 by claude-code" },
-          { time: "14:09", text: "CloudTrail matched, 2 events, 0 unexpected" },
-          { time: "14:10", text: "recorded, spend −$41.20/mo" },
+          { time: "14:09", text: "CloudTrail matched, 1 event, 0 unexpected" },
+          { time: "14:10", text: "recorded, 1 resource removed" },
         ],
       },
     },

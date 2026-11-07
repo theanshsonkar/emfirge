@@ -65,7 +65,7 @@ function Mock({ mock, tone }: { mock: WorldMock; tone: WorldCard["tone"] }) {
     return (
       <div className={cn(shell, "space-y-1.5 px-4 py-4 text-[13px]")}>
         {mock.lines.map((l, i) => (
-          <p key={i} className={cn(i === 0 ? "text-ink" : "", l.hard && "text-brand")}>
+          <p key={i} className={cn(i === 0 && "text-ink")}>
             {l.text}
           </p>
         ))}

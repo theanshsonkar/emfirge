@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { FORK } from "@/content";
+import { cn } from "@/lib/cn";
 import { useReduced } from "@/lib/useReduced";
 
 const H = 132;
@@ -83,24 +84,26 @@ function Fork({ w }: { w: number }) {
   );
 }
 
-/** Draws once (~1.6s). Server render and reduced motion show the final drawing. */
-export function HeroFork() {
+/** Plays the draw once after mount. Server render and reduced motion show the final drawing. */
+export function useForkPlay(): boolean {
   const reduced = useReduced();
   const [play, setPlay] = useState(false);
   useEffect(() => {
     if (!reduced) setPlay(true);
   }, [reduced]);
+  return play && !reduced;
+}
 
+/** The horizontal fork, shown below lg. */
+export function HeroFork() {
+  const play = useForkPlay();
   return (
-    <div role="img" aria-label={FORK.alt} className={play && !reduced ? "fork-play" : undefined}>
+    <div role="img" aria-label={FORK.alt} className={cn("lg:hidden", play && "fork-play")}>
       <div className="md:hidden">
         <Fork w={390} />
       </div>
-      <div className="hidden md:block lg:hidden">
+      <div className="hidden md:block">
         <Fork w={760} />
-      </div>
-      <div className="hidden lg:block">
-        <Fork w={1200} />
       </div>
     </div>
   );
