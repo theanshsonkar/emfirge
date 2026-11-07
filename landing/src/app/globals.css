@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+/* Design tokens: "Forge at night" (see DESIGN.md) */
+@theme {
+  --color-ink: #0b0b0c;
+  --color-surface: #141416;
+  --color-line: #26262a;
+  --color-paper: #edebe6;
+  --color-muted: #8e8c86;
+  --color-forge: #ff5a1f;
+  --color-forge-hover: #ff7a47;
+  --color-pass: #3ddc84;
+  --color-warn: #f5b83d;
+  --color-block: #ff4d4d;
+}
+
+/* Fonts are loaded in layout.tsx with next/font/google */
+@theme inline {
+  --font-display: var(--font-instrument), "Times New Roman", serif;
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+}
+
+@layer base {
+  html {
+    background: var(--color-ink);
+    scroll-behavior: smooth;
+    scroll-padding-top: 80px;
+  }
+  body {
+    background: var(--color-ink);
+    color: var(--color-paper);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    overflow-x: clip;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-forge);
+    outline-offset: 3px;
+    border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+}
+
+/* Hero dot grid, fading out at the bottom */
+@utility dot-grid {
+  background-image: radial-gradient(rgba(237, 235, 230, 0.13) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: linear-gradient(to bottom, #000 40%, transparent 100%);
+}
