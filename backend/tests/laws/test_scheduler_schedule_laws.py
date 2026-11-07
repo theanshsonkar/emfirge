@@ -144,7 +144,7 @@ def test_L75a_collector_only_makes_read_calls(fake_aws, monkeypatch):
     original = BaseClient._make_api_call
     monkeypatch.setattr(BaseClient, "_make_api_call", lambda self, op, params: (seen.append(op), original(self, op, params))[1])
     _collect()
-    assert seen and set(seen) <= {"ListSchedules", "GetSchedule", "ListScheduleGroups"}
+    assert seen and set(seen) == {"ListSchedules", "GetSchedule"}  # least privilege: the role grants exactly these (L75j)
 
 
 # ── L75b denied / error ────────────────────────────────────────────────────────
@@ -642,7 +642,8 @@ def test_L75j_iam_read_policy_lists_the_scheduler_reads_and_no_scheduler_writes(
     actions = [a for statement in document["Resources"]["EmfirgeReadOnlyRole"]["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
                for a in statement["Action"]]
     scheduler = {a for a in actions if a.startswith("scheduler:")}
-    assert scheduler == {"scheduler:ListSchedules", "scheduler:GetSchedule", "scheduler:ListScheduleGroups", "scheduler:ListTagsForResource"}
+    # Least privilege: exactly the reads the collector makes (L75a pins the collector side).
+    assert scheduler == {"scheduler:ListSchedules", "scheduler:GetSchedule"}
 
 
 # ── L75k compatibility and boundary ────────────────────────────────────────────

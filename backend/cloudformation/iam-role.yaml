@@ -79,8 +79,6 @@ Resources:
                   - sqs:GetQueueAttributes
                   - scheduler:ListSchedules
                   - scheduler:GetSchedule
-                  - scheduler:ListScheduleGroups
-                  - scheduler:ListTagsForResource
                 Resource: '*'
 
 Outputs:
