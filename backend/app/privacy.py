@@ -12,6 +12,7 @@ from dataclasses import dataclass
 import boto3
 
 from app import database
+from app.log_safe import safe_exc
 
 logger = logging.getLogger(__name__)
 
@@ -133,12 +134,12 @@ def purge_s3_reports(analysis_uuids: list[str]) -> int:
                         s3.delete_object(Bucket=bucket, Key=key)
                         deleted += 1
                     except Exception as err:
-                        logger.warning("S3 delete failed for %s: %s", key, err)
+                        logger.warning("S3 delete failed for 1 object: %s", safe_exc(err))
             if not resp.get("IsTruncated"):
                 break
             token = resp.get("NextContinuationToken")
     except Exception as err:
-        logger.warning("S3 purge step failed: %s", err)
+        logger.warning("S3 purge step failed: %s", safe_exc(err))
     return deleted
 
 
