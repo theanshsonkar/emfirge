@@ -20,7 +20,7 @@ APP_DIR = Path(__file__).resolve().parents[2] / "app"
 CORE_MODULES = {
     "branches", "diffing", "verdict", "exposure", "scoring", "delete_lens",
     "cost", "limits", "graph_schema", "evidence_models", "in_use_evidence",
-    "egraph", "context_query",
+    "egraph", "context_query", "check_facts",
 }
 
 # AWS-adapter modules (app.<name>).  Ambiguous calls: `models` (defines
@@ -36,6 +36,9 @@ ADAPTER_MODULES = {
     "rules", "compliance", "compliance_sources", "mitre",
     # Turns AWSInfrastructure into the neutral facts bundle for context_query.
     "aws_context",
+    # Turn a branch into the neutral inputs for check_facts; the outside-world
+    # table is hand-written AWS service knowledge with AWS documentation URLs.
+    "aws_check", "aws_outside_world",
 }
 AWS_LIBS = {"boto3", "botocore"}
 
@@ -57,6 +60,7 @@ ALLOWED: dict[str, set[str]] = {
     "in_use_evidence": {"boto3", "botocore", "mutations"},
     "egraph": {"models", "iam_classifier", "iam_escalation", "rds_ports"},
     "context_query": set(),
+    "check_facts": set(),
 }
 
 

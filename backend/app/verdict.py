@@ -172,6 +172,40 @@ def _graph_escalation_details(base_infra: AWSInfrastructure, branch_infra: AWSIn
         return set(), set()
 
 
+def recovery_removals(base_infra: Any, branch_infra: Any) -> list[tuple[str, str]]:
+    """Recovery points the branch removes, as sorted (resource_id, resource_type) pairs.
+
+    A deleted RDS/EBS snapshot, automated backups turned off on a database
+    that had them, or bucket versioning turned off. One truth for the
+    ``recovery_point_removed`` reason and the check's data facts.
+    """
+    removed: set[tuple[str, str]] = set()
+    base_snapshots = (_value(_value(base_infra, "rds", {}), "rds_snapshots", []) or []) + (_value(_value(base_infra, "ec2", {}), "ebs_snapshots", []) or [])
+    branch_snapshots = (_value(_value(branch_infra, "rds", {}), "rds_snapshots", []) or []) + (_value(_value(branch_infra, "ec2", {}), "ebs_snapshots", []) or [])
+    for item in deletion_ledger(branch_infra):
+        rid = str(item.get("resource_id"))
+        if (item.get("resource_type") in {"rds_snapshot", "ebs_snapshot"}
+                and any(str(_value(s, "id")) == rid for s in base_snapshots)
+                and not any(str(_value(s, "id")) == rid for s in branch_snapshots)):
+            removed.add((rid, str(item.get("resource_type"))))
+    for old in _value(_value(base_infra, "rds", {}), "rds_instances", []) or []:
+        for new in _value(_value(branch_infra, "rds", {}), "rds_instances", []) or []:
+            if (_value(old, "id") == _value(new, "id")
+                    and (_value(old, "backup_retention_days", 0) or 0) > 0 and (_value(new, "backup_retention_days", 0) or 0) == 0):
+                removed.add((str(_value(old, "id")), "rds_instance"))
+    for old in _value(_value(base_infra, "s3", {}), "buckets", []) or []:
+        for new in _value(_value(branch_infra, "s3", {}), "buckets", []) or []:
+            if (_value(old, "name") == _value(new, "name")
+                    and _value(old, "versioning_enabled", False) is True and _value(new, "versioning_enabled", False) is False):
+                removed.add((str(_value(old, "name")), "s3_bucket"))
+    return sorted(removed)
+
+
+def introduced_privilege_escalation_ids(base_infra: AWSInfrastructure, branch_infra: AWSInfrastructure) -> set[str]:
+    """Roles and users that gain privilege-escalation paths in the branch (the verdict's own set)."""
+    return set(_graph_escalation_details(base_infra, branch_infra)[0])
+
+
 def _native_finding(finding: Any) -> dict[str, Any]:
     rule_id = _text(_value(finding, "rule_id"))
     resource = _text(_value(finding, "resource_id"))
@@ -294,6 +328,8 @@ def _latent_resources(infra: Any, graph: Any = None, base_infra: Any = None) -> 
 
 _CONTAINMENT_RELATIONSHIPS = {"in_subnet", "belongs_to_vpc", "in_vpc", "contains_resource"}
 _DATA_STORE_TYPES = {"s3_bucket", "rds_instance", "dynamodb_table", "elasticache_cluster", "ebs_volume", "sqs_queue"}
+# types that hold data, public so the check can say which of them has no recovery assessment
+DATA_HOLDING_TYPES = frozenset(_DATA_STORE_TYPES)
 
 
 def _resource_id(item: Any) -> str:
@@ -748,22 +784,7 @@ def combined_verdict(
         reasons.append(_reason("warn", "data_store_deleted_with_recovery_point", "Deleted data store has a surviving recovery point", _resource_ids(recovered_deleted)))
     if data_lost and any(item.resource_id not in {x.resource_id for x in deletion.data_lost} for item in deletion.recovery_points):
         reasons.append(_reason("warn", "recovery_point_removed", "A recovery point was removed", removed_recovery_point_ids))
-    recovery_removed = any(
-        item.get("resource_type") in {"rds_snapshot", "ebs_snapshot"}
-        and any(str(_value(s, "id")) == str(item.get("resource_id")) for s in _value(_value(base_infra, "rds", {}), "rds_snapshots", []) + _value(_value(base_infra, "ec2", {}), "ebs_snapshots", []))
-        and not any(str(_value(s, "id")) == str(item.get("resource_id")) for s in _value(_value(branch_infra, "rds", {}), "rds_snapshots", []) + _value(_value(branch_infra, "ec2", {}), "ebs_snapshots", []))
-        for item in deletion_ledger(branch_infra)
-    ) or any(
-        (_value(old, "backup_retention_days", 0) or 0) > 0 and (_value(new, "backup_retention_days", 0) or 0) == 0
-        for old in _value(_value(base_infra, "rds", {}), "rds_instances", []) or []
-        for new in _value(_value(branch_infra, "rds", {}), "rds_instances", []) or []
-        if _value(old, "id") == _value(new, "id")
-    ) or any(
-        _value(old, "versioning_enabled", False) is True and _value(new, "versioning_enabled", False) is False
-        for old in _value(_value(base_infra, "s3", {}), "buckets", []) or []
-        for new in _value(_value(branch_infra, "s3", {}), "buckets", []) or []
-        if _value(old, "name") == _value(new, "name")
-    )
+    recovery_removed = bool(recovery_removals(base_infra, branch_infra))
     if recovery_removed:
         reasons.append(_reason("warn", "recovery_point_removed", "A recovery point was removed", removed_recovery_point_ids))
     if deleted_base_reachable(base_infra, branch_infra):

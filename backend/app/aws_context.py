@@ -59,6 +59,10 @@ def _node_id(graph: Graph, resource_type: str, name: str) -> str:
     return graph.node_id_for(resource_type, name) or str(name)
 
 
+safe_warning = _safe_warning
+node_id_for = _node_id
+
+
 def _tag_lines(infra: AWSInfrastructure, graph: Graph) -> list[TagLine]:
     lines = []
     for resource_type, items in tagged_collections(infra).items():
@@ -125,6 +129,9 @@ def _role_use_lines(infra: AWSInfrastructure, graph: Graph) -> list[UseLine]:
         lines.append(UseLine(node_id, used, role.last_used_at if status_ok else None,
                              RECENT_USE_DAYS, "scan:last_used", topic, reason))
     return lines
+
+
+role_use_lines = _role_use_lines
 
 
 def _evidence_use_lines(graph: Graph, evidence: Sequence[EvidenceRecord]) -> list[UseLine]:
