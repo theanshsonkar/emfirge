@@ -8,6 +8,7 @@ from botocore.config import Config
 from app.cidr import is_internet_cidr, rule_opens_port_to_internet
 from app.tags import tag_map
 from app.log_safe import safe_exc, safe_choice
+from app.scheduler_schedule import aws_schedule_fields
 from app.s3_public import acl_grants_are_public, effective_is_public, policy_is_public
 from app.models import (
     AWSCredentials, AWSInfrastructure,
@@ -18,7 +19,7 @@ from app.models import (
     APIGatewayData, APIGatewayInstance,
     ElastiCacheData, ElastiCacheCluster,
     SQSData, SQSQueue,
-    DynamoDBData, DynamoDBTable,
+    DynamoDBData, DynamoDBTable, SchedulerData, SchedulerSchedule,
     EBSVolume, EBSSnapshot, ElasticIP, Route, RouteTable, NACLEntry, NetworkACL, NetworkInterface,
     VPCPeeringConnection, TransitGatewayAttachment, VPNGateway, InterfaceEndpoint, BlockDevice,
     RDSSnapshot, PolicyDocumentRecord, merge_policy_statements, AccessStatement
@@ -117,6 +118,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         'elasticache':     collect_elasticache,
         'sqs':             collect_sqs,
         'dynamodb':        collect_dynamodb,
+        'scheduler':       collect_scheduler,
     }
 
     results = {}
@@ -128,7 +130,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         ['s3', 'guardduty', 'sns', 'sqs'],
         ['iam', 'cost', 'cloudwatch', 'config'],
         ['lambda', 'vpc', 'ecs', 'waf'],
-        ['secrets_manager', 'api_gateway', 'elasticache', 'dynamodb'],
+        ['secrets_manager', 'api_gateway', 'elasticache', 'dynamodb', 'scheduler'],
     ]
 
     with ThreadPoolExecutor(max_workers=16) as executor:
@@ -177,6 +179,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
                     'elasticache':     ElastiCacheData(),
                     'sqs':             SQSData(),
                     'dynamodb':        DynamoDBData(),
+                    'scheduler':       SchedulerData(),
                 }
                 results[name] = defaults[name]
             except Exception as e:
@@ -202,6 +205,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
                     'elasticache':     ElastiCacheData(),
                     'sqs':             SQSData(),
                     'dynamodb':        DynamoDBData(),
+                    'scheduler':       SchedulerData(),
                 }
                 results[name] = defaults[name]
 
@@ -226,6 +230,8 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
 
     lambda_data.functions_with_admin_role = functions_with_admin
 
+    # A collector that timed out or crashed never reported: say so rather than leave the status unrecorded.
+    collection_status.setdefault('scheduler', 'error')
     return AWSInfrastructure(
         ec2=results['ec2'],
         s3=results['s3'],
@@ -247,6 +253,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         elasticache=results['elasticache'],
         sqs=results['sqs'],
         dynamodb=results['dynamodb'],
+        scheduler=results['scheduler'],
         network_interfaces=results['ec2'].network_interfaces,
         collection={**collection_status, 'network_interfaces': results['ec2'].network_interfaces_status},
         region=region,
@@ -3151,6 +3158,66 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
         tables_without_backup=tables_without_backup,
         tables=tables,
     )
+
+
+# ── EVENTBRIDGE SCHEDULER COLLECTOR ───────────────────────────────
+_DENIED_CODES = ['AccessDenied', 'AccessDeniedException', 'UnauthorizedOperation']
+
+
+def collect_scheduler(key, secret, token, region, warnings) -> SchedulerData:
+    """Schedules with state, expression and target (read-only: ListSchedules + GetSchedule).
+
+    The Target.Input payload may hold secrets and is never stored, only whether one is set.
+    EventBridge Scheduler schedules cannot be tagged (only schedule groups can).
+    Status: ok, denied (a read was refused; what the list gave is kept), or error.
+    """
+    schedules = []
+    status = 'error'
+    try:
+        client = boto3.client('scheduler', aws_access_key_id=key,
+                              aws_secret_access_key=secret,
+                              aws_session_token=token,
+                              region_name=region, config=BOTO_CONFIG)
+        summaries = []
+        for page in client.get_paginator('list_schedules').paginate():
+            summaries.extend(page.get('Schedules', []))
+        denied = False
+        failed = False
+        for summary in summaries:
+            detail = None
+            try:
+                detail = client.get_schedule(Name=summary['Name'], GroupName=summary['GroupName'])
+            except ClientError as e:
+                if get_error_code(e) in _DENIED_CODES:
+                    denied = True
+                else:
+                    failed = True
+            except Exception as e:
+                failed = True
+                print(f'Scheduler get skipped for 1 schedule: {safe_exc(e)}')
+            # The summary has no expression, window or input; without GetSchedule those stay unknown.
+            schedules.append(SchedulerSchedule(**aws_schedule_fields(detail if detail is not None else summary)))
+        if denied:
+            warnings.append('Scheduler schedule details skipped: insufficient permissions')
+            print('Scheduler schedule details skipped: insufficient permissions')
+        if failed:
+            warnings.append('Scheduler schedule details skipped: read error')
+            print('Scheduler schedule details skipped: read error')
+        status = 'denied' if denied else 'error' if failed else 'ok'
+    except ClientError as e:
+        code = get_error_code(e)
+        if code in _DENIED_CODES:
+            status = 'denied'
+            warnings.append('Scheduler scan skipped: insufficient permissions')
+            print('Scheduler scan skipped: insufficient permissions')
+        else:
+            warnings.append(f'Scheduler scan skipped: {code}')
+            print(f'Scheduler scan skipped: {code}')
+    except Exception as e:
+        warnings.append(f'Scheduler scan skipped: unexpected error — {safe_exc(e)}')
+        print(f'Scheduler scan skipped: unexpected error — {safe_exc(e)}')
+
+    return SchedulerData(schedules=schedules, collection_status={'scheduler': status})
 
 
 ROLE_SESSION_NAME = 'EmfirgeSecurityScan'

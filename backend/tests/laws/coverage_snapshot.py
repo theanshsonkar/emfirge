@@ -7,7 +7,7 @@ from app.models import (
     NetworkACL, NACLEntry, VPCPeeringConnection, TransitGatewayAttachment,
     VPNGateway, InterfaceEndpoint, ECSData, APIGatewayData,
     APIGatewayInstance, ElastiCacheData, ElastiCacheCluster, SQSData,
-    SQSQueue, DynamoDBData, DynamoDBTable,
+    SQSQueue, DynamoDBData, DynamoDBTable, SchedulerData, SchedulerSchedule,
 )
 
 
@@ -58,5 +58,8 @@ def build_coverage_infrastructure() -> AWSInfrastructure:
         api_gateway=APIGatewayData(apis=[APIGatewayInstance(id="api-0cov0001", name="coverage", api_type="REST", endpoint_type="REGIONAL", auth_type="IAM")]),
         elasticache=ElastiCacheData(clusters=[ElastiCacheCluster(id="cache-0cov0001", engine="redis", node_type="cache.t3.micro", vpc_id=VPC_ID, sg_ids=[SG_ID])]),
         sqs=SQSData(queues=[SQSQueue(url="https://sqs.us-east-1.amazonaws.com/000000000000/coverage-queue", arn="arn:aws:sqs:us-east-1:000000000000:coverage-queue", name="coverage-queue")]),
+        scheduler=SchedulerData(schedules=[SchedulerSchedule(
+            name="coverage-schedule", state="ENABLED", schedule_expression="rate(1 day)", flexible_time_window_mode="OFF",
+            target_arn=f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:coverage-lambda", target_role_arn=ROLE_ARN, has_input=False)]),
         dynamodb=DynamoDBData(tables=[DynamoDBTable(name="coverage", arn="arn:aws:dynamodb:us-east-1:000000000000:table/coverage", pitr_enabled=True)]),
     )

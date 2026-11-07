@@ -25,7 +25,7 @@ from app.iam_escalation import matching_paths
 from app.rds_ports import ports_cover, rds_port
 
 
-GRAPH_SCHEMA_VERSION = 1
+GRAPH_SCHEMA_VERSION = 2
 INTERNAL_REACH_EDGE_BUDGET = 50_000
 
 
@@ -73,6 +73,7 @@ class RelationshipType(str, Enum):
     uses_security_group = "uses_security_group"
     in_subnet = "in_subnet"
     uses_iam_role = "uses_iam_role"
+    invokes = "invokes"
     attached_to_instance = "attached_to_instance"
     REACHES = "REACHES"
     REACHES_VIA_SG = "REACHES_VIA_SG"
@@ -117,6 +118,8 @@ TRAVERSABLE_RELATIONSHIPS = frozenset({
 DEPENDENCY_EDGES: dict[str, str | None] = {
     "uses_security_group": "source_depends_on_target", "in_subnet": "source_depends_on_target",
     "uses_iam_role": "source_depends_on_target", "attached_to_instance": "target_depends_on_source",
+    # a schedule depends on the target it invokes: deleting the target breaks the schedule
+    "invokes": "source_depends_on_target",
     "REACHES": "target_depends_on_source", "REACHES_VIA_SG": "target_depends_on_source",
     "targets_instance": "source_depends_on_target", "serves_from_bucket": "source_depends_on_target",
     "in_vpc": "source_depends_on_target", "REFERENCES_SECRET": "source_depends_on_target",
@@ -146,6 +149,7 @@ _RESOURCE_CATEGORIES = {
     "vpc_peering_connection": NodeCategory.NETWORK,
     "cloudfront_distribution": NodeCategory.EDGE,
     "iam_role": NodeCategory.IDENTITY,
+    "scheduler_schedule": NodeCategory.OTHER,  # a trigger, not compute
 }
 
 
@@ -1710,6 +1714,62 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
                 'relationship': 'REFERENCES_SECRET'
             })
     
+    # ── SCHEDULER NODES ───────────────────────────────────────────
+    function_names = {fn['name'] if isinstance(fn, dict) else fn.name for fn in infrastructure.lambda_data.functions}
+    for schedule in infrastructure.scheduler.schedules:
+        schedule_id = f"{schedule.group_name}/{schedule.name}"
+        metadata = {
+            'name': schedule.name,
+            'group_name': schedule.group_name,
+            'state': schedule.state,
+            'schedule_expression': schedule.schedule_expression,
+            'target_arn': schedule.target_arn,
+            'target_role_arn': schedule.target_role_arn,
+            'flexible_time_window_mode': schedule.flexible_time_window_mode,
+            'flexible_time_window_minutes': schedule.flexible_time_window_minutes,
+            'schedule_expression_timezone': schedule.schedule_expression_timezone,
+            'start_date': schedule.start_date,
+            'end_date': schedule.end_date,
+            'action_after_completion': schedule.action_after_completion,
+            'has_input': schedule.has_input,
+            'unmodeled_settings': list(schedule.unmodeled_settings),
+        }
+        if schedule.arn is not None:
+            metadata['arn'] = schedule.arn
+        nodes.append({
+            'id': schedule_id,
+            'type': 'scheduler_schedule',
+            'label': f"Schedule: {schedule_id}",
+            'metadata': metadata,
+        })
+        # Edge: Schedule -> Lambda it invokes. Any other target stays a plain arn on the node.
+        target_arn = schedule.target_arn or ''
+        if ':lambda:' in target_arn and ':function:' in target_arn:
+            arn_parts = target_arn.split(':')
+            same_region = not infrastructure.region or arn_parts[3] == infrastructure.region
+            function_name = target_arn.split(':function:', 1)[1].split(':', 1)[0]
+            if same_region and function_name in function_names:
+                edges.append({
+                    'from': schedule_id,
+                    'to': id_plan.id('lambda_function', function_name),
+                    'relationship': 'invokes'
+                })
+        # Edge: Schedule -> the role EventBridge Scheduler assumes to invoke the target
+        if schedule.target_role_arn:
+            role_id = f"iam-role-{schedule.target_role_arn.split('/')[-1]}"
+            if not any(n['id'] == role_id for n in nodes):
+                nodes.append({
+                    'id': role_id,
+                    'type': 'iam_role',
+                    'label': "IAM Role",
+                    'metadata': {'arn': schedule.target_role_arn}
+                })
+            edges.append({
+                'from': schedule_id,
+                'to': role_id,
+                'relationship': 'uses_iam_role'
+            })
+
     # ── ECS NODES ─────────────────────────────────────────────────
     if infrastructure.ecs.task_role_arns:
         nodes.append({

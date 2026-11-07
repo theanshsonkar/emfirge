@@ -25,7 +25,7 @@ EMITTED_RESOURCE_TYPES = frozenset({
     "sqs_queue", "secretsmanager_secret", "security_group", "network_acl", "vpc_subnet",
     "vpc", "vpc_peering_connection", "cloudfront_distribution", "iam_role", "internet",
     "route_table", "internet_gateway", "nat_gateway", "transit_gateway_attachment",
-    "vpn_gateway", "interface_endpoint", "elastic_ip",
+    "vpn_gateway", "interface_endpoint", "elastic_ip", "scheduler_schedule",
 })
 
 

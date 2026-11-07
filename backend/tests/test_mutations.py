@@ -280,6 +280,10 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
         if resource_type == "rds_snapshot":
             assert operations == {"add", "delete"}
             continue
+        if resource_type == "scheduler_schedule":
+            # identified by <group>/<name>; exercised in tests/laws/test_scheduler_schedule_laws.py
+            assert operations == {"add", "modify", "delete"}
+            continue
         resource_id, identity_field, add_fields = ids[resource_type]
         for operation in SUPPORTED_OPERATIONS:
             infra = copy.deepcopy(empty_infra)

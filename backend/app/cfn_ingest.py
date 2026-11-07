@@ -154,6 +154,35 @@ def _resolved(value: Any) -> Any:
     return None
 
 
+_SCHEDULER_OPERATIONS = {"Add": "CreateSchedule", "Modify": "UpdateSchedule", "Remove": "DeleteSchedule"}
+
+
+def _scheduler_call(resource: dict[str, Any], action: str, physical: Any) -> dict[str, Any] | None:
+    """AWS::Scheduler::Schedule add / update / remove as the API call it stands for (properties are the API's members)."""
+    before = _properties(_context(resource, "BeforeContext")) or {}
+    after = _properties(_context(resource, "AfterContext")) or {}
+    source = before if action == "Remove" else after
+    name = source.get("Name", physical if action != "Add" else None)
+    group = source.get("GroupName")
+    if not isinstance(name, str) or not name or (group is not None and not isinstance(group, str)):
+        return None
+    params: dict[str, Any] = {"Name": name}
+    if group:
+        params["GroupName"] = group
+    if action == "Remove":
+        return {"service": "scheduler", "operation": "DeleteSchedule", "parameters": params}
+    params.update({key: value for key, value in after.items() if key not in {"Name", "GroupName"}})
+    window, target = params.get("FlexibleTimeWindow"), params.get("Target")
+    if (not isinstance(params.get("ScheduleExpression"), str) or not isinstance(window, dict) or not isinstance(window.get("Mode"), str)
+            or not isinstance(target, dict) or not isinstance(target.get("Arn"), str) or not isinstance(target.get("RoleArn"), str)
+            or not all(isinstance(params.get(key), str) for key in ("State", "StartDate", "EndDate", "ScheduleExpressionTimezone", "ActionAfterCompletion") if key in params)):
+        return None
+    minutes = window.get("MaximumWindowInMinutes")
+    if isinstance(minutes, str) and minutes.isdigit():
+        params["FlexibleTimeWindow"] = {**window, "MaximumWindowInMinutes": int(minutes)}
+    return {"service": "scheduler", "operation": _SCHEDULER_OPERATIONS[action], "parameters": params}
+
+
 def _nacl_entry_call(resource: dict[str, Any], properties: dict[str, Any], operation: str) -> dict[str, Any] | None:
     acl_id = _resolved(properties.get("NetworkAclId")); number = _resolved(properties.get("RuleNumber"))
     protocol = _resolved(properties.get("Protocol", properties.get("IpProtocol")))
@@ -240,6 +269,14 @@ def convert_change_set(doc: Any, nacls: Any = None) -> tuple[dict[str, Any], lis
                 if default_id: calls.append({"service": "ec2", "operation": "ReplaceNetworkAclAssociation", "parameters": {"AssociationId": association_id, "NetworkAclId": default_id}})
                 else: extras.append(_extra(address, typ, "ReplaceNetworkAclAssociation"))
             else: extras.append(_extra(address, typ, "ReplaceNetworkAclAssociation"))
+            continue
+        if (typ == "AWS::Scheduler::Schedule" and action in _SCHEDULER_OPERATIONS and policy not in {"Retain", "ReplaceAndRetain"}
+                and not (action == "Modify" and resource.get("Replacement") in {"True", "Conditional"})):
+            call = _scheduler_call(resource, action, physical)
+            if call is None:
+                extras.append(_extra(address, typ, "MissingPropertyValues"))
+            else:
+                calls.append(call)
             continue
         if action == "Remove":
             removal_calls, removal_extras = _removal(resource, address, policy)

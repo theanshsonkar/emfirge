@@ -35,6 +35,11 @@ from app.models import (
     IAMUser,
     NATGateway,
     RolePolicy,
+    SchedulerSchedule,
+)
+from app.scheduler_schedule import (
+    AWS_DEFAULTS as _SCHEDULER_DEFAULTS, SETTABLE_FIELDS as _SCHEDULER_FIELDS,
+    identity as _scheduler_identity, normalize_timestamp, split_identity as _split_schedule_id,
 )
 
 
@@ -195,6 +200,9 @@ def _strict_validate_field(resource_type: str, field: str, value: Any, annotatio
 def _validate_change_fields(change: Change) -> None:
     if change.op not in {"add", "modify"}:
         return
+    if change.resource_type == "scheduler_schedule":
+        _validate_scheduler_fields(change)
+        return
     if change.resource_type == "nat_gateway" and change.op == "add":
         unknown = set(change.fields) - {"subnet_id", "connectivity_type", "allocation_id", "tags"}
         if unknown:
@@ -268,6 +276,69 @@ def _validate_change_fields(change: Change) -> None:
             _strict_validate_field(change.resource_type, field, value, annotations[field])
 
 
+def _validate_scheduler_fields(change: Change) -> None:
+    """Branch fields of a schedule: AWS's own limits via the catalog, plus what the resource id carries."""
+    for field in change.fields:
+        if field in {"name", "group_name", "arn"}:
+            raise ValueError(f"scheduler_schedule.{field}: cannot be set; the schedule is identified by resource_id <group>/<name> and AWS assigns the ARN")
+    unknown = set(change.fields) - set(_SCHEDULER_FIELDS)
+    if unknown:
+        raise ValueError(f"scheduler_schedule fields: unknown schema field (allowed: {', '.join(sorted(_SCHEDULER_FIELDS))})")
+    _split_schedule_id(change.resource_id)
+    annotations = {field: info.annotation for field, info in SchedulerSchedule.model_fields.items()}
+    for field, value in change.fields.items():
+        if field in {"start_date", "end_date"}:
+            if value is not None:
+                _strict_validate_field("scheduler_schedule", field, value, str)
+                try:
+                    normalize_timestamp(value)
+                except ValueError as exc:
+                    raise ValueError(f"scheduler_schedule.{field}: expected an ISO 8601 timestamp") from exc
+        elif field in {"target_arn", "target_role_arn"} and isinstance(value, str) and not value.startswith("arn:"):
+            raise ValueError(f"scheduler_schedule.{field}: expected an ARN")
+        elif field == "unmodeled_settings":
+            if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                raise ValueError("scheduler_schedule.unmodeled_settings: expected a list of member names")
+        else:
+            _strict_validate_field("scheduler_schedule", field, value, annotations[field])
+
+
+def _apply_scheduler_change(result: AWSInfrastructure, change: Change) -> AWSInfrastructure:
+    """Add, modify or delete one EventBridge Scheduler schedule.
+
+    Adds use CreateSchedule's documented defaults (State ENABLED, timezone UTC, no action after
+    completion); a required member the change leaves out stays None (unknown), never a guess.
+    A modify sets only the fields given; an UpdateSchedule call replaces everything, and the
+    ingest layer states every member of it (see scheduler_schedule.api_fields).
+    """
+    group, name = _split_schedule_id(change.resource_id)
+    identity = _scheduler_identity(group, name)
+    if change.op == "delete":
+        _delete(result, "scheduler_schedule", identity, change.fields)
+        _sync_counts(result)
+        return recompute_derived_state(result)
+    schedules = result.scheduler.schedules
+    index = next((i for i, item in enumerate(schedules) if _scheduler_identity(item.group_name, item.name) == identity), None)
+    fields = {key: (normalize_timestamp(value) if key in {"start_date", "end_date"} and value is not None else value)
+              for key, value in change.fields.items()}
+    if change.op == "add":
+        if index is not None:
+            raise ValueError("Target already exists: scheduler_schedule")
+        data = {"name": name, "group_name": group, "has_input": False, **_SCHEDULER_DEFAULTS, **fields}
+        schedule = SchedulerSchedule.model_validate(data)
+        schedules.append(schedule)
+    else:
+        if index is None:
+            raise TargetNotFound("scheduler_schedule", identity)
+        if not fields:
+            raise ValueError("modify needs at least one field")
+        schedule = SchedulerSchedule.model_validate({**schedules[index].model_dump(), **fields})
+        schedules[index] = schedule
+    if schedule.flexible_time_window_minutes is not None and schedule.flexible_time_window_mode != "FLEXIBLE":
+        raise ValueError("scheduler_schedule.flexible_time_window_minutes: only valid when flexible_time_window_mode is FLEXIBLE")
+    return recompute_derived_state(result)
+
+
 _CRUD_OPERATIONS = frozenset({"add", "modify", "delete"})
 _IAM_USER_FIELDS = frozenset({"has_console_access", "access_statements", "policy_documents", "has_access_keys"})
 # CreateVolume size range per volume type (AWS EBS volume types docs).
@@ -326,6 +397,7 @@ _MUTATION_CAPABILITIES = {
     },
     "iam_instance_profile": {"model": None, "operations": frozenset({"add"}), "constraints": ()},
     "nat_gateway": {"model": NATGateway, "operations": frozenset({"add"}), "constraints": ()},
+    "scheduler_schedule": {"model": SchedulerSchedule, "operations": _CRUD_OPERATIONS, "constraints": ()},
     "iam_role_policy": {
         "model": None,
         "operations": frozenset({"modify"}),
@@ -504,6 +576,8 @@ def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
         return infra.vpc.nat_gateway_details
     if resource_type == "route_table":
         return infra.vpc.route_tables
+    if resource_type == "scheduler_schedule":
+        return infra.scheduler.schedules
     return infra.lambda_data.functions
 
 
@@ -514,6 +588,8 @@ def _identity(resource_type: str, resource: BaseModel) -> str:
         return resource.role_arn
     if resource_type == "iam_user":
         return resource.username
+    if resource_type == "scheduler_schedule":
+        return _scheduler_identity(resource.group_name, resource.name)
     return resource.id
 
 
@@ -1207,6 +1283,8 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         profiles[arn] = dict(mapping)
         if role_arn: profiles.setdefault(arn.rsplit('/', 1)[-1], dict(mapping))
         return result
+    if resource_type == "scheduler_schedule":
+        return _apply_scheduler_change(result, change)
     if resource_type == "nat_gateway" and change.op == "add":
         return _add_nat_gateway(result, change)
     if resource_type == "ebs_volume" and change.op == "add":

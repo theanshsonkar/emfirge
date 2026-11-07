@@ -14,6 +14,8 @@ class NodeSchema:
     category: str
     required: dict[str, dict[str, tuple[type, ...]]]
     optional: dict[str, dict[str, tuple[type, ...]]]
+    # Base keys whose before/after values a diff may report (never secrets or free text).
+    diff_values: tuple[str, ...] = ()
 
 
 KEY_TYPES: dict[str, tuple[type, ...]] = {
@@ -78,15 +80,28 @@ KEY_TYPES: dict[str, tuple[type, ...]] = {
     "service_name": (str, type(None)),
     "public_ip": (str,),
     "is_attached": (bool,),
+    "group_name": (str,),
+    "schedule_expression": (str, type(None)),
+    "schedule_expression_timezone": (str, type(None)),
+    "target_arn": (str, type(None)),
+    "target_role_arn": (str, type(None)),
+    "flexible_time_window_mode": (str, type(None)),
+    "flexible_time_window_minutes": (int, type(None)),
+    "start_date": (str, type(None)),
+    "end_date": (str, type(None)),
+    "action_after_completion": (str, type(None)),
+    "has_input": (bool, type(None)),
+    "unmodeled_settings": (list,),
 }
 
 
-def _node(resource_type, category, required=(), optional=()):
+def _node(resource_type, category, required=(), optional=(), diff_values=()):
     required_keys = {key: KEY_TYPES[key] for key in required}
     optional_keys = {key: KEY_TYPES[key] for key in optional}
     return NodeSchema(resource_type, category,
                       {layer: (required_keys.copy() if layer == "base" else {}) for layer in LAYER_NAMES},
-                      {layer: (optional_keys.copy() if layer == "base" else {}) for layer in LAYER_NAMES})
+                      {layer: (optional_keys.copy() if layer == "base" else {}) for layer in LAYER_NAMES},
+                      diff_values=tuple(diff_values))
 
 
 NODE_SCHEMAS = {
@@ -117,6 +132,14 @@ NODE_SCHEMAS = {
     "vpn_gateway": _node("vpn_gateway", "network_boundary", ("vpc_id",), ("id", "state")),
     "interface_endpoint": _node("interface_endpoint", "network_boundary", ("vpc_id",), ("id", "service_name")),
     "elastic_ip": _node("elastic_ip", "other", ("public_ip", "is_attached")),
+    "scheduler_schedule": _node(
+        "scheduler_schedule", "other",
+        ("name", "group_name", "state", "target_arn"),
+        ("arn", "schedule_expression", "schedule_expression_timezone", "target_role_arn", "flexible_time_window_mode",
+         "flexible_time_window_minutes", "start_date", "end_date", "action_after_completion", "has_input", "unmodeled_settings"),
+        diff_values=("state", "schedule_expression", "schedule_expression_timezone", "target_arn", "target_role_arn",
+                     "flexible_time_window_mode", "flexible_time_window_minutes", "start_date", "end_date",
+                     "action_after_completion", "has_input")),
 }
 
 # Relationship endpoint pairs are deliberately literal: this is the contract
@@ -124,7 +147,8 @@ NODE_SCHEMAS = {
 EDGE_SCHEMAS = {
     RelationshipType.uses_security_group: frozenset({("ec2_instance", "security_group"), ("rds_instance", "security_group"), ("lambda_function", "security_group"), ("elasticache_cluster", "security_group")} ),
     RelationshipType.in_subnet: frozenset({("ec2_instance", "vpc_subnet"), ("lambda_function", "vpc_subnet"), ("rds_instance", "vpc_subnet")} ),
-    RelationshipType.uses_iam_role: frozenset({("ec2_instance", "iam_role"), ("lambda_function", "iam_role")} ),
+    RelationshipType.uses_iam_role: frozenset({("ec2_instance", "iam_role"), ("lambda_function", "iam_role"), ("scheduler_schedule", "iam_role")} ),
+    RelationshipType.invokes: frozenset({("scheduler_schedule", "lambda_function")} ),
     RelationshipType.attached_to_instance: frozenset({("ebs_volume", "ec2_instance"), ("security_group", "ec2_instance"), ("security_group", "rds_instance")} ),
     RelationshipType.REACHES: frozenset({("internet", "security_group"), ("internet", "api_gateway")} ),
     RelationshipType.REACHES_VIA_SG: frozenset({("internet", "ec2_instance")} ),

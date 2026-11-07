@@ -12,7 +12,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from app.aws_collector import collect_ec2, collect_lambda, collect_rds, collect_s3, collect_vpc
+from app.aws_collector import collect_ec2, collect_lambda, collect_rds, collect_s3, collect_scheduler, collect_vpc
 from app.models import AWSInfrastructure, NACLEntry
 from app.mutations import Change, apply_changes
 from app.typed_handback import build_api_calls
@@ -52,7 +52,10 @@ def _resource(state, typ, ident):
         "lambda_function": state.lambda_data.functions,
         "route_table": state.vpc.route_tables,
         "network_acl": state.vpc.nacls,
+        "scheduler_schedule": state.scheduler.schedules,
     }
+    if typ == "scheduler_schedule":
+        return next((x for x in groups[typ] if f"{x.group_name}/{x.name}" == ident), None)
     key = "name" if typ in {"s3_bucket", "lambda_function"} else "id"
     return next((x for x in groups[typ] if getattr(x, key) == ident), None)
 
@@ -76,6 +79,9 @@ def _assert_matches(recollected, modeled, change, typ, ident, touched):
             continue
         actual_value = getattr(actual, field)
         expected_value = getattr(expected, field)
+        if field == "arn" and expected_value is None:
+            assert actual_value, "AWS assigns the ARN of an added resource"
+            continue
         if field == "rules":
             def rule_key(rule):
                 value = dict(rule)
@@ -215,6 +221,54 @@ def test_nat_gateway_add_roundtrip():
     assert len(created) == len(expected) == 1
     assert created[0].model_dump(exclude={"id"}) == expected[0].model_dump(exclude={"id"})
     assert set(recollected.vpc.nat_gateways) == set(base.vpc.nat_gateways) | {created[0].id}
+
+
+SCHEDULE_TARGET = {"Arn": "arn:aws:lambda:ap-south-1:123456789012:function:roundtrip-fn", "RoleArn": "arn:aws:iam::123456789012:role/roundtrip-scheduler"}
+
+
+def _schedule(name="roundtrip-schedule", group=None, **extra):
+    params = {"Name": name, "ScheduleExpression": "cron(0 2 * * ? *)", "FlexibleTimeWindow": {"Mode": "OFF"}, "Target": dict(SCHEDULE_TARGET)}
+    if group:
+        params["GroupName"] = group
+    params.update(extra)
+    _client("scheduler").create_schedule(**params)
+
+
+def test_scheduler_state_modify_roundtrip():
+    # The incident: a paused schedule is switched back on.
+    _schedule(State="DISABLED", StartDate="2030-01-01T00:00:00Z", ScheduleExpressionTimezone="Asia/Kolkata")
+    def collect(): return _base(_collect(collect_scheduler), "scheduler")
+    base = collect()
+    assert base.scheduler.schedules[0].state == "DISABLED"
+    ident = "default/roundtrip-schedule"
+    change = Change(op="modify", resource_type="scheduler_schedule", resource_id=ident, fields={"state": "ENABLED"})
+    assert [item["operation"] for item in build_api_calls(base, [change])] == ["UpdateSchedule"]
+    _roundtrip(base, change, collect, "scheduler_schedule", ident, ["state"])
+    assert collect().scheduler.schedules[0].state == "ENABLED"
+    # and back: the same call shape disables it again
+    _roundtrip(collect(), Change(op="modify", resource_type="scheduler_schedule", resource_id=ident, fields={"state": "DISABLED"}), collect, "scheduler_schedule", ident, ["state"])
+    assert collect().scheduler.schedules[0].state == "DISABLED"
+
+
+def test_scheduler_add_and_delete_roundtrip():
+    _client("scheduler").create_schedule_group(Name="batch")
+    def collect(): return _base(_collect(collect_scheduler), "scheduler")
+    base = collect()
+    fields = {"schedule_expression": "rate(1 hour)", "flexible_time_window_mode": "FLEXIBLE", "flexible_time_window_minutes": 10,
+              "target_arn": SCHEDULE_TARGET["Arn"], "target_role_arn": SCHEDULE_TARGET["RoleArn"], "state": "DISABLED",
+              "end_date": "2031-06-01T12:30:00Z"}
+    ident = "batch/added"
+    _roundtrip(base, Change(op="add", resource_type="scheduler_schedule", resource_id=ident, fields=fields), collect, "scheduler_schedule", ident, [])
+    _roundtrip(collect(), Change(op="delete", resource_type="scheduler_schedule", resource_id=ident, fields={}), collect, "scheduler_schedule", ident, [])
+
+
+def test_scheduler_update_that_would_wipe_an_input_payload_is_not_handed_back():
+    _schedule(State="DISABLED", Target={**SCHEDULE_TARGET, "Input": "{\"k\": \"v\"}"})
+    base = _base(_collect(collect_scheduler), "scheduler")
+    assert base.scheduler.schedules[0].has_input is True
+    from app.typed_handback import UnmappableChanges
+    with pytest.raises(UnmappableChanges):
+        build_api_calls(base, [Change(op="modify", resource_type="scheduler_schedule", resource_id="default/roundtrip-schedule", fields={"state": "ENABLED"})])
 
 
 def test_tampered_handback_call_is_detected():

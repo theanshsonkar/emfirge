@@ -158,6 +158,24 @@ CATALOG: dict[str, dict[str, Source]] = {
     "iam_instance_profile": {
         "role_arn": Normalized("CreateInstanceProfile / AddRoleToInstanceProfile", "the one role the profile carries; the profile ARN is the change's resource_id"),
     },
+    # EventBridge Scheduler schedules have no tags (only schedule groups do). The Target.Input
+    # payload is deliberately not a field: it can hold secrets and is never stored.
+    "scheduler_schedule": {
+        "group_name": Derived("part of the resource_id <group>/<name>"),
+        "arn": Derived("set by AWS"),
+        "state": Aws("scheduler", "CreateSchedule", "State"),
+        "schedule_expression": Aws("scheduler", "CreateSchedule", "ScheduleExpression"),
+        "schedule_expression_timezone": Aws("scheduler", "CreateSchedule", "ScheduleExpressionTimezone"),
+        "flexible_time_window_mode": Aws("scheduler", "CreateSchedule", "FlexibleTimeWindow.Mode"),
+        "flexible_time_window_minutes": Aws("scheduler", "CreateSchedule", "FlexibleTimeWindow.MaximumWindowInMinutes"),
+        "target_arn": Aws("scheduler", "CreateSchedule", "Target.Arn"),
+        "target_role_arn": Aws("scheduler", "CreateSchedule", "Target.RoleArn"),
+        "start_date": Normalized("CreateSchedule / UpdateSchedule StartDate", "UTC timestamp text, YYYY-MM-DDTHH:MM:SSZ"),
+        "end_date": Normalized("CreateSchedule / UpdateSchedule EndDate", "UTC timestamp text, YYYY-MM-DDTHH:MM:SSZ"),
+        "action_after_completion": Aws("scheduler", "CreateSchedule", "ActionAfterCompletion"),
+        "has_input": Normalized("CreateSchedule / UpdateSchedule Target.Input", "true when an input payload is set; the payload itself is never stored"),
+        "unmodeled_settings": Normalized("CreateSchedule / UpdateSchedule", "names of other members that are set but not modeled (Description, KmsKeyArn, Target.RetryPolicy, ...)"),
+    },
     "iam_role_policy": {
         "access_statements": Normalized("PutRolePolicy / AttachRolePolicy", "complete normalized statement list"),
         "policy_documents": Normalized("PutRolePolicy / AttachRolePolicy", "normalized policy documents"),
@@ -165,7 +183,7 @@ CATALOG: dict[str, dict[str, Source]] = {
 }
 
 # Identity fields are the change's resource_id, never a field.
-IDENTITY_FIELDS = {"s3_bucket": "name", "lambda_function": "name", "iam_user": "username"}
+IDENTITY_FIELDS = {"s3_bucket": "name", "lambda_function": "name", "iam_user": "username", "scheduler_schedule": "name"}
 
 
 @lru_cache(maxsize=None)

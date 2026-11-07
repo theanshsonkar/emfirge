@@ -192,6 +192,12 @@ def estimate_monthly_cost(infra: AWSInfrastructure) -> CostEstimate:
             function.name, "lambda_function", None, "usage-based-unknown",
         ))
 
+    for schedule in infra.scheduler.schedules:
+        # EventBridge Scheduler is priced per invocation, which a snapshot cannot know.
+        resources.append(_record(
+            f"{schedule.group_name}/{schedule.name}", "scheduler_schedule", None, "usage-based-unknown",
+        ))
+
     for instance in infra.rds.rds_instances:
         # RDSInstance intentionally has no instance class, engine, or storage fields.
         resources.append(_record(

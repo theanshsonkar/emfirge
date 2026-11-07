@@ -182,8 +182,29 @@ def _changed_node_fields(before: Any, after: Any) -> list[str]:
     return sorted(set(changed))
 
 
+def _changed_values(before: Any, after: Any, changed: list[str]) -> dict[str, dict[str, Any]]:
+    """Before/after of changed fields the node schema declares reportable (state, expression, ...)."""
+    resource_type, before_layers = _node_layers(before)
+    _, after_layers = _node_layers(after)
+    schema = NODE_SCHEMAS.get(resource_type)
+    if schema is None or not schema.diff_values:
+        return {}
+    left, right = before_layers.get("base"), after_layers.get("base")
+    if not isinstance(left, Mapping) or not isinstance(right, Mapping):
+        return {}
+    return {
+        f"base.{key}": {"before": _canonical_value(left.get(key)), "after": _canonical_value(right.get(key))}
+        for key in schema.diff_values if f"base.{key}" in changed
+    }
+
+
 def _modified_detail(before: Any, after: Any) -> dict[str, Any]:
-    return {**_resource_detail(after), "changed": _changed_node_fields(before, after)}
+    changed = _changed_node_fields(before, after)
+    detail = {**_resource_detail(after), "changed": changed}
+    values = _changed_values(before, after, changed)
+    if values:
+        detail["values"] = values
+    return detail
 
 
 def _node_structure(node: Any) -> tuple[str, str]:

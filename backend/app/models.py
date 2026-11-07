@@ -177,6 +177,31 @@ class NATGateway(BaseModel):
     tags: Optional[Dict[str, str]] = None  # None = not collected
 
 
+class SchedulerSchedule(BaseModel):
+    """One EventBridge Scheduler schedule. Identity is ``group_name/name``.
+
+    The Target.Input payload is never stored (it can hold secrets); ``has_input``
+    only says whether one is set. ``unmodeled_settings`` names other members that
+    are set but not modeled (Description, KmsKeyArn, Target.RetryPolicy, ...).
+    None means not collected / unknown. EventBridge Scheduler schedules have no tags.
+    """
+    name: str
+    group_name: str = "default"
+    arn: Optional[str] = None
+    state: Optional[Literal["ENABLED", "DISABLED"]] = None
+    schedule_expression: Optional[str] = None
+    schedule_expression_timezone: Optional[str] = None
+    flexible_time_window_mode: Optional[Literal["OFF", "FLEXIBLE"]] = None
+    flexible_time_window_minutes: Optional[int] = None
+    target_arn: Optional[str] = None
+    target_role_arn: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    action_after_completion: Optional[Literal["NONE", "DELETE"]] = None
+    has_input: Optional[bool] = None
+    unmodeled_settings: List[str] = Field(default_factory=list)
+
+
 class VPCPeeringConnection(BaseModel):
     id: str
     requester_vpc_id: str
@@ -353,6 +378,11 @@ class LambdaData(BaseModel):
     # Relationship tracking
     functions: List[LambdaFunction] = []
 
+class SchedulerData(BaseModel):
+    schedules: List[SchedulerSchedule] = Field(default_factory=list)
+    collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
+
+
 # ── NEW: SECRETS MANAGER MODEL ────────────────────────────────────
 class SecretsManagerData(BaseModel):
     total_secrets: int = 0
@@ -508,6 +538,7 @@ class AWSInfrastructure(BaseModel):
     elasticache: ElastiCacheData = ElastiCacheData()     # NEW
     sqs: SQSData = SQSData()                             # NEW
     dynamodb: DynamoDBData = DynamoDBData()               # NEW
+    scheduler: SchedulerData = SchedulerData()
     region: str = ''
     collected_at: Optional[str] = Field(default=None, exclude_if=lambda value: value is None)
     warnings: List[str] = []          # services skipped due to insufficient permissions

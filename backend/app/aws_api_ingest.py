@@ -6,6 +6,7 @@ import json
 from app.mutations import Change
 from app.aws_collector import build_security_group_rule
 from app.tags import tag_map
+from app.scheduler_schedule import DEFAULT_GROUP, api_fields as scheduler_api_fields, split_identity as scheduler_split_identity, unsupported_members as scheduler_unsupported
 import copy
 import re
 
@@ -481,6 +482,31 @@ def translate_api_calls(
             if fields:
                 changes.append(Change(op="modify", resource_type="rds_instance", resource_id=parameters["DBInstanceIdentifier"], fields=fields))
                 addresses.append(address)
+            continue
+        if lower_service == "scheduler" and operation in {"CreateSchedule", "UpdateSchedule", "DeleteSchedule"}:
+            name, group = parameters.get("Name"), parameters.get("GroupName", DEFAULT_GROUP)
+            try:
+                if not _valid_string(name) or not _valid_string(group):
+                    raise ValueError
+                scheduler_split_identity(f"{group}/{name}")
+            except ValueError:
+                unmodeled.append(_unmodeled(address, lower_service, operation, "missing or invalid Name or GroupName")); continue
+            resource_id = f"{group}/{name}"
+            if operation == "DeleteSchedule":
+                for field in parameters:
+                    if field not in {"Name", "GroupName", "ClientToken"}:
+                        unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+                changes.append(Change(op="delete", resource_type="scheduler_schedule", resource_id=resource_id)); addresses.append(address); continue
+            # UpdateSchedule replaces the whole schedule: State left out means ENABLED. A member
+            # the call needs and lacks is an unknown field, never a default.
+            fields, problems = scheduler_api_fields(parameters, replace=operation == "UpdateSchedule")
+            for member, reason in problems:
+                unknown_fields.append({"address": address, "field": member, "reason": reason})
+            for member in scheduler_unsupported(parameters):
+                unknown_fields.append({"address": address, "field": member, "reason": "unsupported_attribute"})
+            changes.append(Change(op="add" if operation == "CreateSchedule" else "modify", resource_type="scheduler_schedule",
+                                  resource_id=resource_id, fields=fields))
+            addresses.append(address)
             continue
         if lower_service == "ec2" and operation == "CreateNatGateway":
             if not _valid_string(parameters.get("SubnetId")):

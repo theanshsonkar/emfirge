@@ -42,6 +42,8 @@ ADAPTER_MODULES = {
     # Provider action catalog (botocore / IAM data) and the glue that feeds the
     # neutral permission expansion (permission_facts) from collected role policies.
     "aws_actions", "aws_permissions",
+    # EventBridge Scheduler schedule parsing shared by collector, mutations and ingest.
+    "scheduler_schedule",
 }
 AWS_LIBS = {"boto3", "botocore"}
 

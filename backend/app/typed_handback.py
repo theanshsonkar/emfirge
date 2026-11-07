@@ -10,6 +10,7 @@ from botocore.validate import ParamValidator
 from app.models import AWSInfrastructure
 from app.tags import is_aws_tag, user_tags
 from app.mutations import Change, apply_changes
+from app.scheduler_schedule import identity as scheduler_identity, split_identity as scheduler_split_identity
 
 _SESSION = botocore.session.get_session()
 
@@ -96,6 +97,48 @@ def _ec2_tag_calls(call, err, ident, old, new) -> list[dict]:
     return result
 
 
+def _schedule_params(schedule, err) -> dict | None:
+    """CreateSchedule / UpdateSchedule parameters from the schedule's complete modeled state.
+
+    Both calls replace everything, so every required member must be known, and a schedule with an
+    input payload or other settings Emfirge does not store cannot be rebuilt without wiping them.
+    """
+    missing = [field for field in ("schedule_expression", "flexible_time_window_mode", "target_arn", "target_role_arn", "state")
+               if getattr(schedule, field) is None]
+    if schedule.flexible_time_window_mode == "FLEXIBLE" and schedule.flexible_time_window_minutes is None:
+        missing.append("flexible_time_window_minutes")
+    if missing:
+        err("unspecified_values: " + ", ".join(missing))
+    if schedule.has_input is not False:
+        err("unspecified_values: Target.Input (the payload is not stored, so the call would drop it or invent it)")
+    if schedule.unmodeled_settings:
+        err("field_not_mapped: " + ", ".join(schedule.unmodeled_settings) + " (set on the schedule but not stored; the call would reset them)")
+    if missing or schedule.has_input is not False or schedule.unmodeled_settings:
+        return None
+    window = {"Mode": schedule.flexible_time_window_mode}
+    if schedule.flexible_time_window_mode == "FLEXIBLE":
+        window["MaximumWindowInMinutes"] = schedule.flexible_time_window_minutes
+    params = {"Name": schedule.name, "GroupName": schedule.group_name, "ScheduleExpression": schedule.schedule_expression,
+              "FlexibleTimeWindow": window, "Target": {"Arn": schedule.target_arn, "RoleArn": schedule.target_role_arn},
+              "State": schedule.state}
+    for field, member in (("schedule_expression_timezone", "ScheduleExpressionTimezone"), ("action_after_completion", "ActionAfterCompletion"),
+                          ("start_date", "StartDate"), ("end_date", "EndDate")):
+        if getattr(schedule, field) is not None:
+            params[member] = getattr(schedule, field)
+    return params
+
+
+def _scheduler_calls(change: Change, after, index: int, err, call) -> list[dict]:
+    group, name = scheduler_split_identity(change.resource_id)
+    if change.op == "delete":
+        return [call("scheduler", "DeleteSchedule", {"Name": name, "GroupName": group})]
+    schedule = next(item for item in after.scheduler.schedules if scheduler_identity(item.group_name, item.name) == scheduler_identity(group, name))
+    params = _schedule_params(schedule, err)
+    if params is None:
+        return []
+    return [call("scheduler", "CreateSchedule" if change.op == "add" else "UpdateSchedule", params)]
+
+
 def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], list[dict]]:
     typ, op, ident, fields = change.resource_type, change.op, change.resource_id, change.fields
     errors: list[dict] = []
@@ -103,6 +146,8 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
         errors.append({"change_index": index, "op": op, "resource_type": typ, "reason": reason})
     def call(service, operation, params):
         return {"change_index": index, "service": service, "operation": operation, "params": params}
+    if typ == "scheduler_schedule":
+        return _scheduler_calls(change, after, index, err, call), errors
     if op == "add":
         if typ == "rds_snapshot":
             db_instance_id = fields.get("db_instance_id")

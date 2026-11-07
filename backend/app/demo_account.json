@@ -251,6 +251,9 @@
     "total_buckets": 1,
     "unencrypted_buckets": []
   },
+  "scheduler": {
+    "schedules": []
+  },
   "secrets_manager": {
     "secrets_without_rotation": [],
     "total_secrets": 0

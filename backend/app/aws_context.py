@@ -36,16 +36,17 @@ from app.tags import TAGGED_TYPES, tagged_collections, user_tags
 
 # Collection sources (infra.collection keys) each question depends on.
 QUESTION_SOURCES: dict[str, tuple[str, ...]] = {
-    "inventory": ("ebs_volumes",),
-    "resource": ("ebs_volumes",),
-    "depends_on": ("ebs_volumes",),
-    "dependents": ("ebs_volumes",),
+    "inventory": ("ebs_volumes", "scheduler"),
+    "resource": ("ebs_volumes", "scheduler"),
+    "depends_on": ("ebs_volumes", "scheduler"),
+    "dependents": ("ebs_volumes", "scheduler"),
     "reachable": ("network_interfaces",),
     "access": (),
     "data": ("ebs_snapshots", "ebs_volumes", "rds_snapshots"),
     "cost": ("ebs_volumes",),
     "live": ("iam_role_last_used",),
     "marks": (),
+    "baseline": ("scheduler",),
 }
 # Which snapshot source must be readable before "no recovery point" can be said.
 _SNAPSHOT_SOURCE = {"ebs_volume": "ebs_snapshots", "rds_instance": "rds_snapshots"}

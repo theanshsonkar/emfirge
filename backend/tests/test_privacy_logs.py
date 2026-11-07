@@ -260,7 +260,7 @@ def test_L71g_c_safe_choice_only_passes_known_labels():
 PLANTED = [
     "plantedbucket-zq7", "planted-user-zq7", "planted-role-zq7", "planted-table-zq7",
     "planted-queue-zq7", "planted-topic-zq7", "planted-fn-zq7", "planted-key-zq7",
-    "123456789012",
+    "planted-sched-zq7", "123456789012",
 ]
 SNEAKY = "plantedbucket-zq7 arn:aws:iam::123456789012:user/planted-user-zq7"
 
@@ -286,6 +286,10 @@ def _plant(region="us-east-1"):
     boto3.client("kms", **kw).create_key(Description="planted-key-zq7")
     ec2 = boto3.client("ec2", **kw)
     ec2.create_vpc(CidrBlock="10.77.0.0/16")
+    boto3.client("scheduler", **kw).create_schedule(
+        Name="planted-sched-zq7", ScheduleExpression="rate(1 day)", FlexibleTimeWindow={"Mode": "OFF"},
+        Target={"Arn": "arn:aws:lambda:us-east-1:123456789012:function:planted-fn-zq7",
+                "RoleArn": "arn:aws:iam::123456789012:role/planted-role-zq7"})
 
 
 # Per-resource operations to break (all collectors use these through botocore).
@@ -298,6 +302,7 @@ FAIL_OPS = {
     "GetQueueAttributes", "DescribeTable", "DescribeContinuousBackups", "ListTagsOfResource",
     "GetTopicAttributes", "DescribeFlowLogs", "GetKeyRotationStatus", "DescribeKey", "ListResourceTags",
     "DescribeTaskDefinition", "DescribeNetworkInterfaces", "DescribeLoadBalancers",
+    "ListSchedules", "GetSchedule",
 }
 
 

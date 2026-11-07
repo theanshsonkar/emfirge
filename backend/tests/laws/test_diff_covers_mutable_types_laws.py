@@ -4,7 +4,7 @@ import pytest
 
 from app.diffing import diff_infrastructure
 from app.graph_schema import NODE_SCHEMAS
-from app.models import NetworkACL
+from app.models import NetworkACL, SchedulerData, SchedulerSchedule
 from app.mutations import (
     Change,
     _MUTATION_CAPABILITIES,
@@ -24,7 +24,9 @@ def _base():
     ec2 = base.ec2.model_copy(update={"instances": instances})
     groups = [group.model_copy(update={"rules": [], "egress_rules": []}) for group in ec2.security_groups]
     ec2 = ec2.model_copy(update={"security_groups": groups})
-    return base.model_copy(update={"ec2": ec2, "vpc": base.vpc.model_copy(update={"nacls": [acl]})})
+    schedule = SchedulerSchedule(name="sched-law-base", state="DISABLED")
+    return base.model_copy(update={"ec2": ec2, "vpc": base.vpc.model_copy(update={"nacls": [acl]}),
+                                   "scheduler": SchedulerData(schedules=[schedule])})
 
 
 def _add_samples(base):
@@ -45,6 +47,8 @@ def _add_samples(base):
             samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="nat-law-add", fields={"subnet_id": subnet.id, "allocation_id": "eipalloc-law-add"})
         elif resource_type == "route_table":
             samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="rtb-law-add", fields={"vpc_id": base.vpc.route_tables[0].vpc_id})
+        elif resource_type == "scheduler_schedule":
+            samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="default/sched-law-add", fields={"state": "DISABLED"})
         elif resource_type == "ebs_volume":
             samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="vol-law-add", fields={"size_gb": 8})
         elif resource_type == "network_acl":
