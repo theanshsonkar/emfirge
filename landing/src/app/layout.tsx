@@ -27,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <style>{`[data-reveal]{opacity:1!important;transform:none!important}details>[data-faq-body]{height:auto!important;opacity:1!important}`}</style>
         </noscript>
         {children}
+        <div aria-hidden="true" className="grain" />
       </body>
     </html>
   );

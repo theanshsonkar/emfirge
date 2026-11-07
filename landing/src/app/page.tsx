@@ -1,15 +1,9 @@
 import { Nav } from "@/components/Nav";
 import { Hero } from "@/components/Hero";
 import { WorksWith } from "@/components/WorksWith";
-import { Problem } from "@/components/Problem";
-import { Comparison } from "@/components/Comparison";
-import { Loop } from "@/components/Loop";
-import { Verbs } from "@/components/Verbs";
-import { DamageQuestions } from "@/components/DamageQuestions";
-import { Facts } from "@/components/Facts";
-import { EmfirgeMd } from "@/components/EmfirgeMd";
-import { UseCases } from "@/components/UseCases";
-import { Safety } from "@/components/Safety";
+import { Harness } from "@/components/Harness";
+import { HowItWorks } from "@/components/HowItWorks";
+import { Questions } from "@/components/Questions";
 import { GetStarted } from "@/components/GetStarted";
 import { Faq } from "@/components/Faq";
 import { FinalCta } from "@/components/FinalCta";
@@ -21,15 +15,9 @@ export default function Page() {
       <main>
         <Hero />
         <WorksWith />
-        <Problem />
-        <Comparison />
-        <Loop />
-        <Verbs />
-        <DamageQuestions />
-        <Facts />
-        <EmfirgeMd />
-        <UseCases />
-        <Safety />
+        <Harness />
+        <HowItWorks />
+        <Questions />
         <GetStarted />
         <Faq />
         <FinalCta />

@@ -1,7 +1,8 @@
 "use client";
 
+import { useReduced } from "@/lib/useReduced";
 import { useState } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
 import { Plus } from "lucide-react";
 import { Section, Eyebrow, H2 } from "./ui/Section";
 import { cn } from "@/lib/cn";
@@ -9,12 +10,12 @@ import { FAQ } from "@/content";
 
 /** A native <details>, with its open/close animated. Works without JS. */
 function FaqItem({ q, a }: { q: string; a: string }) {
-  const reduce = useReducedMotion();
+  const reduce = useReduced();
   const [attr, setAttr] = useState(false); // the <details open> attribute
   const [open, setOpen] = useState(false); // logical state, drives the animation
 
   return (
-    <details open={attr} className="border-b border-line">
+    <details open={attr} className="border-b border-white/10">
       <summary
         onClick={(e) => {
           e.preventDefault();
@@ -46,11 +47,11 @@ function FaqItem({ q, a }: { q: string; a: string }) {
 
 export function Faq() {
   return (
-    <Section aria-labelledby="faq-h">
+    <Section aria-labelledby="faq-h" className="py-12 md:py-16">
       <div className="mx-auto max-w-[760px]">
         <Eyebrow>FAQ</Eyebrow>
         <H2 id="faq-h">Questions.</H2>
-        <div className="mt-10 border-t border-line">
+        <div className="mt-8 border-t border-white/10">
           {FAQ.map((f) => (
             <FaqItem key={f.q} {...f} />
           ))}

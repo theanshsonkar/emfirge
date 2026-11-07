@@ -1,6 +1,7 @@
 "use client";
 
-import { motion, useReducedMotion } from "motion/react";
+import { useReduced } from "@/lib/useReduced";
+import { motion } from "motion/react";
 
 /** Fade/slide up 12px when scrolled into view. Shown immediately under reduced motion. */
 export function Reveal({
@@ -12,7 +13,7 @@ export function Reveal({
   className?: string;
   delay?: number;
 }) {
-  const reduce = useReducedMotion();
+  const reduce = useReduced();
   if (reduce) return <div className={className}>{children}</div>;
   return (
     <motion.div

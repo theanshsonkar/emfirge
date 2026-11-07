@@ -1,20 +1,27 @@
-import { Section } from "./ui/Section";
 import { AGENTS } from "@/content";
+
+function Diamond() {
+  return <span aria-hidden="true" className="mx-7 inline-block size-1.5 rotate-45 bg-forge" />;
+}
 
 export function WorksWith() {
   return (
-    <Section aria-label="Compatible agents" className="border-y border-line py-10 md:py-10">
-      <div className="text-center">
-        <p className="text-sm text-muted">Works with any agent that runs a shell</p>
-        <ul className="mt-4 flex flex-wrap justify-center gap-x-2 gap-y-1 text-lg text-paper">
-          {AGENTS.map((a, i) => (
-            <li key={a} className="flex items-center gap-2">
-              {i > 0 && <span className="text-muted" aria-hidden="true">·</span>}
-              {a}
-            </li>
-          ))}
+    <section aria-label="Compatible agents" className="border-y border-white/[0.07] py-9">
+      <p className="text-center font-mono text-xs uppercase tracking-[0.14em] text-muted">
+        Works with any agent that runs a shell
+      </p>
+      <div className="mt-6 overflow-hidden [mask-image:linear-gradient(to_right,transparent,#000_12%,#000_88%,transparent)]">
+        <ul className="marquee-track flex w-max animate-marquee items-center whitespace-nowrap font-display text-[28px] text-paper/90 md:text-[34px]">
+          {[0, 1].map((dup) =>
+            AGENTS.map((a) => (
+              <li key={`${dup}-${a}`} className="flex items-center" aria-hidden={dup === 1 || undefined}>
+                {a}
+                <Diamond />
+              </li>
+            )),
+          )}
         </ul>
       </div>
-    </Section>
+    </section>
   );
 }

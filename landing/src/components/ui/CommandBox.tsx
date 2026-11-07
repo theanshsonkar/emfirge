@@ -23,7 +23,7 @@ export function CommandBox({ command, className }: { command: string; className?
   return (
     <div
       className={cn(
-        "flex h-12 w-full max-w-full items-center gap-3 rounded-xl border border-line bg-surface pl-4 pr-1.5 font-mono text-[13px] sm:text-sm",
+        "glass flex h-12 w-full max-w-full items-center gap-3 rounded-xl border border-white/10 pl-4 pr-1.5 font-mono text-[12px] sm:text-sm",
         className,
       )}
     >
@@ -33,10 +33,10 @@ export function CommandBox({ command, className }: { command: string; className?
         type="button"
         onClick={copy}
         aria-label={copied ? "Copied" : `Copy command: ${command}`}
-        className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 font-sans text-[13px] font-medium text-paper hover:bg-line"
+        className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-3 font-sans text-[13px] font-medium text-paper hover:bg-white/10"
       >
         {copied ? <Check size={15} className="text-pass" /> : <Copy size={15} />}
-        <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
+        <span aria-live="polite" className="hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
       </button>
     </div>
   );
