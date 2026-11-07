@@ -27,6 +27,7 @@ import { inUseEvidenceSchema, inUseEvidenceZodObject, inUseEvidenceHandler } fro
 import { contextSchema, contextZodObject, contextHandler, CONTEXT_DESCRIPTION } from "./tools/context.js";
 import { planVerdictSchema, planVerdictZodObject, planVerdictHandler } from "./tools/plan-verdict.js";
 import { branchHandbackSchema, branchHandbackZodObject, branchHandbackHandler } from "./tools/branch-handback.js";
+import { checkSchema, checkZodObject, checkHandler, CHECK_DESCRIPTION } from "./tools/check.js";
 import {
   applyChangeSchema,
   applyChangeZodObject,
@@ -204,6 +205,13 @@ export const tools: ToolRegistration[] = [
     schema: branchIdSchema as Record<string, z.ZodTypeAny>,
     zodObject: branchVerdictZodObject as z.ZodObject<z.ZodRawShape>,
     handler: branchVerdictHandler,
+  },
+  {
+    name: "emfirge_check",
+    description: CHECK_DESCRIPTION,
+    schema: checkSchema as Record<string, z.ZodTypeAny>,
+    zodObject: checkZodObject as z.ZodObject<z.ZodRawShape>,
+    handler: checkHandler,
   },
   {
     name: "emfirge_plan_verdict",

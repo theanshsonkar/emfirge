@@ -12,7 +12,7 @@ import { redactDeep } from "../tokenize.js";
 import { parseCommand, UsageError, type Parsed } from "./args.js";
 import { VERB_NAMES, verbHelp, topUsage } from "./verbs.js";
 import { formatOk, formatError, type ErrorInfo } from "./output.js";
-import { checkBranch, planHandback } from "./extra.js";
+import { planHandback } from "./extra.js";
 import { loadGuide } from "./guide.js";
 
 export interface CliIo {
@@ -206,7 +206,7 @@ async function check(p: Parsed): Promise<unknown> {
       branch_id: branchId, sources, accept_estimate_id: str(p, "accept-estimate"), role_arn: str(p, "role-arn"),
     }));
   }
-  return checkBranch(branchId);
+  return tool("emfirge_check", { branch_id: branchId });
 }
 
 async function report(p: Parsed): Promise<unknown> {

@@ -64,6 +64,7 @@ Inputs for `try` can be a file path, inline JSON, or `-` for stdin.
 | `emfirge_discard_branch` | `emfirge branch discard B` |
 | `emfirge_apply_change` | `emfirge try B --typed JSON` |
 | `emfirge_plan_verdict` | `emfirge try B --aws-cli / --aws-api / --terraform / --cloudformation` |
+| `emfirge_check` | `emfirge check B` |
 | `emfirge_branch_diff` | `emfirge check B --diff` |
 | `emfirge_branch_verdict` | `emfirge check B --verdict` |
 | `emfirge_in_use_evidence` | `emfirge check B --evidence` |
