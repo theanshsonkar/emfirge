@@ -4874,68 +4874,15 @@ def purge_user_data(payload: PurgeRequest, request: Request, caller: Caller = De
     """
     Delete all stored data for the AWS account that owns this role.
     Re-assumes the role to verify caller controls the account.
-    Deletes from analysis_logs, drift_events, simulation_logs + S3 reports.
+    Deletes every table in app.privacy.PURGE_PLAN for the account + S3 reports.
     """
     assume_customer_role(payload.role_arn, caller, db)
     account_id = payload.role_arn.split(':')[4]
-
-    # Collect analysis UUIDs first (needed for S3 cleanup), then delete DB rows
-    from app.database import SessionLocal, AnalysisLog, DriftEvent, SimulationLog
-    deleted_counts = {'analysis_logs': 0, 'drift_events': 0, 'simulation_logs': 0, 's3_objects': 0}
-    analysis_uuids = []
-    session = SessionLocal()
+    from app import privacy
     try:
-        rows = session.query(AnalysisLog).filter_by(aws_account_id=account_id).all()
-        for row in rows:
-            try:
-                data = json.loads(row.findings_json) if row.findings_json else {}
-                uid = data.get('analysis_id')
-                if uid:
-                    analysis_uuids.append(uid)
-            except Exception:
-                pass
-
-        deleted_counts['analysis_logs'] = session.query(AnalysisLog).filter_by(aws_account_id=account_id).delete()
-        deleted_counts['drift_events'] = session.query(DriftEvent).filter_by(aws_account_id=account_id).delete()
-        deleted_counts['simulation_logs'] = session.query(SimulationLog).filter_by(aws_account_id=account_id).delete()
-        session.commit()
-    except Exception as e:
-        session.rollback()
+        deleted_counts = privacy.purge_account(account_id)
+    except Exception:
         raise HTTPException(status_code=500, detail='Database purge failed')
-    finally:
-        session.close()
-
-    # S3 cleanup. Best-effort: errors are logged, not raised.
-    try:
-        bucket = os.getenv('S3_BUCKET_NAME')
-        if bucket and analysis_uuids:
-            s3 = boto3.client(
-                's3',
-                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-                region_name=os.getenv('AWS_REGION', 'ap-south-1'),
-            )
-            uid_set = set(analysis_uuids)
-            for prefix in ('reports/', 'snapshots/'):
-                token = None
-                while True:
-                    kwargs = {'Bucket': bucket, 'Prefix': prefix}
-                    if token:
-                        kwargs['ContinuationToken'] = token
-                    resp = s3.list_objects_v2(**kwargs)
-                    for obj in resp.get('Contents', []):
-                        key = obj['Key']
-                        if any(uid in key for uid in uid_set):
-                            try:
-                                s3.delete_object(Bucket=bucket, Key=key)
-                                deleted_counts['s3_objects'] += 1
-                            except Exception as del_err:
-                                logger.warning(f'S3 delete failed for {key}: {del_err}')
-                    if not resp.get('IsTruncated'):
-                        break
-                    token = resp.get('NextContinuationToken')
-    except Exception as e:
-        logger.warning(f'S3 purge step failed: {e}')
 
     return {
         'status': 'purged',
