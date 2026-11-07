@@ -60,7 +60,7 @@ def user_tags(tags: Optional[dict[str, str]]) -> dict[str, str]:
     return {key: value for key, value in (tags or {}).items() if not is_aws_tag(key)}
 
 
-def _tagged_collections(infra: Any) -> dict[str, list]:
+def tagged_collections(infra: Any) -> dict[str, list]:
     return {
         "ec2_instance": infra.ec2.instances,
         "security_group": infra.ec2.security_groups,
@@ -80,8 +80,8 @@ def _ident(item: Any) -> str:
 def retagged_resources(base: Any, branch: Any) -> list[str]:
     """Existing resources whose user tags differ between base and branch."""
     changed = []
-    branch_collections = _tagged_collections(branch)
-    for resource_type, items in _tagged_collections(base).items():
+    branch_collections = tagged_collections(branch)
+    for resource_type, items in tagged_collections(base).items():
         after = {_ident(item): item for item in branch_collections[resource_type]}
         for item in items:
             other = after.get(_ident(item))

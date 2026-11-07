@@ -64,6 +64,8 @@ from app.database import create_tables, save_analysis, get_recent_logs, get_log_
 from app.storage import save_report, get_report_url
 from app.egraph import build_graph, get_simulation_slice, validate_simulation_response, classify_query, format_graph_for_claude, bfs_from_internet, find_attack_path, Graph
 from app.exposure import compute_exposures
+from app.aws_context import answer_for_infra
+from app.context_query import ContextRequest, ContextResponse, ResourceNotFound
 from app.drift_service import compare_findings
 from app.compliance import evaluate_all_frameworks
 
@@ -549,6 +551,53 @@ def get_log_by_uuid(analysis_id: str, account_id: str = None, caller: Caller = D
     if not log:
         raise HTTPException(status_code=404, detail='Analysis not found')
     return log
+
+def _context_source(payload: ContextRequest, caller: Caller, db):
+    """Resolve the snapshot a context question is about: (infra, base_infra, analysis_id, branch_id, evidence).
+
+    Every path is tenant-scoped and answers 404 for anything the caller cannot see.
+    """
+    if payload.branch_id is not None:
+        _require_visible_branch(payload.branch_id, caller, db)
+        try:
+            branch = branches.get_branch(payload.branch_id)
+        except branches.BranchNotFoundError:
+            raise HTTPException(status_code=404, detail=f'Branch not found: {payload.branch_id}')
+        return (branches.rebuild_branch_state(branch), branch.base, branch.base_analysis_id,
+                payload.branch_id, branches.list_evidence(payload.branch_id))
+    if payload.analysis_id is not None:
+        infrastructure, data = _load_analysis_record(payload.analysis_id, caller=caller, db=db)
+        if infrastructure is None:
+            raise HTTPException(status_code=404, detail='Analysis not found')
+    else:
+        accounts = allowed_accounts(caller, db)
+        recent = get_recent_logs(limit=1, account_ids=accounts)
+        log = get_log_by_id(recent[0]['id'], account_ids=accounts) if recent else None
+        if not log:
+            raise HTTPException(status_code=404, detail='Analysis not found')
+        try:
+            data = json.loads(log['findings_json'])
+            infrastructure = AWSInfrastructure.model_validate(data.get('infrastructure', {}))
+        except Exception:
+            raise HTTPException(status_code=404, detail='Analysis not found')
+    if 'infrastructure' not in data:
+        raise HTTPException(status_code=404, detail='This scan has no stored infrastructure snapshot')
+    return infrastructure, None, data.get('analysis_id'), None, ()
+
+
+@app.post('/context', dependencies=[Depends(require_api_key)], response_model=ContextResponse)
+def context_query_endpoint(payload: ContextRequest, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    """Read-only context query: facts about the snapshot, what was checked and what was not.
+
+    Never advice or a verdict; no AWS call and no database write.
+    """
+    infrastructure, base_infra, analysis_id, branch_id, evidence = _context_source(payload, caller, db)
+    try:
+        return answer_for_infra(payload.question, infrastructure, analysis_id=analysis_id, branch_id=branch_id,
+                                base_infra=base_infra, evidence=evidence, resource_id=payload.resource_id)
+    except ResourceNotFound:
+        raise HTTPException(status_code=404, detail='Resource not found in this snapshot')
+
 
 @app.get('/egraph/{analysis_id}', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def get_graph(analysis_id: str, caller: Caller = Depends(get_caller), db=Depends(get_db)):

@@ -10,10 +10,11 @@ import fnmatch
 import ipaddress
 import json
 import re
+from collections import deque
 from collections.abc import Mapping as MappingABC
 from enum import Enum
 from types import MappingProxyType
-from typing import ClassVar, Dict, List, Any, Optional, Set, Mapping
+from typing import ClassVar, Dict, Iterable, List, Any, NamedTuple, Optional, Set, Mapping
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -2709,6 +2710,60 @@ def get_internet_reachable_set(graph: Graph) -> set:
 
     visited.discard('INTERNET')
     return visited
+
+
+class DependencyStep(NamedTuple):
+    """One node reached by ``dependency_closure``."""
+    node_id: str
+    depth: int
+    relationship: str
+    via: str
+
+
+def dependency_closure(
+    graph: Graph,
+    roots: Iterable[str],
+    *,
+    direction: str = "dependents",
+    max_depth: int = 10,
+    allowed: Optional[Set[str]] = None,
+) -> List[DependencyStep]:
+    """Breadth-first walk over ``DEPENDENCY_EDGES`` from ``roots`` (not included in the result).
+
+    ``direction="dependents"`` follows what depends on the roots (what a delete
+    of the roots would impact); ``"depends_on"`` follows what the roots depend
+    on. ``allowed`` limits which nodes may be reached. This is the one dependency
+    walk: the deletion lens and the context query both use it.
+    """
+    if direction not in {"dependents", "depends_on"}:
+        raise ValueError(f"unknown direction: {direction}")
+    adjacency: Dict[str, List[tuple[str, str]]] = {}
+    for edge in graph.edges:
+        relationship = edge.relationship.value
+        rule = DEPENDENCY_EDGES.get(relationship)
+        if rule == "source_depends_on_target":
+            dependent, dependency = edge.src, edge.dst
+        elif rule == "target_depends_on_source":
+            dependent, dependency = edge.dst, edge.src
+        else:
+            continue
+        origin, reached = (dependency, dependent) if direction == "dependents" else (dependent, dependency)
+        adjacency.setdefault(origin, []).append((reached, relationship))
+    ordered_roots = list(roots)
+    seen = set(ordered_roots)
+    queue = deque((root, 0) for root in ordered_roots)
+    steps: List[DependencyStep] = []
+    while queue:
+        source, depth = queue.popleft()
+        if depth >= max_depth:
+            continue
+        for reached, relationship in adjacency.get(source, ()):
+            if reached in seen or (allowed is not None and reached not in allowed):
+                continue
+            seen.add(reached)
+            steps.append(DependencyStep(reached, depth + 1, relationship, source))
+            queue.append((reached, depth + 1))
+    return steps
 
 
 def get_attack_path_to(graph: Graph, target_id: str) -> Optional[List[str]]:

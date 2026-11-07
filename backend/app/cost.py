@@ -245,7 +245,7 @@ def estimate_monthly_cost(infra: AWSInfrastructure) -> CostEstimate:
     )
 
 
-def _unknown_reason(resource: ResourceCost) -> str:
+def unknown_reason(resource: ResourceCost) -> str:
     if resource.basis == "usage-based-unknown":
         return "usage-based pricing is not embedded"
     if resource.resource_type == "ec2_instance":
