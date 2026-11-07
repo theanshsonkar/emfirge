@@ -20,12 +20,14 @@ from __future__ import annotations
 from typing import Any, Mapping, Optional, Sequence
 
 from app.aws_context import answer_for_infra, node_id_for, role_use_lines, safe_warning
-from app.aws_outside_world import classify_action
+from app.aws_outside_world import SCHEDULER_ENTRY, classify_action
 from app.aws_permissions import (
     NOTE_ACTION_CATALOG, NOTE_APP_CODE, NOTE_MANAGED_NOT_RECORDED, compute_users, role_node_id, role_node_ids,
     role_permission_diff, statements_differ,
 )
-from app.check_facts import ChangeLine, CheckInputs, CheckResult, PermissionChange, PlanGap, assemble, is_unchanged
+from app.check_facts import (
+    ChangeLine, CheckInputs, CheckResult, PermissionChange, PlanGap, ScheduleChange, assemble, is_unchanged,
+)
 from app.cost import PRICE_TABLE_AS_OF, PRICE_TABLE_REGION
 from app.egraph import Graph, build_graph_pair
 from app.evidence_models import EvidenceRecord
@@ -158,6 +160,58 @@ def _escalation_lines(base: AWSInfrastructure, branch: AWSInfrastructure, types:
             for rid in sorted(introduced_privilege_escalation_ids(base, branch))]
 
 
+def _schedule_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, base_graph: Graph, branch_graph: Graph
+                     ) -> tuple[list[ScheduleChange], list[tuple[str, str, Optional[str]]], int]:
+    """Schedules whose effective state became ENABLED (or whose timing changed while ENABLED) or became DISABLED.
+
+    Emfirge cannot see what a target does, so an enabled schedule always leaves an unknown about its target. A state
+    that was not collected is never read as a flip.
+    """
+    identity = lambda s: f"{s.group_name}/{s.name}"  # noqa: E731
+    old = {identity(s): s for s in base.scheduler.schedules}
+    new = {identity(s): s for s in branch.scheduler.schedules}
+    targets = {rid: sorted({e.dst for e in branch_graph.edges if e.src == rid and e.relationship.value == "invokes"})
+               for rid in new}
+    old_targets = {rid: sorted({e.dst for e in base_graph.edges if e.src == rid and e.relationship.value == "invokes"})
+                   for rid in old}
+    changes: list[ScheduleChange] = []
+    doubts: set[tuple[str, str, Optional[str]]] = set()
+    for rid in sorted(new):
+        after, before = new[rid], old.get(rid)
+        if before is not None and before == after:
+            continue
+        was, now = (before.state if before else None), after.state
+        if now == "ENABLED":
+            if before is None:
+                kind = "schedule_added_enabled"
+            elif was == "DISABLED":
+                kind = "schedule_enabled"
+            elif was == "ENABLED" and (before.schedule_expression != after.schedule_expression
+                                       or before.target_arn != after.target_arn):
+                kind = "schedule_changed"
+            else:
+                kind = None
+                if was is None:
+                    doubts.add(("schedule_state_unknown", "the state of this schedule before the change was not collected, "
+                                "so it cannot be said whether the change started it running", rid))
+            if kind:
+                changes.append(ScheduleChange(rid, "scheduler_schedule", kind, after.schedule_expression,  # type: ignore[arg-type]
+                                              targets[rid], SCHEDULER_ENTRY))
+                if targets[rid]:
+                    for target in targets[rid]:
+                        doubts.add(("target_effects", "what the target does outside the cloud is not visible to Emfirge", target))
+                else:
+                    doubts.add(("schedule_target_not_modeled", "the target of this schedule is not a resource Emfirge collects, "
+                                "so what it does is not visible", rid))
+        elif now is None:
+            doubts.add(("schedule_state_unknown", "the state of this schedule was not collected, so it cannot be said "
+                        "whether it runs", rid))
+        elif was == "ENABLED":  # now DISABLED
+            changes.append(ScheduleChange(rid, "scheduler_schedule", "schedule_disabled", after.schedule_expression,
+                                          targets[rid] or old_targets.get(rid, []), SCHEDULER_ENTRY))
+    return changes, sorted(doubts, key=lambda d: (d[0], d[1], d[2] or "")), len(set(old) | set(new))
+
+
 def plan_gaps(plans: Optional[Sequence[Mapping[str, Any]]]) -> list[PlanGap]:
     """Every plan item the branch could not model or apply, from the stored plan receipts."""
     gaps: list[PlanGap] = []
@@ -187,6 +241,7 @@ def build_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, verdict: Co
     for role, line in zip(base.iam.role_policies, role_use_lines(base, base_graph)):
         uses[line.resource_id] = uses[role.role_arn] = line.used
     permission_changes, permission_doubts, permission_checked = _permission_inputs(base, branch, base_graph, branch_graph)
+    schedule_changes, schedule_doubts, schedules_compared = _schedule_inputs(base, branch, base_graph, branch_graph)
     baseline = (answer_for_infra("baseline", base, analysis_id=base_analysis_id)
                 if is_unchanged(verdict, gaps) else None)
     warnings = tuple(sorted({safe_warning(w) for infra in (base, branch) for w in infra.warnings}))
@@ -197,7 +252,8 @@ def build_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, verdict: Co
         recovery_removals=recovery_removals(base, branch), uses=uses,
         collection=dict(base.collection), needs=DAMAGE_SOURCES, warnings=warnings,
         permission_changes=permission_changes, permission_doubts=permission_doubts,
-        permission_checked=permission_checked,
+        permission_checked=permission_checked, schedule_changes=schedule_changes, schedule_doubts=schedule_doubts,
+        schedules_compared=schedules_compared,
         checked_notes={
             "money": [("price_table", f"AWS {PRICE_TABLE_REGION} on-demand list prices as of {PRICE_TABLE_AS_OF}")],
             "control": [("modeled_fields", f"{len(branch.iam.role_policies)} roles, {len(branch.s3.buckets)} buckets and "

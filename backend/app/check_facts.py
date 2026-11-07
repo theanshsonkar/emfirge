@@ -80,7 +80,7 @@ class AvailabilityFact(_Strict):
     resource_id: str
     resource_type: str
     change: Literal["dependency_removed", "internal_path_removed", "dependent_of_deleted", "deleted_along_with",
-                    "internet_path_removed"]
+                    "internet_path_removed", "schedule_disabled"]
     path: list[str]
     depth: Optional[int]
     recently_used: Optional[bool]
@@ -115,7 +115,20 @@ class OutsideFact(_Strict):
     resource_id: Optional[str]
 
 
-Fact = Union[DataFact, ExposureFact, MoneyFact, AvailabilityFact, PermissionFact, ControlFact, OutsideFact]
+class ScheduleFact(_Strict):
+    """A timer that now runs its target. ``resource_ids`` are the collected targets; what they do outside is not claimed."""
+    resource_id: str
+    resource_type: str
+    change: Literal["schedule_enabled", "schedule_added_enabled", "schedule_changed"]
+    schedule_expression: Optional[str]
+    resource_ids: list[str]
+    action: Optional[str]
+    service: str
+    reason: str
+    source_url: str
+
+
+Fact = Union[DataFact, ExposureFact, MoneyFact, AvailabilityFact, PermissionFact, ControlFact, OutsideFact, ScheduleFact]
 
 
 class DamageAnswer(_Strict):
@@ -172,6 +185,17 @@ class PermissionChange:
     affected_node_ids: Sequence[str] = ()
 
 
+@dataclass(frozen=True)
+class ScheduleChange:
+    """A timer whose effective state or timing changed on the branch (an adapter read it off provider fields)."""
+    resource_id: str
+    resource_type: str
+    change: Literal["schedule_enabled", "schedule_added_enabled", "schedule_changed", "schedule_disabled"]
+    schedule_expression: Optional[str]
+    target_ids: Sequence[str]
+    entry: OutsideEntry
+
+
 @dataclass
 class CheckInputs:
     branch_id: str
@@ -193,6 +217,10 @@ class CheckInputs:
     # (topic, reason, resource_id) notes about the action-level comparison; shown in availability
     permission_doubts: Sequence[tuple[str, str, Optional[str]]] = ()
     permission_checked: Sequence[tuple[str, str]] = ()
+    schedule_changes: Sequence[ScheduleChange] = ()
+    # (topic, reason, resource_id) notes about schedules; shown in outside_world
+    schedule_doubts: Sequence[tuple[str, str, Optional[str]]] = ()
+    schedules_compared: int = 0
     checked_notes: Mapping[str, Sequence[tuple[str, str]]] = field(default_factory=dict)
     unknown_notes: Mapping[str, Sequence[tuple[str, str]]] = field(default_factory=dict)
     baseline: Optional[ContextResponse] = None
@@ -405,6 +433,12 @@ def _availability(verdict: CombinedVerdict, inputs: CheckInputs, types: Mapping[
     for item in inputs.permission_changes:
         if item.change == "permission_removed":
             draft.facts.append(_permission_fact(item))
+    for item in inputs.schedule_changes:
+        if item.change == "schedule_disabled":
+            for target in sorted(set(item.target_ids)) or [None]:
+                draft.facts.append(AvailabilityFact(
+                    resource_id=item.resource_id, resource_type=item.resource_type, change="schedule_disabled",
+                    path=[item.resource_id] + ([target] if target else []), depth=1 if target else 0, recently_used=None))
     for topic, reason, rid in inputs.permission_doubts:
         draft.doubt(topic, reason, rid)
     for topic, detail in inputs.permission_checked:
@@ -454,6 +488,15 @@ def _outside_world(inputs: CheckInputs, changed_typed: int) -> _Draft:
         classified += 1
         draft.facts.append(OutsideFact(action=gap.action, service=entry.service, reason=entry.reason,
                                        source_url=entry.source_url, resource_id=gap.address))
+    for item in inputs.schedule_changes:
+        if item.change != "schedule_disabled":
+            draft.facts.append(ScheduleFact(
+                resource_id=item.resource_id, resource_type=item.resource_type, change=item.change,  # type: ignore[arg-type]
+                schedule_expression=item.schedule_expression, resource_ids=sorted(set(item.target_ids)), action=None,
+                service=item.entry.service, reason=item.entry.reason, source_url=item.entry.source_url))
+    for topic, reason, rid in inputs.schedule_doubts:
+        draft.doubt(topic, reason, rid)
+    draft.check("schedules", f"{inputs.schedules_compared} schedules compared between the base and the branch for a timer that starts running")
     draft.check("typed_changes", f"{changed_typed} typed changes are changes to resources inside the account; they stay inside the account "
                                  "and do not leave the cloud")
     draft.check("plan_actions", f"{classified} unmodeled plan actions matched the table of services whose actions leave the cloud")

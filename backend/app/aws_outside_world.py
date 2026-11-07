@@ -70,6 +70,14 @@ OUTSIDE_WORLD_SERVICES: tuple[OutsideService, ...] = (
     ),
 )
 
+# Not an action to classify: a schedule starts its target on a timer, which can reach outside the account
+# through whatever the target does. Used by the check for schedules that begin or keep running on a branch.
+SCHEDULER_ENTRY = OutsideEntry(
+    service="scheduler",
+    reason="Runs its target on a timer without anyone starting it.",
+    source_url="https://docs.aws.amazon.com/scheduler/latest/UserGuide/managing-schedule-enable-disable.html",
+)
+
 _BY_SERVICE = {service: entry for entry in OUTSIDE_WORLD_SERVICES for service in entry.services}
 _BY_PREFIX = sorted(((prefix, entry) for entry in OUTSIDE_WORLD_SERVICES for prefix in entry.terraform_prefixes),
                     key=lambda pair: -len(pair[0]))
