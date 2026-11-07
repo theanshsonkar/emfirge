@@ -36,11 +36,17 @@ async function waitForLogin(pending: Promise<boolean>): Promise<boolean> {
   }
 }
 
-export async function authHeader(): Promise<string> {
+/** Authorization value from the API key or stored sign-in; null (no browser login) if neither exists. */
+export async function authHeaderIfSignedIn(): Promise<string | null> {
   const apiKey = process.env.EMFIRGE_API_KEY;
   if (apiKey) return `Bearer ${apiKey}`;
   const token = await getAccessToken();
-  if (token) return `Bearer ${token}`;
+  return token ? `Bearer ${token}` : null;
+}
+
+export async function authHeader(): Promise<string> {
+  const existing = await authHeaderIfSignedIn();
+  if (existing) return existing;
   const login = await startLogin();
   if (await waitForLogin(login.pending)) {
     const newToken = await getAccessToken();

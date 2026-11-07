@@ -63,7 +63,7 @@ we do not promise any. <!-- law: L71h -->
 | Postgres `account_binding_events` | A log of link and refused-link events: AWS account ID, project, action, actor | yes | until you purge |
 | Postgres `branch_logs` | Simulation branches: name, the base infrastructure snapshot, and the list of changes | yes | until you discard the branch or purge |
 | Postgres `branch_owners` | Which project owns a branch | yes | until you discard the branch or purge |
-| Postgres `plan_logs` | Terraform plan receipts: the sha256 of the plan and the ingest outcome. Never the plan text | yes | until you discard the branch or purge |
+| Postgres `plan_logs` | Plan receipts (Terraform, CloudFormation, AWS CLI/API): the sha256 of the plan and the ingest outcome. Never the plan text | yes | until you discard the branch or purge |
 | Postgres `branch_evidence_logs` | Opt-in in-use evidence for a branch | yes | until you discard the branch or purge |
 | Postgres `branch_policy_check_logs` | Opt-in policy check results for a branch | yes | until you discard the branch or purge |
 | Postgres `projects` | Your login workspace: name and your ExternalId | no | until you ask us to delete your login |
@@ -221,9 +221,9 @@ The MCP command then deletes your local `~/.emfirge/tokens.json`. It does
 **not** delete `~/.emfirge/credentials.json`. Remove that file yourself, or
 sign out, if you want your local sign-in gone too.
 
-One known gap: the MCP command does not send a sign-in or API key with its
-request. On a server that requires sign-in it will be refused. Until that is
-fixed, call `POST /privacy/purge` with your own key, or email us.
+The MCP command signs in with your stored credentials, or with your API key
+(`EMFIRGE_API_KEY`). Without either it stops, sends nothing, leaves your local
+files alone and asks you to sign in first. <!-- law: L71i -->
 
 ### Want zero data on emfirge.cloud at all?
 
