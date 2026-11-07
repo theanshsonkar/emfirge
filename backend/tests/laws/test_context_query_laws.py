@@ -51,7 +51,7 @@ SHAPES = {
     "depends_on": {"resource_id", "resource_type", "relationship", "depth", "path"},
     "dependents": {"resource_id", "resource_type", "relationship", "depth", "path"},
     "reachable": {"resource_id", "resource_type", "protocol", "ports", "source", "resource_ids", "state"},
-    "access": {"resource_id", "resource_ids", "escalation"},
+    "access": {"resource_id", "resource_ids", "escalation", "permissions"},
     "data": {"resource_id", "resource_type", "has_recovery_point", "recovery_resource_ids", "recovery_kinds"},
     "cost": {"resource_id", "resource_type", "monthly_usd", "basis"},
     "live": {"resource_id", "used", "last_used_at", "window_days", "basis"},

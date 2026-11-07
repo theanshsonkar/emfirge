@@ -21,7 +21,11 @@ from typing import Any, Mapping, Optional, Sequence
 
 from app.aws_context import answer_for_infra, node_id_for, role_use_lines, safe_warning
 from app.aws_outside_world import classify_action
-from app.check_facts import ChangeLine, CheckInputs, CheckResult, PlanGap, assemble, is_unchanged
+from app.aws_permissions import (
+    NOTE_ACTION_CATALOG, NOTE_APP_CODE, NOTE_MANAGED_NOT_RECORDED, compute_users, role_node_id, role_node_ids,
+    role_permission_diff, statements_differ,
+)
+from app.check_facts import ChangeLine, CheckInputs, CheckResult, PermissionChange, PlanGap, assemble, is_unchanged
 from app.cost import PRICE_TABLE_AS_OF, PRICE_TABLE_REGION
 from app.egraph import Graph, build_graph_pair
 from app.evidence_models import EvidenceRecord
@@ -73,6 +77,43 @@ def _role_lines(base: AWSInfrastructure, branch: AWSInfrastructure, base_graph: 
         elif was_external and not is_external:
             exposure.append(ChangeLine(rid, "iam_role", "no_longer_trusts_external_account", "external_trust"))
     return control, exposure
+
+
+def _permission_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, base_graph: Graph, branch_graph: Graph
+                       ) -> tuple[list[PermissionChange], list[tuple[str, str, Optional[str]]], list[tuple[str, str]]]:
+    """Action-level changes of roles present on both sides whose identity-policy statements differ.
+
+    Returns (facts, unknown notes, checked notes). Which actions the application code calls is unknown for every
+    changed role that compute uses.
+    """
+    old = {r.role_arn: r for r in base.iam.role_policies}
+    new = {r.role_arn: r for r in branch.iam.role_policies}
+    base_ids, branch_ids = role_node_ids(base_graph), role_node_ids(branch_graph)
+    changes: list[PermissionChange] = []
+    doubts: set[tuple[str, str, Optional[str]]] = set()
+    compared = 0
+    for arn in sorted(set(old) & set(new)):
+        before, after = old[arn], new[arn]
+        if not statements_differ(before, after):
+            continue
+        compared += 1
+        rid = role_node_id(after, branch_ids)
+        users = sorted(set(compute_users(base_graph, role_node_id(before, base_ids))) | set(compute_users(branch_graph, rid)))
+        diff = role_permission_diff(before, after, base_graph, branch_graph)
+        for change, items in (("permission_removed", diff.removed), ("permission_added", diff.added)):
+            for action, targets in items.items():
+                changes.append(PermissionChange(rid, "iam_role", change, action, targets, users))  # type: ignore[arg-type]
+        for topic, reason in diff.notes:
+            doubts.add((topic, reason, rid))
+        if users:
+            doubts.add((*NOTE_APP_CODE, rid))
+        if before.policy_documents is None:
+            doubts.add((*NOTE_MANAGED_NOT_RECORDED, rid))
+    if compared:
+        doubts.add((*NOTE_ACTION_CATALOG, None))
+    checked = ([("permissions", f"{compared} roles whose identity policy statements changed were compared action by action "
+                                "for the resources the graph links them to")] if compared else [])
+    return changes, sorted(doubts, key=lambda d: (d[0], d[1], d[2] or "")), checked
 
 
 def _user_lines(base: AWSInfrastructure, branch: AWSInfrastructure) -> list[ChangeLine]:
@@ -145,6 +186,7 @@ def build_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, verdict: Co
     # one line per base role, in role order: keyed by graph id and by ARN (a delete names the ARN)
     for role, line in zip(base.iam.role_policies, role_use_lines(base, base_graph)):
         uses[line.resource_id] = uses[role.role_arn] = line.used
+    permission_changes, permission_doubts, permission_checked = _permission_inputs(base, branch, base_graph, branch_graph)
     baseline = (answer_for_infra("baseline", base, analysis_id=base_analysis_id)
                 if is_unchanged(verdict, gaps) else None)
     warnings = tuple(sorted({safe_warning(w) for infra in (base, branch) for w in infra.warnings}))
@@ -154,6 +196,8 @@ def build_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, verdict: Co
         exposure_lines=role_exposure + bucket_exposure, control_lines=control,
         recovery_removals=recovery_removals(base, branch), uses=uses,
         collection=dict(base.collection), needs=DAMAGE_SOURCES, warnings=warnings,
+        permission_changes=permission_changes, permission_doubts=permission_doubts,
+        permission_checked=permission_checked,
         checked_notes={
             "money": [("price_table", f"AWS {PRICE_TABLE_REGION} on-demand list prices as of {PRICE_TABLE_AS_OF}")],
             "control": [("modeled_fields", f"{len(branch.iam.role_policies)} roles, {len(branch.s3.buckets)} buckets and "

@@ -86,6 +86,20 @@ class AvailabilityFact(_Strict):
     recently_used: Optional[bool]
 
 
+class PermissionFact(_Strict):
+    """One action a role may (no longer) call on the listed resources, from collected identity policies.
+
+    ``resource_id`` is the role; ``resource_ids`` the resources the action is about; ``affected_node_ids`` the
+    resources that use the role. Which actions application code calls is never claimed.
+    """
+    resource_id: str
+    resource_type: str
+    change: Literal["permission_removed", "permission_added"]
+    action: str
+    resource_ids: list[str]
+    affected_node_ids: list[str]
+
+
 class ControlFact(_Strict):
     resource_id: Optional[str]
     resource_type: Optional[str]
@@ -101,7 +115,7 @@ class OutsideFact(_Strict):
     resource_id: Optional[str]
 
 
-Fact = Union[DataFact, ExposureFact, MoneyFact, AvailabilityFact, ControlFact, OutsideFact]
+Fact = Union[DataFact, ExposureFact, MoneyFact, AvailabilityFact, PermissionFact, ControlFact, OutsideFact]
 
 
 class DamageAnswer(_Strict):
@@ -147,6 +161,17 @@ class PlanGap:
     address: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class PermissionChange:
+    """One action of one role that went from allowed to not allowed (or back) on the listed resources."""
+    resource_id: str
+    resource_type: str
+    change: Literal["permission_removed", "permission_added"]
+    action: str
+    resource_ids: Sequence[str]
+    affected_node_ids: Sequence[str] = ()
+
+
 @dataclass
 class CheckInputs:
     branch_id: str
@@ -164,6 +189,10 @@ class CheckInputs:
     collection: Mapping[str, str] = field(default_factory=dict)
     needs: Mapping[str, Sequence[str]] = field(default_factory=dict)
     warnings: Sequence[str] = ()
+    permission_changes: Sequence[PermissionChange] = ()
+    # (topic, reason, resource_id) notes about the action-level comparison; shown in availability
+    permission_doubts: Sequence[tuple[str, str, Optional[str]]] = ()
+    permission_checked: Sequence[tuple[str, str]] = ()
     checked_notes: Mapping[str, Sequence[tuple[str, str]]] = field(default_factory=dict)
     unknown_notes: Mapping[str, Sequence[tuple[str, str]]] = field(default_factory=dict)
     baseline: Optional[ContextResponse] = None
@@ -345,6 +374,12 @@ def _chain(rid: str, via: Mapping[str, str]) -> list[str]:
     return list(reversed(path))
 
 
+def _permission_fact(item: PermissionChange) -> PermissionFact:
+    return PermissionFact(resource_id=item.resource_id, resource_type=item.resource_type, change=item.change,
+                          action=item.action, resource_ids=sorted(set(item.resource_ids)),
+                          affected_node_ids=sorted(set(item.affected_node_ids)))
+
+
 def _availability(verdict: CombinedVerdict, inputs: CheckInputs, types: Mapping[str, str],
                   uses: Mapping[str, Optional[bool]], use_doubts: Sequence[_Note],
                   affected_ids: Sequence[str]) -> _Draft:
@@ -367,6 +402,13 @@ def _availability(verdict: CombinedVerdict, inputs: CheckInputs, types: Mapping[
     for rid in verdict.no_longer_internet_reachable:
         draft.facts.append(AvailabilityFact(resource_id=rid, resource_type=_type_of(rid, types), change="internet_path_removed",
                                             path=[rid], depth=0, recently_used=uses.get(rid)))
+    for item in inputs.permission_changes:
+        if item.change == "permission_removed":
+            draft.facts.append(_permission_fact(item))
+    for topic, reason, rid in inputs.permission_doubts:
+        draft.doubt(topic, reason, rid)
+    for topic, detail in inputs.permission_checked:
+        draft.check(topic, detail)
     draft.check("dependencies", f"{len(verdict.lost_dependencies)} lost dependencies and {len(verdict.lost_connectivity)} lost internal paths "
                                 "compared between the base and the branch")
     draft.check("deleted_dependents", f"{len(impacts)} resources that depend on or go down with a deleted resource found by walking dependency edges "
@@ -390,6 +432,9 @@ def _control(inputs: CheckInputs) -> _Draft:
     for line in inputs.control_lines:
         draft.facts.append(ControlFact(resource_id=line.resource_id, resource_type=line.resource_type,
                                        change=line.change, attribute=line.attribute))
+    for item in inputs.permission_changes:
+        if item.change == "permission_added":
+            draft.facts.append(_permission_fact(item))
     draft.check("control_changes", f"{len(inputs.control_lines)} control changes read from modeled fields between the base and the branch")
     draft.doubt("other_policy_layers", "permission boundaries, organization policies and resource policies are not collected, so effective access can differ")
     return draft

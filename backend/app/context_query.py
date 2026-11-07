@@ -129,10 +129,18 @@ class ReachableFact(_Strict):
     state: str
 
 
+class ActionAllow(_Strict):
+    """One action a role is allowed (``allow``) or conditionally allowed (``conditional``) on the listed resources."""
+    action: str
+    effect: Literal["allow", "conditional"]
+    resource_ids: list[str]
+
+
 class AccessFact(_Strict):
     resource_id: str
     resource_ids: list[str]
     escalation: list[str]
+    permissions: list[ActionAllow]
 
 
 class DataFact(_Strict):
@@ -238,6 +246,23 @@ class ExposureLine:
     state: str
 
 
+@dataclass(frozen=True)
+class PermissionEntry:
+    """An action-level allow of one identity (from the neutral permission expansion)."""
+    resource_id: str
+    action: str
+    effect: str
+    target_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PermissionNote:
+    """What the expansion could not decide for one identity (topic and text carry no identifiers)."""
+    resource_id: str
+    topic: str
+    text: str
+
+
 @dataclass
 class FactsBundle:
     source: SourceInfo
@@ -252,6 +277,8 @@ class FactsBundle:
     costs: Sequence[CostLine] = ()
     uses: Sequence[UseLine] = ()
     exposures: Sequence[ExposureLine] = ()
+    permissions: Sequence[PermissionEntry] = ()
+    permission_notes: Sequence[PermissionNote] = ()
     # adapter-supplied per-question notes
     known: Mapping[str, Sequence[Note]] = field(default_factory=dict)
     unknown: Mapping[str, Sequence[Note]] = field(default_factory=dict)
@@ -362,6 +389,9 @@ def _access(ctx: _Ctx) -> _Result:
     for edge in ctx.graph.edges:
         if edge.relationship.value in ACCESS_RELATIONSHIPS:
             targets.setdefault(edge.src, set()).add(edge.dst)
+    entries: dict[str, list[PermissionEntry]] = {}
+    for entry in ctx.bundle.permissions:
+        entries.setdefault(entry.resource_id, []).append(entry)
     facts = []
     for node in _real_nodes(ctx):
         if node.category.value != "identity" and node.id not in targets:
@@ -370,11 +400,16 @@ def _access(ctx: _Ctx) -> _Result:
             continue
         paths = node.base.get("privilege_escalation_paths") or []
         facts.append(AccessFact(resource_id=node.id, resource_ids=sorted(targets.get(node.id, ())),
-                                escalation=sorted({str(p) for p in paths})))
+                                escalation=sorted({str(p) for p in paths}),
+                                permissions=[ActionAllow(action=e.action, effect=e.effect,  # type: ignore[arg-type]
+                                                         resource_ids=sorted(e.target_ids))
+                                             for e in sorted(entries.get(node.id, ()), key=lambda e: (e.action, e.effect))]))
     facts.sort(key=lambda f: f.resource_id)
     known = [("identity_policies", f"{len(facts)} identities with access relationships read from collected policies"),
-             ("escalation_paths", "privilege escalation paths are matched from collected identity policy statements")]
-    return facts, known, []
+             ("escalation_paths", "privilege escalation paths are matched from collected identity policy statements"),
+             ("action_permissions", f"{sum(len(f.permissions) for f in facts)} action-level allows expanded from collected identity policies")]
+    unknown = [(n.topic, n.text, n.resource_id) for n in ctx.bundle.permission_notes if _wanted(ctx, n.resource_id)]
+    return facts, known, unknown
 
 
 def _data(ctx: _Ctx) -> _Result:

@@ -20,7 +20,7 @@ APP_DIR = Path(__file__).resolve().parents[2] / "app"
 CORE_MODULES = {
     "branches", "diffing", "verdict", "exposure", "scoring", "delete_lens",
     "cost", "limits", "graph_schema", "evidence_models", "in_use_evidence",
-    "egraph", "context_query", "check_facts",
+    "egraph", "context_query", "check_facts", "permission_facts",
 }
 
 # AWS-adapter modules (app.<name>).  Ambiguous calls: `models` (defines
@@ -39,6 +39,9 @@ ADAPTER_MODULES = {
     # Turn a branch into the neutral inputs for check_facts; the outside-world
     # table is hand-written AWS service knowledge with AWS documentation URLs.
     "aws_check", "aws_outside_world",
+    # Provider action catalog (botocore / IAM data) and the glue that feeds the
+    # neutral permission expansion (permission_facts) from collected role policies.
+    "aws_actions", "aws_permissions",
 }
 AWS_LIBS = {"boto3", "botocore"}
 
@@ -61,6 +64,7 @@ ALLOWED: dict[str, set[str]] = {
     "egraph": {"models", "iam_classifier", "iam_escalation", "rds_ports"},
     "context_query": set(),
     "check_facts": set(),
+    "permission_facts": set(),
 }
 
 

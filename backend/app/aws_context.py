@@ -18,9 +18,13 @@ from __future__ import annotations
 import re
 from typing import Optional, Sequence
 
+from app.aws_permissions import (
+    NOTE_ACTION_CATALOG, NOTE_MANAGED_NOT_RECORDED, NOTE_TARGET_GRANULARITY, role_node_id, role_node_ids,
+    role_permission_lines,
+)
 from app.context_query import (
-    ContextResponse, CostLine, DataLine, ExposureLine, FactsBundle, Note, SourceInfo,
-    TagLine, UseLine, VIRTUAL_NODE_IDS, answer,
+    ContextResponse, CostLine, DataLine, ExposureLine, FactsBundle, Note, PermissionEntry, PermissionNote,
+    SourceInfo, TagLine, UseLine, VIRTUAL_NODE_IDS, answer,
 )
 from app.cost import estimate_monthly_cost, unknown_reason
 from app.delete_lens import DATA_STORE_TYPES, RECENT_USE_DAYS, recovery_point_for, role_recent_use
@@ -158,6 +162,21 @@ def _exposure_lines(infra: AWSInfrastructure, graph: Graph, base_infra: Optional
             for e in compute_exposures(infra, graph, base_infra)]
 
 
+def _permission_lines(infra: AWSInfrastructure, graph: Graph) -> tuple[list[PermissionEntry], list[PermissionNote]]:
+    """Action-level allows per role: the neutral expansion over collected statements (same function the check uses)."""
+    ids = role_node_ids(graph)
+    entries: list[PermissionEntry] = []
+    notes: list[PermissionNote] = []
+    for role in infra.iam.role_policies:
+        rid = role_node_id(role, ids)
+        result = role_permission_lines(role, graph)
+        entries += [PermissionEntry(rid, p.action, p.effect, p.resource_ids) for p in result.allows]
+        notes += [PermissionNote(rid, topic, text) for topic, text in result.notes]
+        if role.policy_documents is None:
+            notes.append(PermissionNote(rid, *NOTE_MANAGED_NOT_RECORDED))
+    return entries, notes
+
+
 def build_bundle(infra: AWSInfrastructure, graph: Graph, *, source: SourceInfo,
                  base_infra: Optional[AWSInfrastructure] = None,
                  evidence: Sequence[EvidenceRecord] = ()) -> FactsBundle:
@@ -166,7 +185,9 @@ def build_bundle(infra: AWSInfrastructure, graph: Graph, *, source: SourceInfo,
     uses = _role_use_lines(infra, graph) + _evidence_use_lines(graph, evidence)
     untagged_types = sorted({n.resource_type for n in graph.nodes
                              if n.id not in VIRTUAL_NODE_IDS and n.resource_type not in TAGGED_TYPES})
+    permissions, permission_notes = _permission_lines(infra, graph)
     unknown = {
+        "access": [Note(*NOTE_ACTION_CATALOG), Note(*NOTE_TARGET_GRANULARITY)],
         "data": [Note("data_store_types", "only s3_bucket, rds_instance and ebs_volume are assessed; "
                                           "other data stores (tables, queues, caches, secrets) have no recovery assessment")],
         "marks": ([Note("tags:unmodeled_types", "the snapshot has no tag field for: " + ", ".join(untagged_types))]
@@ -185,6 +206,8 @@ def build_bundle(infra: AWSInfrastructure, graph: Graph, *, source: SourceInfo,
         costs=cost_lines,
         uses=uses,
         exposures=_exposure_lines(infra, graph, base_infra),
+        permissions=permissions,
+        permission_notes=permission_notes,
         known=known,
         unknown=unknown,
     )
