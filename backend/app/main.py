@@ -320,6 +320,10 @@ def _lookup_resource_name(resource_id: str, resource_type: str) -> Optional[str]
 
 # Raw mode = caller is an LLM host (MCP, etc.) so we skip Gemini/Claude calls.
 # The host renders the response itself, no need to spend tokens here.
+class _RawModeNoLLM(Exception):
+    """Control flow only: raw mode skips the LLM and uses the deterministic narrative."""
+
+
 def _is_raw_mode(request: Request, raw: bool = False) -> bool:
     if raw:
         return True
@@ -4779,6 +4783,9 @@ def simulate_component(request: ComponentRequest, http_request: Request, caller:
     # ── CLAUDE NARRATIVE (Haiku — fast) ───────────────────────────
     narrative = {'verdict': '', 'severity': 'low', 'summary': '', 'recommendations': []}
     try:
+        if _is_raw_mode(http_request):
+            # Raw (MCP) mode: the host is already an LLM; never send data to a second one.
+            raise _RawModeNoLLM()
         anthropic_client = anthropic_lib.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'), timeout=30)
 
         findings_summary = f"{len(new_findings)} new findings"
@@ -4823,7 +4830,8 @@ Respond with ONLY this JSON (no markdown):
         raw = msg.content[0].text.strip().replace('```json', '').replace('```', '').strip()
         narrative = json.loads(raw)
     except Exception as e:
-        logger.warning(f"simulate_component: Claude narrative failed (non-fatal): {e}")
+        if not isinstance(e, _RawModeNoLLM):
+            logger.warning(f"simulate_component: Claude narrative failed (non-fatal): {e}")
         # Fallback: generate narrative from facts
         if new_findings:
             max_sev = 'critical' if any(f.get('severity') == 'Critical' for f in new_findings) else 'medium'
