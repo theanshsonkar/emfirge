@@ -16,6 +16,21 @@ export function extractNextStep(text: string): string | null {
   }
 }
 
+/** An Error that remembers the HTTP status, so callers (the CLI) can pick an exit code. */
+export class HttpStatusError extends Error {
+  constructor(public readonly status: number, message: string) {
+    super(message);
+    this.name = "HttpStatusError";
+  }
+}
+
+let interactiveLogin = true;
+
+/** The CLI turns this off: not signed in must fail fast, not wait for a browser. */
+export function setInteractiveLogin(value: boolean): void {
+  interactiveLogin = value;
+}
+
 let authWaitTimeoutMs = 120_000;
 
 /** Test hook for keeping the pending-login wait short. */
@@ -47,6 +62,9 @@ export async function authHeaderIfSignedIn(): Promise<string | null> {
 export async function authHeader(): Promise<string> {
   const existing = await authHeaderIfSignedIn();
   if (existing) return existing;
+  if (!interactiveLogin) {
+    throw new HttpStatusError(401, "Not signed in. Run: emfirge login (or set EMFIRGE_API_KEY).");
+  }
   const login = await startLogin();
   if (await waitForLogin(login.pending)) {
     const newToken = await getAccessToken();
@@ -112,7 +130,7 @@ export async function backendCall<T = unknown>(
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
-      if (res.status === 401) throw new Error("Your sign-in has expired. Run emfirge_login.");
+      if (res.status === 401) throw new HttpStatusError(401, "Your sign-in has expired. Run emfirge_login.");
     }
 
     if (!res.ok) {
@@ -130,13 +148,13 @@ export async function backendCall<T = unknown>(
       }
 
       if (res.status === 429) {
-        throw new Error(
+        throw new HttpStatusError(429,
           detail ??
             "Daily limit reached for this AWS account. Resets at midnight UTC.",
         );
       }
       if (res.status === 403) {
-        throw new Error(
+        throw new HttpStatusError(403,
           detail ??
           "Access denied. Check the role's trust policy and your project ExternalId from emfirge_setup. " +
             "If you don't have a role yet, call emfirge_setup_help.",
@@ -147,10 +165,10 @@ export async function backendCall<T = unknown>(
           ? "Branch not found. Call emfirge_list_branches to see available branches."
           : `Not found at ${path}. If you passed an analysis_id, run emfirge_scan first.`;
         const suffix = detail && detail !== "Not Found" ? ` Backend says: ${detail}` : "";
-        throw new Error(`${hint}${suffix}`);
+        throw new HttpStatusError(404, `${hint}${suffix}`);
       }
 
-      throw new Error(String(redactDeep(`Backend ${res.status} on ${path}: ${surfacedDetail ?? text.slice(0, 300)}`)));
+      throw new HttpStatusError(res.status, String(redactDeep(`Backend ${res.status} on ${path}: ${surfacedDetail ?? text.slice(0, 300)}`)));
     }
 
     return (await res.json()) as T;
@@ -160,6 +178,8 @@ export async function backendCall<T = unknown>(
     if (e instanceof Error && e.name === "AbortError") {
       throw new Error(String(redactDeep(`${path} timed out after ${timeoutMs / 1000}s`)));
     }
+    const status = (e as { status?: unknown } | null)?.status;
+    if (typeof status === "number") throw new HttpStatusError(status, String(redactDeep(message)));
     throw new Error(String(redactDeep(message)));
   } finally {
     clearTimeout(timer);
@@ -245,20 +265,20 @@ export async function backendCallSSE<T = unknown>(
         body: body ? JSON.stringify(body) : undefined,
         signal: controller.signal,
       });
-      if (res.status === 401) throw new Error("Your sign-in has expired. Run emfirge_login.");
+      if (res.status === 401) throw new HttpStatusError(401, "Your sign-in has expired. Run emfirge_login.");
     }
 
     if (!res.ok) {
       const text = await res.text();
       const detail = extractDetail(text);
       if (res.status === 429) {
-        throw new Error(
+        throw new HttpStatusError(429,
           detail ??
             "Daily limit reached for this AWS account. Resets at midnight UTC.",
         );
       }
       if (res.status === 403) {
-        throw new Error(
+        throw new HttpStatusError(403,
           detail ??
             "Access denied. Check the role's trust policy and your project ExternalId from emfirge_setup. " +
               "If you don't have a role yet, call emfirge_setup_help.",
@@ -269,9 +289,9 @@ export async function backendCallSSE<T = unknown>(
           ? "Branch not found. Call emfirge_list_branches to see available branches."
           : `Not found at ${path}. If you passed an analysis_id, run emfirge_scan first.`;
         const suffix = detail && detail !== "Not Found" ? ` Backend says: ${detail}` : "";
-        throw new Error(`${hint}${suffix}`);
+        throw new HttpStatusError(404, `${hint}${suffix}`);
       }
-      throw new Error(`Backend ${res.status} on ${path}: ${detail ?? text.slice(0, 300)}`);
+      throw new HttpStatusError(res.status, `Backend ${res.status} on ${path}: ${detail ?? text.slice(0, 300)}`);
     }
 
     if (!res.body) {
@@ -342,6 +362,8 @@ export async function backendCallSSE<T = unknown>(
     if (e instanceof Error && e.name === "AbortError") {
       throw new Error(String(redactDeep(`${path} timed out after ${timeoutMs / 1000}s`)));
     }
+    const status = (e as { status?: unknown } | null)?.status;
+    if (typeof status === "number") throw new HttpStatusError(status, String(redactDeep(message)));
     throw new Error(String(redactDeep(message)));
   } finally {
     clearTimeout(timer);
