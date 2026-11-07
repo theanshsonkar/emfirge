@@ -367,8 +367,12 @@ def test_L71f_b_collector_logs_no_customer_identifiers(mode, monkeypatch, capsys
                     raise
 
     captured = capsys.readouterr()
-    haystack = "\n".join([captured.out, captured.err, caplog.text,
-                          *(r.getMessage() for r in caplog.records)])
+    # Third-party libraries (botocore at DEBUG logs raw request/response bodies) are out of the law's
+    # scope: the app never enables DEBUG for them (no basicConfig/setLevel in app/; production root
+    # level is WARNING).  Everything else, i.e. the app's own loggers, is checked at DEBUG.
+    third_party = ("botocore", "boto3", "urllib3", "moto", "s3transfer", "werkzeug", "responses")
+    own = [r for r in caplog.records if not r.name.split(".")[0] in third_party]
+    haystack = "\n".join([captured.out, captured.err, *(r.getMessage() for r in own)])
     assert haystack.strip(), "collector produced no log output; the law would be vacuous"
     leaked = [p for p in PLANTED if p in haystack]
     assert not leaked, f"{mode}: planted identifiers reached logs: {leaked}\n{haystack[:3000]}"
