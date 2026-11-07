@@ -13,6 +13,7 @@ import boto3
 
 from app import database
 from app.log_safe import safe_exc
+from app.storage import REPORTS_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ def purge_s3_reports(analysis_uuids: list[str]) -> int:
         uid_set = set(analysis_uuids)
         token = None
         while True:
-            kwargs = {"Bucket": bucket, "Prefix": "reports/"}
+            kwargs = {"Bucket": bucket, "Prefix": REPORTS_PREFIX}
             if token:
                 kwargs["ContinuationToken"] = token
             resp = s3.list_objects_v2(**kwargs)
