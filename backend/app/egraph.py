@@ -25,7 +25,7 @@ from app.iam_escalation import matching_paths
 from app.rds_ports import ports_cover, rds_port
 
 
-GRAPH_SCHEMA_VERSION = 2
+GRAPH_SCHEMA_VERSION = 3
 INTERNAL_REACH_EDGE_BUDGET = 50_000
 
 
@@ -1541,6 +1541,9 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
             })
     
     # ── S3 NODES ──────────────────────────────────────────────────
+    # Buckets a collected distribution serves from get that distribution's node, not a synthetic one.
+    cloudfront_buckets = {origin.s3_bucket for dist in infrastructure.cloudfront.distributions
+                          for origin in dist.origins if origin.s3_bucket}
     for bucket in infrastructure.s3.buckets:
         # Handle both dict and Pydantic model formats
         if isinstance(bucket, dict):
@@ -1569,7 +1572,7 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
         })
         
         # Edge: S3 Bucket -> CloudFront (if has_cloudfront is True)
-        if has_cloudfront:
+        if has_cloudfront and bucket_name not in cloudfront_buckets:
             # Create a virtual CloudFront node for this bucket
             cf_id = f"cloudfront-{bucket_name}"
             nodes.append({
@@ -1586,6 +1589,44 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
                 'relationship': 'serves_from_bucket'
             })
     
+    # ── CLOUDFRONT NODES ──────────────────────────────────────────
+    bucket_node_ids = {(b['name'] if isinstance(b, dict) else b.name): id_plan.id('s3_bucket', b['name'] if isinstance(b, dict) else b.name)
+                       for b in infrastructure.s3.buckets}
+    for dist in infrastructure.cloudfront.distributions:
+        behaviors = ([dist.default_cache_behavior] if dist.default_cache_behavior else []) + list(dist.cache_behaviors)
+        metadata = {
+            'domain_name': dist.domain_name,
+            'aliases': list(dist.aliases),
+            'enabled': dist.enabled,
+            'status': dist.status,
+            'price_class': dist.price_class,
+            'web_acl_id': dist.web_acl_id,
+            'origins': [{'id': o.id, 'domain_name': o.domain_name, 'origin_type': o.origin_type,
+                         'origin_access_control_id': o.origin_access_control_id, 's3_bucket': o.s3_bucket} for o in dist.origins],
+            'behaviors': [{'path_pattern': b.path_pattern, 'target_origin_id': b.target_origin_id,
+                           'cache_policy_id': b.cache_policy_id, 'origin_request_policy_id': b.origin_request_policy_id,
+                           'viewer_protocol_policy': b.viewer_protocol_policy,
+                           'uses_legacy_forwarded_values': b.uses_legacy_forwarded_values,
+                           'forwards_host': infrastructure.cloudfront.behavior_forwards_host(b)} for b in behaviors],
+            'unmodeled_settings': dist.unmodeled_names(),
+        }
+        if dist.arn is not None:
+            metadata['arn'] = dist.arn
+        nodes.append({'id': dist.id, 'type': 'cloudfront_distribution', 'label': f"CloudFront: {dist.id}", 'metadata': metadata})
+        # Edge: distribution -> the S3 bucket a behavior serves from (the distribution depends on the bucket)
+        origins = {o.id: o for o in dist.origins}
+        for behavior in behaviors:
+            origin = origins.get(behavior.target_origin_id)
+            if origin is None or origin.origin_type != 's3' or origin.s3_bucket not in bucket_node_ids:
+                continue
+            edges.append({
+                'from': dist.id,
+                'to': bucket_node_ids[origin.s3_bucket],
+                'relationship': 'serves_from_bucket',
+                'attrs': {'path_pattern': behavior.path_pattern, 'oac': bool(origin.origin_access_control_id),
+                          'forwards_host': infrastructure.cloudfront.behavior_forwards_host(behavior)},
+            })
+
     # ── RDS NODES ─────────────────────────────────────────────────
     for rds in infrastructure.rds.rds_instances:
         # Handle both dict and Pydantic model formats
@@ -3129,7 +3170,11 @@ def find_orphaned_resources(graph: Graph) -> List[Dict[str, Any]]:
         node_type = node['type']
         if node_type == 'ebs_volume' and node.get('metadata', {}).get('state') != 'available':
             continue
-        
+        # A collected distribution serves the internet from origins that are not always modeled nodes;
+        # having no edge says nothing about it, and its price is usage based (never a guessed number).
+        if node_type == 'cloudfront_distribution' and 'origins' in node.get('metadata', {}):
+            continue
+
         # Get inbound and outbound connections
         inbound = graph.get_inbound(node_id)
         outbound = graph.get_outbound(node_id)

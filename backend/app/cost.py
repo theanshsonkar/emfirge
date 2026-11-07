@@ -198,6 +198,12 @@ def estimate_monthly_cost(infra: AWSInfrastructure) -> CostEstimate:
             f"{schedule.group_name}/{schedule.name}", "scheduler_schedule", None, "usage-based-unknown",
         ))
 
+    for distribution in infra.cloudfront.distributions:
+        # CloudFront is priced by requests and data transfer, which a snapshot cannot know.
+        resources.append(_record(
+            distribution.id, "cloudfront_distribution", None, "usage-based-unknown",
+        ))
+
     for instance in infra.rds.rds_instances:
         # RDSInstance intentionally has no instance class, engine, or storage fields.
         resources.append(_record(

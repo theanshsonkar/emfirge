@@ -92,6 +92,13 @@ KEY_TYPES: dict[str, tuple[type, ...]] = {
     "action_after_completion": (str, type(None)),
     "has_input": (bool, type(None)),
     "unmodeled_settings": (list,),
+    "domain_name": (str, type(None)),
+    "aliases": (list,),
+    "enabled": (bool, type(None)),
+    "price_class": (str, type(None)),
+    "web_acl_id": (str, type(None)),
+    "origins": (list,),
+    "behaviors": (list,),
 }
 
 
@@ -122,7 +129,13 @@ NODE_SCHEMAS = {
     "vpc_subnet": _node("vpc_subnet", "network", ("vpc_id", "cidr", "resource_count")),
     "vpc": _node("vpc", "network", optional=("is_default", "subnet_count", "source", "collected")),
     "vpc_peering_connection": _node("vpc_peering_connection", "network", ("requester_vpc_id", "accepter_vpc_id", "status")),
-    "cloudfront_distribution": _node("cloudfront_distribution", "edge", ("origin_bucket",)),
+    # A collected distribution carries its origins and behaviors; the synthetic node of a snapshot
+    # without CloudFront data carries only origin_bucket.
+    "cloudfront_distribution": _node(
+        "cloudfront_distribution", "edge", (),
+        ("origin_bucket", "arn", "domain_name", "aliases", "enabled", "status", "price_class", "web_acl_id", "origins", "behaviors",
+         "unmodeled_settings"),
+        diff_values=("enabled", "aliases", "price_class", "web_acl_id", "origins", "behaviors", "unmodeled_settings")),
     "iam_role": _node("iam_role", "identity", ("arn", "trusted_services", "trust_allows_external", "trust_has_conditions", "has_privilege_escalation"), ("source", "has_admin", "policies", "privilege_escalation_paths")),
     "internet": _node("internet", "other", ("is_virtual",)),
     "route_table": _node("route_table", "network", ("routes", "is_main", "vpc_id")),
@@ -176,6 +189,10 @@ EDGE_SCHEMAS = {
 # Explicit edge-attribute catalog. Types are observed in ALL_SNAPSHOTS and in
 # build_graph's ingress/internal/IAM emitters (egraph.py:780, 1008, 2166).
 EDGE_ATTR_TYPES: dict[RelationshipType, dict[str, tuple[type, ...]]] = {
+    # One edge per cache behavior that serves from the bucket; forwards_host None = not known.
+    RelationshipType.serves_from_bucket: {
+        "path_pattern": (str,), "oac": (bool,), "forwards_host": (bool, type(None)),
+    },
     RelationshipType.REACHES: {
         "ports": (list,), "reason": (str,), "confidence": (str,),
     },

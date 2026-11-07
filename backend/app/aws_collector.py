@@ -9,6 +9,7 @@ from app.cidr import is_internet_cidr, rule_opens_port_to_internet
 from app.tags import tag_map
 from app.log_safe import safe_exc, safe_choice
 from app.scheduler_schedule import aws_schedule_fields
+from app.cloudfront_distribution import collect_cloudfront
 from app.s3_public import acl_grants_are_public, effective_is_public, policy_is_public
 from app.models import (
     AWSCredentials, AWSInfrastructure,
@@ -19,7 +20,7 @@ from app.models import (
     APIGatewayData, APIGatewayInstance,
     ElastiCacheData, ElastiCacheCluster,
     SQSData, SQSQueue,
-    DynamoDBData, DynamoDBTable, SchedulerData, SchedulerSchedule,
+    DynamoDBData, DynamoDBTable, SchedulerData, SchedulerSchedule, CloudFrontData,
     EBSVolume, EBSSnapshot, ElasticIP, Route, RouteTable, NACLEntry, NetworkACL, NetworkInterface,
     VPCPeeringConnection, TransitGatewayAttachment, VPNGateway, InterfaceEndpoint, BlockDevice,
     RDSSnapshot, PolicyDocumentRecord, merge_policy_statements, AccessStatement
@@ -119,6 +120,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         'sqs':             collect_sqs,
         'dynamodb':        collect_dynamodb,
         'scheduler':       collect_scheduler,
+        'cloudfront':      collect_cloudfront,
     }
 
     results = {}
@@ -130,7 +132,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         ['s3', 'guardduty', 'sns', 'sqs'],
         ['iam', 'cost', 'cloudwatch', 'config'],
         ['lambda', 'vpc', 'ecs', 'waf'],
-        ['secrets_manager', 'api_gateway', 'elasticache', 'dynamodb', 'scheduler'],
+        ['secrets_manager', 'api_gateway', 'elasticache', 'dynamodb', 'scheduler', 'cloudfront'],
     ]
 
     with ThreadPoolExecutor(max_workers=16) as executor:
@@ -180,6 +182,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
                     'sqs':             SQSData(),
                     'dynamodb':        DynamoDBData(),
                     'scheduler':       SchedulerData(),
+                    'cloudfront':      CloudFrontData(),
                 }
                 results[name] = defaults[name]
             except Exception as e:
@@ -206,6 +209,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
                     'sqs':             SQSData(),
                     'dynamodb':        DynamoDBData(),
                     'scheduler':       SchedulerData(),
+                    'cloudfront':      CloudFrontData(),
                 }
                 results[name] = defaults[name]
 
@@ -232,6 +236,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
 
     # A collector that timed out or crashed never reported: say so rather than leave the status unrecorded.
     collection_status.setdefault('scheduler', 'error')
+    collection_status.setdefault('cloudfront', 'error')
     return AWSInfrastructure(
         ec2=results['ec2'],
         s3=results['s3'],
@@ -254,6 +259,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         sqs=results['sqs'],
         dynamodb=results['dynamodb'],
         scheduler=results['scheduler'],
+        cloudfront=results['cloudfront'],
         network_interfaces=results['ec2'].network_interfaces,
         collection={**collection_status, 'network_interfaces': results['ec2'].network_interfaces_status},
         region=region,

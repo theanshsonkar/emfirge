@@ -86,6 +86,22 @@ class AvailabilityFact(_Strict):
     recently_used: Optional[bool]
 
 
+class EdgeOriginFact(_Strict):
+    """A cache behavior of an edge distribution now passes the viewer Host header to the storage origin it serves.
+
+    ``resource_id`` is the distribution, ``resource_ids`` the storage resources it serves from, ``path_pattern`` the
+    behavior, the policy ids what carries the header, ``source_url`` the provider documentation of the behavior.
+    """
+    resource_id: str
+    resource_type: str
+    change: Literal["origin_receives_host_header"]
+    resource_ids: list[str]
+    path_pattern: str
+    cache_policy_id: Optional[str]
+    origin_request_policy_id: Optional[str]
+    source_url: str
+
+
 class PermissionFact(_Strict):
     """One action a role may (no longer) call on the listed resources, from collected identity policies.
 
@@ -128,7 +144,7 @@ class ScheduleFact(_Strict):
     source_url: str
 
 
-Fact = Union[DataFact, ExposureFact, MoneyFact, AvailabilityFact, PermissionFact, ControlFact, OutsideFact, ScheduleFact]
+Fact = Union[DataFact, ExposureFact, MoneyFact, AvailabilityFact, EdgeOriginFact, PermissionFact, ControlFact, OutsideFact, ScheduleFact]
 
 
 class DamageAnswer(_Strict):
@@ -221,6 +237,9 @@ class CheckInputs:
     # (topic, reason, resource_id) notes about schedules; shown in outside_world
     schedule_doubts: Sequence[tuple[str, str, Optional[str]]] = ()
     schedules_compared: int = 0
+    # facts and (topic, reason, resource_id) doubts an adapter read for the availability answer
+    availability_facts: Sequence[Any] = ()
+    availability_doubts: Sequence[tuple[str, str, Optional[str]]] = ()
     checked_notes: Mapping[str, Sequence[tuple[str, str]]] = field(default_factory=dict)
     unknown_notes: Mapping[str, Sequence[tuple[str, str]]] = field(default_factory=dict)
     baseline: Optional[ContextResponse] = None
@@ -439,6 +458,9 @@ def _availability(verdict: CombinedVerdict, inputs: CheckInputs, types: Mapping[
                 draft.facts.append(AvailabilityFact(
                     resource_id=item.resource_id, resource_type=item.resource_type, change="schedule_disabled",
                     path=[item.resource_id] + ([target] if target else []), depth=1 if target else 0, recently_used=None))
+    draft.facts.extend(inputs.availability_facts)
+    for topic, reason, rid in inputs.availability_doubts:
+        draft.doubt(topic, reason, rid)
     for topic, reason, rid in inputs.permission_doubts:
         draft.doubt(topic, reason, rid)
     for topic, detail in inputs.permission_checked:

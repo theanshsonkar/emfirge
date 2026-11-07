@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, PrivateAttr
-from typing import Dict, List, Optional, Literal, Union
+from typing import Any, Dict, List, Optional, Literal, Union
 import json
 
 # ── INPUT MODEL ───────────────────────────────────────────────────
@@ -202,6 +202,103 @@ class SchedulerSchedule(BaseModel):
     unmodeled_settings: List[str] = Field(default_factory=list)
 
 
+def _says_something(value: Any) -> bool:
+    """True when a configuration member says something: AWS fills in empty structures (Quantity 0, Enabled false) everywhere."""
+    if isinstance(value, dict):
+        return any(_says_something(v) for k, v in value.items() if k != "Quantity") if value else False
+    if isinstance(value, list):
+        return any(_says_something(v) for v in value)
+    return value not in (None, "", False, 0)
+
+
+class CloudFrontOrigin(BaseModel):
+    """One origin of a CloudFront distribution (botocore ``Origin``).
+
+    ``origin_type`` is ``s3`` for an S3 bucket origin (S3OriginConfig), ``custom`` for a custom or S3 website
+    origin (CustomOriginConfig) and ``other`` for anything else (VPC origin, ...). ``extra`` carries the members
+    that are not modeled (OriginPath, timeouts, OriginShield, S3OriginConfig, ...) as AWS reports them, so a
+    full-replace hand-back is exact.
+    """
+    id: str
+    domain_name: str = ""
+    origin_type: Literal["s3", "custom", "other"] = "other"
+    origin_access_control_id: Optional[str] = None
+    s3_bucket: Optional[str] = None
+    extra: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CloudFrontCacheBehavior(BaseModel):
+    """One cache behavior (botocore ``CacheBehavior``; the default behavior has path_pattern ``*``).
+
+    ``uses_legacy_forwarded_values`` is true when the behavior is configured with ForwardedValues instead of
+    a cache policy; the raw ForwardedValues stay in ``extra``.
+    """
+    path_pattern: str
+    target_origin_id: str = ""
+    cache_policy_id: Optional[str] = None
+    origin_request_policy_id: Optional[str] = None
+    viewer_protocol_policy: Optional[Literal["allow-all", "https-only", "redirect-to-https"]] = None
+    allowed_methods: List[str] = Field(default_factory=list)
+    cached_methods: List[str] = Field(default_factory=list)
+    uses_legacy_forwarded_values: bool = False
+    extra: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CloudFrontDistribution(BaseModel):
+    """One CloudFront distribution (botocore ``DistributionConfig``).
+
+    ``etag`` is the concurrency token of the collected configuration (the IfMatch of UpdateDistribution); None
+    means the full configuration was not read. ``extra`` holds the DistributionConfig members that are not
+    modeled; ``withheld_settings`` names settings stored without their values (origin custom header values can
+    be secrets), which make an exact hand-back impossible. ``tags`` None means not collected.
+    """
+    id: str
+    arn: Optional[str] = None
+    domain_name: Optional[str] = None
+    aliases: List[str] = Field(default_factory=list)
+    enabled: Optional[bool] = None
+    status: Optional[str] = None
+    price_class: Optional[str] = None
+    default_cache_behavior: Optional[CloudFrontCacheBehavior] = None
+    cache_behaviors: List[CloudFrontCacheBehavior] = Field(default_factory=list)
+    origins: List[CloudFrontOrigin] = Field(default_factory=list)
+    web_acl_id: Optional[str] = None
+    tags: Optional[Dict[str, str]] = None
+    etag: Optional[str] = None
+    extra: Dict[str, Any] = Field(default_factory=dict)
+    withheld_settings: List[str] = Field(default_factory=list)
+
+    def unmodeled_names(self) -> List[str]:
+        """Names of the settings carried verbatim (not interpreted) that say something, plus withheld ones."""
+        names = {f"DistributionConfig.{k}" for k, v in self.extra.items() if _says_something(v)}
+        for label, items in (("DefaultCacheBehavior", [self.default_cache_behavior] if self.default_cache_behavior else []),
+                             ("CacheBehaviors", self.cache_behaviors), ("Origins", self.origins)):
+            names |= {f"{label}.{k}" for item in items for k, v in item.extra.items() if _says_something(v)}
+        return sorted(names | set(self.withheld_settings))
+
+
+class CloudFrontPolicy(BaseModel):
+    """A CloudFront cache policy or origin request policy, reduced to its header rule.
+
+    ``forwards_host`` is whether the viewer Host header reaches the origin under this policy: True / False when
+    the header rule decides it, None when it cannot be told.
+    """
+    id: str
+    name: Optional[str] = None
+    type: Literal["managed", "custom"] = "custom"
+    headers_behavior: Optional[str] = None
+    headers: List[str] = Field(default_factory=list)
+    forwards_host: Optional[bool] = None
+
+
+class CloudFrontOriginAccessControl(BaseModel):
+    id: str
+    name: Optional[str] = None
+    origin_type: Optional[str] = None
+    signing_behavior: Optional[str] = None
+    signing_protocol: Optional[str] = None
+
+
 class VPCPeeringConnection(BaseModel):
     id: str
     requester_vpc_id: str
@@ -378,6 +475,37 @@ class LambdaData(BaseModel):
     # Relationship tracking
     functions: List[LambdaFunction] = []
 
+class CloudFrontData(BaseModel):
+    distributions: List[CloudFrontDistribution] = Field(default_factory=list)
+    cache_policies: List[CloudFrontPolicy] = Field(default_factory=list)
+    origin_request_policies: List[CloudFrontPolicy] = Field(default_factory=list)
+    origin_access_controls: List[CloudFrontOriginAccessControl] = Field(default_factory=list)
+    collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
+
+    def behavior_forwards_host(self, behavior: CloudFrontCacheBehavior) -> Optional[bool]:
+        """Whether the viewer Host header reaches the origin for a cache behavior.
+
+        True when its cache policy, its origin request policy or its legacy forwarded headers pass Host on;
+        False only when every rule that applies is known and none does; None when a rule that applies is not
+        known (the policy was not collected, or its header rule is not one this model reads).
+        """
+        verdicts: List[Optional[bool]] = []
+        if behavior.cache_policy_id:
+            found = next((p for p in self.cache_policies if p.id == behavior.cache_policy_id), None)
+            verdicts.append(found.forwards_host if found else None)
+        elif behavior.uses_legacy_forwarded_values:
+            headers = (((behavior.extra.get("ForwardedValues") or {}).get("Headers") or {}).get("Items")) or []
+            verdicts.append(any(str(h).lower() in {"host", "*"} for h in headers))
+        else:
+            verdicts.append(None)
+        if behavior.origin_request_policy_id:
+            found = next((p for p in self.origin_request_policies if p.id == behavior.origin_request_policy_id), None)
+            verdicts.append(found.forwards_host if found else None)
+        if any(v is True for v in verdicts):
+            return True
+        return None if any(v is None for v in verdicts) else False
+
+
 class SchedulerData(BaseModel):
     schedules: List[SchedulerSchedule] = Field(default_factory=list)
     collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
@@ -539,6 +667,7 @@ class AWSInfrastructure(BaseModel):
     sqs: SQSData = SQSData()                             # NEW
     dynamodb: DynamoDBData = DynamoDBData()               # NEW
     scheduler: SchedulerData = SchedulerData()
+    cloudfront: CloudFrontData = CloudFrontData()
     region: str = ''
     collected_at: Optional[str] = Field(default=None, exclude_if=lambda value: value is None)
     warnings: List[str] = []          # services skipped due to insufficient permissions

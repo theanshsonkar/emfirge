@@ -44,6 +44,8 @@ ADAPTER_MODULES = {
     "aws_actions", "aws_permissions",
     # EventBridge Scheduler schedule parsing shared by collector, mutations and ingest.
     "scheduler_schedule",
+    # CloudFront distribution parsing / hand-back / collector, and the check's CloudFront availability fact.
+    "cloudfront_distribution", "cloudfront_check",
 }
 AWS_LIBS = {"boto3", "botocore"}
 

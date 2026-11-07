@@ -176,6 +176,27 @@ CATALOG: dict[str, dict[str, Source]] = {
         "has_input": Normalized("CreateSchedule / UpdateSchedule Target.Input", "true when an input payload is set; the payload itself is never stored"),
         "unmodeled_settings": Normalized("CreateSchedule / UpdateSchedule", "names of other members that are set but not modeled (Description, KmsKeyArn, Target.RetryPolicy, ...)"),
     },
+    # CloudFront distributions: modify only (UpdateDistribution replaces the whole DistributionConfig). Adding or
+    # deleting a distribution is not modeled. The sub-fields of behaviors and origins are traced to botocore in
+    # app.cloudfront_distribution (BEHAVIOR_SOURCES / ORIGIN_SOURCES).
+    "cloudfront_distribution": {
+        "arn": Derived("set by AWS"),
+        "domain_name": Derived("set by AWS"),
+        "status": Derived("set by AWS"),
+        "etag": Derived("the concurrency token of the collected configuration (UpdateDistribution IfMatch)"),
+        "tags": Derived("not settable on a branch; collected for reading"),
+        "aliases": Aws("cloudfront", "UpdateDistribution", "DistributionConfig.Aliases.Items"),
+        "enabled": Aws("cloudfront", "UpdateDistribution", "DistributionConfig.Enabled"),
+        "price_class": Aws("cloudfront", "UpdateDistribution", "DistributionConfig.PriceClass"),
+        "web_acl_id": Aws("cloudfront", "UpdateDistribution", "DistributionConfig.WebACLId"),
+        "default_cache_behavior": Normalized("UpdateDistribution DistributionConfig.DefaultCacheBehavior",
+                                             "object of the behavior fields to change (cache_policy_id, origin_request_policy_id, target_origin_id, viewer_protocol_policy, allowed_methods)"),
+        "cache_behaviors": Normalized("UpdateDistribution DistributionConfig.CacheBehaviors",
+                                      "object keyed by path_pattern with the fields to change, or the complete ordered behavior list"),
+        "origins": Normalized("UpdateDistribution DistributionConfig.Origins", "complete origin list"),
+        "extra": Normalized("UpdateDistribution DistributionConfig", "members that are not modeled, kept as AWS reports them"),
+        "withheld_settings": Normalized("UpdateDistribution DistributionConfig", "names of settings stored without their values (origin custom headers)"),
+    },
     "iam_role_policy": {
         "access_statements": Normalized("PutRolePolicy / AttachRolePolicy", "complete normalized statement list"),
         "policy_documents": Normalized("PutRolePolicy / AttachRolePolicy", "normalized policy documents"),

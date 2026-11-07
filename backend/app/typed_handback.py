@@ -11,6 +11,7 @@ from app.models import AWSInfrastructure
 from app.tags import is_aws_tag, user_tags
 from app.mutations import Change, apply_changes
 from app.scheduler_schedule import identity as scheduler_identity, split_identity as scheduler_split_identity
+from app.cloudfront_distribution import build_update_call as cloudfront_update_call
 
 _SESSION = botocore.session.get_session()
 
@@ -139,6 +140,17 @@ def _scheduler_calls(change: Change, after, index: int, err, call) -> list[dict]
     return [call("scheduler", "CreateSchedule" if change.op == "add" else "UpdateSchedule", params)]
 
 
+def _cloudfront_calls(change: Change, after, err, call) -> list[dict]:
+    """UpdateDistribution with the whole modeled distribution; refused when it would drop or invent settings."""
+    dist = next(item for item in after.cloudfront.distributions if item.id == change.resource_id)
+    params, problems = cloudfront_update_call(dist)
+    if params is None:
+        for problem in problems:
+            err("unspecified_values: " + problem)
+        return []
+    return [call("cloudfront", "UpdateDistribution", params)]
+
+
 def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], list[dict]]:
     typ, op, ident, fields = change.resource_type, change.op, change.resource_id, change.fields
     errors: list[dict] = []
@@ -148,6 +160,8 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
         return {"change_index": index, "service": service, "operation": operation, "params": params}
     if typ == "scheduler_schedule":
         return _scheduler_calls(change, after, index, err, call), errors
+    if typ == "cloudfront_distribution":
+        return _cloudfront_calls(change, after, err, call), errors
     if op == "add":
         if typ == "rds_snapshot":
             db_instance_id = fields.get("db_instance_id")

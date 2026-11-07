@@ -25,6 +25,7 @@ from app.aws_permissions import (
     NOTE_ACTION_CATALOG, NOTE_APP_CODE, NOTE_MANAGED_NOT_RECORDED, compute_users, role_node_id, role_node_ids,
     role_permission_diff, statements_differ,
 )
+from app.cloudfront_check import with_cloudfront
 from app.check_facts import (
     ChangeLine, CheckInputs, CheckResult, PermissionChange, PlanGap, ScheduleChange, assemble, is_unchanged,
 )
@@ -245,7 +246,7 @@ def build_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, verdict: Co
     baseline = (answer_for_infra("baseline", base, analysis_id=base_analysis_id)
                 if is_unchanged(verdict, gaps) else None)
     warnings = tuple(sorted({safe_warning(w) for infra in (base, branch) for w in infra.warnings}))
-    return CheckInputs(
+    inputs = CheckInputs(
         branch_id=branch_id, base_analysis_id=base_analysis_id, branch_revision=branch_revision,
         classify=classify_action, plan_gaps=gaps, resource_types=types,
         exposure_lines=role_exposure + bucket_exposure, control_lines=control,
@@ -267,6 +268,7 @@ def build_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, verdict: Co
         },
         baseline=baseline,
     )
+    return with_cloudfront(inputs, base, branch, branch_graph)
 
 
 def check_for_branch(base: AWSInfrastructure, branch: AWSInfrastructure, *, branch_id: str,

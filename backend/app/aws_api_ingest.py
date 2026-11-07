@@ -7,6 +7,7 @@ from app.mutations import Change
 from app.aws_collector import build_security_group_rule
 from app.tags import tag_map
 from app.scheduler_schedule import DEFAULT_GROUP, api_fields as scheduler_api_fields, split_identity as scheduler_split_identity, unsupported_members as scheduler_unsupported
+from app.cloudfront_distribution import config_to_fields as cloudfront_fields
 import copy
 import re
 
@@ -506,6 +507,24 @@ def translate_api_calls(
                 unknown_fields.append({"address": address, "field": member, "reason": "unsupported_attribute"})
             changes.append(Change(op="add" if operation == "CreateSchedule" else "modify", resource_type="scheduler_schedule",
                                   resource_id=resource_id, fields=fields))
+            addresses.append(address)
+            continue
+        if lower_service == "cloudfront" and operation == "UpdateDistribution":
+            distribution_id, config = parameters.get("Id"), parameters.get("DistributionConfig")
+            if not _valid_string(distribution_id) or not isinstance(config, dict):
+                unmodeled.append(_unmodeled(address, lower_service, operation, "missing Id or DistributionConfig")); continue
+            # UpdateDistribution replaces the whole distribution. A partial call (a CloudFormation change) states only
+            # the members it changed and names the ones it could not convert.
+            partial = call.get("partial") is True
+            fields, problems = cloudfront_fields(config, replace=not partial)
+            for member, reason in problems:
+                unknown_fields.append({"address": address, "field": member, "reason": reason})
+            for name in call.get("unmodeled") or []:
+                unknown_fields.append({"address": address, "field": str(name), "reason": "unsupported_attribute"})
+            for field in parameters:
+                if field not in {"Id", "DistributionConfig", "IfMatch"}:
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            changes.append(Change(op="modify", resource_type="cloudfront_distribution", resource_id=distribution_id, fields=fields))
             addresses.append(address)
             continue
         if lower_service == "ec2" and operation == "CreateNatGateway":

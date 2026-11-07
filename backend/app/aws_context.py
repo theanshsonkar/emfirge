@@ -36,10 +36,10 @@ from app.tags import TAGGED_TYPES, tagged_collections, user_tags
 
 # Collection sources (infra.collection keys) each question depends on.
 QUESTION_SOURCES: dict[str, tuple[str, ...]] = {
-    "inventory": ("ebs_volumes", "scheduler"),
-    "resource": ("ebs_volumes", "scheduler"),
-    "depends_on": ("ebs_volumes", "scheduler"),
-    "dependents": ("ebs_volumes", "scheduler"),
+    "inventory": ("ebs_volumes", "scheduler", "cloudfront"),
+    "resource": ("ebs_volumes", "scheduler", "cloudfront"),
+    "depends_on": ("ebs_volumes", "scheduler", "cloudfront"),
+    "dependents": ("ebs_volumes", "scheduler", "cloudfront"),
     "reachable": ("network_interfaces",),
     "access": (),
     "data": ("ebs_snapshots", "ebs_volumes", "rds_snapshots"),

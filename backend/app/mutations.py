@@ -36,7 +36,9 @@ from app.models import (
     NATGateway,
     RolePolicy,
     SchedulerSchedule,
+    CloudFrontDistribution,
 )
+from app.cloudfront_distribution import apply_fields as _apply_cloudfront_fields
 from app.scheduler_schedule import (
     AWS_DEFAULTS as _SCHEDULER_DEFAULTS, SETTABLE_FIELDS as _SCHEDULER_FIELDS,
     identity as _scheduler_identity, normalize_timestamp, split_identity as _split_schedule_id,
@@ -203,6 +205,8 @@ def _validate_change_fields(change: Change) -> None:
     if change.resource_type == "scheduler_schedule":
         _validate_scheduler_fields(change)
         return
+    if change.resource_type == "cloudfront_distribution":
+        return  # validated against botocore's DistributionConfig by app.cloudfront_distribution when applied
     if change.resource_type == "nat_gateway" and change.op == "add":
         unknown = set(change.fields) - {"subnet_id", "connectivity_type", "allocation_id", "tags"}
         if unknown:
@@ -339,6 +343,16 @@ def _apply_scheduler_change(result: AWSInfrastructure, change: Change) -> AWSInf
     return recompute_derived_state(result)
 
 
+def _apply_cloudfront_change(result: AWSInfrastructure, change: Change) -> AWSInfrastructure:
+    """Modify one collected CloudFront distribution (cache behaviors, origins, aliases, enabled, ...)."""
+    distributions = result.cloudfront.distributions
+    index = next((i for i, item in enumerate(distributions) if item.id == change.resource_id), None)
+    if index is None:
+        raise TargetNotFound("cloudfront_distribution", change.resource_id)
+    distributions[index] = _apply_cloudfront_fields(distributions[index], change.fields)
+    return recompute_derived_state(result)
+
+
 _CRUD_OPERATIONS = frozenset({"add", "modify", "delete"})
 _IAM_USER_FIELDS = frozenset({"has_console_access", "access_statements", "policy_documents", "has_access_keys"})
 # CreateVolume size range per volume type (AWS EBS volume types docs).
@@ -398,6 +412,18 @@ _MUTATION_CAPABILITIES = {
     "iam_instance_profile": {"model": None, "operations": frozenset({"add"}), "constraints": ()},
     "nat_gateway": {"model": NATGateway, "operations": frozenset({"add"}), "constraints": ()},
     "scheduler_schedule": {"model": SchedulerSchedule, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    "cloudfront_distribution": {
+        "model": CloudFrontDistribution,
+        "operations": frozenset({"modify"}),
+        "constraints": ({
+            "operations": ["modify"], "kind": "partial_field_replacement",
+            "fields": [], "required_fields": [],
+            "allowed_fields": ["enabled", "aliases", "price_class", "web_acl_id", "default_cache_behavior", "cache_behaviors", "origins"],
+            "message": "Change an existing collected distribution: enabled, or the cache policy / origin request policy of a behavior "
+                       "(cache_behaviors keyed by path_pattern, or default_cache_behavior). Adding or deleting a distribution is not modeled; "
+                       "settings other than origins, behaviors, aliases, price class, web ACL and enabled are carried unchanged and not interpreted",
+        },),
+    },
     "iam_role_policy": {
         "model": None,
         "operations": frozenset({"modify"}),
@@ -578,6 +604,8 @@ def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
         return infra.vpc.route_tables
     if resource_type == "scheduler_schedule":
         return infra.scheduler.schedules
+    if resource_type == "cloudfront_distribution":
+        return infra.cloudfront.distributions
     return infra.lambda_data.functions
 
 
@@ -1285,6 +1313,8 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         return result
     if resource_type == "scheduler_schedule":
         return _apply_scheduler_change(result, change)
+    if resource_type == "cloudfront_distribution":
+        return _apply_cloudfront_change(result, change)
     if resource_type == "nat_gateway" and change.op == "add":
         return _add_nat_gateway(result, change)
     if resource_type == "ebs_volume" and change.op == "add":

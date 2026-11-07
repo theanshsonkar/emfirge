@@ -8,6 +8,7 @@ import json
 from app.mutations import Change
 from app.aws_api_ingest import remove_security_group_rule
 from app.scheduler_schedule import DEFAULT_GROUP, api_fields as scheduler_api_fields, unsupported_members as scheduler_unsupported
+from app.cloudfront_distribution import tf_fields as cloudfront_tf_fields
 from app.plan_ingest_compute import instance_fields, lambda_fields
 from app.plan_ingest_s3 import S3_SEPARATE_TYPES, S3Model, inline_fields as s3_inline_fields, order_key as s3_order_key
 from app.plan_ingest_iam import IAM_POLICY_TYPES, IamModel, iam_context, identity_arn
@@ -361,6 +362,23 @@ def _schedule_changes(item: dict, address: str, actions: list, unknown: list[dic
     return result, None
 
 
+def _distribution_changes(item: dict, address: str, unknown: list[dict]) -> tuple[list[Change], dict | None]:
+    """aws_cloudfront_distribution update: the modeled attributes that differ, as a partial change of the stored distribution."""
+    change = item.get("change") or {}
+    before, after, after_unknown = change.get("before") or {}, change.get("after") or {}, change.get("after_unknown") or {}
+    distribution_id = after.get("id") or before.get("id")
+    if not distribution_id or "id" in _unknown_paths(after_unknown):
+        unknown.append({"address": address, "field": "id", "reason": "unknown Terraform value"})
+        return [], {"address": address, "type": item.get("type", ""), "actions": ["update"], "outside_view": False,
+                    "detail": "the distribution id is unknown at plan time, so its identity cannot be built"}
+    fields, unknown_names, unmodeled = cloudfront_tf_fields(before, after, _unknown_paths(after_unknown) - {"arn", "id", "etag", "status", "last_modified_time"})
+    for name in unknown_names:
+        unknown.append({"address": address, "field": name, "reason": "unknown Terraform value"})
+    for name in unmodeled:
+        unknown.append({"address": address, "field": name, "reason": "unsupported_attribute"})
+    return ([Change(op="modify", resource_type="cloudfront_distribution", resource_id=str(distribution_id), fields=fields)] if fields else []), None
+
+
 def _route_table_add(item: dict, address: str, unknown: list[dict]) -> list[Change]:
     """aws_route_table create: VPC, tags and simple IGW/NAT routes (VPC local routes are implicit)."""
     change = item.get("change") or {}
@@ -550,6 +568,8 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         return _route_table_add(item, address, unknown_fields), None
     if typ == "aws_scheduler_schedule":
         return _schedule_changes(item, address, actions, unknown_fields)
+    if typ == "aws_cloudfront_distribution" and actions == ["update"]:
+        return _distribution_changes(item, address, unknown_fields)
     if typ in IAM_POLICY_TYPES and iam is not None:
         sink: list[dict] = []
         iam.handle(item, unknown_fields, sink)

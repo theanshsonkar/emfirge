@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from app.aws_api_ingest import _unmodeled
+from app.cloudfront_distribution import cfn_config_to_api, cfn_unmodeled
 
 
 _MAX_CHANGES = 2000
@@ -183,6 +184,17 @@ def _scheduler_call(resource: dict[str, Any], action: str, physical: Any) -> dic
     return {"service": "scheduler", "operation": _SCHEDULER_OPERATIONS[action], "parameters": params}
 
 
+def _cloudfront_call(resource: dict[str, Any], physical: Any) -> dict[str, Any] | None:
+    """AWS::CloudFront::Distribution update as a partial UpdateDistribution call (only the modeled members, converted to the API's shape)."""
+    before = (_properties(_context(resource, "BeforeContext")) or {}).get("DistributionConfig")
+    after = (_properties(_context(resource, "AfterContext")) or {}).get("DistributionConfig")
+    if not isinstance(physical, str) or not physical or not isinstance(after, dict) or not isinstance(before, dict):
+        return None
+    return {"service": "cloudfront", "operation": "UpdateDistribution", "partial": True,
+            "unmodeled": cfn_unmodeled(before, after),
+            "parameters": {"Id": physical, "DistributionConfig": cfn_config_to_api(after)}}
+
+
 def _nacl_entry_call(resource: dict[str, Any], properties: dict[str, Any], operation: str) -> dict[str, Any] | None:
     acl_id = _resolved(properties.get("NetworkAclId")); number = _resolved(properties.get("RuleNumber"))
     protocol = _resolved(properties.get("Protocol", properties.get("IpProtocol")))
@@ -273,6 +285,14 @@ def convert_change_set(doc: Any, nacls: Any = None) -> tuple[dict[str, Any], lis
         if (typ == "AWS::Scheduler::Schedule" and action in _SCHEDULER_OPERATIONS and policy not in {"Retain", "ReplaceAndRetain"}
                 and not (action == "Modify" and resource.get("Replacement") in {"True", "Conditional"})):
             call = _scheduler_call(resource, action, physical)
+            if call is None:
+                extras.append(_extra(address, typ, "MissingPropertyValues"))
+            else:
+                calls.append(call)
+            continue
+        if (typ == "AWS::CloudFront::Distribution" and action == "Modify" and policy not in {"Retain", "ReplaceAndRetain"}
+                and resource.get("Replacement") not in {"True", "Conditional"}):
+            call = _cloudfront_call(resource, physical)
             if call is None:
                 extras.append(_extra(address, typ, "MissingPropertyValues"))
             else:
