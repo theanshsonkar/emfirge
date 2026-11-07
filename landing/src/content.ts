@@ -1,533 +1,256 @@
-import {
-  Activity,
-  BookOpenCheck,
-  Cloud,
-  Cpu,
-  Database,
-  EyeOff,
-  Globe,
-  HardDrive,
-  KeyRound,
-  LifeBuoy,
-  type LucideIcon,
-  Network,
-  Scale,
-  Server,
-  ShieldAlert,
-  ShieldCheck,
-  Wallet,
-  Zap,
-} from "lucide-react";
+/* All page copy lives here. Components only lay it out. */
 
 export const LINKS = {
+  home: "https://emfirge.cloud",
   docs: "https://emfirge.cloud/docs",
   github: "https://github.com/theanshsonkar/emfirge",
+  changelog: "https://github.com/theanshsonkar/emfirge/releases",
   privacy: "https://github.com/theanshsonkar/emfirge/blob/main/PRIVACY.md",
   security: "https://github.com/theanshsonkar/emfirge/blob/main/SECURITY.md",
   email: "mailto:ansh@emfirge.cloud",
 } as const;
 
-export const CONNECT_CMD = "npx @emfirge/cli@latest connect";
+export const CONNECT_CMD = "npx @emfirge/cli connect";
 
-export const NAV_ITEMS = [
-  { label: "Harness", href: "#harness" },
-  { label: "How it works", href: "#how-it-works" },
-  { label: "Safety", href: "#safety" },
-  { label: "Docs", href: LINKS.docs },
-] as const;
+export interface LinkItem {
+  label: string;
+  href: string;
+}
+
+export const SITE = {
+  title: "Emfirge: the harness for cloud agents",
+  description:
+    "Emfirge gives your coding agent a true model of your AWS, a branch to try changes on, and facts about what would break, before anything reaches production.",
+};
+
+export const ANNOUNCE = {
+  text: "New: the emfirge CLI. Six verbs, any agent.",
+  link: { label: "Read the docs", href: LINKS.docs },
+  dismiss: "Dismiss announcement",
+};
+
+export const NAV = {
+  home: "Emfirge home",
+  items: [
+    { label: "Product", href: "#product" },
+    { label: "Docs", href: LINKS.docs },
+    { label: "GitHub", href: LINKS.github },
+    { label: "Changelog", href: LINKS.changelog },
+  ] satisfies LinkItem[],
+  signIn: { label: "Sign in", href: LINKS.home },
+  start: { label: "Get started", href: "#get-started" },
+  skip: "Skip to content",
+};
 
 export const HERO = {
-  eyebrow: "emfirge cli v1 · AWS",
-  sub: "A true model of your AWS, a branch to try changes on, and facts about what would break. Your agent gets all three before it touches production.",
-  note: "Read-only. Works with any agent that can run a shell.",
+  title: "The harness for cloud agents",
+  body: "Your agent gets a true model of your AWS, a branch to try changes on, and facts about what would break. Production never sees a guess.",
+  primary: { label: "Get started", href: "#get-started" },
+  secondary: { label: "Read the docs", href: LINKS.docs },
+  copy: "Copy command",
+  copied: "Copied",
 };
 
-/* ------------------------------------------------------------------ */
-/* Terminal vocabulary (shared by the canvas panel and How it works)   */
-/* ------------------------------------------------------------------ */
+export const FORK = {
+  alt: "A trunk line labelled live runs left to right with commit dots. Branch number 1 forks off, is tried, and ends in a red cross. Branch number 2 forks off, ends in a green check, and merges back into the trunk.",
+  trunk: "live",
+  branch1: "branch #1",
+  branch2: "branch #2",
+};
 
-export type Tone = "paper" | "muted" | "forge" | "pass" | "block";
-export interface TermSeg {
-  text: string;
-  tone?: Tone;
-  bold?: boolean;
-}
+export const WORKS_WITH = {
+  heading: "Works with the agent you already use.",
+  agents: ["Claude Code", "Codex", "Cursor", "Gemini CLI", "Kiro", "Cline"],
+};
+
+export type LineTone = "cmd" | "out" | "block" | "pass";
 export interface TermLine {
-  who?: "you" | "agent";
-  segs: TermSeg[];
-  /** type the line out character by character */
-  type?: boolean;
-}
-
-export const cmd = (verb: string, args = ""): TermSeg[] => [
-  { text: "$ emfirge " },
-  { text: verb, tone: "forge" },
-  ...(args ? [{ text: ` ${args}` }] : []),
-];
-export const out = (text: string): TermLine => ({ segs: [{ text, tone: "muted" }] });
-
-/* ------------------------------------------------------------------ */
-/* Cloud canvas: nodes, edges and the scripted 7-step story            */
-/* ------------------------------------------------------------------ */
-
-export type NodeKind = "cdn" | "alb" | "ec2" | "rds" | "s3" | "lambda" | "iam";
-export type NodeId =
-  | "cdn"
-  | "web-alb"
-  | "api-1"
-  | "api-2"
-  | "orders-db"
-  | "legacy-reports-db"
-  | "assets"
-  | "nightly-sync"
-  | "deploy-role";
-export type LayoutId = "desktop" | "compact";
-export interface Pos {
-  x: number;
-  y: number;
-}
-
-export interface KindStyle {
-  icon: LucideIcon;
-  service: string;
-  /** tint color (hex) */
-  color: string;
-}
-export const KIND: Record<NodeKind, KindStyle> = {
-  cdn: { icon: Cloud, service: "CloudFront", color: "#B79CFF" },
-  alb: { icon: Network, service: "ALB", color: "#5AA9FF" },
-  ec2: { icon: Server, service: "EC2", color: "#FF9A5C" },
-  rds: { icon: Database, service: "RDS", color: "#3BD6E0" },
-  s3: { icon: HardDrive, service: "S3", color: "#9BE564" },
-  lambda: { icon: Zap, service: "Lambda", color: "#F5B83D" },
-  iam: { icon: KeyRound, service: "IAM", color: "#F58AC2" },
-};
-
-export interface CanvasNode {
-  id: NodeId;
-  kind: NodeKind;
-  /** position per layout; a missing layout hides the node there */
-  pos: Partial<Record<LayoutId, Pos>>;
-}
-export interface CanvasEdge {
-  from: NodeId;
-  to: NodeId;
-  /** live traffic: animated dots flow along it */
-  traffic?: boolean;
-  /** drawn dotted and quiet */
-  idle?: boolean;
-}
-
-export const LAYOUT: Record<LayoutId, { w: number; h: number; nodeW: number; nodeH: number }> = {
-  desktop: { w: 860, h: 500, nodeW: 172, nodeH: 58 },
-  compact: { w: 400, h: 470, nodeW: 164, nodeH: 54 },
-};
-
-export const CANVAS_NODES: CanvasNode[] = [
-  { id: "cdn", kind: "cdn", pos: { desktop: { x: 14, y: 196 }, compact: { x: 14, y: 18 } } },
-  { id: "web-alb", kind: "alb", pos: { desktop: { x: 236, y: 196 }, compact: { x: 222, y: 18 } } },
-  { id: "api-1", kind: "ec2", pos: { desktop: { x: 458, y: 124 }, compact: { x: 222, y: 120 } } },
-  { id: "api-2", kind: "ec2", pos: { desktop: { x: 458, y: 268 } } },
-  { id: "orders-db", kind: "rds", pos: { desktop: { x: 680, y: 150 }, compact: { x: 222, y: 222 } } },
-  { id: "legacy-reports-db", kind: "rds", pos: { desktop: { x: 680, y: 330 }, compact: { x: 222, y: 330 } } },
-  { id: "assets", kind: "s3", pos: { desktop: { x: 14, y: 346 } } },
-  { id: "nightly-sync", kind: "lambda", pos: { desktop: { x: 458, y: 28 }, compact: { x: 14, y: 330 } } },
-  { id: "deploy-role", kind: "iam", pos: { desktop: { x: 236, y: 390 } } },
-];
-
-export const CANVAS_EDGES: CanvasEdge[] = [
-  { from: "cdn", to: "web-alb", traffic: true },
-  { from: "web-alb", to: "api-1", traffic: true },
-  { from: "web-alb", to: "api-2", traffic: true },
-  { from: "api-1", to: "orders-db", traffic: true },
-  { from: "api-2", to: "orders-db", traffic: true },
-  { from: "cdn", to: "assets", idle: true },
-  { from: "nightly-sync", to: "orders-db", idle: true },
-  { from: "deploy-role", to: "api-2", idle: true },
-];
-
-export type ChipTone = "live" | "branch" | "block" | "pass";
-export interface Callout {
-  node: NodeId;
-  tone: "block" | "pass";
-  head: string;
+  tone: LineTone;
   text: string;
-  pos: Record<LayoutId, Pos & { w: number }>;
-  /** seconds, relative to the step starting */
-  delay?: number;
 }
-export interface CanvasStep {
-  /** active tab */
-  tab: string;
-  /** tabs that exist at this step */
-  tabs: string[];
-  branch: boolean;
-  chip: { label: string; tone: ChipTone };
-  ghost?: NodeId[];
-  gone?: NodeId[];
-  /** edges ("from>to") drawn red and dashed */
-  dead?: string[];
-  shake?: NodeId[];
-  callouts?: Callout[];
-  toast?: { text: string; tone: "branch" | "pass" };
-  /** terminal lines added at this step */
-  lines: TermLine[];
-  /** how long the step holds, ms */
-  ms: number;
+export type Signal = "block" | "pass";
+export interface LogRow {
+  time: string;
+  signal: Signal;
+  area: string;
+  text: string;
 }
 
-const DB_DEAD = ["api-1>orders-db", "api-2>orders-db", "nightly-sync>orders-db"];
-
-export const CANVAS_TABS = ["live", "branch #1", "branch #2"];
-
-export const CANVAS_SCRIPT: CanvasStep[] = [
-  {
-    tab: "live",
-    tabs: ["live"],
-    branch: false,
-    chip: { label: "live · 9 resources", tone: "live" },
-    lines: [{ who: "you", segs: [{ text: "Clean up the unused databases." }] }],
-    ms: 1300,
-  },
-  {
-    tab: "branch #1",
-    tabs: ["live", "branch #1"],
-    branch: true,
-    chip: { label: "0 changes", tone: "branch" },
-    toast: { text: "forked from live", tone: "branch" },
+export const SPLIT = {
+  id: "product",
+  title: "Your agent tries it on a branch. You read one result.",
+  body: "Before anything touches production, the change runs against a copy of your live AWS. Six questions about the result come back as facts. Your agent fixes its own plan.",
+  agent: {
+    label: "Agent view",
+    title: "Your terminal. One command.",
+    mockLabel: "Terminal mock: an agent runs emfirge try, then emfirge check",
+    path: "~/cloud-cleanup",
     lines: [
-      { who: "agent", segs: cmd("branch", "new"), type: true },
-      out("branch #1 forked from live"),
-    ],
-    ms: 1500,
-  },
-  {
-    tab: "branch #1",
-    tabs: ["live", "branch #1"],
-    branch: true,
-    chip: { label: "2 changes", tone: "branch" },
-    ghost: ["orders-db", "legacy-reports-db"],
-    dead: DB_DEAD,
-    lines: [
-      { who: "agent", segs: cmd("try", "--delete orders-db legacy-reports-db"), type: true },
-      out("2 changes on branch #1"),
-    ],
-    ms: 1500,
-  },
-  {
-    tab: "branch #1",
-    tabs: ["live", "branch #1"],
-    branch: true,
-    chip: { label: "BLOCK", tone: "block" },
-    ghost: ["orders-db", "legacy-reports-db"],
-    dead: DB_DEAD,
-    shake: ["api-1", "api-2"],
-    callouts: [
-      {
-        node: "orders-db",
-        tone: "block",
-        head: "data",
-        text: "no recovery point",
-        pos: { desktop: { x: 690, y: 222, w: 164 }, compact: { x: 20, y: 206, w: 196 } },
-        delay: 0.45,
-      },
-      {
-        node: "orders-db",
-        tone: "block",
-        head: "availability",
-        text: "1,240 queries/day",
-        pos: { desktop: { x: 690, y: 270, w: 164 }, compact: { x: 20, y: 256, w: 196 } },
-        delay: 0.7,
-      },
-    ],
-    lines: [
-      { who: "agent", segs: cmd("check"), type: true },
-      { segs: [{ text: "BLOCK", tone: "block", bold: true }] },
-      { segs: [{ text: "✗ ", tone: "block" }, { text: "data  orders-db has no recovery point" }] },
-      { segs: [{ text: "✗ ", tone: "block" }, { text: "availability  1,240 queries/day" }] },
-    ],
-    ms: 2200,
-  },
-  {
-    tab: "branch #2",
-    tabs: ["live", "branch #1", "branch #2"],
-    branch: true,
-    chip: { label: "1 change", tone: "branch" },
-    ghost: ["legacy-reports-db"],
-    lines: [
-      { who: "agent", segs: [{ text: "Keeping orders-db." }], type: true },
-      out("branch #2 · 1 change"),
-    ],
-    ms: 1500,
-  },
-  {
-    tab: "branch #2",
-    tabs: ["live", "branch #1", "branch #2"],
-    branch: true,
-    chip: { label: "PASS", tone: "pass" },
-    ghost: ["legacy-reports-db"],
-    callouts: [
-      {
-        node: "legacy-reports-db",
-        tone: "pass",
-        head: "saves $41.20/mo",
-        text: "nothing live depends on it",
-        pos: { desktop: { x: 640, y: 410, w: 214 }, compact: { x: 172, y: 396, w: 212 } },
-        delay: 0.4,
-      },
-    ],
-    lines: [
-      { who: "agent", segs: cmd("check", "--branch 2"), type: true },
-      { segs: [{ text: "PASS", tone: "pass", bold: true }, { text: "  saves $41.20/mo" }] },
-    ],
-    ms: 2300,
-  },
-  {
-    tab: "live",
-    tabs: ["live", "branch #1", "branch #2"],
-    branch: false,
-    chip: { label: "applied", tone: "pass" },
-    gone: ["legacy-reports-db"],
-    toast: { text: "verified in CloudTrail ✓", tone: "pass" },
-    lines: [
-      { who: "agent", segs: cmd("report", "--applied"), type: true },
-      { segs: [{ text: "recorded · verified in CloudTrail ", tone: "muted" }, { text: "✓", tone: "pass" }] },
-    ],
-    ms: 2300,
-  },
-];
-/** held after the last step before the loop restarts */
-export const CANVAS_RESET_PAUSE_MS = 1300;
-/** step shown (statically) under reduced motion: BLOCK with callouts */
-export const CANVAS_REDUCED_STEP = 3;
-
-export const CANVAS_ARIA =
-  "Cloud canvas: an agent is asked to clean up unused databases. It opens a branch of your live AWS, tries deleting orders-db and legacy-reports-db, and Emfirge blocks it: orders-db has no recovery point and serves 1,240 queries a day. The agent keeps orders-db, tries again deleting only legacy-reports-db, gets a pass that saves $41.20 a month, applies it, and the change is verified in CloudTrail.";
-export const CANVAS_STORY_TEXT = [
-  "1. On the live canvas, traffic flows from CloudFront to the load balancer, the API servers and orders-db. You ask the agent to clean up the unused databases.",
-  "2. The agent runs emfirge branch new. Branch 1 forks from live.",
-  "3. It tries deleting orders-db and legacy-reports-db on the branch. Both fade out and the edges into orders-db break.",
-  "4. emfirge check blocks it: data has no recovery point and availability, 1,240 queries a day.",
-  "5. The agent keeps orders-db and opens branch 2 with only legacy-reports-db removed.",
-  "6. emfirge check passes: saves $41.20 a month and nothing live depends on it.",
-  "7. The agent applies it. Back on live, legacy-reports-db is gone and the change is verified in CloudTrail.",
-];
-
-/* ------------------------------------------------------------------ */
-/* Works with                                                          */
-/* ------------------------------------------------------------------ */
-
-export const AGENTS = ["Claude Code", "Codex", "Cursor", "Gemini CLI", "Kiro", "Cline", "Aider", "your own agent"];
-
-/* ------------------------------------------------------------------ */
-/* Harness (problem + comparison, bento)                               */
-/* ------------------------------------------------------------------ */
-
-export const HARNESS = {
-  eyebrow: "The problem",
-  h2: "Coding agents got a harness. *Cloud* agents didn't.",
-  lead: "Nobody trusts an agent with their cloud: it can't see what's live, can't try before it does, and you can't see what it did. So we built it the harness coding agents already have.",
-};
-
-export const BENTO = {
-  context: {
-    coding: "Files",
-    name: "Context",
-    body: "A queryable model of your cloud: what exists, what's live, what depends on what.",
-    tooltip: ["orders-db · live", "1,240 q/day · 3 dependents"],
+      { tone: "cmd", text: "emfirge try --delete rds:orders-db rds:legacy-reports-db" },
+      { tone: "out", text: "2 changes on branch #1" },
+      { tone: "cmd", text: "emfirge check" },
+      { tone: "block", text: "block · 2 of 6 checks failed" },
+    ] satisfies TermLine[],
   },
   branch: {
-    coding: "Git branch",
-    name: "Branch",
-    body: "A copy of your live AWS to try changes on.",
-  },
-  signals: {
-    coding: "Tests",
-    name: "Signals",
-    body: "The diff, six damage answers, evidence, unknowns.",
-  },
-  boundaries: {
-    coding: "Permissions",
-    name: "Boundaries",
-    body: "Plain English. Agents read it as context; Emfirge enforces the hard lines as boundaries.",
-  },
-  record: {
-    coding: "Commit log",
-    name: "Record",
-    body: "What happened, predicted vs actual.",
-    events: [
-      { time: "14:02", text: "branch #2", tag: "PASS", tone: "pass" as const },
-      { time: "14:03", text: "applied by agent", tone: "muted" as const },
-      { time: "14:03", text: "verified in CloudTrail", tag: "✓", tone: "pass" as const },
-    ],
+    label: "The branch",
+    title: "Six checks. Every change.",
+    mockLabel: "Console mock: the six checks on branch number 1, two block and four pass",
+    pills: { block: "Block", pass: "Pass" } satisfies Record<Signal, string>,
+    rows: [
+      { time: "14:02:36.04", signal: "block", area: "data", text: "orders-db has no recovery point" },
+      { time: "14:02:36.05", signal: "block", area: "availability", text: "orders-db served 1,240 queries/day" },
+      { time: "14:02:36.05", signal: "pass", area: "exposure", text: "nothing newly reachable" },
+      { time: "14:02:36.06", signal: "pass", area: "money", text: "−$41.20/mo" },
+      { time: "14:02:36.06", signal: "pass", area: "control", text: "no access or logging lost" },
+      { time: "14:02:36.07", signal: "pass", area: "outside world", text: "no external side effects" },
+    ] satisfies LogRow[],
   },
 };
 
-export const SIGNAL = {
-  status: "FAIL",
-  title: "availability",
-  lines: [
-    "feed.xml → S3 (OAC) now receives the Host header",
-    "predicted: origin 404",
-    "live traffic: 1,240 req/day",
-    "source: CloudFront config · CloudWatch metrics",
-  ],
-};
+export type WorldMock =
+  | { kind: "table"; head: string[]; rows: string[][] }
+  | { kind: "branches"; rows: { name: string; branch: string; state: "block" | "pass" | "live" }[] }
+  | { kind: "doc"; lines: { text: string; hard?: boolean }[] }
+  | { kind: "timeline"; rows: { time: string; text: string }[] };
 
-export const EMFIRGE_MD = [
-  "# my cloud",
-  "- prod-* is production. Never delete without me.",
-  "- The nightly-sync schedule is paused on purpose.",
-  "- Tell me about any support case or quota request.",
-  "- Budget: $30/month.",
-];
-
-/* ------------------------------------------------------------------ */
-/* How it works (six verbs, scroll-driven)                             */
-/* ------------------------------------------------------------------ */
-
-export interface Verb {
-  name: string;
-  line: string;
-  example: string;
-  output: TermLine[];
-}
-export const VERBS: Verb[] = [
-  {
-    name: "context",
-    line: "Ask what's true.",
-    example: "emfirge context --live --deps orders-db",
-    output: [
-      { segs: [{ text: "orders-db  ", bold: true }, { text: "rds · live", tone: "muted" }] },
-      out("1,240 queries/day (30d) · 3 dependents"),
-      out("api-1 · api-2 · nightly-sync"),
-    ],
-  },
-  {
-    name: "branch",
-    line: "Open, fork, compare, discard workspaces.",
-    example: "emfirge branch fork 1",
-    output: [out("branch #2 forked from branch #1"), out("2 changes carried over · live untouched")],
-  },
-  {
-    name: "try",
-    line: "Put a change on a branch: typed, AWS CLI, API, Terraform or CloudFormation.",
-    example: "emfirge try --terraform plan.json",
-    output: [out("read plan.json · 1 resource to destroy"), out("1 change on branch #2")],
-  },
-  {
-    name: "check",
-    line: "The diff, six damage answers, evidence and unknowns.",
-    example: "emfirge check --json",
-    output: [
-      { segs: [{ text: "BLOCK", tone: "block", bold: true }] },
-      { segs: [{ text: "✗ ", tone: "block" }, { text: "data          no recovery point" }] },
-      { segs: [{ text: "✗ ", tone: "block" }, { text: "availability  1,240 queries/day" }] },
-      { segs: [{ text: "✓ ", tone: "pass" }, { text: "exposure · money · control · outside world", tone: "muted" }] },
-    ],
-  },
-  {
-    name: "request",
-    line: "Ask the owner, keep working on something else.",
-    example: 'emfirge request "delete orders-db?"',
-    output: [out("sent to owner · request #4"), out("agent continues on other work")],
-  },
-  {
-    name: "report",
-    line: "\"I applied it.\" Exact calls, bound to the verdict, verified in CloudTrail.",
-    example: "emfirge report --applied",
-    output: [{ segs: [{ text: "recorded · verified in CloudTrail 14s later ", tone: "muted" }, { text: "✓", tone: "pass" }] }],
-  },
-];
-
-export const HOW = {
-  eyebrow: "How it works",
-  h2: "Six verbs. The loop is *the product.*",
-  footer:
-    "Your agent fails on a branch, reads the signal, fixes its own plan and tries again. Only what's left reaches you.",
-  loop: ["context", "branch", "try", "check"],
-};
-
-/* ------------------------------------------------------------------ */
-/* Damage questions + trust                                            */
-/* ------------------------------------------------------------------ */
-
-export interface DamageQuestion {
-  icon: LucideIcon;
-  name: string;
-  question: string;
-  /** shown red in the radar, echoing the hero story */
-  fails?: boolean;
-}
-export const DAMAGE_QUESTIONS: DamageQuestion[] = [
-  { icon: Database, name: "Data", question: "Did something holding data disappear with no recovery point?", fails: true },
-  { icon: Globe, name: "Exposure", question: "Is anything newly reachable from the internet or another account?" },
-  { icon: Wallet, name: "Money", question: "Did the monthly cost go above your limit?" },
-  { icon: Activity, name: "Availability", question: "Did something live traffic depends on break?", fails: true },
-  { icon: KeyRound, name: "Control", question: "Was access or logging lost: an admin role, a KMS key, CloudTrail?" },
-  { icon: LifeBuoy, name: "Outside world", question: "Does it leave the cloud: support cases, quota requests, emails, domains?" },
-];
-
-export const QUESTIONS = {
-  eyebrow: "Six questions",
-  h2: "Six questions about the result. Not 15,000 rules about *actions.*",
-  sub: "Emfirge doesn't judge what an agent says it's doing. It judges what the change does on the branch.",
-  foot: "Each answer either tells you (a line in the record, nobody waits) or asks you (your agent keeps working on something else).",
-};
-
-export interface SafetyItem {
-  icon: LucideIcon;
+export interface WorldCard {
   title: string;
   body: string;
+  tone: "dark" | "light";
+  mockLabel: string;
+  mock: WorldMock;
 }
-export const SAFETY: SafetyItem[] = [
-  { icon: ShieldCheck, title: "Read-only, always.", body: "Emfirge never writes to your cloud. Your agent applies with its own access." },
-  { icon: EyeOff, title: "Private by default.", body: "AWS identifiers are tokenized on your machine before any model sees them." },
-  { icon: ShieldAlert, title: "No silent passes.", body: "Anything it can't model is reported, never passed." },
-  { icon: Cpu, title: "No AI inside.", body: "Deterministic: same snapshot, same changes, same verdict." },
-  {
-    icon: BookOpenCheck,
-    title: "Built from public data.",
-    body: "AWS's own API models and price list, pathfinding.cloud, Prowler and policy_sentry.",
-  },
-  {
-    icon: Scale,
-    title: "Pinned by laws.",
-    body: "Every behavior is a property test that must always hold, e.g. *L7: the same snapshot and changes always give the same verdict.*",
-  },
-];
 
-/* ------------------------------------------------------------------ */
-/* Get started, FAQ, final CTA                                         */
-/* ------------------------------------------------------------------ */
-
-export const START = {
-  h2: "Two minutes to a *safe* cloud agent.",
-  steps: [
-    { title: "Sign in", text: "Connect the CLI to your Emfirge account." },
-    { title: "Create a read-only role", text: "One click in CloudFormation. Delete the stack any time to revoke." },
-    { title: "Tell your agent", text: "One line, and it works on your cloud with a harness." },
-  ],
-  prompt: "Use emfirge before you change anything in AWS.",
+export const WORLD = {
+  title: "The world your agent works in.",
+  body: "Coding agents got files, branches, tests and a log. Cloud agents get the same.",
+  cards: [
+    {
+      title: "Context. Ask what's true.",
+      body: "What exists, what's live, what depends on what.",
+      tone: "dark",
+      mockLabel: "Mock: a table of three resources with state, load and dependents",
+      mock: {
+        kind: "table",
+        head: ["resource", "type", "state", "load", "dependents"],
+        rows: [
+          ["orders-db", "rds", "live", "1,240 q/day", "3"],
+          ["checkout-api", "lambda", "live", "8,900 req/day", "5"],
+          ["legacy-reports-db", "rds", "idle", "0 q/day", "0"],
+        ],
+      },
+    },
+    {
+      title: "Branch. Try anything.",
+      body: "A copy of your live AWS. Fork it, compare it, throw it away.",
+      tone: "dark",
+      mockLabel: "Mock: a list of branches with their result, next to live",
+      mock: {
+        kind: "branches",
+        rows: [
+          { name: "#1", branch: "cleanup-dbs", state: "block" },
+          { name: "#2", branch: "cleanup-dbs", state: "pass" },
+          { name: "live", branch: "", state: "live" },
+        ],
+      },
+    },
+    {
+      title: "Boundaries. Write your intent once.",
+      body: "Plain English in emfirge.md. Hard lines are enforced.",
+      tone: "light",
+      mockLabel: "Mock: an emfirge.md file with four lines",
+      mock: {
+        kind: "doc",
+        lines: [
+          { text: "# emfirge.md" },
+          { text: "Keep spend under $4,000 a month." },
+          { text: "Ask me before touching IAM." },
+          { text: "hard: nothing becomes publicly reachable", hard: true },
+        ],
+      },
+    },
+    {
+      title: "Record. Know what happened.",
+      body: "Every applied change, checked against CloudTrail.",
+      tone: "light",
+      mockLabel: "Mock: a three-line timeline of an applied change",
+      mock: {
+        kind: "timeline",
+        rows: [
+          { time: "14:09", text: "applied cleanup-dbs #2 by claude-code" },
+          { time: "14:09", text: "CloudTrail matched, 2 events, 0 unexpected" },
+          { time: "14:10", text: "recorded, spend −$41.20/mo" },
+        ],
+      },
+    },
+  ] satisfies WorldCard[],
 };
 
-export const FAQ: { q: string; a: string }[] = [
-  {
-    q: "Does Emfirge change my AWS?",
-    a: "No. It's read-only. Your agent applies with its own credentials; Emfirge records and verifies.",
-  },
-  { q: "Which agents work?", a: "Any agent that can run a shell command. An MCP adapter is also available." },
-  {
-    q: "Is a PASS a guarantee?",
-    a: "No. A branch is a model of your cloud. A pass is evidence, and every verdict says what was checked and what wasn't.",
-  },
-  { q: "Is it open source?", a: "Yes. Engine AGPL-3.0, CLI Apache-2.0." },
-];
+export const PRINCIPLES = {
+  title: "Built so you can trust it.",
+  items: [
+    {
+      title: "Read-only. Always.",
+      body: "Emfirge never writes to your cloud. Your agent applies with its own access, and Emfirge records it.",
+    },
+    {
+      title: "No AI inside.",
+      body: "The same branch always gives the same answer. Nothing can talk it into a pass.",
+    },
+    {
+      title: "Unknown never passes.",
+      body: "If a change can't be modeled, the result says so. A missing check is reported, not hidden.",
+    },
+  ],
+};
 
-export const FOOTER_LINKS = [
-  { label: "Docs", href: LINKS.docs },
-  { label: "GitHub", href: LINKS.github },
-  { label: "Privacy", href: LINKS.privacy },
-  { label: "Security", href: LINKS.security },
-  { label: "ansh@emfirge.cloud", href: LINKS.email },
-];
+export const NUMBERS = {
+  label: "Numbers from the repository",
+  items: [
+    { figure: "48", label: "laws every release must pass" },
+    { figure: "2,428", label: "engine tests" },
+    { figure: "92", label: "IAM escalation paths, from pathfinding.cloud" },
+  ],
+};
+
+export const CTA = {
+  id: "get-started",
+  title: "Give your agent a branch of your cloud.",
+  primary: { label: "Get started", href: LINKS.docs },
+  secondary: { label: "Read the docs", href: LINKS.docs },
+};
+
+export const FOOTER = {
+  tagline: "The harness for cloud agents.",
+  columns: [
+    {
+      title: "Product",
+      links: [
+        { label: "CLI", href: LINKS.docs },
+        { label: "Docs", href: LINKS.docs },
+        { label: "Changelog", href: LINKS.changelog },
+      ],
+    },
+    {
+      title: "Open source",
+      links: [
+        { label: "GitHub", href: LINKS.github },
+        { label: "Engine (AGPL-3.0)", href: LINKS.github },
+        { label: "CLI (Apache-2.0)", href: LINKS.github },
+      ],
+    },
+    {
+      title: "Trust",
+      links: [
+        { label: "Privacy", href: LINKS.privacy },
+        { label: "Security", href: LINKS.security },
+      ],
+    },
+    {
+      title: "Contact",
+      links: [{ label: "ansh@emfirge.cloud", href: LINKS.email }],
+    },
+  ] satisfies { title: string; links: LinkItem[] }[],
+  legal: "© 2026 Emfirge · Built by Ansh Sonkar",
+};

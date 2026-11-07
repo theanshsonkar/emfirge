@@ -1,27 +1,24 @@
-import { AGENTS } from "@/content";
-
-function Diamond() {
-  return <span aria-hidden="true" className="mx-7 inline-block size-1.5 rotate-45 bg-forge" />;
-}
+import { WORKS_WITH } from "@/content";
+import { Frame } from "./Frame";
 
 export function WorksWith() {
   return (
-    <section aria-label="Compatible agents" className="border-y border-white/[0.07] py-9">
-      <p className="text-center font-mono text-xs uppercase tracking-[0.14em] text-muted">
-        Works with any agent that runs a shell
-      </p>
-      <div className="mt-6 overflow-hidden [mask-image:linear-gradient(to_right,transparent,#000_12%,#000_88%,transparent)]">
-        <ul className="marquee-track flex w-max animate-marquee items-center whitespace-nowrap font-display text-[28px] text-paper/90 md:text-[34px]">
-          {[0, 1].map((dup) =>
-            AGENTS.map((a) => (
-              <li key={`${dup}-${a}`} className="flex items-center" aria-hidden={dup === 1 || undefined}>
-                {a}
-                <Diamond />
-              </li>
-            )),
-          )}
+    <section aria-labelledby="works-with" className="border-b border-line bg-white">
+      <Frame>
+        <h2 id="works-with" className="px-4 pb-4 pt-8 text-sm font-normal text-ink-3 sm:px-6 lg:px-12">
+          {WORKS_WITH.heading}
+        </h2>
+        <ul className="grid grid-cols-2 border-t border-line md:grid-cols-6">
+          {WORKS_WITH.agents.map((a) => (
+            <li
+              key={a}
+              className="flex h-24 items-center justify-center border-b border-line text-lg font-medium text-ink-3 odd:border-r max-md:last:border-b-0 md:border-b-0 md:border-r md:last:border-r-0 md:odd:border-r"
+            >
+              {a}
+            </li>
+          ))}
         </ul>
-      </div>
+      </Frame>
     </section>
   );
 }
