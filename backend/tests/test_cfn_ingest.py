@@ -130,6 +130,7 @@ def test_invalid_change_set_documents_raise_value_error(doc):
     ("AWS::Lambda::Function", "lambda", "DeleteFunction", {"FunctionName": "id-1"}),
     ("AWS::IAM::Role", "iam", "DeleteRole", {"RoleName": "id-1"}),
     ("AWS::EC2::SecurityGroup", "ec2", "DeleteSecurityGroup", {"GroupId": "id-1"}),
+    ("AWS::DynamoDB::Table", "dynamodb", "DeleteTable", {"TableName": "id-1"}),
 ])
 def test_true_replacement_removes_old_mapped_resource(typ, service, operation, parameters):
     api, extras = convert_change_set({"Changes": [rc("Modify", typ, replacement="True")]})
@@ -138,9 +139,9 @@ def test_true_replacement_removes_old_mapped_resource(typ, service, operation, p
 
 
 def test_true_replacement_unmapped_resource_blocks_delete():
-    api, extras = convert_change_set({"Changes": [rc("Modify", "AWS::DynamoDB::Table", replacement="True")]})
+    api, extras = convert_change_set({"Changes": [rc("Modify", "AWS::SQS::Queue", replacement="True")]})
     assert api["calls"] == []
-    assert extras[0]["type"] == "dynamodb.DeleteTable" and extras[0]["actions"] == ["delete"]
+    assert extras[0]["type"] == "sqs.DeleteQueue" and extras[0]["actions"] == ["delete"]
 
 
 def test_conditional_replacement_removes_and_warns():

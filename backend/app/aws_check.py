@@ -37,7 +37,7 @@ from app.verdict import CombinedVerdict, combined_verdict, introduced_privilege_
 
 # Collection sources (infra.collection keys) each damage depends on.
 DAMAGE_SOURCES: dict[str, tuple[str, ...]] = {
-    "data": ("ebs_snapshots", "ebs_volumes", "rds_snapshots"),
+    "data": ("ebs_snapshots", "ebs_volumes", "rds_snapshots", "dynamodb"),
     "exposure": ("network_interfaces",),
     "money": ("ebs_volumes",),
     "availability": ("iam_role_last_used", "network_interfaces"),
@@ -261,8 +261,10 @@ def build_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, verdict: Co
                                            f"{len(ACCOUNT_SETTINGS)} account-level settings compared between the base and the branch")],
         },
         unknown_notes={
-            "data": [("data_store_types", "only s3_bucket, rds_instance and ebs_volume are assessed for recovery; "
-                                          "other data stores (tables, queues, caches, secrets) have no recovery assessment")],
+            "data": [("data_store_types", "only s3_bucket, rds_instance, ebs_volume and dynamodb_table are assessed for recovery; "
+                                          "other data stores (queues, caches, secrets) have no recovery assessment"),
+                     ("table_backups", "a table's recovery points are its on-demand backups made with DynamoDB and its point-in-time recovery; "
+                                       "backups made with the AWS Backup service are not read")],
             "control": [("account_settings", "a branch cannot change audit trail, threat detection, key management or configuration recording "
                                              "settings, so changes to them are not modeled")],
         },

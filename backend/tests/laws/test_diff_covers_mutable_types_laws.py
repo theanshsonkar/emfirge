@@ -4,7 +4,7 @@ import pytest
 
 from app.diffing import diff_infrastructure
 from app.graph_schema import NODE_SCHEMAS
-from app.models import NetworkACL, SchedulerData, SchedulerSchedule
+from app.models import DynamoDBData, DynamoDBTable, NetworkACL, SchedulerData, SchedulerSchedule
 from app.mutations import (
     Change,
     _MUTATION_CAPABILITIES,
@@ -26,7 +26,9 @@ def _base():
     ec2 = ec2.model_copy(update={"security_groups": groups})
     schedule = SchedulerSchedule(name="sched-law-base", state="DISABLED")
     return base.model_copy(update={"ec2": ec2, "vpc": base.vpc.model_copy(update={"nacls": [acl]}),
-                                   "scheduler": SchedulerData(schedules=[schedule])})
+                                   "scheduler": SchedulerData(schedules=[schedule]),
+                                   "dynamodb": DynamoDBData(total_tables=1, tables=[DynamoDBTable(
+                                       name="ddb-law-base", arn="arn:aws:dynamodb:us-east-1:000000000000:table/ddb-law-base", item_count=1)])})
 
 
 def _add_samples(base):

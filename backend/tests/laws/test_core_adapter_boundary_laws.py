@@ -46,6 +46,8 @@ ADAPTER_MODULES = {
     "scheduler_schedule",
     # CloudFront distribution parsing / hand-back / collector, and the check's CloudFront availability fact.
     "cloudfront_distribution", "cloudfront_check",
+    # DynamoDB table call / template parsing shared by collector, mutations and ingest.
+    "dynamodb_table",
 }
 AWS_LIBS = {"boto3", "botocore"}
 

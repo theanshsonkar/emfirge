@@ -151,6 +151,27 @@ def _cloudfront_calls(change: Change, after, err, call) -> list[dict]:
     return [call("cloudfront", "UpdateDistribution", params)]
 
 
+def _dynamodb_calls(before, change: Change, after, err, call) -> list[dict]:
+    """DeleteTable, UpdateContinuousBackups (PITR) and UpdateTable (deletion protection) from the table's after state."""
+    ident = change.resource_id
+    if not any(item.name == ident for item in before.dynamodb.tables):
+        err("resource_not_found")
+        return []
+    if change.op == "delete":
+        return [call("dynamodb", "DeleteTable", {"TableName": ident})]
+    table = next(item for item in after.dynamodb.tables if item.name == ident)
+    result = []
+    for field in change.fields:
+        value = getattr(table, field, None)
+        if field not in {"pitr_enabled", "deletion_protection_enabled"} or not isinstance(value, bool):
+            err(f"field_not_mapped: {field}")
+        elif field == "pitr_enabled":
+            result.append(call("dynamodb", "UpdateContinuousBackups", {"TableName": ident, "PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": value}}))
+        else:
+            result.append(call("dynamodb", "UpdateTable", {"TableName": ident, "DeletionProtectionEnabled": value}))
+    return result
+
+
 def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], list[dict]]:
     typ, op, ident, fields = change.resource_type, change.op, change.resource_id, change.fields
     errors: list[dict] = []
@@ -162,6 +183,8 @@ def _calls_for(before, change: Change, after, index: int) -> tuple[list[dict], l
         return _scheduler_calls(change, after, index, err, call), errors
     if typ == "cloudfront_distribution":
         return _cloudfront_calls(change, after, err, call), errors
+    if typ == "dynamodb_table":
+        return _dynamodb_calls(before, change, after, err, call), errors
     if op == "add":
         if typ == "rds_snapshot":
             db_instance_id = fields.get("db_instance_id")

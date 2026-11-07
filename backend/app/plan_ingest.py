@@ -9,6 +9,7 @@ from app.mutations import Change
 from app.aws_api_ingest import remove_security_group_rule
 from app.scheduler_schedule import DEFAULT_GROUP, api_fields as scheduler_api_fields, unsupported_members as scheduler_unsupported
 from app.cloudfront_distribution import tf_fields as cloudfront_tf_fields
+from app.dynamodb_table import plan_fields as dynamodb_plan_fields
 from app.plan_ingest_compute import instance_fields, lambda_fields
 from app.plan_ingest_s3 import S3_SEPARATE_TYPES, S3Model, inline_fields as s3_inline_fields, order_key as s3_order_key
 from app.plan_ingest_iam import IAM_POLICY_TYPES, IamModel, iam_context, identity_arn
@@ -64,7 +65,7 @@ _RESOURCE_MAP = {
 }
 _TAGGED_RESOURCES = frozenset({"aws_instance", "aws_db_instance", "aws_security_group", "aws_s3_bucket",
                                "aws_lambda_function", "aws_nat_gateway", "aws_ebs_volume"})
-_DELETE_ORDER = ["scheduler_schedule", "ec2_instance", "lambda_function", "rds_instance", "ebs_volume",
+_DELETE_ORDER = ["scheduler_schedule", "dynamodb_table", "ec2_instance", "lambda_function", "rds_instance", "ebs_volume",
                  "ebs_snapshot", "rds_snapshot", "s3_bucket", "security_group", "iam_role"]
 
 
@@ -362,6 +363,50 @@ def _schedule_changes(item: dict, address: str, actions: list, unknown: list[dic
     return result, None
 
 
+# Terraform computes these; a difference in them is not a change the author made.
+_TF_TABLE_COMPUTED = frozenset({"arn", "id", "tags_all", "stream_arn", "stream_label", "stream_enabled_computed"})
+_TF_TABLE_MODELED = frozenset({"point_in_time_recovery", "deletion_protection_enabled"})
+
+
+def _table_changes(item: dict, address: str, actions: list, unknown: list[dict]) -> tuple[list[Change], dict | None]:
+    """aws_dynamodb_table: delete, and point-in-time recovery / deletion protection on update.
+
+    Creating a table is not modeled. A replace deletes the table (its data is gone) and the new table is unmodeled.
+    """
+    change = item.get("change") or {}
+    before, after, after_unknown = change.get("before") or {}, change.get("after") or {}, change.get("after_unknown") or {}
+    deleting = actions == ["delete"] or actions in (["delete", "create"], ["create", "delete"])
+    creating = actions == ["create"] or actions in (["delete", "create"], ["create", "delete"])
+    result: list[Change] = []
+    if deleting:
+        name = before.get("name") or before.get("id")
+        if not isinstance(name, str) or not name:
+            return result, {"address": address, "type": item.get("type", ""), "actions": actions, "outside_view": False,
+                            "detail": "the table name is not in the plan, so the table cannot be identified"}
+        result.append(Change(op="delete", resource_type="dynamodb_table", resource_id=name))
+    if creating:
+        return result, {"address": address, "type": item.get("type", ""), "actions": actions, "provider_name": "aws", "outside_view": False,
+                        "detail": "creating a DynamoDB table is not modeled"}
+    if actions != ["update"]:
+        return result, None
+    paths = _unknown_paths(after_unknown)
+    name = after.get("name") or before.get("name") or before.get("id")
+    if not isinstance(name, str) or not name or "name" in paths:
+        unknown.append({"address": address, "field": "name", "reason": "unknown Terraform value"})
+        return result, {"address": address, "type": item.get("type", ""), "actions": actions, "outside_view": False,
+                        "detail": "the table name is unknown at plan time, so its identity cannot be built"}
+    fields, unknown_paths = dynamodb_plan_fields(before, after, paths)
+    for path in unknown_paths:
+        unknown.append({"address": address, "field": path, "reason": "unknown Terraform value"})
+    for key in sorted(set(before) | set(after)):
+        if (key not in _TF_TABLE_MODELED | _TF_TABLE_COMPUTED and before.get(key) != after.get(key)
+                and not any(path == key or path.startswith(key + ".") for path in paths)):
+            unknown.append({"address": address, "field": key, "reason": "unsupported_attribute"})
+    if fields:
+        result.append(Change(op="modify", resource_type="dynamodb_table", resource_id=name, fields=fields))
+    return result, None
+
+
 def _distribution_changes(item: dict, address: str, unknown: list[dict]) -> tuple[list[Change], dict | None]:
     """aws_cloudfront_distribution update: the modeled attributes that differ, as a partial change of the stored distribution."""
     change = item.get("change") or {}
@@ -568,6 +613,8 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         return _route_table_add(item, address, unknown_fields), None
     if typ == "aws_scheduler_schedule":
         return _schedule_changes(item, address, actions, unknown_fields)
+    if typ == "aws_dynamodb_table":
+        return _table_changes(item, address, actions, unknown_fields)
     if typ == "aws_cloudfront_distribution" and actions == ["update"]:
         return _distribution_changes(item, address, unknown_fields)
     if typ in IAM_POLICY_TYPES and iam is not None:

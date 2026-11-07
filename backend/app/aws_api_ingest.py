@@ -8,6 +8,7 @@ from app.aws_collector import build_security_group_rule
 from app.tags import tag_map
 from app.scheduler_schedule import DEFAULT_GROUP, api_fields as scheduler_api_fields, split_identity as scheduler_split_identity, unsupported_members as scheduler_unsupported
 from app.cloudfront_distribution import config_to_fields as cloudfront_fields
+from app.dynamodb_table import api_fields as dynamodb_api_fields, table_name as dynamodb_table_name
 import copy
 import functools
 import re
@@ -551,6 +552,23 @@ def translate_api_calls(
                     unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
             changes.append(Change(op="modify", resource_type="cloudfront_distribution", resource_id=distribution_id, fields=fields))
             addresses.append(address)
+            continue
+        if lower_service == "dynamodb" and operation in {"DeleteTable", "UpdateTable", "UpdateContinuousBackups"}:
+            name = dynamodb_table_name(parameters.get("TableName"))
+            if name is None:
+                raise _invalid()
+            if operation == "DeleteTable":
+                for field in parameters:
+                    if field != "TableName":
+                        unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+                changes.append(Change(op="delete", resource_type="dynamodb_table", resource_id=name)); addresses.append(address); continue
+            fields, unsupported, valid = dynamodb_api_fields(operation, parameters)
+            if not valid:
+                raise _invalid()
+            for member in unsupported:
+                unknown_fields.append({"address": address, "field": member, "reason": "unsupported_attribute"})
+            if fields:
+                changes.append(Change(op="modify", resource_type="dynamodb_table", resource_id=name, fields=fields)); addresses.append(address)
             continue
         if lower_service == "ec2" and operation == "CreateNatGateway":
             if not _valid_string(parameters.get("SubnetId")):

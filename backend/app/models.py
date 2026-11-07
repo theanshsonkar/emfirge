@@ -629,10 +629,13 @@ class DynamoDBTable(BaseModel):
     name: str
     arn: str
     encryption_type: str = "DEFAULT"  # "DEFAULT" | "KMS" | "NONE"
-    pitr_enabled: bool = False        # Point-in-time recovery
-    has_backup: bool = False          # On-demand backup exists
+    # None = the provider read was refused or failed: unknown, never "off".
+    pitr_enabled: Optional[bool] = False      # Point-in-time recovery (DescribeContinuousBackups)
+    has_backup: Optional[bool] = False        # An AVAILABLE on-demand backup exists (ListBackups)
     billing_mode: str = "PROVISIONED" # "PROVISIONED" | "PAY_PER_REQUEST"
-    item_count: int = 0
+    # DescribeTable ItemCount, which AWS updates about every six hours; None = not reported.
+    item_count: Optional[int] = None
+    deletion_protection_enabled: Optional[bool] = None  # DescribeTable DeletionProtectionEnabled; None = not reported
 
 class DynamoDBData(BaseModel):
     total_tables: int = 0
@@ -640,6 +643,7 @@ class DynamoDBData(BaseModel):
     tables_without_encryption: List[str] = []   # Tables using only default encryption
     tables_without_backup: List[str] = []       # No backup plan
     tables: List[DynamoDBTable] = []
+    collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
 
 # Master infrastructure object — holds all collected data + warnings from skipped services
 class AWSInfrastructure(BaseModel):

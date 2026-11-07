@@ -5,6 +5,7 @@ from typing import Any
 
 from app.aws_api_ingest import _unmodeled
 from app.cloudfront_distribution import cfn_config_to_api, cfn_unmodeled
+from app.dynamodb_table import cfn_calls as dynamodb_cfn_calls
 
 
 _MAX_CHANGES = 2000
@@ -140,7 +141,8 @@ def _removal(resource: dict[str, Any], address: str, policy_action: str | None) 
                   ("ec2", "SecurityGroup"): ("ec2", "DeleteSecurityGroup", "GroupId", False),
                   ("s3", "Bucket"): ("s3", "DeleteBucket", "Bucket", False),
                   ("lambda", "Function"): ("lambda", "DeleteFunction", "FunctionName", False),
-                  ("iam", "Role"): ("iam", "DeleteRole", "RoleName", False)}
+                  ("iam", "Role"): ("iam", "DeleteRole", "RoleName", False),
+                  ("dynamodb", "Table"): ("dynamodb", "DeleteTable", "TableName", False)}
     mapped = operations.get((service, suffix))
     if mapped and isinstance(physical, str) and physical:
         svc, operation, key, many = mapped
@@ -289,6 +291,23 @@ def convert_change_set(doc: Any, nacls: Any = None) -> tuple[dict[str, Any], lis
                 extras.append(_extra(address, typ, "MissingPropertyValues"))
             else:
                 calls.append(call)
+            continue
+        if (typ == "AWS::DynamoDB::Table" and action == "Modify" and policy not in {"Retain", "ReplaceAndRetain"}
+                and resource.get("Replacement") not in {"True", "Conditional"}):
+            before_props, after_props = _properties(_context(resource, "BeforeContext")), _properties(_context(resource, "AfterContext"))
+            if not isinstance(before_props, dict) or not isinstance(after_props, dict):
+                extras.append(_extra(address, typ, "MissingPropertyValues"))
+                continue
+            table_calls, resolved = dynamodb_cfn_calls(action, physical, before_props, after_props)
+            if not resolved:
+                extras.append(_extra(address, typ, "MissingPropertyValues"))
+                continue
+            calls.extend(table_calls)
+            # every other property that differs is a change Emfirge does not model
+            others = {key for key in set(before_props) | set(after_props)
+                      if key not in {"PointInTimeRecoverySpecification", "DeletionProtectionEnabled"} and before_props.get(key) != after_props.get(key)}
+            if others:
+                extras.append(_extra(address, typ, "UpdateTable"))
             continue
         if (typ == "AWS::CloudFront::Distribution" and action == "Modify" and policy not in {"Retain", "ReplaceAndRetain"}
                 and resource.get("Replacement") not in {"True", "Conditional"}):

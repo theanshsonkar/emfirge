@@ -25,7 +25,7 @@ from app.iam_escalation import matching_paths
 from app.rds_ports import ports_cover, rds_port
 
 
-GRAPH_SCHEMA_VERSION = 3
+GRAPH_SCHEMA_VERSION = 4
 INTERNAL_REACH_EDGE_BUDGET = 50_000
 
 
@@ -2246,12 +2246,14 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
             encryption_type = table.get('encryption_type', 'DEFAULT')
             pitr_enabled = table.get('pitr_enabled', False)
             billing_mode = table.get('billing_mode', 'PROVISIONED')
+            protected = table.get('deletion_protection_enabled')
         else:
             table_name = table.name
             table_arn = table.arn
             encryption_type = table.encryption_type
             pitr_enabled = table.pitr_enabled
             billing_mode = table.billing_mode
+            protected = table.deletion_protection_enabled
 
         nodes.append({
             'id': id_plan.id('dynamodb_table', table_name),
@@ -2262,6 +2264,7 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
                 'encryption_type': encryption_type,
                 'pitr_enabled': pitr_enabled,
                 'billing_mode': billing_mode,
+                'deletion_protection_enabled': protected,
             }
         })
 

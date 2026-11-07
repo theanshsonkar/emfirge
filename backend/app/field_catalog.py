@@ -197,6 +197,16 @@ CATALOG: dict[str, dict[str, Source]] = {
         "extra": Normalized("UpdateDistribution DistributionConfig", "members that are not modeled, kept as AWS reports them"),
         "withheld_settings": Normalized("UpdateDistribution DistributionConfig", "names of settings stored without their values (origin custom headers)"),
     },
+    # Only the two settings AWS lets a call change are settable; the rest of the table is what was collected.
+    "dynamodb_table": {
+        "pitr_enabled": Aws("dynamodb", "UpdateContinuousBackups", "PointInTimeRecoverySpecification.PointInTimeRecoveryEnabled"),
+        "deletion_protection_enabled": Aws("dynamodb", "UpdateTable", "DeletionProtectionEnabled"),
+        "arn": Derived("set by AWS"),
+        "encryption_type": Derived("collected from DescribeTable SSEDescription; changing it (UpdateTable SSESpecification) is not modeled"),
+        "has_backup": Derived("collected from ListBackups: an AVAILABLE on-demand backup exists"),
+        "billing_mode": Derived("collected from DescribeTable BillingModeSummary; changing it (UpdateTable BillingMode) is not modeled"),
+        "item_count": Derived("collected from DescribeTable ItemCount, which AWS refreshes about every six hours"),
+    },
     "iam_role_policy": {
         "access_statements": Normalized("PutRolePolicy / AttachRolePolicy", "complete normalized statement list"),
         "policy_documents": Normalized("PutRolePolicy / AttachRolePolicy", "normalized policy documents"),
@@ -204,7 +214,8 @@ CATALOG: dict[str, dict[str, Source]] = {
 }
 
 # Identity fields are the change's resource_id, never a field.
-IDENTITY_FIELDS = {"s3_bucket": "name", "lambda_function": "name", "iam_user": "username", "scheduler_schedule": "name"}
+IDENTITY_FIELDS = {"s3_bucket": "name", "lambda_function": "name", "iam_user": "username", "scheduler_schedule": "name",
+                   "dynamodb_table": "name"}
 
 
 @lru_cache(maxsize=None)

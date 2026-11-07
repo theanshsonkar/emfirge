@@ -27,7 +27,9 @@ from pydantic import BaseModel, ConfigDict
 
 from app.context_query import VIRTUAL_NODE_IDS, ContextResponse, KnownItem, UnknownItem
 from app.cost import ResourceCost, unknown_reason
-from app.delete_lens import DATA_STORE_TYPES
+from app.delete_lens import (
+    DATA_STORE_TYPES, DYNAMODB_ITEM_COUNT_URL, DYNAMODB_SYSTEM_BACKUP_URL, HOLDS_DATA_UNKNOWN,
+)
 from app.verdict import DATA_HOLDING_TYPES, CombinedVerdict
 
 DAMAGES: tuple[str, ...] = ("data", "exposure", "money", "availability", "control", "outside_world")
@@ -322,6 +324,12 @@ def _type_map(verdict: CombinedVerdict, inputs: CheckInputs) -> dict[str, str]:
 
 # ── the six answers ───────────────────────────────────────────────
 
+_RECOVERY_UNKNOWN = {
+    True: "the item count of this table was not reported, so whether it held data is unknown, and no on-demand backup or point-in-time recovery is known either",
+    False: "the backup or point-in-time recovery settings of this table could not be read, so whether a recovery point exists is unknown",
+}
+
+
 def _data(verdict: CombinedVerdict, inputs: CheckInputs, types: Mapping[str, str], removed_ids: Sequence[str]) -> _Draft:
     draft = _Draft("data")
     for lost in verdict.deletion.data_lost:
@@ -332,6 +340,17 @@ def _data(verdict: CombinedVerdict, inputs: CheckInputs, types: Mapping[str, str
             resource_id=point.resource_id, resource_type=_type_of(point.resource_id, types), change="deleted",
             has_recovery_point=True,
             recovery_resource_ids=[point.source_id] if point.source_id != point.resource_id else []))
+    for unknown in verdict.deletion.recovery_unknown:
+        draft.facts.append(DataFact(resource_id=unknown.resource_id, resource_type=unknown.resource_type, change="deleted",
+                                    has_recovery_point=None, recovery_resource_ids=[]))
+        draft.doubt("recovery_unknown", _RECOVERY_UNKNOWN[unknown.why == HOLDS_DATA_UNKNOWN], unknown.resource_id)
+    for point in verdict.deletion.recovery_points:
+        if point.kind == "reported_empty_table":
+            draft.doubt("item_count_approximate", "the table was reported empty by DescribeTable, but AWS refreshes the item count only about "
+                                                  f"every six hours, so recent items may not be counted: {DYNAMODB_ITEM_COUNT_URL}", point.resource_id)
+    if any(point.kind == "dynamodb_system_backup" for point in verdict.deletion.recovery_points):
+        draft.check("table_system_backup", "deleting a table with point-in-time recovery on makes AWS keep a system backup for 35 days "
+                                           f"that the table can be restored from: {DYNAMODB_SYSTEM_BACKUP_URL}")
     for rid, rtype in inputs.recovery_removals:
         draft.facts.append(DataFact(resource_id=rid, resource_type=rtype, change="recovery_removed",
                                     has_recovery_point=None, recovery_resource_ids=[]))
@@ -341,10 +360,10 @@ def _data(verdict: CombinedVerdict, inputs: CheckInputs, types: Mapping[str, str
     draft.check("recovery_points", f"{len(verdict.deletion.recovery_points)} deleted data stores have a surviving recovery point; "
                                    f"{len(verdict.deletion.data_lost)} have none")
     draft.check("recovery_removed", f"{len(inputs.recovery_removals)} recovery points removed by the branch "
-                                    "(snapshots deleted, automated backups or versioning turned off)")
+                                    "(snapshots deleted, automated backups, versioning or point-in-time recovery turned off)")
     for rid in removed_ids:
         if types.get(rid) in DATA_HOLDING_TYPES - DATA_STORE_TYPES:
-            draft.doubt("recovery_not_assessed", "this removed resource holds data but only buckets, databases and volumes get a recovery assessment", rid)
+            draft.doubt("recovery_not_assessed", "this removed resource holds data but only buckets, databases, volumes and DynamoDB tables get a recovery assessment", rid)
     draft.doubt("data_contents", "what a data store holds is not read; recovery is judged from snapshots, backups and bucket emptiness only")
     return draft
 

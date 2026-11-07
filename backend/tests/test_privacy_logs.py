@@ -309,7 +309,7 @@ FAIL_OPS = {
     "GetQueueAttributes", "DescribeTable", "DescribeContinuousBackups", "ListTagsOfResource",
     "GetTopicAttributes", "DescribeFlowLogs", "GetKeyRotationStatus", "DescribeKey", "ListResourceTags",
     "DescribeTaskDefinition", "DescribeNetworkInterfaces", "DescribeLoadBalancers",
-    "ListSchedules", "GetSchedule",
+    "ListSchedules", "GetSchedule", "ListBackups",
     "ListDistributions", "GetDistributionConfig", "ListCachePolicies", "ListOriginRequestPolicies", "ListOriginAccessControls",
 }
 

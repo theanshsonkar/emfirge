@@ -19,6 +19,11 @@ class DataLost(BaseModel):
     resource_id: str
     resource_type: str
     why: str
+class RecoveryUnknown(BaseModel):
+    """A deleted data store whose data loss cannot be judged: what it holds or what recovers it is not known."""
+    resource_id: str
+    resource_type: str
+    why: str
 class RecoveryPoint(BaseModel):
     resource_id: str
     kind: str
@@ -35,6 +40,7 @@ class DeletionCoverage(BaseModel):
 class DeletionLens(BaseModel):
     data_lost: list[DataLost] = Field(default_factory=list)
     recovery_points: list[RecoveryPoint] = Field(default_factory=list)
+    recovery_unknown: list[RecoveryUnknown] = Field(default_factory=list)
     impacts: list[DeletionImpact] = Field(default_factory=list)
     max_depth: int = 0
     coverage: DeletionCoverage = Field(default_factory=DeletionCoverage)
@@ -61,7 +67,47 @@ def _parse_time(value: Any):
     except ValueError:
         return None
 
-DATA_STORE_TYPES = frozenset({"s3_bucket", "rds_instance", "ebs_volume"})
+DATA_STORE_TYPES = frozenset({"s3_bucket", "rds_instance", "ebs_volume", "dynamodb_table"})
+
+# Provider documentation the DynamoDB judgment rests on.
+DYNAMODB_ITEM_COUNT_URL = "https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_TableDescription.html"
+DYNAMODB_SYSTEM_BACKUP_URL = "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/PointInTimeRecovery_Howitworks.html"
+
+# why codes of RecoveryUnknown
+HOLDS_DATA_UNKNOWN = "holds_data_unknown"
+RECOVERY_SOURCE_UNKNOWN = "recovery_source_unknown"
+
+
+def _table_recovery(rid: str, before: dict) -> tuple[RecoveryPoint | None, str | None]:
+    """DynamoDB table: (recovery point, why unknown).
+
+    * an AVAILABLE on-demand backup restores the table after it is gone (Restore.Tutorial);
+    * with point-in-time recovery on, DeleteTable makes a system backup kept 35 days
+      (PointInTimeRecovery_Howitworks, BackupSummary BackupType SYSTEM);
+    * ItemCount 0 is "reported empty": AWS refreshes ItemCount about every six hours
+      (TableDescription), so the data answer carries that as a caveat.
+    Nothing known to recover and a count that is None (not reported) is unknown, not empty;
+    items but an unreadable PITR / backup source is unknown, not lost.
+    """
+    if before.get("has_backup") is True:
+        return RecoveryPoint(resource_id=rid, kind="dynamodb_backup", source_id=rid), None
+    if before.get("pitr_enabled") is True:
+        return RecoveryPoint(resource_id=rid, kind="dynamodb_system_backup", source_id=rid), None
+    count = before.get("item_count")
+    if count == 0:
+        return RecoveryPoint(resource_id=rid, kind="reported_empty_table", source_id=rid), None
+    if count is None:
+        return None, HOLDS_DATA_UNKNOWN
+    if before.get("has_backup") is None or before.get("pitr_enabled") is None:
+        return None, RECOVERY_SOURCE_UNKNOWN
+    return None, None
+
+
+def recovery_assessment(typ: str, rid: str, before: Any, options: Any, rds_snapshots: Any, ebs_snapshots: Any) -> tuple[RecoveryPoint | None, str | None]:
+    """(recovery point that survives deleting ``rid``, why that is unknown). Both None: data is lost."""
+    if typ == "dynamodb_table":
+        return _table_recovery(rid, before or {})
+    return recovery_point_for(typ, rid, before, options, rds_snapshots, ebs_snapshots), None
 
 
 def recovery_point_for(typ: str, rid: str, before: Any, options: Any, rds_snapshots: Any, ebs_snapshots: Any) -> RecoveryPoint | None:
@@ -73,6 +119,8 @@ def recovery_point_for(typ: str, rid: str, before: Any, options: Any, rds_snapsh
     """
     before = before or {}
     options = options or {}
+    if typ == "dynamodb_table":
+        return _table_recovery(rid, before)[0]
     if typ == "s3_bucket":
         if before.get("is_empty") is True:
             return RecoveryPoint(resource_id=rid, kind="empty_bucket", source_id=rid)
@@ -110,15 +158,18 @@ def analyze_deletions(base: Any, branch: Any, evidence=None) -> DeletionLens:
     snapshots_ebs = _state_items(branch, "ec2", "ebs_snapshots")
     recovery: list[RecoveryPoint] = []
     lost: list[DataLost] = []
+    unknown_recovery: list[RecoveryUnknown] = []
     for item in deleted:
         rid, typ = str(item["resource_id"]), str(item["resource_type"])
         before = item.get("state_before") or {}
         options = item.get("options") or {}
-        point = recovery_point_for(typ, rid, before, options, snapshots_rds, snapshots_ebs)
+        point, unknown_why = recovery_assessment(typ, rid, before, options, snapshots_rds, snapshots_ebs)
         recovered = point is not None
         if point is not None:
             recovery.append(point)
-        if typ in DATA_STORE_TYPES and not recovered:
+        if typ in DATA_STORE_TYPES and not recovered and unknown_why is not None:
+            unknown_recovery.append(RecoveryUnknown(resource_id=rid, resource_type=typ, why=unknown_why))
+        elif typ in DATA_STORE_TYPES and not recovered:
             lost.append(DataLost(resource_id=rid, resource_type=typ, why="deleted_without_surviving_recovery_point"))
     deleted_set = {str(x.get("resource_id")) for x in ledger}
     scoped = [item for item in evidence if str(_v(item, "resource_id", "")) in deleted_set]
@@ -172,7 +223,7 @@ def analyze_deletions(base: Any, branch: Any, evidence=None) -> DeletionLens:
                 can.append(source)
     can = sorted(can)
     cannot = sorted(cannot)
-    return DeletionLens(data_lost=lost, recovery_points=sorted(recovery, key=lambda x: (x.resource_id, x.kind)), impacts=impacts, max_depth=max((x.depth for x in impacts), default=0), coverage=DeletionCoverage(can_see=can, cannot_see=cannot), in_use_evidence=scoped)
+    return DeletionLens(data_lost=lost, recovery_points=sorted(recovery, key=lambda x: (x.resource_id, x.kind)), recovery_unknown=unknown_recovery, impacts=impacts, max_depth=max((x.depth for x in impacts), default=0), coverage=DeletionCoverage(can_see=can, cannot_see=cannot), in_use_evidence=scoped)
 
 
 def deleted_ids(lens: DeletionLens, branch: Any) -> set[str]:

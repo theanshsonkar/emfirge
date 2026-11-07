@@ -235,6 +235,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
     lambda_data.functions_with_admin_role = functions_with_admin
 
     # A collector that timed out or crashed never reported: say so rather than leave the status unrecorded.
+    collection_status.setdefault('dynamodb', 'error')
     collection_status.setdefault('scheduler', 'error')
     collection_status.setdefault('cloudfront', 'error')
     return AWSInfrastructure(
@@ -3045,12 +3046,38 @@ def collect_sqs(key, secret, token, region, warnings) -> SQSData:
 
 
 # ── DYNAMODB COLLECTOR ────────────────────────────────────────────
+def _dynamodb_available_backup(ddb, table_name):
+    """Whether an AVAILABLE on-demand backup of the table exists (every ListBackups page is read).
+
+    A backup that is still CREATING or already DELETED restores nothing. ListBackups lists the
+    backups the table's owner made (BackupType defaults to USER); backups made through the
+    AWS Backup service are not listed by it and are not read here.
+    """
+    start = None
+    while True:
+        params = {'TableName': table_name, 'Limit': 100}
+        if start:
+            params['ExclusiveStartBackupArn'] = start
+        page = ddb.list_backups(**params)
+        if any(item.get('BackupStatus') == 'AVAILABLE' for item in page.get('BackupSummaries', [])):
+            return True
+        start = page.get('LastEvaluatedBackupArn')
+        if not start:
+            return False
+
+
 def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
+    """Tables with item count, PITR, an on-demand backup and deletion protection (read only).
+
+    Status dynamodb = ok | denied | error. A refused or failed read of one fact leaves that fact
+    None (unknown) and marks the status; it is never recorded as "no PITR", "no backup" or "empty".
+    """
     total_tables = 0
     tables_without_pitr = []
     tables_without_encryption = []
     tables_without_backup = []
     tables = []
+    status = 'error'
 
     try:
         ddb = boto3.client('dynamodb', aws_access_key_id=key,
@@ -3066,14 +3093,16 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                 table_names.extend(page.get('TableNames', []))
         except ClientError as e:
             code = get_error_code(e)
-            if code in ['AccessDenied', 'UnauthorizedOperation']:
+            if code in _DENIED_CODES:
                 msg = 'DynamoDB scan skipped: insufficient permissions'
                 print('DynamoDB scan skipped: insufficient permissions')
                 warnings.append(msg)
-                return DynamoDBData()
+                return DynamoDBData(collection_status={'dynamodb': 'denied'})
             raise
 
         total_tables = len(table_names)
+        denied = False
+        failed = False
 
         # Describe each table
         for table_name in table_names:
@@ -3082,8 +3111,9 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                 table = desc.get('Table', {})
 
                 table_arn = table.get('TableArn', '')
-                item_count = table.get('ItemCount', 0)
+                item_count = table.get('ItemCount')  # approximate (about every six hours); absent -> unknown
                 billing_mode = table.get('BillingModeSummary', {}).get('BillingMode', 'PROVISIONED')
+                deletion_protection = table.get('DeletionProtectionEnabled')
 
                 # Encryption — check SSEDescription
                 sse = table.get('SSEDescription', {})
@@ -3094,7 +3124,7 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                     encryption_type = 'DEFAULT'  # AWS-owned key (default)
 
                 # PITR check
-                pitr_enabled = False
+                pitr_enabled = None
                 try:
                     pitr_resp = ddb.describe_continuous_backups(TableName=table_name)
                     pitr_desc = pitr_resp.get('ContinuousBackupsDescription', {})
@@ -3102,28 +3132,33 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                     pitr_enabled = pitr_status == 'ENABLED'
                 except ClientError as e:
                     code = get_error_code(e)
-                    if code not in ['AccessDenied', 'UnauthorizedOperation']:
+                    if code in _DENIED_CODES:
+                        denied = True
+                    else:
+                        failed = True
                         print(f'DynamoDB PITR check skipped for 1 table: {code}')
                 except Exception:
-                    pass
+                    failed = True
 
-                # Backup check — see if any on-demand backups exist
-                has_backup = False
+                # Backup check — is there an on-demand backup that can be restored from
+                has_backup = None
                 try:
-                    backups = ddb.list_backups(TableName=table_name, Limit=1)
-                    has_backup = len(backups.get('BackupSummaries', [])) > 0
+                    has_backup = _dynamodb_available_backup(ddb, table_name)
                 except ClientError as e:
                     code = get_error_code(e)
-                    if code not in ['AccessDenied', 'UnauthorizedOperation']:
+                    if code in _DENIED_CODES:
+                        denied = True
+                    else:
+                        failed = True
                         print(f'DynamoDB backup check skipped for 1 table: {code}')
                 except Exception:
-                    pass
+                    failed = True
 
-                if not pitr_enabled:
+                if pitr_enabled is not True:
                     tables_without_pitr.append(table_name)
                 if encryption_type == 'DEFAULT':
                     tables_without_encryption.append(table_name)
-                if not has_backup:
+                if has_backup is not True:
                     tables_without_backup.append(table_name)
 
                 tables.append(DynamoDBTable(
@@ -3134,17 +3169,30 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                     has_backup=has_backup,
                     billing_mode=billing_mode,
                     item_count=item_count,
+                    deletion_protection_enabled=deletion_protection,
                 ))
 
             except ClientError as e:
                 code = get_error_code(e)
                 print(f'DynamoDB describe skipped for 1 table: {code}')
+                if code in _DENIED_CODES:
+                    denied = True
+                else:
+                    failed = True
             except Exception as e:
+                failed = True
                 print(f'DynamoDB describe skipped for 1 table: {safe_exc(e)}')
+
+        if denied:
+            warnings.append('DynamoDB table details skipped: insufficient permissions')
+        if failed:
+            warnings.append('DynamoDB table details skipped: read error')
+        status = 'denied' if denied else 'error' if failed else 'ok'
 
     except ClientError as e:
         code = get_error_code(e)
-        if code in ['AccessDenied', 'UnauthorizedOperation']:
+        if code in _DENIED_CODES:
+            status = 'denied'
             msg = 'DynamoDB scan skipped: insufficient permissions'
             print('DynamoDB scan skipped: insufficient permissions')
             warnings.append(msg)
@@ -3163,6 +3211,7 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
         tables_without_encryption=tables_without_encryption,
         tables_without_backup=tables_without_backup,
         tables=tables,
+        collection_status={'dynamodb': status},
     )
 
 

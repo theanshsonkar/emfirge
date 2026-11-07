@@ -12,7 +12,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from app.aws_collector import collect_ec2, collect_lambda, collect_rds, collect_s3, collect_scheduler, collect_vpc
+from app.aws_collector import collect_ec2, collect_dynamodb, collect_lambda, collect_rds, collect_s3, collect_scheduler, collect_vpc
 from app.models import AWSInfrastructure, NACLEntry
 from app.mutations import Change, apply_changes
 from app.typed_handback import build_api_calls
@@ -53,10 +53,11 @@ def _resource(state, typ, ident):
         "route_table": state.vpc.route_tables,
         "network_acl": state.vpc.nacls,
         "scheduler_schedule": state.scheduler.schedules,
+        "dynamodb_table": state.dynamodb.tables,
     }
     if typ == "scheduler_schedule":
         return next((x for x in groups[typ] if f"{x.group_name}/{x.name}" == ident), None)
-    key = "name" if typ in {"s3_bucket", "lambda_function"} else "id"
+    key = "name" if typ in {"s3_bucket", "lambda_function", "dynamodb_table"} else "id"
     return next((x for x in groups[typ] if getattr(x, key) == ident), None)
 
 
@@ -269,6 +270,40 @@ def test_scheduler_update_that_would_wipe_an_input_payload_is_not_handed_back():
     from app.typed_handback import UnmappableChanges
     with pytest.raises(UnmappableChanges):
         build_api_calls(base, [Change(op="modify", resource_type="scheduler_schedule", resource_id="default/roundtrip-schedule", fields={"state": "ENABLED"})])
+
+
+def _table(name="roundtrip-table", items=2):
+    client = _client("dynamodb")
+    client.create_table(TableName=name, KeySchema=[{"AttributeName": "k", "KeyType": "HASH"}],
+                        AttributeDefinitions=[{"AttributeName": "k", "AttributeType": "S"}], BillingMode="PAY_PER_REQUEST")
+    for number in range(items):
+        client.put_item(TableName=name, Item={"k": {"S": f"i{number}"}})
+    return client
+
+
+def test_dynamodb_pitr_and_deletion_protection_modify_roundtrip():
+    client = _table()
+    client.update_continuous_backups(TableName="roundtrip-table", PointInTimeRecoverySpecification={"PointInTimeRecoveryEnabled": True})
+    def collect(): return _base(_collect(collect_dynamodb), "dynamodb")
+    base = collect()
+    assert (base.dynamodb.tables[0].pitr_enabled, base.dynamodb.tables[0].item_count) == (True, 2)
+    off = Change(op="modify", resource_type="dynamodb_table", resource_id="roundtrip-table", fields={"pitr_enabled": False})
+    assert [item["operation"] for item in build_api_calls(base, [off])] == ["UpdateContinuousBackups"]
+    _roundtrip(base, off, collect, "dynamodb_table", "roundtrip-table", ["pitr_enabled"])
+    assert collect().dynamodb.tables[0].pitr_enabled is False
+    protect = Change(op="modify", resource_type="dynamodb_table", resource_id="roundtrip-table", fields={"deletion_protection_enabled": True})
+    _roundtrip(collect(), protect, collect, "dynamodb_table", "roundtrip-table", ["deletion_protection_enabled"])
+    assert collect().dynamodb.tables[0].deletion_protection_enabled is True
+
+
+def test_dynamodb_delete_roundtrip_and_a_backup_survives_the_table():
+    client = _table()
+    client.create_backup(TableName="roundtrip-table", BackupName="roundtrip-backup")
+    def collect(): return _base(_collect(collect_dynamodb), "dynamodb")
+    base = collect()
+    assert base.dynamodb.tables[0].has_backup is True
+    _roundtrip(base, Change(op="delete", resource_type="dynamodb_table", resource_id="roundtrip-table", fields={}), collect, "dynamodb_table", "roundtrip-table", [])
+    assert client.list_backups(TableName="roundtrip-table")["BackupSummaries"][0]["BackupStatus"] == "AVAILABLE"
 
 
 def test_tampered_handback_call_is_detected():

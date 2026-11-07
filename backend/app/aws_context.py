@@ -27,7 +27,7 @@ from app.context_query import (
     SourceInfo, TagLine, UseLine, VIRTUAL_NODE_IDS, answer,
 )
 from app.cost import estimate_monthly_cost, unknown_reason
-from app.delete_lens import DATA_STORE_TYPES, RECENT_USE_DAYS, recovery_point_for, role_recent_use
+from app.delete_lens import DATA_STORE_TYPES, RECENT_USE_DAYS, recovery_assessment, role_recent_use
 from app.egraph import Graph, build_graph
 from app.evidence_models import EvidenceRecord, parse_iso
 from app.exposure import compute_exposures
@@ -42,14 +42,14 @@ QUESTION_SOURCES: dict[str, tuple[str, ...]] = {
     "dependents": ("ebs_volumes", "scheduler", "cloudfront"),
     "reachable": ("network_interfaces",),
     "access": (),
-    "data": ("ebs_snapshots", "ebs_volumes", "rds_snapshots"),
+    "data": ("ebs_snapshots", "ebs_volumes", "rds_snapshots", "dynamodb"),
     "cost": ("ebs_volumes",),
     "live": ("iam_role_last_used",),
     "marks": (),
     "baseline": ("scheduler",),
 }
 # Which snapshot source must be readable before "no recovery point" can be said.
-_SNAPSHOT_SOURCE = {"ebs_volume": "ebs_snapshots", "rds_instance": "rds_snapshots"}
+_SNAPSHOT_SOURCE = {"ebs_volume": "ebs_snapshots", "rds_instance": "rds_snapshots", "dynamodb_table": "dynamodb"}
 
 
 _ERROR_DETAIL = re.compile(r"(unexpected error)\s*[\u2014-].*", re.S)
@@ -85,19 +85,20 @@ def _data_lines(infra: AWSInfrastructure, graph: Graph) -> list[DataLine]:
         [("s3_bucket", b.name, b) for b in infra.s3.buckets]
         + [("rds_instance", d.id, d) for d in infra.rds.rds_instances]
         + [("ebs_volume", v.id, v) for v in infra.ec2.ebs_volumes]
+        + [("dynamodb_table", t.name, t) for t in infra.dynamodb.tables]
     )
     lines = []
     for resource_type, rid, item in stores:
         assert resource_type in DATA_STORE_TYPES
         # Existing resource: default delete options, so only a surviving snapshot (or an empty bucket) counts.
-        point = recovery_point_for(resource_type, rid, item.model_dump(), {}, rds_snapshots, ebs_snapshots)
+        point, unknown_why = recovery_assessment(resource_type, rid, item.model_dump(), {}, rds_snapshots, ebs_snapshots)
         node_id = _node_id(graph, resource_type, rid)
         if point is not None:
             lines.append(DataLine(node_id, resource_type, True,
                                   (point.source_id,) if point.source_id != rid else (), (point.kind,)))
             continue
         needed = _SNAPSHOT_SOURCE.get(resource_type)
-        readable = needed is None or infra.collection.get(needed) == "ok"
+        readable = unknown_why is None and (needed is None or infra.collection.get(needed) == "ok")
         lines.append(DataLine(node_id, resource_type, False if readable else None))
     return lines
 
@@ -189,8 +190,10 @@ def build_bundle(infra: AWSInfrastructure, graph: Graph, *, source: SourceInfo,
     permissions, permission_notes = _permission_lines(infra, graph)
     unknown = {
         "access": [Note(*NOTE_ACTION_CATALOG), Note(*NOTE_TARGET_GRANULARITY)],
-        "data": [Note("data_store_types", "only s3_bucket, rds_instance and ebs_volume are assessed; "
-                                          "other data stores (tables, queues, caches, secrets) have no recovery assessment")],
+        "data": [Note("data_store_types", "only s3_bucket, rds_instance, ebs_volume and dynamodb_table are assessed; "
+                                          "other data stores (queues, caches, secrets) have no recovery assessment"),
+                 Note("table_backups", "a table's recovery points are its on-demand backups made with DynamoDB and its point-in-time recovery; "
+                                       "backups made with the AWS Backup service are not read")],
         "marks": ([Note("tags:unmodeled_types", "the snapshot has no tag field for: " + ", ".join(untagged_types))]
                   if untagged_types else []),
     }

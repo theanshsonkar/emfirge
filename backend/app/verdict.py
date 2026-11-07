@@ -176,7 +176,8 @@ def recovery_removals(base_infra: Any, branch_infra: Any) -> list[tuple[str, str
     """Recovery points the branch removes, as sorted (resource_id, resource_type) pairs.
 
     A deleted RDS/EBS snapshot, automated backups turned off on a database
-    that had them, or bucket versioning turned off. One truth for the
+    that had them, bucket versioning turned off, or a DynamoDB table's
+    point-in-time recovery turned off. One truth for the
     ``recovery_point_removed`` reason and the check's data facts.
     """
     removed: set[tuple[str, str]] = set()
@@ -198,6 +199,11 @@ def recovery_removals(base_infra: Any, branch_infra: Any) -> list[tuple[str, str
             if (_value(old, "name") == _value(new, "name")
                     and _value(old, "versioning_enabled", False) is True and _value(new, "versioning_enabled", False) is False):
                 removed.add((str(_value(old, "name")), "s3_bucket"))
+    for old in _value(_value(base_infra, "dynamodb", {}), "tables", []) or []:
+        for new in _value(_value(branch_infra, "dynamodb", {}), "tables", []) or []:
+            if (_value(old, "name") == _value(new, "name")
+                    and _value(old, "pitr_enabled", None) is True and _value(new, "pitr_enabled", None) is False):
+                removed.add((str(_value(old, "name")), "dynamodb_table"))
     return sorted(removed)
 
 
@@ -780,6 +786,9 @@ def combined_verdict(
         reasons.append(_reason("warn", "recent_activity", "CloudTrail shows recent changes to a deleted resource", cloudtrail_recent_ids))
     if no_recovery:
         reasons.append(_reason("block", "data_store_deleted_no_recovery_point", "Deleted data store has no recovery point", _resource_ids(item.get("resource_id") for item in no_recovery)))
+    recovery_unknown = _resource_ids(item.resource_id for item in deletion.recovery_unknown)
+    if recovery_unknown:
+        reasons.append(_reason("warn", "data_store_deleted_recovery_unknown", "Deleted data store: whether data is lost could not be determined", recovery_unknown))
     if recovered_deleted:
         reasons.append(_reason("warn", "data_store_deleted_with_recovery_point", "Deleted data store has a surviving recovery point", _resource_ids(recovered_deleted)))
     if data_lost and any(item.resource_id not in {x.resource_id for x in deletion.data_lost} for item in deletion.recovery_points):
