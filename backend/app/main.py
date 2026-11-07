@@ -3312,7 +3312,7 @@ def create_ci_key(request: CIAPIKeyRequest):
 
 @app.get('/ci/api-keys', dependencies=[Depends(legacy_ci_enabled)])
 def list_ci_keys(installation_id: int):
-    """List CI/CD API keys for an installation (shows prefixes only)."""
+    """List CI/CD API keys for an installation (masked; key material is never returned)."""
     return get_ci_api_keys(installation_id)
 
 
