@@ -4484,7 +4484,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
 # Deterministic mutation: Python mutates graph, Claude only writes prose.
 
 @app.post('/simulate/component', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def simulate_component(request: ComponentRequest, http_request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+def simulate_component(request: ComponentRequest, http_request: Request, raw: bool = False, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     """
     Simulate adding/modifying a component in the infrastructure.
     
@@ -4784,7 +4784,7 @@ def simulate_component(request: ComponentRequest, http_request: Request, caller:
     # ── CLAUDE NARRATIVE (Haiku — fast) ───────────────────────────
     narrative = {'verdict': '', 'severity': 'low', 'summary': '', 'recommendations': []}
     try:
-        if _is_raw_mode(http_request):
+        if _is_raw_mode(http_request, raw):
             # Raw (MCP) mode: the host is already an LLM; never send data to a second one.
             raise _RawModeNoLLM()
         anthropic_client = anthropic_lib.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'), timeout=30)

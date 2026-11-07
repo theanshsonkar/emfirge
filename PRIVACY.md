@@ -154,8 +154,8 @@ The backend calls two AI providers. These are the only calls in the code:
 `X-Source: mcp`) or the raw flag. Then the backend does not call a model. It
 returns a plain, rule-based answer instead, and your own AI host writes the
 text. Every request the MCP's backend client sends carries that header.
-`/simulate/component` honours the header only (not the query flag). It never
-calls a model for the MCP. <!-- law: L71e -->
+`/simulate/component` honours the header and the query flag, like the other
+endpoints. It never calls a model for the MCP. <!-- law: L71e -->
 
 Anyone else calling these endpoints (for example the web dashboard, or `curl`
 without the header) sends the real resource IDs shown above to Gemini or

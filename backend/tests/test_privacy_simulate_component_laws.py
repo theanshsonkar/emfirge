@@ -50,3 +50,11 @@ def test_L71e_non_raw_mode_still_uses_the_llm_path(client, llm_calls):
     response = client.post("/simulate/component", json=BODY)
     assert response.status_code == 200, response.text
     assert llm_calls == ["client constructed"]  # failure falls back to the deterministic narrative
+
+
+def test_L71e_raw_query_flag_never_calls_an_llm(client, llm_calls):
+    response = client.post("/simulate/component?raw=true", json=BODY)
+    assert response.status_code == 200, response.text
+    assert llm_calls == []
+    narrative = response.json()["narrative"]
+    assert narrative["verdict"] and narrative["summary"]
