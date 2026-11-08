@@ -344,7 +344,7 @@ mark.todo { background: rgba(255, 196, 0, .22); color: var(--ink); font-family: 
 .fr-verbmap > svg, .fr-ways > svg { min-width: 560px; }
 .fr-role > svg { min-width: 560px; }
 .fr-branch .cv, .fr-coverage .cv { height: auto; }
-.fr-coverage .cv { aspect-ratio: 640 / 250; }
+.fr-coverage .cv { aspect-ratio: 640 / 375; }
 .covfig { width: 100%; }
 .mt { font-family: var(--font-geist-mono), monospace; font-size: 10px; font-weight: 500; letter-spacing: .6px; fill: var(--ink); }
 .steps { list-style: none; margin: 0; padding: 26px 34px 22px; display: flex; justify-content: space-between; position: relative; counter-reset: s; }
@@ -444,7 +444,7 @@ mark.todo { background: rgba(255, 196, 0, .22); color: var(--ink); font-family: 
   .steps .label { font-size: 8.5px; letter-spacing: .3px; }
   .tok { grid-template-columns: 1fr; padding: 20px 16px 10px; }
   .tk-m { flex-direction: row; justify-content: center; transform: rotate(90deg); }
-  .fr-coverage .cv { aspect-ratio: 350 / 330; }
+  .fr-coverage .cv { aspect-ratio: 350 / 440; }
 }
 @media (prefers-reduced-motion: reduce) {
   .steps::after { transition: none; transform: scaleX(1); }

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLive } from "./useLive";
 
 // Security figure 2: an account ID scrambles into a token once, in view, on your machine, before the model. Final text without motion.
-const REAL = "123456789012", TOKEN = "acct_7f3a…", POOL = "0123456789abcdef";
+const REAL = "123456789012", TOKEN = "ACCOUNT_001", POOL = "0123456789abcdef";
 
 export function TokenFig() {
   const { ref, live, still } = useLive<HTMLDivElement>();

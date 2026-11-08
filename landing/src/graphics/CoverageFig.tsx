@@ -10,6 +10,14 @@ const grid = (n: number) => (u: number, v: number) => (edge(u, v, 0.06) ? 1 : Ma
 const solid = (u: number, v: number): number => (edge(u, v, 0.08) ? 1 : 0.55);
 const dashed = (u: number, v: number): number => (edge(u, v, 0.1) ? ((Math.floor(u * 8) + Math.floor(v * 8)) % 2 === 0 ? 1 : 0.4) : 0.14);
 const key = (u: number, v: number) => { const d = Math.hypot(u - 0.35, v - 0.45); return d < 0.2 && d > 0.1 ? 1 : v > 0.42 && v < 0.5 && u > 0.5 && u < 0.85 ? 1 : edge(u, v, 0.05) ? 0.6 : 0.15; };
+const rows = (u: number, v: number): number => (edge(u, v, 0.06) ? 1 : Math.floor(v * 5) % 2 === 0 ? 0.85 : 0.2);
+const clock = (u: number, v: number): number => {
+  const d = Math.hypot(u - 0.5, v - 0.5);
+  if (d > 0.36 && d < 0.46) return 1;
+  if (Math.abs(u - 0.5) < 0.045 && v > 0.2 && v < 0.5) return 1;
+  if (Math.abs(v - 0.5) < 0.045 && u > 0.5 && u < 0.72) return 1;
+  return edge(u, v, 0.05) ? 0.6 : 0.12;
+};
 const disk = (z: number, g: number, p: (u: number, v: number) => number = solid) => box(0, 0, z, 6, 6, 0.9, g, { top: p, left: p, right: p });
 
 type Item = { name: string; ops: string; scene: Quad[] };
@@ -23,18 +31,22 @@ const ITEMS: Item[] = [
   { name: "iam_role", ops: "amd", scene: box(0, 0, 0, 6, 6, 4.5, 0, { top: solid, left: key, right: bands(5) }) },
   { name: "iam_role_policy", ops: "m", scene: [0, 1.5, 3].flatMap((z, i) => box(0, 0, z, 7, 7, 0.5, i, { top: bands(7), left: solid, right: solid })) },
   { name: "iam_user", ops: "a", scene: [...box(0, 0, 0, 7, 4, 2.5, 0, { top: solid, left: solid, right: solid }), ...box(2, 0.5, 2.5, 3, 3, 3, 1, { top: solid, left: solid, right: solid })] },
+  { name: "iam_instance_profile", ops: "a", scene: [...box(0, 0, 0, 3, 3, 3, 0, { top: solid, left: key, right: solid }), ...box(5, 0, 0, 3, 3, 3, 1, { top: solid, left: solid, right: bands(4) }), ...box(3, 1, 1, 2, 1, 0.8, 2, { top: solid, left: solid, right: solid })] },
   { name: "nat_gateway", ops: "a", scene: box(0, 0, 0, 6, 6, 3.5, 0, { top: (u, v) => (Math.abs(u - 0.5) < 0.09 || (v < 0.32 && Math.abs(u - 0.5) < 0.4 - v) ? 1 : edge(u, v, 0.08) ? 1 : 0.2), left: solid, right: bands(5) }) },
   { name: "route_table", ops: "am", scene: box(0, 0, 0, 8, 8, 0.9, 0, { top: (u, v) => (edge(u, v, 0.05) || Math.abs(v - 0.5) < 0.07 || (u > 0.5 && Math.abs(v - 0.2) < 0.06) || (u > 0.5 && Math.abs(v - 0.8) < 0.06) ? 1 : 0.1), left: solid, right: solid }) },
   { name: "rds_snapshot", ops: "ad", scene: [disk(0, 0, dashed), disk(1.4, 1, dashed)].flat() },
   { name: "ebs_volume", ops: "ad", scene: box(0, 0, 0, 5, 5, 4.6, 0, { top: solid, left: bands(7), right: bands(7) }) },
   { name: "ebs_snapshot", ops: "d", scene: box(0, 0, 0, 5, 5, 3.4, 0, { top: dashed, left: dashed, right: dashed }) },
+  { name: "dynamodb_table", ops: "md", scene: [...box(0, 0, 0, 8, 6, 1.6, 0, { top: rows, left: bands(3), right: bands(3) }), ...box(0, 0, 2.6, 8, 6, 1.6, 1, { top: rows, left: bands(3), right: bands(3) })] },
+  { name: "cloudfront_distribution", ops: "m", scene: [...box(0, 0, 0, 9, 9, 0.8, 0, { top: dashed, left: solid, right: solid }), ...box(3, 3, 0.8, 3, 3, 4, 1, { top: solid, left: bands(5), right: bands(5) }), ...box(0.6, 0.6, 0.8, 1.8, 1.8, 1.8, 2, { top: solid, left: solid, right: solid }), ...box(6.6, 0.6, 0.8, 1.8, 1.8, 1.8, 2, { top: solid, left: solid, right: solid }), ...box(0.6, 6.6, 0.8, 1.8, 1.8, 1.8, 2, { top: solid, left: solid, right: solid }), ...box(6.6, 6.6, 0.8, 1.8, 1.8, 1.8, 2, { top: solid, left: solid, right: solid })] },
+  { name: "scheduler_schedule", ops: "amd", scene: box(0, 0, 0, 7, 7, 1.6, 0, { top: clock, left: solid, right: solid }) },
 ];
 
 export function CoverageFig() {
   const cache = useRef<{ key: string; dots: Dot[][]; cw: number; ch: number; n: number } | null>(null);
   const draw = useCallback<DrawFn>((ctx, w, h, t, still) => {
-    const n = w >= 560 ? 7 : 5, rows = Math.ceil(ITEMS.length / n);
-    const cw = w / n, ch = h / rows, k = `${w}x${h}`;
+    const n = w >= 560 ? 6 : 5, nrows = Math.ceil(ITEMS.length / n);
+    const cw = w / n, ch = h / nrows, k = `${w}x${h}`;
     const art = Math.min(cw * 0.78, ch * 0.5);
     if (!cache.current || cache.current.key !== k) {
       const pitch = cw < 80 ? 2.6 : 3.2;
@@ -43,6 +55,19 @@ export function CoverageFig() {
     ctx.clearRect(0, 0, w, h);
     const mono = getComputedStyle(document.documentElement).getPropertyValue("--font-geist-mono") || "monospace";
     ctx.font = `500 ${cw < 80 ? 7 : 8}px ${mono}`; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    // Long names break at an underscore to fit the cell; the pips of a row sit under its longest label.
+    const labelLines = (name: string): string[] => {
+      if (ctx.measureText(name).width <= cw - 6) return [name];
+      let best = [name], bw = Infinity;
+      for (const m of name.matchAll(/_/g)) {
+        const a = name.slice(0, m.index! + 1), b = name.slice(m.index! + 1);
+        const lw = Math.max(ctx.measureText(a).width, ctx.measureText(b).width);
+        if (lw < bw) { bw = lw; best = [a, b]; }
+      }
+      return best;
+    };
+    const lines = ITEMS.map((it) => labelLines(it.name));
+    const rowLines = Array.from({ length: nrows }, (_, r) => Math.max(...lines.slice(r * n, r * n + n).map((l) => l.length)));
     ITEMS.forEach((it, i) => {
       const cx = (i % n) * cw + cw / 2, top = Math.floor(i / n) * ch + 12;
       const on = still ? 1 : Math.min(1, Math.max(0, (t - i * 0.11) / 0.5));
@@ -58,11 +83,12 @@ export function CoverageFig() {
       }
       const ly = top + art * 0.82 + 14;
       ctx.fillStyle = `rgba(11,16,21,${0.6 * on})`;
-      ctx.fillText(it.name, cx, ly);
+      lines[i].forEach((ln, li) => ctx.fillText(ln, cx, ly + li * 9));
+      const py = ly + (rowLines[Math.floor(i / n)] - 1) * 9;
       // pips: add (green), modify (outlined), delete (red)
       const px = cx - 11;
       [["a", "#0A7A4B"], ["m", "#0B1015"], ["d", "#C4574A"]].forEach(([op, col], j) => {
-        const has = it.ops.includes(op), x = px + j * 11, y = ly + 6;
+        const has = it.ops.includes(op), x = px + j * 11, y = py + 6;
         ctx.globalAlpha = (has ? 1 : 0.35) * on;
         if (!has) { ctx.fillStyle = "rgba(11,16,21,.25)"; ctx.fillRect(x + 2, y + 2, 2, 2); }
         else if (op === "m") { ctx.strokeStyle = col; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, 5, 5); }
@@ -72,6 +98,6 @@ export function CoverageFig() {
     });
   }, []);
   const ref = useCanvas(draw, { fps: 20 });
-  return <canvas ref={ref} className="cv covfig" role="img" aria-label="Fourteen resource types, each marked with the operations a branch supports" />;
+  return <canvas ref={ref} className="cv covfig" role="img" aria-label="Eighteen resource types, each marked with the operations a branch supports" />;
 }
 export default CoverageFig;

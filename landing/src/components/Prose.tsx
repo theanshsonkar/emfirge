@@ -37,7 +37,7 @@ export function Prose() {
       <p>
         We built the hard parts: a branch engine for your live AWS, <b>six checks</b> that say what a change does to your
         data, exposure, money, availability, control and the outside world, and a <b>record</b> of what was applied,
-        verified against CloudTrail.
+        bound by hash to the verdict it was judged with.
       </p>
       <p>
         <b>Emfirge supplies the truth. Your agent supplies the intelligence.</b> Emfirge has no AI inside: the same branch

@@ -26,17 +26,17 @@ Intelligence is no longer the constraint. Trust is.
 
 Agents can already write the Terraform and run the CLI. What they can't do is see what a change will break, and owners can't let them near production without that.
 
-We built the hard parts: a branch engine for your live AWS, six checks that say what a change does to your data, exposure, money, availability, control and the outside world, and a record of what was applied, verified against CloudTrail.
+We built the hard parts: a branch engine for your live AWS, six checks that say what a change does to your data, exposure, money, availability, control and the outside world, and a record of what was applied, bound by hash to the verdict it was judged with.
 
 Emfirge supplies the truth. Your agent supplies the intelligence. Emfirge has no AI inside: the same branch always gets the same answer, and it never writes to your cloud.
 
-Figure 1. A change enters emfirge in any format and runs on a branch of your live cloud. Six checks answer with facts; a block goes back to the agent, which changes its plan. Only a passing change reaches your agent's context to apply.
+Figure 1. A change enters emfirge in any format and runs on a branch of your live cloud. Six checks answer with facts, and the verdict reads pass, warn or block. The agent reads them, changes its plan and tries again. The change that is left comes back as a hand-back, bound by hash to its verdict.
 
 ## What we do
 
 - **A true model of your cloud.** What exists, what's live, what depends on what, and what each identity can reach, read through a role you can revoke any time.
 - **A branch for every change.** Your agent tries AWS CLI commands, Terraform plans and CloudFormation change sets on a copy of live, never on production.
-- **Six checks, no AI inside.** Data, exposure, money, availability, control, outside world. Deterministic, and unknown never passes.
+- **Six checks, no AI inside.** Data, exposure, money, availability, control, outside world. Deterministic, and what it cannot check is listed as unknown, never as safe.
 
 Every check comes from public data: AWS's own API models and Price List, pathfinding.cloud, Prowler and policy_sentry. Not hand-written lists.
 
@@ -48,13 +48,13 @@ Numbers, counted from the repository:
 
 | What | Count | How it was counted |
 |---|---|---|
-| Engine tests (backend) | 2,432 | `pytest --collect-only` in backend/ |
-| MCP + CLI tests | 102 | `npm test` in mcp/ |
-| Laws | 48 | README, "Built to be trusted" |
-| Modeled resource types | 14 | `SUPPORTED_RESOURCE_TYPES` in backend/app/mutations.py |
+| Engine tests (backend) | 3,247 | `pytest --collect-only` in backend/ |
+| MCP + CLI tests | 206 | `npm test` in mcp/ |
+| Laws | 88 | distinct L1 to L88 ids in the tests |
+| Modeled resource types | 18 | `SUPPORTED_RESOURCE_TYPES` in backend/app/mutations.py |
 | pathfinding.cloud escalation paths | 92 | backend/app/data/pathfinding_paths.json |
 | Scanner check reads | 55 | backend/app/data/scanner_check_reads.json |
-| Native reason codes | 30 | distinct codes in backend/app/verdict.py |
+| Native reason codes | 32 | distinct codes in backend/app/verdict.py |
 | Prowler check metadata files | 21 | backend/app/data/third_party/prowler/checks |
 | Severity crosswalk entries | 21 | backend/app/data/scanner_severity_crosswalk.json |
 
@@ -95,27 +95,28 @@ Privacy: https://github.com/theanshsonkar/emfirge/blob/main/PRIVACY.md
 ### Install
 
 ```
-npx @emfirge/cli@latest connect
+npx emfirge login
+npx emfirge connect
 ```
 
-This signs you in and connects emfirge to the AWS account through a read-only IAM role (one CloudFormation click; delete the stack to revoke). Full steps: https://emfirge.cloud/quickstart.md
+`login` signs you in with GitHub or Google in your browser. `connect` prints a one-click CloudFormation link that creates a read-only IAM role (delete the stack to revoke). Then scan with `emfirge context --refresh --role-arn ARN --region REGION`. Add `-y` to skip npx's first-run prompt: `npx -y emfirge ...`. Node.js 20 or later. Full steps: https://emfirge.cloud/quickstart.md
 
-### The six verbs
+### The verbs
 
-1. `context`: ask what is true (what exists, what depends on what, the owner's marks in emfirge.md).
-2. `branch`: open, fork, compare, roll back or discard a copy of the live cloud model. Live never moves.
-3. `try`: put a change on the branch (AWS CLI command, AWS API call, Terraform plan, CloudFormation change set, or a typed change).
-4. `check`: six checks answer with facts: data, exposure, money, availability, control, outside world.
-5. `request`: ask the owner when a check says to.
-6. `report`: record what you applied, so emfirge can verify it against CloudTrail.
+1. `context`: ask what is true (`emfirge context inventory`; 11 questions: inventory, resource, depends_on, dependents, reachable, access, data, cost, live, marks, baseline).
+2. `branch`: `open`, `fork`, `list`, `get`, `rollback`, `rollback-to`, `discard`, `compare` a copy of the live cloud model. Live never moves.
+3. `try`: put a change on the branch (`--typed`, `--aws-cli`, `--aws-api`, `--terraform`, `--cloudformation`).
+4. `check`: six answers with facts, what was checked and what is unknown: data, exposure, money, availability, control, outside world. Plus `changed_settings`. `--verdict` gives pass, warn or block.
+5. `request`: ask the owner. Not built yet: it exits 1.
+6. `report`: the hand-back of what you applied, bound by hash to the verdict (`--verify` checks the binding).
 
-Every flag: https://emfirge.cloud/cli.md
+Every flag: https://emfirge.cloud/cli.md. Run `emfirge guide` for the agent guide.
 
 ### Rules
 
-- Never apply a change that did not pass.
-- A block is a fact. Change your plan and retry on a new branch; do not argue with it or route around it.
-- Read emfirge.md in the project for the facts about this cloud before proposing changes.
-- Emfirge never writes to the cloud. Applying a passing change is your job, with your own credentials.
-- Unknown never passes. If a check could not run, the verdict says so.
-- Use `--json` when you read output. Exit codes: 0 pass, 1 warn or ask, 2 block, 3 error.
+- Emfirge never writes to the cloud. You apply your own change, with your own access.
+- Facts, not fixes. Emfirge will not tell you what to do.
+- Unknown means not checked. It never means safe. Read every `unknown` entry and every changed setting that is not judged.
+- Names and IDs come back as tokens (`S3_001`, `NAME_003`, `TAG_001`). Pass them back as they are.
+- Emfirge keeps no plan text, only its SHA-256. Apply your own original plan.
+- Output is JSON on stdout (`--human` for short text); errors are JSON on stderr. Exit codes: 0 ok, 1 usage or rejected input, 2 not signed in, 3 not found, 4 server error or rate limit, 5 conflict, 6 needs a newer emfirge (run `npx emfirge@latest`). A finding never changes the exit code.

@@ -12,7 +12,7 @@ Before it goes live, every claim must be checked against the code (roadmap guard
 - Core line: **Emfirge supplies the truth. Your agent supplies the intelligence.**
 - Audience: solo developers and small teams with one AWS account who already use coding agents
   (Claude Code, Codex, Cursor, Gemini CLI, Kiro, Cline...).
-- Product shape: a CLI (`npx @emfirge/cli@latest`) that any agent can run from a shell. MCP is an extra adapter.
+- Product shape: a CLI (`npx emfirge`) that any agent can run from a shell. MCP is an extra adapter.
 - Never: "we scan your cloud", "AI-powered", "guarantee". Emfirge has no AI inside; it is deterministic.
 
 ## Visual direction: "Forge at night"
@@ -45,7 +45,7 @@ Mobile: logo + Get started + menu toggle.
 - Eyebrow pill: `● emfirge cli v1 · AWS`
 - H1 (serif, ~88px desktop / 48px mobile): "The harness for *cloud* agents." ("cloud" in italic orange)
 - Sub: "Your coding agent has files, a branch, tests and a log. Emfirge gives it the same when it touches your cloud: a true model of your AWS, a branch to try changes on, and facts about what would break, before anything reaches production."
-- CTAs: copyable command box `npx @emfirge/cli@latest connect` (copy button) + secondary link "Read the docs →".
+- CTAs: copyable command box `npx emfirge connect` (copy button) + secondary link "Read the docs →".
 - Small line under CTAs: "Read-only. Works with any agent that can run a shell."
 - Right/below: **animated terminal** (the signature visual), titled `~/infra — claude`. Script:
 
@@ -158,7 +158,7 @@ Grid of 6:
 
 ### 13. Get started (3 steps)
 H2: "Two minutes to a safe cloud agent."
-1. `npx @emfirge/cli@latest connect`: sign in.
+1. `npx emfirge connect`: sign in.
 2. One-click CloudFormation link creates a read-only role. Delete the stack any time to revoke.
 3. Tell your agent: "Use emfirge before you change anything in AWS."
 CTA buttons: Get started (orange) · Read the docs.
@@ -180,22 +180,22 @@ Footer: logo, "The harness for cloud agents.", links (Docs, GitHub, Privacy, Sec
 - GitHub: https://github.com/theanshsonkar/emfirge
 - Privacy/Security: GitHub blob links to PRIVACY.md / SECURITY.md
 
-## Aspirational today (verify before launch)
-- The CLI, `@emfirge/cli` package name, and verb flags (CLI not built; name open).
-- `request`, `report`, CloudTrail verification, `emfirge.md` boundaries (roadmap v2/PROPOSED).
-- Six damage questions as signals (LEANING), consequence-fact `check` output.
-- "Private by default" while PRIVACY.md audit findings (roadmap §5) are open.
-- Coverage of CloudFront, DynamoDB, EventBridge Scheduler (not modeled yet).
-- The numbers in the terminal demo are illustrative.
-- v4: FAQ answer "there will always be a free tier for one account" (post-beta pricing) is a commitment not yet decided; the hero and tab terminal transcripts, resource names and numbers are illustrative.
-- v7 (the website is the docs), written "as if built", none of it exists yet:
-  - the whole `emfirge` CLI and the `@emfirge/cli` package: `connect`, `login`, `logout`, `status`, `privacy`, `tokens`, `purge`, global flags (`--json`, `--branch`, `--region`, `--revision`, `--no-color`) and the exit codes 0/1/2/3 (marked [TODO Ansh: confirm] on /cli);
-  - the six verbs' flags: `context` (`--about`, `--paths`, `--findings`, `--compliance`, `--usage --approve`, `--refresh`), `branch` (`new`, `fork`, `list`, `show`, `compare`, `rollback --to`, `discard`), `try` (`--aws-cli`, `--terraform`, `--cfn`, `--aws-api`, typed `--op/--type/--id/--fields`, `--delete`), `check` (`--diff`, `--only`, `--policy-checks --approve`);
-  - `request` (ask the owner, `--wait`, `request status`) and `report` (`--calls`, `--verify`, `report show`), including the CloudTrail after-check, which may need `cloudtrail:LookupEvents` added to iam-role.yaml;
-  - owner thresholds and the tell/ask defaults ("Tell vs ask" on /how-it-works), and `emfirge.md` read as context and enforced as boundaries;
-  - the Control and Outside-world checks (no reason codes exist in verdict.py yet) and a Money reason code;
-  - `emfirge connect` printing a one-click CloudFormation link and detecting the role; "reading us-east-1 ... 214 resources" and every other terminal transcript on the new pages are illustrative;
-  - the MCP adapter exposing the same verbs: today it ships the 24 tools listed on /cli;
-  - the token form `acct_7f3a…` shown in the tokenization figure is illustrative (the engine's real tokens look like `SG_001`);
-  - "Free while in beta": confirm it is the actual commercial position (nothing is decided about after beta).
-- v7 truth notes: /security states that the 90-day retention sweep, full purge, and branch deletion are not built (roadmap §5 audit), so PRIVACY.md should be corrected to match; remove that sentence from the page when they ship.
+## As-if-built list (v8, 2026-11-08)
+
+Sections above are the original v1 spec and are superseded by DESIGN-v6.md (look) and DESIGN-v7.md (pages). Site v8 checked
+every statement on every page against the merged code; the sources are in `FACTS.md`. Built and now true on the site, so
+removed from this list: the CLI and its package name (`emfirge`), the verbs' flags, exit codes 0 to 6, the six damage answers
+in `check` with `changed_settings`, the server-served command list, the `context` query, coverage of CloudFront, DynamoDB
+and EventBridge Scheduler (18 resource types), purge and branch deletion, and the 27 MCP tools.
+
+Still not built or not decided (the site says "not built yet" or carries a visible `[TODO Ansh]`):
+- `emfirge request` (listed, exits 1 with `not_built`), the owner side of it (Tell vs ask, owner thresholds) and `emfirge.md`
+  (`context marks` says it is not built). The v7 "Tell vs ask" and "emfirge.md" sections were reduced to a "Not built yet"
+  section on /how-it-works; the v7 wording is in git history (commit 1c10452).
+- CloudTrail verification of what was applied: `report --verify` checks the hash binding on the server only.
+- Retention periods and sweeps (none exist; /security says so).
+- "Free while in beta" and everything about pricing after beta; beta usage limits on the production server (code defaults only).
+- Publishing: npm shows `emfirge` 0.1.1 as latest while the repo's CLI is 0.2.9.
+- A law that compares a typed change with the AWS API call (L18, L19, L21 cover the CLI, CloudFormation and Terraform).
+- Home placeholders: the "Writing" posts, the X handle, the status page (the footer text "All systems operational" has no source), the CLI announcement post.
+- The real-world scorecard numbers are recorded in `FACTS.md` section 10 and are deliberately not on the site.

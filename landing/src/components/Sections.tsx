@@ -67,7 +67,7 @@ export function SameCard({ style }: { style?: React.CSSProperties }) {
       <thead><tr><th>{m.same.cols[0]}</th><th>{m.same.cols[1]}</th></tr></thead>
       <tbody>
         {m.same.rows.map((r, i) => (
-          <tr key={r}><td>{r}</td><td className="d"><i className="gd" style={{ ["--i" as string]: i }} />Same verdict · {m.same.law}</td></tr>
+          <tr key={r.name}><td>{r.name}</td><td className="d"><i className="gd" style={{ ["--i" as string]: i }} />Same verdict · {r.law ?? r.note}</td></tr>
         ))}
       </tbody>
     </table>

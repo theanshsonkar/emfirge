@@ -1,61 +1,73 @@
 # One command, six verbs. The CLI, in one page.
 
-`emfirge` is a thin client for the hosted engine. It signs in, tokenizes identifiers on your machine, sends one verb, and prints the answer for a person or, with `--json`, for an agent. The six verbs follow an agent's workflow: context, branch, try, check, request, report.
+`emfirge` is a thin client for the hosted engine. It signs in, tokenizes identifiers on your machine, sends one command, and prints the answer as JSON, or as short text with `--human`. The verbs follow an agent's workflow: context, branch, try, check, request, report. `request` is listed but not built yet.
 
 Human version: https://emfirge.cloud/cli/
 
-*Figure 1. The six verbs follow an agent's loop: ask what is true, open a branch, try a change, check it, ask the owner if needed, report what was applied. The highlighted verb is the section you are reading.*
+*Figure 1. The six verbs follow an agent's loop: ask what is true, open a branch, try a change, check it, ask the owner (not built yet), get the hand-back of what was applied. The highlighted verb is the section you are reading.*
 
 ## Install and sign in
 
-**Run it with npx, or install it once.**
+**Run it with npx. There is nothing to install.**
 
 Terminal:
 
 ```
-npx @emfirge/cli@latest connect   # sign in and create the read-only role
-npm install -g @emfirge/cli       # optional: put `emfirge` on your PATH
+npx emfirge login      # sign in with GitHub or Google in your browser
+npx emfirge connect    # print the link that creates the read-only role
 ```
 
-Node.js 20 or later.
+The npm package is `emfirge` and the command is `emfirge`. Node.js 20 or later. It is one file with no dependencies. Agents add `-y` to skip npx's first-run prompt: `npx -y emfirge context inventory`. For a permanent command, `npm install -g emfirge` puts `emfirge` on your PATH.
 
 | Command | What it does |
 |---|---|
-| `emfirge connect` | Sign in, then walk through the read-only role and the first scan. The one command a person needs. |
-| `emfirge login` | Open the browser to sign in with GitHub or Google. Stores the session on this machine. |
-| `emfirge logout` | Sign out of this device. |
-| `emfirge status` | Show the signed-in account, the connected role, the privacy mode and the backend in use. |
-| `emfirge privacy [strict\|balanced\|off]` | Show or set the privacy mode. |
-| `emfirge tokens` | List the local identifier-to-token mappings. |
-| `emfirge purge --role-arn ARN` | Ask the backend to delete the scan data it holds for that account. Read what it removes first, on [Security & privacy](https://emfirge.cloud/security.md#retention). |
+| `emfirge login` | Sign in with GitHub or Google in your browser. Keeps the session in `~/.emfirge/credentials.json`. If `EMFIRGE_API_KEY` is set, it says so and uses the key. |
+| `emfirge logout` | Sign out on this device. |
+| `emfirge connect` | Print the one-click CloudFormation link that creates the read-only role, with your ExternalId and the next steps. When the stack is ready, use the role ARN from its Outputs in `emfirge context --refresh --role-arn ARN --region REGION`. |
+| `emfirge connect --link` | Link your saved sign-in to an existing API-key project. Needs `EMFIRGE_API_KEY`. |
+| `emfirge guide` | Print the agent guide: the loop, the rules, the exit codes. |
+| `emfirge --help`, `emfirge help COMMAND`, `emfirge COMMAND --help` | Help, from the server's current command list. |
+| `emfirge --version` | Print the version. |
 
-## Global options
+Nothing here asks for AWS access keys. The only thing that reaches your account is the role from `connect`; see [Security & privacy](https://emfirge.cloud/security.md#role). The commands `status`, `privacy`, `tokens` and `purge` belong to the [MCP adapter](#mcp-adapter), not to `emfirge`.
 
-**Same flags on every verb. Machine-readable output is one flag away.**
+## Where the commands come from
+
+**The server owns the command list, so a new command works without a new install.**
+
+`emfirge` fetches its command list from the server (`GET /cli/manifest`, public, with no customer data, 3 second timeout), builds its help from it, parses your arguments by it, and sends the request each command describes. If the server cannot be reached, it uses the copy built into the package, and says so when a command is unknown. The copy and the server's list are the same document, pinned by a test.
+
+Only login, logout, connect, guide and `request` are built in. A few manifest commands (`try`, and some modes of `context` and `check`) run code built into the CLI, because they need more than one request, a file or stdin. Run `npx emfirge@latest` only when emfirge tells you to: a command that needs a newer emfirge exits with code 6.
+
+Today the list has 12 commands: `context`, `branch open|fork|list|get|rollback|rollback-to|discard|compare`, `try`, `check` and `report`.
+
+## Global options and exit codes
+
+**JSON on stdout. Errors on stderr. One exit code per kind of failure.**
 
 | Flag or variable | Meaning |
 |---|---|
-| `--json` | Print one stable, key-sorted JSON document on stdout. Errors go to stderr. This is the mode agents should use. |
-| `--branch NAME` | The branch a verb acts on. Defaults to the branch you opened last. |
-| `--region REGION` | The AWS region to read or act on. Required where a scan has several. |
-| `--revision TOKEN` | A branch revision token from `branch show`. A stale token is rejected with HTTP 409. |
-| `--no-color` | Plain output for logs. |
-| `EMFIRGE_PRIVACY` | `strict` (default), `balanced` or `off`. Strict tokenizes every recognized AWS identifier before a model sees it. |
+| `--human` | Short readable output instead of JSON. |
+| `-h`, `--help` | Show help for the command. |
+| `--version`, `-v` | Print the version and exit. |
+| `EMFIRGE_API_KEY` | An API key, for CI where no browser can open. Skips browser sign-in. |
 | `EMFIRGE_BASE_URL` | Backend API URL. Defaults to `https://emfirge.cloud/api`. |
-| `EMFIRGE_API_KEY` | An API key, for CI where no browser can open. |
+| `EMFIRGE_PRIVACY` | `strict` (default), `balanced` or `off`. Strict tokenizes every recognized AWS identifier before a model sees it. |
+| `EMFIRGE_NO_BROWSER` | Set to `1` and `login` does not open a browser; it prints the sign-in address. |
 
-Local state lives in `~/.emfirge/`: your session and the token map. The token map never leaves your machine.
+Output is one JSON document on stdout. An error is one JSON line on stderr, `{"error":{"code","message","exit"}}`, and stdout stays empty. Names and IDs in the answer are tokens such as `S3_001`; pass them back as they are and emfirge turns them into real IDs on your machine. Local state lives in `~/.emfirge/`: your sign-in and the token map, which never leaves your machine.
 
 ### Exit codes
 
-| Code | Meaning |
-|---|---|
-| `0` | Pass. Nothing to tell or ask. |
-| `1` | Warn or ask. There are facts the agent should read, or a request is waiting for the owner. |
-| `2` | Block. The change must not be applied as it stands. |
-| `3` | Error. The command could not run (network, auth, bad input). This is not a verdict. |
-
-> [TODO Ansh: confirm the exit codes 0 pass, 1 warn or ask, 2 block, 3 error. The existing branch script exits 2 on any error, so this changes.]
+| Code | Error code | Meaning |
+|---|---|---|
+| `0` |  | Ok. The command ran. A finding does not change this: `check` and `try` exit 0 whatever they report. |
+| `1` | `usage` | A bad command or option, a missing argument, or input the server rejected (HTTP 400 or 422). Also AWS CLI shorthand, and `request` (`not_built`). |
+| `2` | `not_signed_in`, `forbidden` | Not signed in (HTTP 401) or not allowed (HTTP 403). Run `emfirge login`. |
+| `3` | `not_found` | The branch, analysis or resource was not found (HTTP 404). |
+| `4` | `server_error`, `rate_limited` | A server or network error, or a rate limit (HTTP 429). Try again later. |
+| `5` | `conflict` | The branch changed since you read it (HTTP 409). Read it again, then retry. |
+| `6` | `update_needed` | The server's command is newer than this install. Run `npx emfirge@latest`, then retry. |
 
 ## context
 
@@ -64,35 +76,65 @@ Local state lives in `~/.emfirge/`: your session and the token map. The token ma
 Synopsis:
 
 ```
-emfirge context [--about ID] [--paths] [--findings [--severity LEVEL]]
-                [--compliance cis-1.5|soc2] [--usage ID --approve] [--refresh]
+emfirge context QUESTION [--analysis ID | --branch ID] [--resource ID]
+emfirge context --refresh --role-arn ARN --region REGION
+emfirge context --findings | --attack-paths | --compliance --analysis ID
+emfirge context --simulate "what if ..." --analysis ID
 ```
+
+| Question | What it answers |
+|---|---|
+| `inventory` | What exists. |
+| `resource` | One resource: its type, tags and relationships. Needs `--resource`. |
+| `depends_on` | What a resource depends on. Needs `--resource`. |
+| `dependents` | What depends on a resource. Needs `--resource`. |
+| `reachable` | What the internet can reach. |
+| `access` | Who can access what, from the identity policies Emfirge has collected. |
+| `data` | Data stores and their recovery points. |
+| `cost` | Monthly list price of what is provisioned. |
+| `live` | Recent use. |
+| `marks` | Owner tags. `emfirge.md` is not built yet, so tags are all it shows. |
+| `baseline` | Counts for the whole snapshot. |
 
 | Flag | Meaning |
 |---|---|
-| `--about ID` | What depends on a resource, what it depends on, who can reach it, and your marks from `emfirge.md`. |
-| `--paths` | Internet-to-resource paths, chokepoints and orphaned resources. |
-| `--findings` | The findings of the current snapshot. Add `--severity` to filter. |
-| `--compliance` | Per-control status for CIS AWS Foundations 1.5 or SOC 2. Controls emfirge does not evaluate are `not_evaluated`, never `pass`. |
-| `--usage ID` | Opt-in evidence that a resource is in use (CloudTrail and CloudWatch reads). Prints the estimate first and reads only with `--approve`. |
-| `--refresh` | Read your live account again and take a new snapshot. Without it, context uses the latest one and says how old it is. |
+| `--analysis ID` | The analysis (scan) to ask about. Defaults to your latest. |
+| `--branch ID` | Ask about a branch instead of a scan. Not together with `--analysis`. |
+| `--resource ID` | A resource ID or token such as `S3_001`. |
+| `--refresh` | Run a fresh scan of your account. Needs `--role-arn` and `--region`. |
+| `--findings` | List the findings of a scan. Add `--severity Critical\|Moderate\|Low` to filter. |
+| `--attack-paths` | Paths from the internet to inside resources. |
+| `--compliance` | CIS AWS Foundations 1.5 or SOC 2 status. Add `--framework cis-aws-1.5\|soc2` to filter. Controls Emfirge does not evaluate are `not_evaluated`, never `pass`. |
+| `--simulate "…"` | Walk a what-if kill chain; the value is the question. |
 
-Example:
+Use one mode at a time. `--findings`, `--attack-paths`, `--compliance` and `--simulate` need `--analysis`. Every answer has `facts`, `known` (what was checked) and `unknown` (what was not, and why).
+
+Example (abridged output from the engine's synthetic test account):
 
 ```
-$ emfirge context --about DB_001
-  DB_001  rds_instance  us-east-1   snapshot 2026-11-08 09:14 (2h old)
-  holds data     yes, no recovery point on record
-  used by        EC2_003, LAMBDA_002
-  reachable from  nothing outside the VPC
-  marks          "orders-* is production. Never delete without me."  (emfirge.md)
+$ emfirge context data
+{
+  "question": "data",
+  "source": { "kind": "scan", "analysis_id": "ANALYSIS_1", "branch_id": null,
+              "collected_at": "2026-10-01T00:00:00Z", "region": "ap-south-1" },
+  "facts": [
+    { "resource_id": "NAME_002", "resource_type": "rds_instance",
+      "has_recovery_point": false, "recovery_resource_ids": [], "recovery_kinds": [] },
+    { "resource_id": "NAME_004", "resource_type": "rds_instance",
+      "has_recovery_point": true, "recovery_resource_ids": ["NAME_005"],
+      "recovery_kinds": ["rds_snapshot"] }
+  ],
+  "known": [ { "topic": "data_stores", "detail": "5 data stores assessed" } ],
+  "unknown": [ { "topic": "data_contents", "reason": "what a data store holds is not read; …" } ]
+}
 ```
 
 ### For agents
 
-- Run `context` first; do not infer from names. Facts here come from your account, with their source.
-- `context` is the only verb that can touch your live account, and only through the read-only role.
-- The snapshot's age is part of the answer. Re-read with `--refresh` before a change that depends on fresh state.
+- Run `context` first; do not infer from names. Facts come from your account's last scan, with what was checked and what was not.
+- Read `unknown`. Unknown means not checked. It never means safe.
+- `source.collected_at` is the age of the answer. Run `--refresh` before a change that depends on fresh state. A scan counts against a daily limit per AWS account; the reply says how many remain.
+- `--refresh` scans through the read-only role. `check --policy` and `check --evidence` also use it, and only after the owner accepts a cost estimate.
 
 ## branch
 
@@ -101,42 +143,42 @@ $ emfirge context --about DB_001
 Synopsis:
 
 ```
-emfirge branch new [NAME] [--from SCAN]
-emfirge branch fork [BRANCH] [NAME]
-emfirge branch list
-emfirge branch show [BRANCH]
-emfirge branch compare BRANCH BRANCH [BRANCH…]
-emfirge branch rollback [BRANCH] [--to COUNT]
-emfirge branch discard [BRANCH]
+emfirge branch open --analysis ANALYSIS --name NAME
+emfirge branch fork BRANCH --name NAME [--revision REVISION]
+emfirge branch list [--analysis ANALYSIS]
+emfirge branch get BRANCH
+emfirge branch rollback BRANCH [--revision REVISION] [--expected-count N]
+emfirge branch rollback-to BRANCH --count N [--revision REVISION]
+emfirge branch discard BRANCH [--revision REVISION] [--expected-count N]
+emfirge branch compare BRANCH BRANCH [BRANCH ...]
 ```
 
 | Subcommand | What it does |
 |---|---|
-| `new` | Open a branch from the latest scan (or `--from SCAN`). With no changes it equals live. |
-| `fork` | Copy a branch, base and full change log, into an independent child. |
-| `list` | List branches, newest first, with their change counts. |
-| `show` | The branch's metadata, ordered change log and revision token. Never the base snapshot. |
-| `compare` | Compare two or more branches and rank them safest first. |
-| `rollback` | Remove the most recent change, or keep only the first `--to COUNT` changes. `--to 0` returns to base. |
-| `discard` | Close the branch so it takes no more changes. Nothing in your cloud changes. |
+| `open` | Open a branch: a safe copy of a scan. With no changes it equals live. Never touches your cloud. |
+| `fork` | Copy a branch, with its changes, under a new name. |
+| `list` | List your branches. `--analysis` limits it to one base scan. |
+| `get` | Read one branch and its ordered changes. Never the base snapshot. |
+| `rollback` | Remove the most recent change. On a branch with no changes it does nothing. |
+| `rollback-to` | Keep the first `--count` changes and drop the rest. `--count 0` returns to the base. |
+| `discard` | Discard the branch. It deletes the branch and everything stored with it (plans, evidence, policy checks). Nothing in your cloud changes. |
+| `compare` | Compare two or more branches. |
+
+`--revision` is the `branch_revision` you last saw (a SHA-256). `--expected-count` is the change count you last saw. A stale one is rejected with HTTP 409, which is exit code 5. By default at most 10 branches can be open on one base scan; past that the server answers HTTP 429, which is exit code 4.
 
 Example:
 
 ```
-$ emfirge branch new private-db
-  branch private-db  #1   base: us-east-1 scan 2026-11-08   0 changes
-$ emfirge branch fork private-db private-db-v2
-  branch private-db-v2  #1   copied 0 changes from private-db
-$ emfirge branch compare private-db private-db-v2
-  1  private-db-v2   pass   0 blocks  0 warns
-  2  private-db      pass   0 blocks  0 warns
+emfirge branch open --analysis ANALYSIS_ID --name close-ssh
+emfirge branch fork BRANCH_ID --name close-ssh-v2
+emfirge branch compare BRANCH_ID BRANCH_ID_2
 ```
 
 ### For agents
 
-- One idea per branch. To try a different plan after a block, `fork` or open a new branch; do not stack a contradicting change on the old one.
-- Several agents on one base: pass `--revision` from `show` to `try`, `rollback` and `discard`. HTTP 409 means someone else changed the branch; run `show` again.
-- Rolling back an empty branch does nothing. Only open branches take changes.
+- One idea per branch. To try a different plan, `fork` or open a new branch instead of stacking a contradicting change.
+- Several agents on one base: pass `--revision` from `branch get`. Exit code 5 means someone else changed the branch; read it again.
+- Only open branches take changes. Clean up with `discard` when you are done.
 
 ## try
 
@@ -145,174 +187,168 @@ $ emfirge branch compare private-db private-db-v2
 Synopsis:
 
 ```
-emfirge try [--branch NAME] --aws-cli "aws …" [--aws-cli "aws …"]
-emfirge try [--branch NAME] --terraform plan.json
-emfirge try [--branch NAME] --cfn changeset.json
-emfirge try [--branch NAME] --aws-api calls.json
-emfirge try [--branch NAME] --op add|modify --type TYPE --id ID --fields '{…}' [--fields-file F|-]
-emfirge try [--branch NAME] --delete TYPE ID
+emfirge try BRANCH --typed JSON
+emfirge try BRANCH --aws-cli "aws ec2 ..." [--aws-cli "aws ..."]
+emfirge try BRANCH --aws-api FILE|JSON|-
+emfirge try BRANCH --terraform FILE|JSON|-
+emfirge try BRANCH --cloudformation FILE|JSON|-
+emfirge try --verify-fix --rule RULE --resource ID --analysis ID
 ```
 
 | Flag | Meaning |
 |---|---|
-| `--aws-cli CMD` | An AWS CLI command, written out in full. Repeat for several. Shorthand is refused. |
-| `--terraform FILE` | The JSON from `terraform show -json`. Emfirge never runs the plan. |
-| `--cfn FILE` | A CloudFormation change set as JSON. |
-| `--aws-api FILE` | AWS API calls as JSON. |
-| `--op`, `--type`, `--id`, `--fields` | A typed change. `--fields-file -` reads the fields from stdin. A tag change replaces the whole user tag set. |
-| `--delete TYPE ID` | Shorthand for a typed delete. |
+| `--typed JSON` | One typed change as JSON: `{op, resource_type, resource_id, fields}`. `op` is `add`, `modify` or `delete`. Add `branch_revision` or `expected_change_count` to refuse a stale branch. |
+| `--aws-cli CMD` | An AWS CLI command, written out in full. Repeat the flag for several, or pass a JSON list. |
+| `--aws-api` | AWS API calls as JSON: `{"format":"aws-api-calls/1","calls":[...]}`. |
+| `--terraform` | The output of `terraform show -json PLAN`. Emfirge never runs the plan. |
+| `--cloudformation` | The output of `aws cloudformation describe-change-set`. |
+| `--verify-fix` | Model the fix for one finding on a copy of a scan, with no branch. Needs `--rule`, `--resource` and `--analysis`. |
 
-Example:
+Give exactly one input. A JSON input is a file path, inline JSON, or `-` for stdin. AWS CLI shorthand (`--target Arn=…,RoleArn=…`) is refused before anything is sent, with exit code 1; pass the value as JSON. Emfirge keeps only a SHA-256 of a plan, never its text, so apply your own original plan.
+
+For the four plan formats the answer lists what was **applied**, **rejected** (impossible input or a value AWS would reject), **unmodeled** (read but not modeled, so the verdict gets stricter) and **unknown_fields** (a value the plan left out, never guessed). It also carries a `verdict` (`pass`, `warn` or `block`, with reason codes), a `verdict_id`, the `branch_revision` and the hand-back. The resource types you can change are on [Coverage](https://emfirge.cloud/coverage.md#resources).
+
+Example (abridged output from the engine's synthetic test account):
 
 ```
-$ emfirge try --branch private-db --op modify --type rds_instance --id DB_001 --fields '{"publicly_accessible": false}'
-  applied 1 of 1   unmodeled 0   rejected 0   unknown fields 0   branch #2
+$ emfirge try BRANCH_ID --aws-cli "aws ec2 authorize-security-group-ingress --group-id SG_001 --protocol tcp --port 22 --cidr 0.0.0.0/0"
+{
+  "plan_id": "64ded399-…",
+  "input_sha256": "7304d5f4…",
+  "applied": [ "calls[0] ec2.AuthorizeSecurityGroupIngress" ],
+  "rejected": [], "unmodeled": [], "unknown_fields": [],
+  "verdict": {
+    "decision": "block",
+    "reasons": [
+      { "level": "block", "code": "introduced_critical_finding", "resources": ["SG_001"] },
+      { "level": "block", "code": "introduced_critical_exposure", "resources": ["EC2_001"] },
+      { "level": "warn", "code": "new_exposure", "resources": ["EC2_001"] }
+    ]
+  },
+  "verdict_id": "32b82c7e…",
+  "branch_revision": "dc62be73…"
+}
 ```
-
-Every response says which changes were **applied**, **rejected** (impossible input, such as `from_port` greater than `to_port`, or a value AWS would reject), **unmodeled** (read but not modeled, which makes the verdict stricter) and which had **unknown values** (a required value you left out is flagged, never guessed). The resource types you can change are on [Coverage](https://emfirge.cloud/coverage.md#resources).
 
 ### For agents
 
-- Send the change you were already going to run. Do not translate it into emfirge's typed form.
-- If the response lists an unmodeled change, the next `check` cannot pass. Do not retry the same change.
-- `emfirge context --about ID` first when you are unsure of an ID; use the exact ID or token you were given.
+- Send the change you were already going to run. Do not translate it into the typed form.
+- If the answer lists an unmodeled change, read it: the verdict cannot pass. Do not retry the same change.
+- Use the exact ID or token you were given. `emfirge context resource --resource ID` first when you are unsure.
 
 ## check
 
-**Ask what the branch would do. Six answers, with reasons, evidence and unknowns.**
+**Ask what the branch changed. Six answers, each with what was checked and what is unknown.**
 
 Synopsis:
 
 ```
-emfirge check [--branch NAME] [--diff] [--only data,exposure,money,availability,control,outside-world]
-              [--policy-checks --approve]
+emfirge check BRANCH
+emfirge check BRANCH --verdict | --diff
+emfirge check BRANCH --policy [--approve --accept-estimate ID]
+emfirge check BRANCH --evidence [--source S] [--accept-estimate ID --role-arn ARN]
 ```
 
 | Flag | Meaning |
 |---|---|
-| `--diff` | Add the two-sided diff: resources added and removed, relationships changed, what became reachable from the internet, cost before and after. |
-| `--only LIST` | Run a subset of the six checks. |
-| `--policy-checks` | Opt in to asking AWS IAM Access Analyzer whether changed S3 bucket and role trust policies are public. Prints the cost estimate (about $0.002 a policy, billed to your AWS account) and runs only with `--approve`. It can make a verdict stricter, never looser. |
+| (none) | The six answers (data, exposure, money, availability, control, outside world), with `checked` and `unknown` for each, plus `changed_settings`. No verdict. |
+| `--verdict` | The older verdict: `pass`, `warn` or `block`, with reason codes. |
+| `--diff` | The diff against the base scan. |
+| `--policy` | Ask AWS IAM Access Analyzer about changed policies. It costs money (about $0.002 a policy, billed to your AWS account), so it prints an estimate first and sends nothing. Run it with `--accept-estimate ID` and `--approve` once the owner agrees. |
+| `--evidence` | Read CloudTrail and CloudWatch use of deleted resources. Estimate first. `--source cloudtrail_events` or `cloudwatch_metrics`, repeatable. Run it with `--accept-estimate ID --role-arn ARN`. |
 
-Example:
+A check never says pass, warn or block on its own. Each answer lists **facts** (what changed), **checked** (what was looked at) and **unknown** (what was not, and why). `changed_settings` lists every setting that changed, by name and never by value: **judged** by a check, or named as **not judged**. Not judged is not safe. How to read it is on [How it works](https://emfirge.cloud/how-it-works.md#checks).
+
+Example (abridged output from the engine's synthetic test account):
 
 ```
-$ emfirge check --branch orders-cleanup
-  verdict  BLOCK   branch orders-cleanup #1   1 change
-
-  data           block  data_store_deleted_no_recovery_point
-                 DB_001 holds data and has no recovery point after this change
-  availability   block  recently_used
-                 CloudWatch shows DB_001 was used in the last 90 days
-  exposure       pass
-  money          pass   -$58.40/month (provisioned only; usage not priced)
-  control        pass
-  outside world  pass
-
-  coverage  full for the six checks; scanner findings advisory
-  exit 2
+$ emfirge check BRANCH_ID --human
+Branch check: BRANCH_ID (2 change(s))
+- data: 0 fact(s), 4 unknown
+- exposure: 1 fact(s), 1 unknown
+    fact: {"resource_id":"EC2_001","resource_type":"ec2_instance","change":"newly_exposed","protocol":"tcp","ports":[22,22],"so...
+    unknown (not checked, not safe): {"topic":"observed_traffic","reason":"observed traffic, host firewalls and application-level controls are not collect...
+- money: 0 fact(s), 1 unknown
+- availability: 0 fact(s), 3 unknown
+- control: 0 fact(s), 2 unknown
+- outside_world: 0 fact(s), 2 unknown
+changed settings: 3 (1 judged by a check, 2 not judged)
+Changed, not judged:
+    security_group SG_002: attached_instances
+    security_group SG_002: attached_to
 ```
-
-> Example output; the reason codes are real, the numbers are illustrative.
 
 ### For agents
 
-- A block is a fact about your change. Change the plan and retry on a new branch. Do not argue with it, split it to hide it, or route around it.
-- Read `coverage` and `unknowns` as well as the verdict. A check that did not run did not find nothing.
-- Never apply a change that did not pass. A pass is evidence, not a guarantee.
+- Read the facts, then read the unknowns and the changed settings. A check that did not run did not find nothing.
+- A fact is about your change. Change the plan and retry on a new branch; do not argue with it or route around it.
+- `--policy` and `--evidence` show an estimate first and send nothing. Run them only after the owner agrees.
 
 ## request
 
-**Ask the owner. The agent waits only if it has nothing else to do.**
+**Ask the owner. Not built yet.**
 
 Synopsis:
 
 ```
-emfirge request [--branch NAME] --check CHECK --why "…" [--wait [--timeout DURATION]]
-emfirge request status [ID]
+emfirge request BRANCH [--reason TEXT]
 ```
 
-| Flag | Meaning |
-|---|---|
-| `--check CHECK` | Which check needs the owner: data, exposure, money, availability, control or outside-world. |
-| `--why TEXT` | One plain sentence for the owner. Emfirge adds the facts: the branch, the change and the reason code. |
-| `--wait` | Block this command until the owner answers. Without it, `request` returns an ID at once and the agent carries on. |
-| `--timeout` | Give up waiting after this long (for example `10m`). The request stays open. |
-
-Example:
-
-```
-$ emfirge request --branch orders-cleanup-2 --check data --why "Delete legacy-reports-db; I have a manual snapshot from today."
-  request rq_7  open   asked: you@example.com   branch orders-cleanup-2 #1
-$ emfirge request status rq_7
-  rq_7  approved by you@example.com   exit 0
-```
-
-Which facts ask and which only tell is your call, in `emfirge.md`; see [Tell vs ask](https://emfirge.cloud/how-it-works.md#tell-vs-ask). An approval covers exactly the branch revision that was asked about, so changing the branch afterwards needs a new request.
+The command is listed in `emfirge --help`, but it is planned for a later version. It makes no request: it exits with code 1 and a JSON error, `not_built`. Until it exists, ask the owner yourself, then use `emfirge report` after you apply.
 
 ### For agents
 
-- Ask when `check` says to, not before. Put the sentence you would want to read at 3 a.m. in `--why`.
-- Do not wait idle: start the next task and poll `request status`.
-- A denial is final for that branch revision. Change the plan.
+- Do not wait on `request`. Ask the owner in your own channel when a check shows facts they should see.
 
 ## report
 
-**Say what you applied. Emfirge records it and checks it against CloudTrail.**
+**Say what you applied. For now it returns the hand-back, and can verify it.**
 
 Synopsis:
 
 ```
-emfirge report --branch NAME --calls FILE [--verify]
-emfirge report show [BRANCH]
+emfirge report BRANCH [--plan PLAN] [--verify]
 ```
 
 | Flag | Meaning |
 |---|---|
-| `--calls FILE` | The exact calls you applied, as JSON. Emfirge records them as submitted and never applies them itself. |
-| `--verify` | Compare the calls and the live trail with what was judged. Reports the first mismatch by name. |
-| `report show` | Print the record for a branch: the verdict, the calls, and predicted versus actual. |
+| (none) | The hand-back of the branch: the exact AWS API calls its typed changes stand for, their `input_sha256`, the base scan, the `branch_revision`, the `verdict` and a `verdict_id`. |
+| `--plan PLAN` | The hand-back of one plan from `emfirge try`. |
+| `--verify` | Send the hand-back back to the server, which checks the binding. |
 
-Example:
-
-```
-$ emfirge report --branch orders-cleanup-2 --calls applied-calls.json --verify
-  recorded   1 call   input_sha256 4be2…c90d
-  verdict    PASS     branch orders-cleanup-2 #1
-  cloudtrail 1 of 1 calls found, 0 not in the verdict
-  record     predicted vs actual: match
-```
-
-A record binds the calls to the verdict by the input hash, the base snapshot, the branch revision and the verdict ID. On a mismatch, `--verify` returns `input_hash_mismatch`, `base_snapshot_changed`, `branch_revision_changed` or `verdict_changed` and exits 1.
+The hand-back ties the exact calls to the verdict they were judged with. `--verify` answers `{"ok": true}`, or fails with exit code 5 and one `reason_code`: `unknown_plan`, `input_hash_mismatch` (these are not the calls that were judged), `branch_revision_changed`, `base_snapshot_changed` or `verdict_changed`. It checks the binding only. It does not read CloudTrail, and Emfirge never applies anything.
 
 ### For agents
 
-- Report after you apply, every time, with the calls exactly as run.
-- If `--verify` finds a mismatch, tell the owner. Do not edit the calls file to make it match.
+- Apply your own original change with your own access, then run `report` so the record shows what was judged.
+- If `--verify` names a mismatch, tell the owner. Do not edit the calls to make it match.
 
 ## MCP adapter
 
-**The same six verbs, for agents that speak MCP.**
+**The same engine, for agents that speak MCP.**
 
-`@emfirge/mcp` is an adapter over the same client. It exposes the capabilities behind the verbs as MCP tools over stdio, so a client that cannot run a shell can still use emfirge. Both paths share one engine and one privacy layer.
+`@emfirge/mcp` exposes 27 tools over stdio, so a client that cannot run a shell can still use emfirge. The CLI is built on the same handlers, so both paths share one engine and one privacy layer. The tool names are unchanged. It also carries the local commands the CLI does not have.
+
+| Command | What it does |
+|---|---|
+| `npx @emfirge/mcp install` | Wire emfirge into the MCP clients it detects. |
+| `npx @emfirge/mcp uninstall` | Remove it from those clients. |
+| `npx @emfirge/mcp status` | Show wired clients, the backend URL and the privacy mode. |
+| `npx @emfirge/mcp privacy [strict\|balanced\|off]` | Show or set the privacy mode. |
+| `npx @emfirge/mcp tokens` | List the local identifier-to-token mappings. |
+| `npx @emfirge/mcp purge --role-arn ARN` | Delete the data the backend holds for that AWS account and your local token map. Read what it removes on [Security & privacy](https://emfirge.cloud/security.md#retention). |
 
 | Verb | MCP tools behind it |
 |---|---|
-| `context` | `emfirge_scan`, `emfirge_get_findings`, `emfirge_attack_paths`, `emfirge_check_compliance`, `emfirge_in_use_evidence` |
+| `context` | `emfirge_context`, `emfirge_scan`, `emfirge_get_findings`, `emfirge_attack_paths`, `emfirge_check_compliance`, `emfirge_simulate_breach` |
 | `branch` | `emfirge_create_branch`, `emfirge_list_branches`, `emfirge_get_branch`, `emfirge_fork_branch`, `emfirge_discard_branch`, `emfirge_rollback_branch`, `emfirge_rollback_branch_to_count`, `emfirge_compare_branches` |
-| `try` | `emfirge_apply_change`, `emfirge_plan_verdict` |
-| `check` | `emfirge_branch_verdict`, `emfirge_branch_diff`, `emfirge_policy_checks`, `emfirge_verify_fix` |
-| `request` | none yet |
+| `try` | `emfirge_apply_change`, `emfirge_plan_verdict`, `emfirge_verify_fix` |
+| `check` | `emfirge_check`, `emfirge_branch_verdict`, `emfirge_branch_diff`, `emfirge_policy_checks`, `emfirge_in_use_evidence` |
+| `request` | none |
 | `report` | `emfirge_branch_handback` |
 | `connect`, `login`, `logout` | `emfirge_setup_help`, `emfirge_login`, `emfirge_logout`, `emfirge_link_project` |
 
-Install it into the clients it detects, or add it by hand. Restart the client afterwards.
-
-Terminal:
-
-```
-npx @emfirge/mcp install
-```
+Or add it by hand, then restart the client.
 
 Manual MCP config (JSON):
 
@@ -338,8 +374,6 @@ args = ["-y", "@emfirge/mcp"]
 [mcp_servers.emfirge.env]
 EMFIRGE_PRIVACY = "strict"
 ```
-
-> The 24 MCP tool names above are the ones the adapter ships today, and they keep working. [TODO Ansh: decide whether the adapter's tool names change to the six verbs.]
 
 ---
 

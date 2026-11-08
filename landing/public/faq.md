@@ -28,7 +28,7 @@ It cannot pass. The change is listed as unmodeled and the verdict gets stricter.
 Only if the agent listens. Emfirge is advisory today: it does not stop anyone with their own AWS credentials.
 
 **Is it open source?**
-The engine is AGPL-3.0 and the MCP adapter is Apache-2.0. [Source on GitHub](https://github.com/theanshsonkar/emfirge).
+The engine is AGPL-3.0, and the MCP adapter and the CLI are Apache-2.0. [Source on GitHub](https://github.com/theanshsonkar/emfirge).
 
 **What does it cost?**
 Nothing while in beta. See [Pricing](https://emfirge.cloud/pricing.md).
@@ -36,25 +36,31 @@ Nothing while in beta. See [Pricing](https://emfirge.cloud/pricing.md).
 ## Troubleshooting
 
 **`emfirge` is not found, or Node errors on start**
-Use Node.js 20 or later. Run `npx @emfirge/cli@latest status` to see what is installed and which backend it talks to.
+Use Node.js 20 or later. `npx emfirge --version` prints the version that runs, and `npx emfirge --help` prints the commands the server offers.
 
 **Access denied or 403 when reading my account**
-Run `emfirge status` and check the role ARN, the trusted account and the ExternalId in the stack. Re-run `emfirge connect` to print the setup link again.
+Check the role ARN, the trusted account and the ExternalId in your stack against the link `emfirge connect` prints; run it again to print the link. A role made with an older shared ExternalId must be redeployed with your own. A 403 is exit code 2.
 
 **The scan is empty**
 Confirm the region: most resources are regional and emfirge needs one. Check that the role has the read permissions in [iam-role.yaml](https://github.com/theanshsonkar/emfirge/blob/main/iam-role.yaml). An empty result does not mean your account has no risks.
 
 **Branch not found**
-Use the exact name or ID printed by `emfirge branch list`, against the same backend that created it.
+Use the exact ID printed by `emfirge branch list`, against the same backend that created it. This is exit code 3.
 
 **A change was rejected**
 The branch must be open, the resource type supported, and the target must exist for a modify or delete. Unknown fields are rejected. Check [Coverage](https://emfirge.cloud/coverage.md#resources) and run `emfirge try` again with the exact ID.
 
 **HTTP 409 on a change, rollback or discard**
-Someone else changed the branch. Run `emfirge branch show` for the new revision token and pass it with `--revision`.
+Someone else changed the branch. Run `emfirge branch get` for the new revision token and pass it with `--revision`. This is exit code 5.
 
 **Timeouts or HTTP 429**
-A scan can take a while on a large account; the client waits up to 240 seconds. For 429, follow the limit and reset time in the message.
+A scan can take a while on a large account; the client waits up to 240 seconds. For 429 (exit code 4, `rate_limited`), follow the limit and reset time in the message. The open-branch limit is also a 429: discard branches you no longer need.
+
+**Exit code 6, "needs a newer emfirge"**
+The server's command is newer than your install. Run `npx emfirge@latest`, then retry.
+
+**`emfirge request` exits 1**
+It is not built yet. It prints a JSON error, `not_built`, and sends nothing.
 
 **The verdict says a scanner was unavailable**
 Native results still return. `coverage_warnings` says the result is not full coverage. Do not treat it as complete.
@@ -67,17 +73,18 @@ Native results still return. `coverage_warnings` says the result is not full cov
 | Snapshot | What emfirge read from your account at one moment. The base of every branch. |
 | Change | One add, modify or delete of a supported resource on a branch. |
 | Context | What is true about your cloud: what exists, what is live, what depends on what, and your marks. |
-| Verb | One of the six CLI commands: context, branch, try, check, request, report. |
-| Check | One of six questions about a branch: data, exposure, money, availability, control, outside world. |
+| Verb | One of the six CLI commands: context, branch, try, check, request, report. `request` is not built yet. |
+| Check | One of six questions about a branch: data, exposure, money, availability, control, outside world. Each answers with facts, what was checked and what is unknown. |
+| Unknown | What a check could not look at, and why. Unknown means not checked. It never means safe. |
+| Changed setting | A setting that differs between a branch and its base, named without its value: judged by a check, or named as not judged. |
 | Verdict | `pass`, `warn` or `block`, with reasons. Advisory evidence, not a guarantee. |
 | Reason code | A stable name for one fact in a verdict, such as `recently_used`. |
 | Lens | An evaluator that looks at the branch from one angle. Several lenses feed the six checks. |
 | Law | A numbered property test the engine must always satisfy, such as L7: the same snapshot and changes give the same verdict. |
-| Tell and ask | The two responses to a fact: write it in the record, or stop for the owner. |
-| Request | An ask to the owner, raised by an agent. |
-| Report | The agent's record of what it applied, bound by hash to the verdict it passed. |
+| Request | An ask to the owner, raised by an agent. Not built yet. |
+| Hand-back | What `emfirge report` returns: the exact calls, bound by hash to the verdict they were judged with. |
 | Token | A stand-in such as `SG_001` for a real identifier, made on your machine. |
-| emfirge.md | A plain-English file of your marks and limits that agents read as context. |
+| emfirge.md | A planned plain-English file of your marks and limits. Not built yet. |
 | MCP | Model Context Protocol: the interface an agent client uses to call tools. Emfirge offers it as an adapter. |
 
 ---

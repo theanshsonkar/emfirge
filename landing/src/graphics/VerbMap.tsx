@@ -8,8 +8,8 @@ const VERBS = [
   { id: "branch", gloss: "a copy to work on" },
   { id: "try", gloss: "put a change on it" },
   { id: "check", gloss: "six facts back" },
-  { id: "request", gloss: "ask the owner" },
-  { id: "report", gloss: "say what you applied" },
+  { id: "request", gloss: "ask the owner (not built yet)" },
+  { id: "report", gloss: "the hand-back" },
 ];
 const CX = 320, CY = 108, RX = 236, RY = 66;
 const pos = (i: number): [number, number] => { const a = ((180 + 60 * i) * Math.PI) / 180; return [CX + RX * Math.cos(a), CY + RY * Math.sin(a)]; };

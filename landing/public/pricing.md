@@ -8,12 +8,12 @@ Human version: https://emfirge.cloud/pricing/
 
 **Beta: Free while in beta.** For anyone letting an agent change AWS.
 
-- All six verbs: context, branch, try, check, request, report
+- The verbs that are built: context, branch, try, check and report (`request` is not built yet)
 - The CLI and the MCP adapter
 - The hosted engine, with the six checks on every branch
 - The read-only role, revocable by deleting one stack
 - Support by email: ansh@emfirge.cloud
-- [TODO Ansh: usage limits in beta, for example scans per day and open branches per account]
+- [TODO Ansh: confirm the beta limits the production server sets. The engine's code defaults are 5 scans per AWS account per day, 30 branch requests per minute and 10 open branches per base scan.]
 
 The engine is open source (AGPL-3.0). Self-hosting is possible but unsupported.
 
@@ -27,7 +27,7 @@ The engine is open source (AGPL-3.0). Self-hosting is possible but unsupported.
 No. There is no charge for the CLI, the engine or the checks.
 
 **Will emfirge add to my AWS bill?**
-Two opt-in features can cost you: AWS IAM Access Analyzer policy checks (about $0.002 a policy, billed to your AWS account) and usage evidence reads from CloudTrail and CloudWatch. Both print an estimate first and run only when you approve. [TODO Ansh: state whether the regular scan's own AWS API reads can be billed.]
+Two opt-in features can cost you: AWS IAM Access Analyzer policy checks (about $0.002 a policy, billed to your AWS account) and usage evidence reads from CloudTrail and CloudWatch. Both show an estimate first and run only when you accept it. [TODO Ansh: state whether the regular scan's own AWS API reads can be billed.]
 
 **Does emfirge create anything in my account?**
 Only the IAM role, through the CloudFormation stack you create. Delete the stack and it is gone.

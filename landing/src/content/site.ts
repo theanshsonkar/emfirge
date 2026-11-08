@@ -1,17 +1,17 @@
 // Home-page copy and numbers (v6 look, v7 links). Inner pages live in the other files of this folder. See DESIGN-v7.md.
 //
-// REAL NUMBERS (counted from the repo on 2026-11-08, never estimated):
-//  - Engine tests 2,432: `cd backend && python -m pytest --collect-only -q` (parametrized cases included).
-//    The roadmap said 2,428; the collected count today is 2,432. (Plain `def test_` count is 1,497.)
-//  - MCP + CLI tests 102: `cd mcp && npm test` -> "# tests 102, pass 102".
-//  - Laws 48: README "Built to be trusted" says "There are 48 so far". The backend tests only tag 30
-//    distinct ids (L1..L66 with gaps) in docstrings/names, so the tagged count is a lower bound.
-//  - Resource types 14: len(app.mutations.SUPPORTED_RESOURCE_TYPES).
+// REAL NUMBERS (counted from the repo on 2026-11-08, never estimated; sources in landing/FACTS.md, section 4.1):
+//  - Engine tests 3,247: `cd backend && python3 -m pytest --collect-only -q` ("3247 tests collected"; parametrized cases
+//    included). A full run on 2026-11-08: 3243 passed, 3 skipped, 1 xfailed.
+//  - MCP + CLI tests 206: `cd mcp && npm test` -> "# tests 206, pass 206".
+//  - Laws 88: distinct L1..L88 ids in backend/tests (87) plus mcp/src/tokenize-leaks.test.ts (L81). README still says 48.
+//  - Resource types 18: len(app.mutations.SUPPORTED_RESOURCE_TYPES).
 //  - Escalation paths 92: len(app/data/pathfinding_paths.json["paths"]).
 //  - Scanner check reads 55: len(app/data/scanner_check_reads.json).
-//  - Native reason codes 30: distinct codes passed to _reason(...) in app/verdict.py.
+//  - Native reason codes 32: distinct codes passed to _reason(...) in app/verdict.py.
 //  - Prowler check metadata files 21: app/data/third_party/prowler/checks/*.metadata.json.
 //  - Severity crosswalk entries 21: len(app/data/scanner_severity_crosswalk.json).
+//  - MCP tools 27: count of `name: "emfirge_` in mcp/src/tools-registry.ts.
 
 export const LINKS = {
   site: "https://emfirge.cloud",
@@ -38,7 +38,7 @@ export const SITE = {
 };
 
 export const SETUP_PROMPT = "Set up emfirge in this project. Read https://emfirge.cloud/index.md and follow it.";
-export const COMMAND = "npx @emfirge/cli connect";
+export const COMMAND = "npx emfirge connect";
 
 export const RAIL_NAV = [
   { label: "Home", href: "/" },
@@ -80,7 +80,7 @@ export const NOTES = {
 
 export const FIGURE = {
   caption:
-    "Figure 1. A change enters emfirge in any format and runs on a branch of your live cloud. Six checks answer with facts; a block goes back to the agent, which changes its plan. Only a passing change reaches your agent's context to apply.",
+    "Figure 1. A change enters emfirge in any format and runs on a branch of your live cloud. Six checks answer with facts, and the verdict reads pass, warn or block. The agent reads them, changes its plan and tries again. The change that is left comes back as a hand-back, bound by hash to its verdict.",
 };
 
 export const WHAT = {
@@ -99,7 +99,7 @@ export const WHAT = {
     {
       tile: "six",
       title: "Six checks, no AI inside.",
-      text: "Data, exposure, money, availability, control, outside world. Deterministic, and unknown never passes.",
+      text: "Data, exposure, money, availability, control, outside world. Deterministic, and what it cannot check is listed as unknown, never as safe.",
     },
   ],
   note: "Every check comes from public data: AWS's own API models and Price List, pathfinding.cloud, Prowler and policy_sentry. Not hand-written lists.",
@@ -115,14 +115,14 @@ export const METRICS = {
     title: "Tests",
     sub: "Backend pytest, MCP + CLI node",
     cols: ["Test cases"],
-    // 2,432 from pytest --collect-only; 102 from `npm test` in mcp/.
+    // 3,247 from pytest --collect-only; 206 from `npm test` in mcp/.
     rows: [
-      { name: "Engine (backend)", value: 2432 },
-      { name: "MCP + CLI", value: 102 },
+      { name: "Engine (backend)", value: 3247 },
+      { name: "MCP + CLI", value: 206 },
     ],
   },
-  laws: { title: "Laws", sub: "Properties that must always hold", value: 48 },
-  types: { title: "Resource types", sub: "AWS types a branch can add, modify or delete", value: 14 },
+  laws: { title: "Laws", sub: "Properties that must always hold", value: 88 },
+  types: { title: "Resource types", sub: "AWS types a branch can add, modify or delete", value: 18 },
   sources: {
     title: "Where the checks come from",
     sub: "Counts from the repo, not hand-written lists",
@@ -131,7 +131,7 @@ export const METRICS = {
     bars: [
       { label: "PATHS", name: "pathfinding.cloud escalation paths", value: 92 },
       { label: "READS", name: "scanner check reads", value: 55 },
-      { label: "NATIVE", name: "native reason codes in verdict.py", value: 30, own: true },
+      { label: "NATIVE", name: "native reason codes in verdict.py", value: 32, own: true },
       { label: "PROWLER", name: "Prowler check metadata files", value: 21 },
       { label: "CROSSWALK", name: "scanner severity crosswalk entries", value: 21 },
     ],
@@ -139,11 +139,17 @@ export const METRICS = {
   },
   same: {
     title: "Same change, same answer",
-    sub: "One rule, opening port 22 to the world, in five input formats",
-    law: "L21",
+    sub: "The same change, in five input formats",
     cols: ["Format", "Verdict"],
-    rows: ["Typed change", "AWS CLI", "AWS API", "Terraform", "CloudFormation"],
-    foot: "Law L21 pins Terraform and the AWS API to the same verdict, and L20 pins ::/0 to 0.0.0.0/0.",
+    // law: the law that pins this format to the AWS API call; note: why there is none.
+    rows: [
+      { name: "Typed change", note: "the form the others become" },
+      { name: "AWS CLI", law: "L18" },
+      { name: "AWS API", note: "the reference" },
+      { name: "Terraform", law: "L21" },
+      { name: "CloudFormation", law: "L19" },
+    ] as { name: string; law?: string; note?: string }[],
+    foot: "L18 pins an AWS CLI command, L19 a CloudFormation change set and L21 a Terraform ingress rule to the same verdict as the equivalent AWS API call, and L20 pins ::/0 to 0.0.0.0/0.",
     link: "Read the laws",
   },
   quote: "A change Emfirge can't model can't pass. A missing check is reported, not hidden.",
@@ -208,7 +214,7 @@ export const TODOS = [
   "[TODO Ansh: the CLI announcement post URL; the home pill links to /cli/ until then]",
   "[TODO Ansh: X handle for the footer Connect column; shown as plain text without a link]",
   "[TODO Ansh: status page URL; the footer status dot is not linked]",
-  "[TODO Ansh: confirm the law count: README says 48 but tests tag ids up to L66 (30 distinct)]",
-  "[TODO Ansh: cite law numbers for typed, CLI and CloudFormation equivalence, only L20 and L21 are verified]",
+  "[TODO Ansh: the typed-change row of \"Same change, same answer\" has no law that compares it with the AWS API call (L18, L19 and L21 cover the CLI, CloudFormation and Terraform); add one or keep the note]",
+  "[TODO Ansh: npm shows emfirge 0.1.1 as latest, while the repo's CLI is 0.2.9; publish the current CLI before the site goes live]",
   "[TODO Ansh: Writing posts, titles are placeholders with no dates or links]",
 ];

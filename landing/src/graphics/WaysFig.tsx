@@ -26,7 +26,7 @@ export function WaysFig() {
       <text x="346" y="116" className="mt" fill="#fff" style={{ fill: "#fff" }}>BRANCH</text>
       <rect className="vd" x="508" y="102" width="20" height="20" fill="#0A7A4B" />
       <text x="548" y="116" className="mt">ONE VERDICT</text>
-      <text x="548" y="130" className="mt" style={{ fill: "rgba(11,16,21,.45)" }}>LAW L21</text>
+      <text x="548" y="130" className="mt" style={{ fill: "rgba(11,16,21,.45)" }}>L18 L19 L21</text>
     </svg>
   );
 }

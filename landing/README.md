@@ -12,6 +12,6 @@ npm run build    # static export to out/
 
 ## Status
 
-**Not live.** The copy is aspirational: it is written as if the CLI and harness v1 are fully built.
-Before it goes live, every claim must be checked against the code. See [DESIGN.md](./DESIGN.md)
-for the spec, the exact copy, and the list of claims that are aspirational today.
+**Not live.** Since v8 (2026-11-08) every statement is checked against the merged code; the sources are in
+[FACTS.md](./FACTS.md). See [DESIGN.md](./DESIGN.md) for the spec and the short list of things that are
+still not built or not decided.
