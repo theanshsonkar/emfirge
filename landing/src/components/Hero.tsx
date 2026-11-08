@@ -6,7 +6,7 @@ export function Hero() {
   return (
     <section id="top" aria-labelledby="h1" className="mx-auto max-w-[1320px] px-4 pb-16 pt-6 sm:px-8 lg:pb-24">
       <div className="grid grid-cols-[minmax(0,1fr)] gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,8fr)] lg:gap-12">
-        <div className="lg:sticky lg:top-16 lg:self-start lg:pt-6">
+        <div className="lg:sticky lg:top-[72px] lg:self-start lg:pt-6">
           <h1 id="h1" className="display text-[40px] sm:text-[56px] lg:text-[64px]">
             {HERO.h1}
           </h1>

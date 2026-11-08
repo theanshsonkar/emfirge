@@ -57,7 +57,7 @@ function Node({
         <text
           x={w / 2}
           y={nameY}
-          fontSize="11.5"
+          fontSize="11"
           fontWeight="600"
           fill={st === "removed" ? "#8A8A8A" : "#000"}
           textDecoration={st === "removed" ? "line-through" : undefined}

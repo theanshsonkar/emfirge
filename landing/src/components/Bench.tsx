@@ -72,6 +72,7 @@ export function Bench() {
   const [arming, setArming] = useState<{ id: number; phase: "cover" | "toggle" } | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const reportRef = useRef<HTMLDivElement>(null);
+  const benchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const t = timers.current;
@@ -79,9 +80,13 @@ export function Bench() {
   }, []);
 
   function reveal() {
-    requestAnimationFrame(() =>
-      reportRef.current?.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" }),
-    );
+    requestAnimationFrame(() => {
+      const behavior = reduced ? "auto" : "smooth";
+      const bench = benchRef.current;
+      // keep the tabs in view under the live bar when the whole bench fits; else follow the report
+      if (bench && bench.offsetHeight + 56 <= window.innerHeight) bench.scrollIntoView({ block: "start", behavior });
+      else reportRef.current?.scrollIntoView({ block: "nearest", behavior });
+    });
   }
 
   function run(id: number) {
@@ -115,7 +120,7 @@ export function Bench() {
   const note = branchTest ? BENCH.branchNote : BENCH.liveNote;
 
   return (
-    <div className="rounded-[10px] border-2 border-black bg-bench p-3 sm:p-5">
+    <div ref={benchRef} className="scroll-mt-14 rounded-[10px] border-2 border-black bg-bench p-3 sm:p-5">
       {/* a) the demo cloud */}
       <div data-js>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -210,7 +215,7 @@ export function Bench() {
       </div>
 
       {/* c) the test report */}
-      <div ref={reportRef} className="mt-5 scroll-mb-4">
+      <div ref={reportRef} className="mt-5 scroll-mt-14 scroll-mb-4">
         <div data-js>
           <Report test={shown} />
         </div>

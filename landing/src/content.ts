@@ -92,7 +92,7 @@ export type Layout = {
 
 export const LAYOUTS: { wide: Layout; narrow: Layout } = {
   wide: {
-    w: 752,
+    w: 764,
     h: 256,
     nodeW: 124,
     nodeH: 64,
@@ -104,8 +104,8 @@ export const LAYOUTS: { wide: Layout; narrow: Layout } = {
       "orders-db": { x: 622, y: 44 },
       assets: { x: 160, y: 176 },
       "deploy-role": { x: 314, y: 176 },
-      "nightly-sync": { x: 468, y: 176 },
-      "legacy-reports-db": { x: 622, y: 176 },
+      "legacy-reports-db": { x: 468, y: 176 },
+      "nightly-sync": { x: 622, y: 176 },
     },
     edges: {
       "internet>cdn": "M130 76 H160",
@@ -113,7 +113,7 @@ export const LAYOUTS: { wide: Layout; narrow: Layout } = {
       "web-alb>api": "M438 76 H468",
       "api>orders-db": "M592 76 H622",
       "cdn>assets": "M222 108 V176",
-      "nightly-sync>orders-db": "M592 208 H684 V108",
+      "nightly-sync>orders-db": "M684 176 V108",
     },
     routes: {
       api: { d: "M68 44 V16 H530 V44", label: { x: 299, y: 16 } },
@@ -121,7 +121,7 @@ export const LAYOUTS: { wide: Layout; narrow: Layout } = {
     },
   },
   narrow: {
-    w: 360,
+    w: 372,
     h: 356,
     nodeW: 156,
     nodeH: 58,

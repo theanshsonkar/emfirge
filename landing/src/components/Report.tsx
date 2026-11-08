@@ -89,10 +89,11 @@ export function Sheet({ test, shown, animate }: { test: Test | null; shown: numb
           );
         })}
       </ol>
-      <div className="flex min-h-[96px] flex-col-reverse gap-2 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
-        <p className={cn("max-w-[340px] text-[12px] text-ink-2 transition-opacity duration-150", done ? "opacity-100" : "opacity-0")}>
+      <div className={cn("flex flex-col-reverse gap-2 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6", sw && "min-h-[96px]")}>
+        <p className={cn("max-w-[340px] text-[12px] text-ink-2 transition-opacity duration-150", done ? "opacity-100" : "opacity-0", !sw && "hidden")}>
           {sw ? VERDICT[sw.verdict].next : ""}
         </p>
+        {!sw ? <p className="text-[12px] text-ink-3">flip any switch above to run test 001</p> : null}
         {sw && done ? <Stamp verdict={sw.verdict} animate={animate} className="-mt-3 self-end sm:mt-0" /> : null}
       </div>
     </div>
