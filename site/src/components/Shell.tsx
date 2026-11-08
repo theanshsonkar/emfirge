@@ -180,18 +180,24 @@ export function Shell({ children, toc, mdUrl }: { children: React.ReactNode; toc
 
   // scroll spy
   useEffect(() => {
-    const on = () => {
+    // measured at most once per frame, and only announced when the section changes (Safari fires scroll often)
+    let raf = 0, prev = "";
+    const measure = () => {
+      raf = 0;
       const line = window.innerHeight * 0.35;
       let cur = toc[0].id;
       for (const s of toc) { const e = document.getElementById(s.id); if (e && e.getBoundingClientRect().top <= line) cur = s.id; }
+      if (cur === prev) return;
+      prev = cur;
       setActive(cur);
       (window as unknown as { __spy?: string }).__spy = cur;
       window.dispatchEvent(new CustomEvent("emfirge:spy", { detail: cur }));
     };
-    on();
+    const on = () => { if (!raf) raf = requestAnimationFrame(measure); };
+    measure();
     window.addEventListener("scroll", on, { passive: true });
     window.addEventListener("resize", on);
-    return () => { window.removeEventListener("scroll", on); window.removeEventListener("resize", on); };
+    return () => { if (raf) cancelAnimationFrame(raf); window.removeEventListener("scroll", on); window.removeEventListener("resize", on); };
   }, [toc]);
 
   return (

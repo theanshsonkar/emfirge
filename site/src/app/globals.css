@@ -63,12 +63,14 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
   .main { margin-left: calc(var(--rail-w) + 1px); padding: 0 64px 0 72px; position: relative; z-index: 1; }
   .col { margin: 0; max-width: 720px; }
   /* the delta backdrop shows through the rail; the rail keeps only its right border */
-  .rail { background: transparent; }
+  .rail { background: transparent; transform: translateZ(0); will-change: transform; }
   .rail-in { left: 40px; right: auto; width: 232px; }
 }
 .bgdelta { display: none; }
 @media (min-width: 1024px) {
-  .bgdelta { display: block; position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; background: no-repeat 0 0 / 100% 100%; }
+  .bgdelta { display: block; position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; background: no-repeat 0 0 / 100% 100%;
+    /* own compositor layer: Safari otherwise repaints this full-screen image on every scroll frame */
+    transform: translateZ(0); will-change: transform; backface-visibility: hidden; contain: strict; }
 }
 @media print { .bgdelta { display: none !important; } }
 .topbar {
