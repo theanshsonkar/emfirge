@@ -3,17 +3,17 @@
 A typed change (a security group, a bucket, a role) only touches resources inside
 the account. Some AWS actions reach a person or a party outside it: a support
 case, a quota request that AWS staff decide on, email to outside recipients, a
-domain purchase, a billed spending commitment, a message to subscribers. Whether
-an action does that is decided per ACTION, not from a diff and not per service:
-a read (Get, List, Describe) of a table service is known not to be outside-world,
-and a service listed with ``only_actions`` is outside-world for exactly those
-actions.
+domain purchase, a billed spending commitment. Whether an action does that is
+decided per SERVICE (ARC-DISCUSSION "No rulebook: the branch decides"), never by
+adding single actions one by one: that would be a rulebook of ~15k actions. The
+one split inside a service is reads: a Get, List or Describe of a table service is
+not treated as outside-world.
 
 The table is hand-written, so every entry cites AWS's own documentation. It is
 deliberately small. Anything not in the table is reported as unclassified by the
-check, never as fine. Services whose effect AWS does not document in a page we
-could cite (Pinpoint, Connect, EventBridge API destinations, Marketplace
-agreements) are left unclassified on purpose.
+check, never as fine. Services where only some actions leave the cloud (SNS,
+Organizations, RAM, Pinpoint, Connect, EventBridge API destinations, Marketplace
+metering and agreements) are not in the table, so they stay unclassified.
 
 Service names are botocore names (what an API plan carries), not IAM prefixes:
 ``aws-marketplace`` is an IAM prefix, the botocore services are ``marketplace-catalog``,
@@ -41,7 +41,6 @@ class OutsideService:
     terraform_prefixes: tuple[str, ...]
     reason: str
     source_url: str
-    only_actions: Optional[tuple[str, ...]] = None  # None: every action that is not a read; else exactly these
 
 
 READ_ONLY_PREFIXES = ("Get", "List", "Describe")
@@ -83,26 +82,6 @@ OUTSIDE_WORLD_SERVICES: tuple[OutsideService, ...] = (
         reason="Buys a one- or three-year spending commitment that is billed whether or not it is used.",
         source_url="https://docs.aws.amazon.com/savingsplans/latest/userguide/what-is-savings-plans.html",
     ),
-    OutsideService(
-        services=("sns",), terraform_prefixes=(), only_actions=("Publish", "PublishBatch"),
-        reason="Publishing delivers the message to every endpoint subscribed to the topic, or to a phone number or mobile endpoint, which can be outside the account.",
-        source_url="https://docs.aws.amazon.com/sns/latest/api/API_Publish.html",
-    ),
-    OutsideService(
-        services=("organizations",), terraform_prefixes=(), only_actions=("InviteAccountToOrganization",),
-        reason="Sends an invitation, by email on your behalf, to another account's owner to join the organization.",
-        source_url="https://docs.aws.amazon.com/organizations/latest/APIReference/API_InviteAccountToOrganization.html",
-    ),
-    OutsideService(
-        services=("ram",), terraform_prefixes=(), only_actions=("CreateResourceShare",),
-        reason="Sharing a resource makes it available for use by principals outside of the account that created it.",
-        source_url="https://docs.aws.amazon.com/ram/latest/APIReference/API_CreateResourceShare.html",
-    ),
-    OutsideService(
-        services=("meteringmarketplace",), terraform_prefixes=(), only_actions=("MeterUsage",),
-        reason="Emits metering records directly to AWS Marketplace.",
-        source_url="https://docs.aws.amazon.com/marketplacemetering/latest/APIReference/API_MeterUsage.html",
-    ),
 )
 
 # Not an action to classify: a schedule starts its target on a timer, which can reach outside the account
@@ -135,10 +114,7 @@ def classify_action(action: str) -> Optional[OutsideEntry]:
         entry = _BY_SERVICE.get(service)
         if entry is None:
             return None
-        if entry.only_actions is not None:
-            if operation not in entry.only_actions:
-                return None
-        elif operation.startswith(READ_ONLY_PREFIXES):
+        if operation.startswith(READ_ONLY_PREFIXES):
             return OutsideEntry(service=service, reason="A read by name (Get, List or Describe); not treated as leaving the cloud.",
                                 source_url=entry.source_url, outside=False)
         return OutsideEntry(service=service, reason=entry.reason, source_url=entry.source_url)

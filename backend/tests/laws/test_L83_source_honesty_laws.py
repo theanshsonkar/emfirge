@@ -56,16 +56,19 @@ def test_L83a_a_read_makes_no_fact_and_no_unclassified_doubt():
 
 # ── L83b ──────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("action,service", [
-    ("sns.Publish", "sns"), ("sns.PublishBatch", "sns"),
-    ("organizations.InviteAccountToOrganization", "organizations"),
-    ("ram.CreateResourceShare", "ram"),
-    ("meteringmarketplace.MeterUsage", "meteringmarketplace"),
+@pytest.mark.parametrize("action", [
+    "sns.Publish", "sns.PublishBatch", "organizations.InviteAccountToOrganization",
+    "ram.CreateResourceShare", "meteringmarketplace.MeterUsage",
 ])
-def test_L83b_documented_actions_of_added_services_are_outside_world_facts(action, service):
-    entry = classify_action(action)
-    assert entry is not None and entry.outside is True and entry.service == service
-    assert DOC.fullmatch(entry.source_url) and entry.reason.strip()
+def test_L83b_no_per_action_rules_single_actions_of_other_services_stay_unclassified(action):
+    """No rulebook (ARC-DISCUSSION "No rulebook: the branch decides"): outside world is
+    decided per SERVICE. Single actions are never added one by one; they stay unclassified."""
+    assert classify_action(action) is None, action
+
+
+def test_L83b_every_table_entry_is_a_whole_service():
+    for entry in OUTSIDE_WORLD_SERVICES:
+        assert not hasattr(entry, "only_actions"), entry
 
 
 @pytest.mark.parametrize("action", [

@@ -758,8 +758,7 @@ def test_L74f_every_table_entry_cites_the_providers_own_documentation():
         for service in entry.services:
             assert service not in seen, service
             seen.add(service)
-            operation = entry.only_actions[0] if entry.only_actions else "SomeOperation"
-            hit = classify_action(f"{service}.{operation}")
+            hit = classify_action(f"{service}.SomeOperation")
             assert hit is not None and hit.service == service and hit.source_url == entry.source_url
         for prefix in entry.terraform_prefixes:
             assert prefix.startswith("aws_") and prefix.endswith("_")
