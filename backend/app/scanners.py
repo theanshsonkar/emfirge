@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 import threading
 import urllib.error
 import urllib.request
@@ -380,6 +381,32 @@ def _worker_timeout() -> float:
         return 20.0
 
 
+_WORKER_FAILED_AT: Optional[float] = None
+_WORKER_FAILED_REASON = ""
+
+
+def _worker_backoff() -> float:
+    try:
+        return float(os.environ.get("EMFIRGE_SCANNER_BACKOFF_S", "60"))
+    except ValueError:
+        return 60.0
+
+
+def _reset_worker_backoff() -> None:
+    global _WORKER_FAILED_AT, _WORKER_FAILED_REASON
+    _WORKER_FAILED_AT, _WORKER_FAILED_REASON = None, ""
+
+
+def _worker_recently_failed() -> Optional[ScanResult]:
+    """L90c: after a worker failure, skip it for the backoff window instead of waiting again."""
+    if _WORKER_FAILED_AT is None:
+        return None
+    ago = time.monotonic() - _WORKER_FAILED_AT
+    if ago >= _worker_backoff():
+        return None
+    return _unavailable(f"Checkov worker skipped: it failed {int(ago)}s ago ({_WORKER_FAILED_REASON})")
+
+
 def _scan_via_worker(url: str, terraform_json: str, timeout_s: float) -> list[ScannerFinding]:
     """POST the serialized Terraform to the warm worker; raises on any failure."""
     body = ('{"terraform":' + terraform_json + "}").encode("utf-8")
@@ -445,10 +472,16 @@ def run_checkov(infra: AWSInfrastructure, timeout_s: int = 60) -> ScanResult:
         if cached is not None:
             return skip_unknown_input(cached.model_copy(update={"resource_map": resource_map}), loss)
         if url:
+            skipped = _worker_recently_failed()
+            if skipped is not None:
+                return skipped
             try:
                 findings = _scan_via_worker(url, terraform_json, _worker_timeout())
             except Exception as exc:  # noqa: BLE001 - the API must never crash on a scanner
-                return _worker_failure(exc)
+                failure = _worker_failure(exc)
+                global _WORKER_FAILED_AT, _WORKER_FAILED_REASON
+                _WORKER_FAILED_AT, _WORKER_FAILED_REASON = time.monotonic(), failure.error or "failed"
+                return failure
             result = ScanResult(scanner="checkov", available=True, findings=findings, resource_map=resource_map)
             _cache_put(key, result)
             return skip_unknown_input(result, loss)
