@@ -1,5 +1,5 @@
-// The CLI is published as the npm package `emfirge` (folder cli/), a thin
-// package over @emfirge/mcp. These checks keep the two in step.
+// The CLI is published as the npm package `emfirge` (folder cli/), built
+// from the mcp/src/cli source into one file. It must not depend on @emfirge/mcp.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
@@ -17,17 +17,21 @@ test("the CLI package is named emfirge and gives the emfirge command", () => {
   assert.deepEqual(Object.keys(cliPkg.bin), ["emfirge"]);
 });
 
-test("the CLI package pins @emfirge/mcp to the same version as itself and mcp", () => {
-  assert.equal(cliPkg.dependencies["@emfirge/mcp"], mcpPkg.version);
+test("the CLI package has no dependency on @emfirge/mcp (it publishes alone)", () => {
+  for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
+    assert.ok(!(cliPkg[field] && "@emfirge/mcp" in cliPkg[field]), `${field} must not name @emfirge/mcp`);
+  }
   assert.equal(cliPkg.version, mcpPkg.version);
 });
 
-test("the CLI package imports the real CLI entry from @emfirge/mcp", () => {
-  const entry = readFileSync(join(cliDir, cliPkg.bin.emfirge), "utf-8");
-  assert.match(entry, /^#!\/usr\/bin\/env node/);
-  assert.match(entry, /import "@emfirge\/mcp\/dist\/cli\/index\.js";/);
+test("the CLI package builds a single bundled file from the mcp source", () => {
+  assert.equal(cliPkg.bin.emfirge, "./dist/emfirge.js");
+  assert.ok(cliPkg.scripts.build, "build script exists");
+  assert.equal(cliPkg.scripts.prepublishOnly, "npm run build");
+  assert.ok(cliPkg.files.includes("dist"));
+  assert.ok(existsSync(join(cliDir, "scripts", "build.mjs")));
   assert.ok(existsSync(join(mcpDir, "src", "cli", "index.ts")));
-  assert.ok(mcpPkg.files.includes("dist"));
+  assert.ok(!existsSync(join(cliDir, "index.js")));
 });
 
 test("@emfirge/mcp no longer installs an emfirge command of its own (no clash)", () => {

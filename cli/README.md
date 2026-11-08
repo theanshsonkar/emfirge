@@ -19,5 +19,5 @@ in `emfirge --help` without you installing anything. A copy of the list is built
 in for when the server cannot be reached. Run `npx emfirge@latest` only when
 emfirge tells you to (exit code 6: "needs a newer emfirge").
 
-All the code lives in [`@emfirge/mcp`](https://www.npmjs.com/package/@emfirge/mcp);
-this package only gives it the short name.
+The code is built from the same source as the Emfirge MCP server (`mcp/src/cli` in the
+repository). This package is one self-contained file with no dependencies.
