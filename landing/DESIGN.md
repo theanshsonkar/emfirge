@@ -188,3 +188,14 @@ Footer: logo, "The harness for cloud agents.", links (Docs, GitHub, Privacy, Sec
 - Coverage of CloudFront, DynamoDB, EventBridge Scheduler (not modeled yet).
 - The numbers in the terminal demo are illustrative.
 - v4: FAQ answer "there will always be a free tier for one account" (post-beta pricing) is a commitment not yet decided; the hero and tab terminal transcripts, resource names and numbers are illustrative.
+- v7 (the website is the docs), written "as if built", none of it exists yet:
+  - the whole `emfirge` CLI and the `@emfirge/cli` package: `connect`, `login`, `logout`, `status`, `privacy`, `tokens`, `purge`, global flags (`--json`, `--branch`, `--region`, `--revision`, `--no-color`) and the exit codes 0/1/2/3 (marked [TODO Ansh: confirm] on /cli);
+  - the six verbs' flags: `context` (`--about`, `--paths`, `--findings`, `--compliance`, `--usage --approve`, `--refresh`), `branch` (`new`, `fork`, `list`, `show`, `compare`, `rollback --to`, `discard`), `try` (`--aws-cli`, `--terraform`, `--cfn`, `--aws-api`, typed `--op/--type/--id/--fields`, `--delete`), `check` (`--diff`, `--only`, `--policy-checks --approve`);
+  - `request` (ask the owner, `--wait`, `request status`) and `report` (`--calls`, `--verify`, `report show`), including the CloudTrail after-check, which may need `cloudtrail:LookupEvents` added to iam-role.yaml;
+  - owner thresholds and the tell/ask defaults ("Tell vs ask" on /how-it-works), and `emfirge.md` read as context and enforced as boundaries;
+  - the Control and Outside-world checks (no reason codes exist in verdict.py yet) and a Money reason code;
+  - `emfirge connect` printing a one-click CloudFormation link and detecting the role; "reading us-east-1 ... 214 resources" and every other terminal transcript on the new pages are illustrative;
+  - the MCP adapter exposing the same verbs: today it ships the 24 tools listed on /cli;
+  - the token form `acct_7f3a…` shown in the tokenization figure is illustrative (the engine's real tokens look like `SG_001`);
+  - "Free while in beta": confirm it is the actual commercial position (nothing is decided about after beta).
+- v7 truth notes: /security states that the 90-day retention sweep, full purge, and branch deletion are not built (roadmap §5 audit), so PRIVACY.md should be corrected to match; remove that sentence from the page when they ship.

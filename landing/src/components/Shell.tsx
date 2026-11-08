@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import { LINKS, ON_THIS_PAGE, RAIL_NAV } from "@/content";
+import { usePathname } from "next/navigation";
+import { RAIL_NAV } from "@/content/site";
 import { Mark } from "@/graphics/Mark";
 import { Ext } from "./Icons";
 
@@ -14,14 +15,18 @@ function Logo() {
 }
 
 function Nav({ onNav, delay = 0 }: { onNav?: () => void; delay?: number }) {
+  const path = (usePathname() || "/").replace(/\/?$/, "/");
   return (
     <nav className="nav" aria-label="Primary">
-      {RAIL_NAV.map((n, i) => (
-        <a key={n.label} href={n.href} className={`stagger ${n.active ? "on" : ""}`} style={{ animationDelay: `${delay + 120 + i * 45}ms` }}
-          {...(n.ext ? { target: "_blank", rel: "noreferrer" } : {})} onClick={onNav} aria-current={n.active ? "page" : undefined}>
+      {RAIL_NAV.map((n, i) => {
+        const active = !n.ext && n.href === path;
+        return (
+        <a key={n.label} href={n.href} className={`stagger ${active ? "on" : ""}`} style={{ animationDelay: `${delay + 120 + i * 45}ms` }}
+          {...(n.ext ? { target: "_blank", rel: "noreferrer" } : {})} onClick={onNav} aria-current={active ? "page" : undefined}>
           {n.label}{n.ext && <> <Ext /></>}
         </a>
-      ))}
+        );
+      })}
     </nav>
   );
 }
@@ -35,12 +40,12 @@ function Seg({ agent, set }: { agent: boolean; set: (a: boolean) => void }) {
   );
 }
 
-function Otp({ active, onNav, delay = 0 }: { active: string; onNav?: () => void; delay?: number }) {
+function Otp({ toc, active, onNav, delay = 0 }: { toc: Toc[]; active: string; onNav?: () => void; delay?: number }) {
   return (
     <div className="otp stagger" style={{ animationDelay: `${delay + 480}ms` }}>
       <div className="label" style={{ color: "var(--ink-3)" }}>On this page</div>
       <ul>
-        {ON_THIS_PAGE.map((s) => (
+        {toc.map((s) => (
           <li key={s.id}><a href={`#${s.id}`} className={active === s.id ? "on" : ""} onClick={onNav}>{s.label}</a></li>
         ))}
       </ul>
@@ -48,10 +53,12 @@ function Otp({ active, onNav, delay = 0 }: { active: string; onNav?: () => void;
   );
 }
 
-export function Shell({ children }: { children: React.ReactNode }) {
+export type Toc = { id: string; label: string };
+
+export function Shell({ children, toc, mdUrl }: { children: React.ReactNode; toc: Toc[]; mdUrl: string }) {
   const [agent, setAgentState] = useState(false);
   const [md, setMd] = useState<string | null>(null);
-  const [active, setActive] = useState(ON_THIS_PAGE[0].id);
+  const [active, setActive] = useState(toc[0].id);
   const [open, setOpen] = useState(false);
 
   const setAgent = (a: boolean) => {
@@ -68,9 +75,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (agent && md === null) {
-      fetch("/index.md").then((r) => (r.ok ? r.text() : Promise.reject(r.status))).then(setMd).catch(() => setMd("Could not load /index.md"));
+      fetch(mdUrl).then((r) => (r.ok ? r.text() : Promise.reject(r.status))).then(setMd).catch(() => setMd(`Could not load ${mdUrl}`));
     }
-  }, [agent, md]);
+  }, [agent, md, mdUrl]);
 
   // reveal-on-scroll
   useEffect(() => {
@@ -87,15 +94,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
     if (agent) return;
     const on = () => {
       const line = window.innerHeight * 0.35;
-      let cur = ON_THIS_PAGE[0].id;
-      for (const s of ON_THIS_PAGE) { const e = document.getElementById(s.id); if (e && e.getBoundingClientRect().top <= line) cur = s.id; }
+      let cur = toc[0].id;
+      for (const s of toc) { const e = document.getElementById(s.id); if (e && e.getBoundingClientRect().top <= line) cur = s.id; }
       setActive(cur);
+      (window as unknown as { __spy?: string }).__spy = cur;
+      window.dispatchEvent(new CustomEvent("emfirge:spy", { detail: cur }));
     };
     on();
     window.addEventListener("scroll", on, { passive: true });
     window.addEventListener("resize", on);
     return () => { window.removeEventListener("scroll", on); window.removeEventListener("resize", on); };
-  }, [agent]);
+  }, [agent, toc]);
 
   return (
     <>
@@ -104,7 +113,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <Logo />
           <Seg agent={agent} set={setAgent} />
           <Nav />
-          {!agent && <Otp active={active} />}
+          {!agent && <Otp toc={toc} active={active} />}
         </div>
       </aside>
       <div className="edge" aria-hidden="true" />
@@ -116,15 +125,15 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <div className="drawer">
           <Seg agent={agent} set={(a) => { setAgent(a); setOpen(false); }} />
           <Nav onNav={() => setOpen(false)} />
-          {!agent && <Otp active={active} onNav={() => setOpen(false)} />}
+          {!agent && <Otp toc={toc} active={active} onNav={() => setOpen(false)} />}
         </div>
       )}
       <main className="main">
         <div className="col">
           {agent ? (
             <>
-              <pre className="agent" aria-label="index.md">{md ?? "Loading /index.md ..."}</pre>
-              <p className="cap" style={{ marginBottom: 60 }}>Agent view: this is <a className="uline" href="/index.md">/index.md</a>. <a className="uline" href={LINKS.docs}>Docs</a></p>
+              <pre className="agent" aria-label={mdUrl}>{md ?? `Loading ${mdUrl} ...`}</pre>
+              <p className="cap" style={{ marginBottom: 60 }}>Agent view: this is <a className="uline" href={mdUrl}>{mdUrl}</a>. <a className="uline" href="/llms.txt">All pages (llms.txt)</a></p>
             </>
           ) : children}
         </div>

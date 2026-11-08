@@ -1,4 +1,4 @@
-import { CTA, FOOTER, LINKS, METRICS, PRODUCTION, RUNS, TRUST, WHAT, WRITING, FIGURE } from "@/content";
+import { CTA, FOOTER, LINKS, METRICS, PRODUCTION, RUNS, TRUST, WHAT, WRITING, FIGURE } from "@/content/site";
 import { Mark } from "@/graphics/Mark";
 import { Delta, CTA_DELTA } from "@/graphics/Delta";
 import { Tile } from "@/graphics/Tile";
@@ -29,14 +29,56 @@ export function What() {
         </div>
       ))}
       <p className="muted" data-reveal>{WHAT.note}</p>
-      <a className="arrow" href={LINKS.docs} data-reveal>{WHAT.more} <Ext size={10} /></a>
+      <a className="arrow" href={LINKS.how} data-reveal>{WHAT.more} <Ext size={10} /></a>
     </section>
+  );
+}
+
+export function SourcesCard() {
+  const m = METRICS;
+  const max = Math.max(...m.sources.bars.map((b) => b.value));
+  return (
+  <div className="card tall" data-reveal style={{ display: "flex", flexDirection: "column" }}>
+    <h4>{m.sources.title}</h4><div className="label">{m.sources.sub}</div>
+    <div className="num" style={{ marginTop: 22 }}>{m.sources.headline}</div>
+    <p style={{ fontSize: 13, lineHeight: "19.5px", color: "var(--ink-2)", margin: "6px 0 0" }}>{m.sources.headlineLabel}</p>
+    <div className="div" />
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+      <div className="chart" style={{ height: 230, marginTop: 24 }}>
+        {m.sources.bars.map((b) => (
+          <div key={b.label} className={`bar ${b.own ? "own" : ""}`} style={{ ["--h" as string]: `${(b.value / max) * 100}%` }} title={`${b.name}: ${b.value}`}>
+            <span>{b.value}</span>
+          </div>
+        ))}
+      </div>
+      <div className="barlab">{m.sources.bars.map((b) => <span key={b.label}>{b.label}</span>)}</div>
+    </div>
+    <div className="links"><a href={`${LINKS.github}/tree/main/backend/app/data`}>{m.sources.link} <Ext size={9} /></a></div>
+  </div>
+  );
+}
+
+export function SameCard({ style }: { style?: React.CSSProperties }) {
+  const m = METRICS;
+  return (
+  <div className="card" data-reveal style={style}>
+    <h4>{m.same.title}</h4><div className="label">{m.same.sub}</div>
+    <table className="same">
+      <thead><tr><th>{m.same.cols[0]}</th><th>{m.same.cols[1]}</th></tr></thead>
+      <tbody>
+        {m.same.rows.map((r, i) => (
+          <tr key={r}><td>{r}</td><td className="d"><i className="gd" style={{ ["--i" as string]: i }} />Same verdict · {m.same.law}</td></tr>
+        ))}
+      </tbody>
+    </table>
+    <p style={{ fontSize: 13, lineHeight: "19.5px", color: "var(--ink-2)", margin: "16px 0 0" }}>{m.same.foot}</p>
+    <div className="links"><a href={`${LINKS.github}/tree/main/backend/tests/laws`}>{m.same.link} <Ext size={9} /></a></div>
+  </div>
   );
 }
 
 export function Production() {
   const m = METRICS;
-  const max = Math.max(...m.sources.bars.map((b) => b.value));
   return (
     <section id="in-production" style={{ scrollMarginTop: 40 }}>
       <hr className="hr" style={{ marginTop: 70 }} />
@@ -69,37 +111,9 @@ export function Production() {
             <div className="num" style={{ marginTop: 14 }}>{m.types.value}</div>
           </div>
         </div>
-        <div className="card tall" data-reveal style={{ display: "flex", flexDirection: "column" }}>
-          <h4>{m.sources.title}</h4><div className="label">{m.sources.sub}</div>
-          <div className="num" style={{ marginTop: 22 }}>{m.sources.headline}</div>
-          <p style={{ fontSize: 13, lineHeight: "19.5px", color: "var(--ink-2)", margin: "6px 0 0" }}>{m.sources.headlineLabel}</p>
-          <div className="div" />
-          <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
-            <div className="chart" style={{ height: 230, marginTop: 24 }}>
-              {m.sources.bars.map((b) => (
-                <div key={b.label} className={`bar ${b.own ? "own" : ""}`} style={{ ["--h" as string]: `${(b.value / max) * 100}%` }} title={`${b.name}: ${b.value}`}>
-                  <span>{b.value}</span>
-                </div>
-              ))}
-            </div>
-            <div className="barlab">{m.sources.bars.map((b) => <span key={b.label}>{b.label}</span>)}</div>
-          </div>
-          <div className="links"><a href={`${LINKS.github}/tree/main/backend/app/data`}>{m.sources.link} <Ext size={9} /></a></div>
-        </div>
+        <SourcesCard />
       </div>
-      <div className="card" data-reveal style={{ marginTop: 13 }}>
-        <h4>{m.same.title}</h4><div className="label">{m.same.sub}</div>
-        <table className="same">
-          <thead><tr><th>{m.same.cols[0]}</th><th>{m.same.cols[1]}</th></tr></thead>
-          <tbody>
-            {m.same.rows.map((r, i) => (
-              <tr key={r}><td>{r}</td><td className="d"><i className="gd" style={{ ["--i" as string]: i }} />Same verdict · {m.same.law}</td></tr>
-            ))}
-          </tbody>
-        </table>
-        <p style={{ fontSize: 13, lineHeight: "19.5px", color: "var(--ink-2)", margin: "16px 0 0" }}>{m.same.foot}</p>
-        <div className="links"><a href={`${LINKS.github}/tree/main/backend/tests/laws`}>{m.same.link} <Ext size={9} /></a></div>
-      </div>
+      <SameCard style={{ marginTop: 13 }} />
       <blockquote className="quote" data-reveal>
         <p>“A change Emfirge can&apos;t model <b>can&apos;t pass</b>. A missing check is <b>reported, not hidden</b>.”</p>
         <small>{m.quoteBy}</small>
@@ -175,7 +189,7 @@ export function Writing() {
     <section id="writing" className="wr" style={{ scrollMarginTop: 40, marginTop: 90 }}>
       <h2 className="h2" style={{ marginTop: 0 }} data-reveal>{WRITING.title}</h2>
       {WRITING.rows.map((r) => (
-        <a key={r} href={LINKS.docs} data-reveal><span>{r}</span><span className="label">{WRITING.tag}</span></a>
+        <div className="it" key={r} data-reveal><span>{r}</span><span className="label">{WRITING.tag}</span></div>
       ))}
     </section>
   );
@@ -197,7 +211,7 @@ export function Footer() {
       </div>
       <div className="ft-bot">
         <div className="l"><span>{FOOTER.legal}</span><a href={LINKS.privacy}>Privacy</a><a href={LINKS.security}>Security</a></div>
-        <div className="r"><a href={LINKS.docs}><i className="sdot" />{FOOTER.status}</a><a href="#top">Back to top ↑</a></div>
+        <div className="r"><span><i className="sdot" />{FOOTER.status}</span><a href="#top">Back to top ↑</a></div>
       </div>
     </footer>
   );

@@ -1,11 +1,11 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { HERO, LINKS, SETUP_PROMPT } from "@/content";
+import { HERO, LINKS, SETUP_PROMPT } from "@/content/site";
 import { Mark } from "@/graphics/Mark";
 import { Delta, HERO_DELTA } from "@/graphics/Delta";
 import { Caret, Check, Copy, Ext } from "./Icons";
 
-function CopyBar() {
+export function CopyBar() {
   const [open, setOpen] = useState(false);
   const [done, setDone] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -44,7 +44,7 @@ export function Hero() {
     <section>
       <div className="pill stagger" style={{ animationDelay: "60ms" }}>
         <span><i className="dot" />{HERO.pill}</span>
-        <a href={LINKS.docs}>{HERO.pillLink} <Ext size={9} /></a>
+        <a href={LINKS.cli}>{HERO.pillLink} <Ext size={9} /></a>
       </div>
       <h1 className="h1">{HERO.h1}</h1>
       <p className="sub">{HERO.sub}</p>
@@ -55,7 +55,7 @@ export function Hero() {
       <CopyBar />
       <div className="works">
         <span className="label">Works with</span>
-        {HERO.worksWith.map((w) => <a key={w} href={LINKS.docs}>{w}</a>)}
+        {HERO.worksWith.map((w) => <a key={w} href={w === "MCP" ? `${LINKS.cli}#mcp-adapter` : LINKS.cli}>{w}</a>)}
       </div>
       <div className="media" aria-hidden="true"><Delta opts={HERO_DELTA} /></div>
     </section>

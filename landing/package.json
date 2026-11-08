@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build"
+    "gen": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/gen-md.ts",
+    "build": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/gen-md.ts && next build"
   },
   "dependencies": {
     "clsx": "^2.1.1",

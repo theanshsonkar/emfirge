@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { NOTES } from "@/content";
+import { NOTES } from "@/content/site";
 
 function Fn({ text, children, block }: { text: string; children: React.ReactNode; block?: boolean }) {
   const [open, setOpen] = useState(false);

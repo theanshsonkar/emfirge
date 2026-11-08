@@ -1,4 +1,4 @@
-// All copy and numbers for the v6 landing page. See DESIGN-v6.md.
+// Home-page copy and numbers (v6 look, v7 links). Inner pages live in the other files of this folder. See DESIGN-v7.md.
 //
 // REAL NUMBERS (counted from the repo on 2026-11-08, never estimated):
 //  - Engine tests 2,432: `cd backend && python -m pytest --collect-only -q` (parametrized cases included).
@@ -15,13 +15,20 @@
 
 export const LINKS = {
   site: "https://emfirge.cloud",
-  docs: "https://emfirge.cloud/docs",
-  quickstart: "https://emfirge.cloud/docs/quickstart",
+  quickstart: "/quickstart/",
+  how: "/how-it-works/",
+  cli: "/cli/",
+  coverage: "/coverage/",
+  security: "/security/",
+  pricing: "/pricing/",
+  changelog: "/changelog/",
+  faq: "/faq/",
   github: "https://github.com/theanshsonkar/emfirge",
   ansh: "https://github.com/theanshsonkar",
   mail: "mailto:ansh@emfirge.cloud",
-  security: "https://github.com/theanshsonkar/emfirge/blob/main/SECURITY.md",
+  securityPolicy: "https://github.com/theanshsonkar/emfirge/blob/main/SECURITY.md",
   privacy: "https://github.com/theanshsonkar/emfirge/blob/main/PRIVACY.md",
+  iamRole: "https://github.com/theanshsonkar/emfirge/blob/main/iam-role.yaml",
 };
 
 export const SITE = {
@@ -34,12 +41,15 @@ export const SETUP_PROMPT = "Set up emfirge in this project. Read https://emfirg
 export const COMMAND = "npx @emfirge/cli connect";
 
 export const RAIL_NAV = [
-  { label: "Home", href: "/", active: true },
-  { label: "How it works", href: LINKS.docs },
-  { label: "Changelog", href: LINKS.docs },
-  { label: "Pricing", href: LINKS.docs },
-  { label: "Coverage", href: LINKS.docs },
-  { label: "Docs", href: LINKS.docs, ext: true },
+  { label: "Home", href: "/" },
+  { label: "Quickstart", href: "/quickstart/" },
+  { label: "How it works", href: "/how-it-works/" },
+  { label: "CLI", href: "/cli/" },
+  { label: "Coverage", href: "/coverage/" },
+  { label: "Security & privacy", href: "/security/" },
+  { label: "Pricing", href: "/pricing/" },
+  { label: "Changelog", href: "/changelog/" },
+  { label: "FAQ", href: "/faq/" },
   { label: "GitHub", href: LINKS.github, ext: true },
 ];
 
@@ -54,7 +64,7 @@ export const ON_THIS_PAGE = [
 
 export const HERO = {
   pill: "Introducing the emfirge CLI",
-  pillLink: "Read the post",
+  pillLink: "See the CLI",
   h1: "emfirge is building the harness for AI agents that work on your cloud.",
   sub: "Available through our CLI, any agent's shell, and MCP.",
   primary: "Get started with emfirge",
@@ -160,7 +170,7 @@ export const TRUST = {
     { mark: "open", label: "Open source", sub: "AGPL-3.0 · Apache-2.0" },
   ],
   links: [
-    { label: "Security policy", href: LINKS.security },
+    { label: "Security policy", href: LINKS.securityPolicy },
     { label: "Privacy", href: LINKS.privacy },
   ],
 };
@@ -184,20 +194,20 @@ export const WRITING = {
 export const FOOTER = {
   tagline: "The harness for AI agents that work on your cloud.",
   cols: [
-    { h: "Product", links: [["How it works", LINKS.docs], ["Pricing", LINKS.docs], ["Changelog", LINKS.docs], ["Coverage", LINKS.docs], ["Docs ↗", LINKS.docs]] },
-    { h: "Company", links: [["Writing", "#writing"], ["GitHub ↗", LINKS.github], ["Contact", LINKS.mail]] },
+    { h: "Product", links: [["Quickstart", "/quickstart/"], ["How it works", "/how-it-works/"], ["CLI", "/cli/"], ["Coverage", "/coverage/"], ["Pricing", "/pricing/"], ["Changelog", "/changelog/"], ["FAQ", "/faq/"]] },
+    { h: "Company", links: [["Security & privacy", "/security/"], ["GitHub ↗", LINKS.github], ["Contact", LINKS.mail]] },
     { h: "Connect", links: [["X", ""], ["GitHub", LINKS.ansh], ["ansh@emfirge.cloud", LINKS.mail]] },
   ],
   legal: "© 2026 emfirge",
   status: "All systems operational",
 };
 
-// Unknowns, written for Ansh. Not rendered on the page.
+// Unknowns, written for Ansh. Not rendered on the home page. (Inner-page TODOs are written in place in each page file
+// as [TODO Ansh: ...] and rendered visibly.)
 export const TODOS = [
-  "[TODO Ansh: the CLI announcement post URL; the pill links to the docs until then]",
-  "[TODO Ansh: real pages for How it works, Changelog, Pricing and Coverage; the nav links to docs until they exist]",
+  "[TODO Ansh: the CLI announcement post URL; the home pill links to /cli/ until then]",
   "[TODO Ansh: X handle for the footer Connect column; shown as plain text without a link]",
-  "[TODO Ansh: status page URL; the status dot links to docs]",
+  "[TODO Ansh: status page URL; the footer status dot is not linked]",
   "[TODO Ansh: confirm the law count: README says 48 but tests tag ids up to L66 (30 distinct)]",
   "[TODO Ansh: cite law numbers for typed, CLI and CloudFormation equivalence, only L20 and L21 are verified]",
   "[TODO Ansh: Writing posts, titles are placeholders with no dates or links]",

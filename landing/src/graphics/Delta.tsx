@@ -69,7 +69,7 @@ function at(name: PathName, f: number): P {
 const hex = (h: string): [number, number, number] => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 const mix = (a: [number, number, number], b: [number, number, number], t: number) => `rgb(${Math.round(a[0] + (b[0] - a[0]) * t)},${Math.round(a[1] + (b[1] - a[1]) * t)},${Math.round(a[2] + (b[2] - a[2]) * t)})`;
 
-export type DeltaOpts = { field: string; lo: string; hi: string; drift: number; squares: boolean; cell?: number };
+export type DeltaOpts = { field: string; lo: string; hi: string; drift: number; squares: boolean; cell?: number; yOff?: number };
 
 const CYCLE = 9, DUR = 4.4, LEVELS = 7;
 
@@ -79,14 +79,14 @@ export function Delta({ opts, className }: { opts: DeltaOpts; className?: string
   const draw: DrawFn = useCallback((ctx, w, h, t, still) => {
     const cell = (opts.cell ?? 4) * (w < 420 ? 0.75 : 1);
     const cols = Math.ceil(w / cell), rows = Math.ceil(h / cell);
-    const key = `${cols}x${rows}`;
+    const key = `${cols}x${rows}:${opts.yOff ?? 0}`;
     const sc = w / DW;
     if (!cache.current || cache.current.key !== key) {
       const water = new Float32Array(cols * rows), bank = new Float32Array(cols * rows);
       const pts: [number, number, number][] = [];
       for (const s of SEGS) s.pts.forEach((p, i, a) => { const k = i / (a.length - 1); pts.push([p[0], p[1], s.w * (1 - 0.25 * k)]); });
       for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
-        const x = ((i + 0.5) * cell) / sc, y = ((j + 0.5) * cell) / sc;
+        const x = ((i + 0.5) * cell) / sc, y = ((j + 0.5) * cell) / sc + (opts.yOff ?? 0);
         let sd = 1e9;
         for (const p of pts) { const d = Math.hypot(p[0] - x, p[1] - y) - p[2]; if (d < sd) sd = d; }
         water[j * cols + i] = sd; // signed distance in design px
@@ -182,3 +182,4 @@ export function Delta({ opts, className }: { opts: DeltaOpts; className?: string
 
 export const HERO_DELTA: DeltaOpts = { field: "#0B3B2A", lo: "#2E8F64", hi: "#B9EBD2", drift: 0.6, squares: true };
 export const CTA_DELTA: DeltaOpts = { field: "#0B1015", lo: "#1b3a2e", hi: "#4a9672", drift: 0.3, squares: false };
+export const PLAN_DELTA: DeltaOpts = { field: "#0B3B2A", lo: "#2E8F64", hi: "#B9EBD2", drift: 0.4, squares: false, yOff: 70 };

@@ -5,8 +5,14 @@ emfirge is building the harness for AI agents that work on your cloud.
 Available through our CLI, any agent's shell, and MCP.
 
 - Site: https://emfirge.cloud
-- Docs: https://emfirge.cloud/docs
-- Quickstart: https://emfirge.cloud/docs/quickstart
+- Quickstart: https://emfirge.cloud/quickstart.md
+- How it works: https://emfirge.cloud/how-it-works.md
+- CLI reference: https://emfirge.cloud/cli.md
+- Coverage: https://emfirge.cloud/coverage.md
+- Security & privacy: https://emfirge.cloud/security.md
+- Pricing: https://emfirge.cloud/pricing.md
+- Changelog: https://emfirge.cloud/changelog.md
+- FAQ: https://emfirge.cloud/faq.md
 - Source: https://github.com/theanshsonkar/emfirge
 - Contact: ansh@emfirge.cloud
 
@@ -54,7 +60,7 @@ Numbers, counted from the repository:
 
 Same change, same answer: one rule that opens port 22 to the world gives the same verdict as a typed change, an AWS CLI command, an AWS API call, a Terraform plan or a CloudFormation change set. Law L21 pins Terraform and the AWS API to the same verdict.
 
-> A change Emfirge can't model can't pass. A missing check is reported, not hidden. (Emfirge README)
+> A change Emfirge cannot model can't pass. A missing check is reported, not hidden. (Emfirge README)
 
 ## Where it runs
 
@@ -72,6 +78,7 @@ Emfirge is read-only by design. Your account IDs are tokenized on your machine b
 - Tokenized IDs
 - Open source (AGPL-3.0, Apache-2.0)
 
+Security & privacy: https://emfirge.cloud/security.md
 Security policy: https://github.com/theanshsonkar/emfirge/blob/main/SECURITY.md
 Privacy: https://github.com/theanshsonkar/emfirge/blob/main/PRIVACY.md
 
@@ -88,24 +95,27 @@ Privacy: https://github.com/theanshsonkar/emfirge/blob/main/PRIVACY.md
 ### Install
 
 ```
-npx @emfirge/cli connect
+npx @emfirge/cli@latest connect
 ```
 
-This connects the CLI to your AWS account through a read-only IAM role (one CloudFormation click; delete the stack to revoke). The MCP server is configured for Claude Code, Cursor, Codex and others by the installer.
+This signs you in and connects emfirge to the AWS account through a read-only IAM role (one CloudFormation click; delete the stack to revoke). Full steps: https://emfirge.cloud/quickstart.md
 
 ### The six verbs
 
-1. `branch`: fork a copy of the live cloud model. Live never moves.
-2. `try`: put a change on the branch (AWS CLI command, AWS API call, Terraform plan, CloudFormation change set, or a typed change).
-3. `check`: six checks answer with facts: data, exposure, money, availability, control, outside world.
-4. `block`: a failing check is a fact about the change, not an error.
-5. `retry`: change your plan, put the new change on a new branch, and check again.
-6. `pass`: only a change that passed reaches your context to apply.
+1. `context`: ask what is true (what exists, what depends on what, the owner's marks in emfirge.md).
+2. `branch`: open, fork, compare, roll back or discard a copy of the live cloud model. Live never moves.
+3. `try`: put a change on the branch (AWS CLI command, AWS API call, Terraform plan, CloudFormation change set, or a typed change).
+4. `check`: six checks answer with facts: data, exposure, money, availability, control, outside world.
+5. `request`: ask the owner when a check says to.
+6. `report`: record what you applied, so emfirge can verify it against CloudTrail.
+
+Every flag: https://emfirge.cloud/cli.md
 
 ### Rules
 
 - Never apply a change that did not pass.
-- A block is a fact. Change your plan and retry; do not argue with it or route around it.
+- A block is a fact. Change your plan and retry on a new branch; do not argue with it or route around it.
 - Read emfirge.md in the project for the facts about this cloud before proposing changes.
 - Emfirge never writes to the cloud. Applying a passing change is your job, with your own credentials.
 - Unknown never passes. If a check could not run, the verdict says so.
+- Use `--json` when you read output. Exit codes: 0 pass, 1 warn or ask, 2 block, 3 error.

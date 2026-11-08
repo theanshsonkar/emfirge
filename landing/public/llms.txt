@@ -1,8 +1,14 @@
 # emfirge
 
-> The harness for AI agents that work on your cloud: a true model of your AWS, a branch for every change, six checks with no AI inside.
+> Emfirge gives AI agents a true model of your AWS, a branch for every change, and six checks with no AI inside. Every page below is also served as markdown for agents.
 
-- [Home as markdown, with agent instructions](https://emfirge.cloud/index.md): the whole page plus "How to use emfirge (for agents)".
-- [Docs](https://emfirge.cloud/docs)
-- [Quickstart](https://emfirge.cloud/docs/quickstart)
+- [Home, with agent instructions](https://emfirge.cloud/index.md): the whole home page plus "How to use emfirge (for agents)".
+- [Quickstart](https://emfirge.cloud/quickstart.md): Install the emfirge CLI, create the read-only role and run your first check on a branch of your live AWS.
+- [How it works](https://emfirge.cloud/how-it-works.md): The emfirge engine in one page: branches, the six checks, owner thresholds, emfirge.md, the record, and what emfirge never does.
+- [CLI reference](https://emfirge.cloud/cli.md): Install, global options, exit codes and the six verbs (context, branch, try, check, request, report) of the emfirge CLI, plus the MCP adapter.
+- [Coverage](https://emfirge.cloud/coverage.md): The AWS resource types a branch can add, modify or delete, the status of each lens, and where the checks come from.
+- [Security & privacy](https://emfirge.cloud/security.md): The read-only role, identifier tokenization, what the hosted emfirge engine stores, and the retention controls still being built.
+- [Pricing](https://emfirge.cloud/pricing.md): Emfirge is free while in beta: what is included, what can cost money on your AWS bill, and what happens after beta.
+- [Changelog](https://emfirge.cloud/changelog.md): Recent emfirge engine changes, in plain English, from the repository's git history.
+- [FAQ](https://emfirge.cloud/faq.md): Common questions about emfirge, troubleshooting for the CLI, and a glossary.
 - [Source](https://github.com/theanshsonkar/emfirge)
