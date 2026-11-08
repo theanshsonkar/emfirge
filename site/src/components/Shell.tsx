@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { RAIL_GROUPS } from "@/content/site";
 import { Mark } from "@/graphics/Mark";
+import { BgDelta } from "@/graphics/BgDelta";
 import { Ext } from "./Icons";
 
 function Logo() {
@@ -14,7 +15,9 @@ function Logo() {
   );
 }
 
-function Nav({ onNav, delay = 0 }: { onNav?: () => void; delay?: number }) {
+// With `toc` (the desktop rail) the page's sections nest under its own link as an "On this page" list;
+// without it (the mobile drawer) the nav is the flat list and Otp follows it.
+function Nav({ onNav, delay = 0, toc, active }: { onNav?: () => void; delay?: number; toc?: Toc[]; active?: string }) {
   const path = (usePathname() || "/").replace(/\/?$/, "/");
   let i = 0;
   return (
@@ -23,13 +26,22 @@ function Nav({ onNav, delay = 0 }: { onNav?: () => void; delay?: number }) {
         <div className="nav-g" key={g.label} role="group" aria-label={g.label}>
           <div className="label nav-gl stagger" style={{ animationDelay: `${delay + 120 + i * 45}ms` }}>{g.label}</div>
           {g.items.map((n) => {
-            const active = !n.ext && n.href === path;
+            const here = !n.ext && n.href === path;
             const k = i++;
             return (
-              <a key={n.label} href={n.href} className={`stagger ${active ? "on" : ""}`} style={{ animationDelay: `${delay + 120 + (k + 1) * 45}ms` }}
-                {...(n.ext ? { target: "_blank", rel: "noreferrer" } : {})} onClick={onNav} aria-current={active ? "page" : undefined}>
-                {n.label}{n.ext && <> <Ext /></>}
-              </a>
+              <Fragment key={n.label}>
+                <a href={n.href} className={`stagger ${here ? "on" : ""}`} style={{ animationDelay: `${delay + 120 + (k + 1) * 45}ms` }}
+                  {...(n.ext ? { target: "_blank", rel: "noreferrer" } : {})} onClick={onNav} aria-current={here ? "page" : undefined}>
+                  {n.label}{n.ext && <> <Ext /></>}
+                </a>
+                {here && toc && (
+                  <ul className="tb stagger" aria-label="On this page" style={{ animationDelay: `${delay + 480}ms` }}>
+                    {toc.map((t) => (
+                      <li key={t.id}><a href={`#${t.id}`} className={active === t.id ? "on" : ""}>{t.label}</a></li>
+                    ))}
+                  </ul>
+                )}
+              </Fragment>
             );
           })}
         </div>
@@ -52,6 +64,101 @@ function Otp({ toc, active, onNav, delay = 0 }: { toc: Toc[]; active: string; on
 }
 
 export type Toc = { id: string; label: string };
+
+type Geo = { w: number; h: number; top: number; links: { y: number; on: boolean }[]; secs: number[] };
+
+const TRUNK = 4, BRANCH = 22; // x of the trunk and of the section branch, inside .rail-in
+const GREEN = "#0a7a4b", GREY = "rgba(11,16,21,.22)", NODE = "rgba(11,16,21,.45)";
+
+// The branch-tree lines: an aria-hidden SVG over the rail nav. Geometry is measured from the rendered links, so it
+// follows wrapping, fonts and window size; which section is current comes from the scroll spy (`active`).
+// Rects are read (not offsetTop) so fractional line heights stay exact; animationend re-measures after the stagger transforms settle.
+function RailInner({ toc, active }: { toc: Toc[]; active: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [geo, setGeo] = useState<Geo | null>(null);
+
+  const measure = useCallback(() => {
+    const rin = ref.current;
+    const logo = rin?.querySelector(".logo svg");
+    if (!rin || !logo || rin.offsetParent === null) return; // rail hidden (< 1024px): nothing to draw
+    const R = rin.getBoundingClientRect();
+    const cy = (el: Element) => { const r = el.getBoundingClientRect(); return r.top - R.top + r.height / 2; };
+    const next: Geo = {
+      w: R.width,
+      h: rin.scrollHeight,
+      top: logo.getBoundingClientRect().bottom - R.top + 10,
+      links: Array.from(rin.querySelectorAll(".nav-g > a")).map((a) => ({ y: cy(a), on: a.getAttribute("aria-current") === "page" })),
+      secs: Array.from(rin.querySelectorAll(".tb a")).map(cy),
+    };
+    setGeo((g) => (g && JSON.stringify(g) === JSON.stringify(next) ? g : next));
+  }, []);
+
+  useLayoutEffect(() => {
+    measure();
+    const rin = ref.current;
+    if (!rin) return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(rin);
+    window.addEventListener("resize", measure);
+    document.fonts?.ready.then(measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, [measure]);
+
+  return (
+    <div className="rail-in" ref={ref} onAnimationEnd={measure}>
+      <Logo />
+      <Nav toc={toc} active={active} />
+      {geo && <TreeSvg geo={geo} cur={Math.max(0, toc.findIndex((t) => t.id === active))} />}
+    </div>
+  );
+}
+
+function TreeSvg({ geo, cur }: { geo: Geo; cur: number }) {
+  const { links, secs } = geo;
+  if (!links.length) return null;
+  const X = TRUNK, BX = BRANCH;
+  const act = links.find((l) => l.on);
+  const lastSec = secs[secs.length - 1];
+  // the branch rejoins the trunk a little below its last section; the trunk runs at least that far
+  const merge = act && secs.length ? lastSec + 22 : 0;
+  const end = Math.max(links[links.length - 1].y, merge);
+  return (
+    <svg className="rail-tree" aria-hidden="true" width={geo.w} height={geo.h} focusable="false">
+      <path d={`M${X} ${geo.top}V${end}`} stroke={GREY} strokeWidth={1} fill="none" />
+      {links.map((l, i) => l.on ? (
+        <g key={i}>
+          <rect x={X - 3.5} y={l.y - 3.5} width={7} height={7} fill={GREEN} />
+          <path d={`M${X + 4} ${l.y}H18`} stroke={GREEN} strokeWidth={1} />
+        </g>
+      ) : (
+        <g key={i}>
+          <rect x={X - 2.5} y={l.y - 2.5} width={5} height={5} fill="#fff" stroke={NODE} strokeWidth={1} />
+          <path d={`M${X + 4} ${l.y}H14`} stroke={GREY} strokeWidth={1} />
+        </g>
+      ))}
+      {act && secs.length > 0 && (() => {
+        const ay = act.y, ci = Math.min(cur, secs.length - 1);
+        return (
+          <g>
+            <path d={`M${X} ${ay}C${X} ${ay + 12},${BX} ${ay + 6},${BX} ${ay + 20}V${secs[ci]}`} stroke={GREEN} strokeWidth={1.5} fill="none" />
+            <path d={`M${BX} ${secs[ci]}V${lastSec}C${BX} ${lastSec + 14},${X} ${lastSec + 8},${X} ${merge}`} stroke={GREY} strokeWidth={1} fill="none" strokeDasharray="2 3" />
+            {secs.map((y, k) => (
+              <g key={k}>
+                {k < ci ? <rect x={BX - 2} y={y - 2} width={4} height={4} fill={GREEN} />
+                  : k === ci ? <>
+                    <rect x={BX - 3.5} y={y - 3.5} width={7} height={7} fill="#fff" stroke={GREEN} strokeWidth={1.5} />
+                    <rect x={BX - 1} y={y - 1} width={2} height={2} fill={GREEN} />
+                  </>
+                  : <rect x={BX - 2} y={y - 2} width={4} height={4} fill="#fff" stroke="rgba(11,16,21,.4)" strokeWidth={1} />}
+                <path d={`M${BX + (k === ci ? 5 : 3)} ${y}H34`} stroke={k <= ci ? GREEN : GREY} strokeWidth={1} />
+              </g>
+            ))}
+          </g>
+        );
+      })()}
+    </svg>
+  );
+}
 
 export function Shell({ children, toc, mdUrl }: { children: React.ReactNode; toc: Toc[]; mdUrl: string }) {
   const [active, setActive] = useState(toc[0].id);
@@ -89,12 +196,9 @@ export function Shell({ children, toc, mdUrl }: { children: React.ReactNode; toc
 
   return (
     <>
+      <BgDelta />
       <aside className="rail" aria-label="Site">
-        <div className="rail-in">
-          <Logo />
-          <Nav />
-          <Otp toc={toc} active={active} />
-        </div>
+        <RailInner toc={toc} active={active} />
       </aside>
       <div className="edge" aria-hidden="true" />
       <header className="topbar">

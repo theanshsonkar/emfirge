@@ -18,7 +18,7 @@
   --green: #0a7a4b;
   --tint: rgba(10, 122, 75, 0.07);
   --red: #c4574a;
-  --rail-w: max(240px, calc(50vw - 220px));
+  --rail-w: clamp(260px, 20vw, 320px);
   --shadow: 0 1px 2px rgba(11, 16, 21, 0.05), 0 12px 32px -12px rgba(11, 16, 21, 0.18),
     0 32px 64px -24px rgba(11, 16, 21, 0.16);
 }
@@ -60,9 +60,17 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 @media (min-width: 1024px) {
   .rail, .edge { display: block; }
   .topbar { display: none !important; }
-  .main { margin-left: calc(var(--rail-w) + 1px); padding: 0 40px 0 50px; }
-  .col { margin: 0; }
+  .main { margin-left: calc(var(--rail-w) + 1px); padding: 0 64px 0 72px; position: relative; z-index: 1; }
+  .col { margin: 0; max-width: 720px; }
+  /* the delta backdrop shows through the rail; the rail keeps only its right border */
+  .rail { background: transparent; }
+  .rail-in { left: 40px; right: auto; width: 232px; }
 }
+.bgdelta { display: none; }
+@media (min-width: 1024px) {
+  .bgdelta { display: block; position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+}
+@media print { .bgdelta { display: none !important; } }
 .topbar {
   position: sticky; top: 0; z-index: 30; background: rgba(255,255,255,.94); backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--rail-line); display: flex; align-items: center; justify-content: space-between;
@@ -94,6 +102,16 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .otp li a::before { content: ""; width: 0; height: 1px; background: var(--green); transition: width .3s; flex: none; }
 .otp li a.on { color: var(--ink); }
 .otp li a.on::before { width: 12px; }
+
+/* desktop rail: the nav is a branch tree. Trunk and nodes are an aria-hidden SVG (Shell.tsx, RailTree) measured from the links;
+   without JS the links and the nested "On this page" list still show, just without the lines. */
+.rail .nav a, .rail .nav-gl { padding-left: 24px; }
+.rail .nav a.on::before { display: none; }
+.rail .nav .tb { list-style: none; margin: 2px 0 6px; padding: 0; }
+.rail .nav .tb a { font-size: 13px; line-height: 19.5px; min-height: 0; padding: 3.5px 0 3.5px 42px; color: var(--ink-3); }
+.rail .nav .tb a:hover, .rail .nav .tb a.on { color: var(--ink); }
+.rail-tree { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; opacity: 0; animation: tree-in .5s .5s ease forwards; }
+@keyframes tree-in { to { opacity: 1; } }
 
 /* reveal */
 [data-reveal] { opacity: 0; transform: translateY(8px); transition: opacity .6s cubic-bezier(.2,.7,.2,1), transform .6s cubic-bezier(.2,.7,.2,1); }
@@ -268,6 +286,7 @@ footer.ft { margin-top: 110px; border-top: 1px solid var(--line); padding: 40px 
   [data-reveal] { opacity: 1; transform: none; transition: none; }
   .stagger { animation: none; opacity: 1; transform: none; }
   .logo svg path { animation: none; stroke-dashoffset: 0; }
+  .rail-tree { animation: none; opacity: 1; }
   .pill .dot { animation: none; }
   html { scroll-behavior: auto; }
   .bar { transition: none; }
