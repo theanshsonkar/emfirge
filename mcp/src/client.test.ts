@@ -164,3 +164,18 @@ test("formatToolError redacts ARN account and role path in balanced mode", () =>
   assert.equal(out.includes("123456789012"), false);
   assert.equal(out.includes("team/Admin"), false);
 });
+
+test("an HTML gateway error page becomes one short plain sentence", async () => {
+  const { plainBody } = await import("./client.js");
+  const html = "<!DOCTYPE html><html><head><title>504</title></head><body>Gateway Time-out</body></html>";
+  const msg = plainBody(504, html);
+  assert.doesNotMatch(msg, /</);
+  assert.match(msg, /did not answer in time/);
+  assert.match(msg, /504/);
+  assert.equal(plainBody(400, "bad   input\n here"), "bad input here");
+});
+
+test("an HTML gateway page from the server never becomes the error detail", async () => {
+  const { extractDetail } = await import("./client.js");
+  assert.equal(extractDetail("<!DOCTYPE html><html><body>504 Gateway Time-out</body></html>"), null);
+});

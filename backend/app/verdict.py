@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import concurrent.futures
+import contextvars
+import os
+
 from typing import Any, Literal, Mapping, List
 from datetime import datetime, timedelta, timezone
 
@@ -447,6 +451,14 @@ def _plan_reasons(plans: list[Mapping[str, Any]] | None) -> list[dict[str, str]]
     return reasons
 
 
+def _scanner_budget() -> float:
+    """Seconds all borrowed scanners may take together in one verdict (L90a)."""
+    try:
+        return max(0.5, float(os.environ.get("EMFIRGE_SCANNER_BUDGET_S", "12")))
+    except ValueError:
+        return 12.0
+
+
 def combined_verdict(
     base_infra: AWSInfrastructure,
     branch_infra: AWSInfrastructure,
@@ -542,10 +554,26 @@ def combined_verdict(
             return mapped
 
         # Scan only what changed plus its neighbours, the same subset on both sides.
+        # L90: every scanner and both sides run at the same time under ONE wall-clock budget;
+        # whatever is still running when it ends is reported as not run, never waited for.
+        budget = _scanner_budget()
         with scan_scope(plan_scan_scope(base_infra, branch_infra)):
-            for scanner, name in scanner_results:
-                base_scans[name] = _run(scanner, name, base_infra, "base")
-                branch_scans[name] = _run(scanner, name, branch_infra, "branch")
+            jobs = [(scanner, name, infra, side) for scanner, name in scanner_results
+                    for infra, side in ((base_infra, "base"), (branch_infra, "branch"))]
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=len(jobs), thread_name_prefix="scanner")
+            futures = {
+                pool.submit(contextvars.copy_context().run, _run, scanner, name, infra, side): (name, side)
+                for scanner, name, infra, side in jobs
+            }
+            done, not_done = concurrent.futures.wait(futures, timeout=budget)
+            pool.shutdown(wait=False, cancel_futures=True)
+            for future, (name, side) in futures.items():
+                target = base_scans if side == "base" else branch_scans
+                if future in done:
+                    target[name] = future.result()
+                else:
+                    target[name] = None
+                    reasons.setdefault(name, f"{side} scan exceeded the {budget:g}s time budget")
 
         available_scanners = {
             name for name in base_scans

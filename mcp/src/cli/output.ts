@@ -2,11 +2,11 @@
 // The input is already redacted by the handlers; nothing here adds raw data.
 
 const MAX_DEPTH = 4;
-const MAX_LIST = 8;
+const MAX_LIST = 25;
 
 function scalar(v: unknown): string {
   if (v === null || v === undefined) return "none";
-  if (typeof v === "string") return v.length > 120 ? `${v.slice(0, 117)}...` : v;
+  if (typeof v === "string") return v; // never cut a value: a cut URL or id is worse than a long line
   return String(v);
 }
 
@@ -18,7 +18,7 @@ function render(value: unknown, indent: string, depth: number, lines: string[]):
         render(item, indent + "  ", depth + 1, lines);
       } else lines.push(`${indent}- ${scalar(item)}`);
     }
-    if (value.length > MAX_LIST) lines.push(`${indent}... ${value.length - MAX_LIST} more`);
+    if (value.length > MAX_LIST) lines.push(`${indent}... ${value.length - MAX_LIST} more (all of them are in the JSON form, without --human)`);
     return;
   }
   if (value !== null && typeof value === "object") {
@@ -47,8 +47,8 @@ function humanCheck(v: Record<string, unknown>): string | null {
     const facts = a.facts?.length ?? 0;
     const unknown = a.unknown?.length ?? 0;
     lines.push(`- ${scalar(a.damage)}: ${facts} fact(s), ${unknown} unknown`);
-    for (const f of (a.facts ?? []).slice(0, 3)) lines.push(`    fact: ${scalar(JSON.stringify(f))}`);
-    for (const u of (a.unknown ?? []).slice(0, 3)) lines.push(`    unknown (not checked, not safe): ${scalar(JSON.stringify(u))}`);
+    for (const f of (a.facts ?? [])) lines.push(`    fact: ${scalar(JSON.stringify(f))}`);
+    for (const u of (a.unknown ?? []).slice(0, MAX_LIST)) lines.push(`    unknown (not checked, not safe): ${scalar(JSON.stringify(u))}`);
   }
   const changed = Array.isArray(v.changed_settings) ? (v.changed_settings as ChangedSetting[]) : [];
   const unjudged = changed.filter((c) => c.judged !== true);

@@ -46,7 +46,9 @@ def build_security_group_rule(permission: dict, *, egress: bool = False, include
 # max_attempts=2: one initial call + one retry. Faster failure (11s max vs 25s with 5 retries).
 BOTO_CONFIG = Config(connect_timeout=5, read_timeout=10, retries={'max_attempts': 2, 'mode': 'standard'})
 
-def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dict | None = None) -> AWSInfrastructure:
+def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dict | None = None,
+                           on_progress=None) -> AWSInfrastructure:
+    """The one scan. ``on_progress(name, done, total)`` is called as each collector finishes (the streaming scan uses it)."""
     region = credentials.region
     warnings = []
 
@@ -212,6 +214,11 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
                     'cloudfront':      CloudFrontData(),
                 }
                 results[name] = defaults[name]
+            if on_progress is not None:
+                try:
+                    on_progress(name, len(results), len(future_to_name))
+                except Exception:  # noqa: BLE001 - progress must never break a scan
+                    pass
 
     # ── POST-PROCESSING: Derive functions_with_admin_role from IAM data ──
     # Instead of Lambda collector making duplicate IAM API calls, we cross-reference

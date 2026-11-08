@@ -361,3 +361,12 @@ def ci_sqlite_db(monkeypatch):
     app.dependency_overrides[database.get_db] = override_get_db
     yield
     app.dependency_overrides.pop(database.get_db, None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_scanner_worker_backoff():
+    """L90c keeps a short in-process memory of a failed scanner worker; no test may inherit another's."""
+    from app import scanners
+    scanners._reset_worker_backoff()
+    yield
+    scanners._reset_worker_backoff()

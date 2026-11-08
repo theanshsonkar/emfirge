@@ -578,6 +578,9 @@ def _coverage(draft: _Draft, inputs: CheckInputs, with_warnings: bool) -> None:
             draft.check(source, "collected ok")
         elif status is None:
             draft.doubt(source, "collection status was not recorded for this snapshot, so it cannot be said to have been checked")
+        elif status == "denied":
+            draft.doubt(source, ("collection status is 'denied': the read-only role does not allow this read, so it is not in the snapshot. "
+                "If the role was created from an older template, update the role stack (`emfirge connect` prints the link)"))
         else:
             draft.doubt(source, f"collection status is '{status}'; what it would show is not in the snapshot")
     if with_warnings:

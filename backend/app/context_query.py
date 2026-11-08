@@ -282,6 +282,8 @@ class FactsBundle:
     # adapter-supplied per-question notes
     known: Mapping[str, Sequence[Note]] = field(default_factory=dict)
     unknown: Mapping[str, Sequence[Note]] = field(default_factory=dict)
+    # adapter-supplied resource types that belong to no region (shown as region "global")
+    global_types: Sequence[str] = ()
 
 
 # ── the answer ────────────────────────────────────────────────────
@@ -328,8 +330,9 @@ def _wanted(ctx: _Ctx, resource_id: str) -> bool:
 
 def _inventory(ctx: _Ctx) -> _Result:
     region = ctx.bundle.source.region
+    global_types = set(ctx.bundle.global_types)
     facts = [InventoryFact(resource_id=n.id, resource_type=n.resource_type,
-                           category=n.category.value, region=region)
+                           category=n.category.value, region="global" if n.resource_type in global_types else region)
              for n in _real_nodes(ctx) if _wanted(ctx, n.id)]
     facts.sort(key=lambda f: (f.resource_type, f.resource_id))
     known = [("graph", f"{len(_real_nodes(ctx))} resources in the snapshot graph")]
@@ -441,7 +444,8 @@ def _live(ctx: _Ctx) -> _Result:
     facts.sort(key=lambda f: (f.resource_id, f.basis))
     unknown = [(l.unknown_topic or "recent_use", l.unknown_reason, l.resource_id)
                for l in lines if l.unknown_reason]
-    known = [("recent_use", f"{len(facts)} resources have a recorded last-used")]
+    recorded = sum(1 for f in facts if f.last_used_at is not None or f.used is not None)
+    known = [("recent_use", f"{recorded} of {len(facts)} resources have a recorded last-used")]
     return facts, known, unknown
 
 
@@ -478,6 +482,9 @@ def _coverage(question: str, bundle: FactsBundle) -> tuple[list[tuple[str, ...]]
             known.append((source, "collected ok"))
         elif status is None:
             unknown.append((source, "collection status was not recorded for this snapshot, so it cannot be said to have been checked"))
+        elif status == "denied":
+            unknown.append((source, ("collection status is 'denied': the read-only role does not allow this read, so it is not in the snapshot. "
+                "If the role was created from an older template, update the role stack (`emfirge connect` prints the link)")))
         else:
             unknown.append((source, f"collection status is '{status}'; what it would show is not in the snapshot"))
     for warning in sorted(set(bundle.warnings)):
