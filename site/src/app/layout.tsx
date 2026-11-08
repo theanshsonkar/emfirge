@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   description: SITE.description,
   alternates: { types: { "text/markdown": "/index.md" } },
   openGraph: { type: "website", url: "/", siteName: "Emfirge", title: SITE.title, description: SITE.description },
-  twitter: { card: "summary", title: SITE.title, description: SITE.description },
+  twitter: { card: "summary_large_image", title: SITE.title, description: SITE.description },
 };
 export const viewport: Viewport = { themeColor: "#ffffff" };
 
