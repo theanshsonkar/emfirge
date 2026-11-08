@@ -4,6 +4,7 @@ L89a  create returns the raw key once; list never shows a key or hash; the store
 L89b  a created key authenticates; a revoked key stops working at once
 L89c  project A cannot list or revoke project B's keys (404, and B's key keeps working)
 L89d  at most 10 active keys per project (409); revoking frees a slot
+L89g  create is for browser sign-in only: an API-key caller gets 403 (a leaked key can't mint keys), list and revoke stay open
 L89e  every route needs a signed-in caller (no key, no access); self-host mode gets a clear refusal
 L89f  works for a sign-in token caller too, and the CLI manifest describes the three commands
 """
@@ -21,7 +22,7 @@ KEY_RE = re.compile(r"^emf_[A-Za-z0-9_-]{20,}$")
 
 
 @pytest.fixture
-def client(shared_test_db, monkeypatch):
+def client(shared_test_db, monkeypatch, supabase_env):
     monkeypatch.setattr(auth, 'AUTH_ENABLED', True)
     return TestClient(app)
 
@@ -31,7 +32,13 @@ def _h(key):
 
 
 def _login(name):
-    return auth.create_api_key(name)
+    """A browser sign-in token for project 'sb-<name>': the only kind of caller that may create keys."""
+    from tests.supabase_fake import make_token
+    return make_token(name)
+
+
+def _proj(name):
+    return f'sb-{name}'
 
 
 def test_L89a_create_returns_key_once_and_list_hides_it(client):
@@ -50,13 +57,15 @@ def test_L89a_create_returns_key_once_and_list_hides_it(client):
     row = next(k for k in listing.json()['keys'] if k['key_id'] == body['key_id'])
     assert set(row) == {'key_id', 'name', 'prefix', 'created_at', 'last_used_at', 'active'}
     assert row['active'] is True and row['name'] == 'ci runner' and row['prefix'] == body['prefix']
-    assert next(k for k in listing.json()['keys'] if k['key_id'] != body['key_id'])['name'] is None
+    legacy = auth.create_api_key('sb-l89a-proj')  # a key made some other way has no label
+    listing = client.get('/auth/api-keys', headers=_h(boot))
+    assert any(k['name'] is None and k['prefix'] is None for k in listing.json()['keys'])
     db = database.SessionLocal()
     try:
         stored = db.get(APIKey, body['key_id'])
         assert stored.key_hash == auth.hash_key(body['key'])
         assert body['key'] not in repr(stored.__dict__)
-        assert stored.project_name == 'l89a-proj'
+        assert stored.project_name == 'sb-l89a-proj'
     finally:
         db.close()
 
@@ -105,9 +114,9 @@ def test_L89c_projects_cannot_touch_each_others_keys(client):
 
 
 def test_L89d_ten_active_keys_per_project(client):
-    boot = _login('l89d-proj')  # the bootstrap key counts as one active key
+    boot = _login('l89d-proj')
     made = []
-    for _ in range(9):
+    for _ in range(10):
         r = client.post('/auth/api-keys', headers=_h(boot), json={})
         assert r.status_code == 200, r.text
         made.append(r.json())
@@ -123,6 +132,35 @@ def test_L89e_every_route_needs_a_caller(client):
                          ('delete', '/auth/api-keys/1'), ('post', '/auth/api-keys/1/revoke')):
         assert getattr(client, method)(path).status_code == 401, (method, path)
         assert getattr(client, method)(path, headers=_h('emf_nope')).status_code == 401, (method, path)
+
+
+def test_L89g_api_key_caller_cannot_create_but_can_list_and_revoke(client):
+    boot = _login('l89g-proj')
+    made = client.post('/auth/api-keys', headers=_h(boot), json={}).json()
+    other = client.post('/auth/api-keys', headers=_h(boot), json={}).json()
+    r = client.post('/auth/api-keys', headers=_h(made['key']), json={})
+    assert r.status_code == 403
+    assert r.json()['detail'] == ("Create keys from a signed-in session: run `emfirge login` on your own computer, "
+                                  "then `emfirge key create`.")
+    assert 'emf_' not in r.text
+    assert client.get('/auth/api-keys', headers=_h(made['key'])).status_code == 200
+    assert client.delete(f"/auth/api-keys/{other['key_id']}", headers=_h(made['key'])).status_code == 200
+    assert client.post(f"/auth/api-keys/{made['key_id']}/revoke", headers=_h(made['key'])).status_code == 200
+    assert client.get('/project', headers=_h(made['key'])).status_code == 401
+    # no key was created by the refused calls
+    assert len(client.get('/auth/api-keys', headers=_h(boot)).json()['keys']) == 2
+
+
+def test_L89g_caller_records_how_it_signed_in(client):
+    import asyncio
+    from starlette.requests import Request
+    def req(tok):
+        return Request({'type': 'http', 'headers': [(b'authorization', f'Bearer {tok}'.encode())]})
+    boot = _login('l89g-who')
+    key = client.post('/auth/api-keys', headers=_h(boot), json={}).json()['key']
+    assert asyncio.run(auth.get_caller(req(boot))).auth == 'sign_in'
+    assert asyncio.run(auth.get_caller(req(key))).auth == 'api_key'
+    assert auth.Caller('hosted', 1, 'p', 'x').auth == 'api_key'  # the default refuses creation
 
 
 def test_L89e_self_host_has_no_project_to_hold_keys(shared_test_db, monkeypatch):

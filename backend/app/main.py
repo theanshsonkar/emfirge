@@ -433,8 +433,11 @@ def _own_key(db, caller: Caller, key_id: int):
 
 @app.post('/auth/api-keys')
 def create_project_api_key(body: Optional[ApiKeyCreate] = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):
-    """Make an API key for the caller's own project. The raw key is in this response only."""
+    """Make an API key for the caller's own project (browser sign-in only). The raw key is in this response only."""
     project = _key_project(caller)
+    if caller.auth != 'sign_in':  # a leaked key must not be able to mint more keys
+        raise HTTPException(status_code=403, detail='Create keys from a signed-in session: run `emfirge login` on '
+                                                    'your own computer, then `emfirge key create`.')
     active = db.query(auth.APIKey).filter(auth.APIKey.project_name == project, auth.APIKey.active.is_(True)).count()
     if active >= MAX_ACTIVE_API_KEYS:
         raise HTTPException(status_code=409, detail=f'This project already has {MAX_ACTIVE_API_KEYS} active keys. Revoke one first.')

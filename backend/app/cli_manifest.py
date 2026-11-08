@@ -244,7 +244,8 @@ def _build() -> dict[str, Any]:
         {
             "name": "key create",
             "summary": "Make an API key for your own project, for places where browser sign-in cannot work "
-                       "(a cloud agent session, CI). The key is shown once. "
+                       "(a cloud agent session, CI). Run it on your own computer after `emfirge login`: "
+                       "a key cannot make keys. The key is shown once. "
                        "Store it as EMFIRGE_API_KEY in your environment's secret settings. "
                        "Never paste it into a chat or commit it.",
             "usage": ["emfirge key create [--name LABEL]"],

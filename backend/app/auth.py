@@ -52,6 +52,9 @@ class Caller:
     project_id: int | None
     project_name: str | None
     external_id: str | None
+    # How the caller proved who it is: 'sign_in' (browser sign-in token), 'api_key', or 'self_host' (no auth).
+    # Defaults to the least-privileged value, so a Caller built without it can never create API keys.
+    auth: str = 'api_key'
 
 
 def _request_key(request: Request) -> str:
@@ -98,7 +101,7 @@ def backfill_legacy_key_projects(session_factory=SessionLocal) -> int:
 
 async def get_caller(request: Request) -> Caller:
     if not AUTH_ENABLED:
-        return Caller('self-host', None, None, os.environ.get('EMFIRGE_EXTERNAL_ID') or None)
+        return Caller('self-host', None, None, os.environ.get('EMFIRGE_EXTERNAL_ID') or None, 'self_host')
     raw = _request_key(request)
     key = verify_api_key(raw)
     if key is None:
@@ -126,14 +129,14 @@ async def get_caller(request: Request) -> Caller:
                         if identity is None:
                             raise
                 project = session.query(Project).filter_by(id=identity.project_id).one()
-                return Caller('hosted', project.id, project.name, project.external_id)
+                return Caller('hosted', project.id, project.name, project.external_id, 'sign_in')
             finally:
                 session.close()
         raise HTTPException(status_code=401, detail='Unauthorized')
     session = SessionLocal()
     try:
         project = _get_or_create_project(session, getattr(key, 'project_name', 'default'))
-        return Caller('hosted', project.id, project.name, project.external_id)
+        return Caller('hosted', project.id, project.name, project.external_id, 'api_key')
     finally:
         session.close()
 

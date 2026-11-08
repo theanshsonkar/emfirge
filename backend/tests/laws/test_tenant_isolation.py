@@ -81,8 +81,9 @@ def test_tenant_routes_have_caller_dependency():
 
 
 def test_api_keys_are_scoped_to_the_callers_project(tenant_client):
-    client, key_a, key_b, _ = tenant_client
-    ha, hb = {'X-API-Key': key_a}, {'X-API-Key': key_b}
+    from tests.supabase_fake import make_token
+    client, _, _, _ = tenant_client
+    ha, hb = {'Authorization': f"Bearer {make_token('iso-keys-a')}"}, {'Authorization': f"Bearer {make_token('iso-keys-b')}"}
     made_b = client.post('/auth/api-keys', headers=hb, json={}).json()
     assert made_b['key_id'] not in {k['key_id'] for k in client.get('/auth/api-keys', headers=ha).json()['keys']}
     assert client.delete(f"/auth/api-keys/{made_b['key_id']}", headers=ha).status_code == 404
