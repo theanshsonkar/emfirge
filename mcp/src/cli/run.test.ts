@@ -387,3 +387,20 @@ test("not signed in exits 2 without waiting for a browser", async () => {
     process.env.EMFIRGE_API_KEY = saved;
   }
 });
+
+test("context --refresh prints a short scan summary, not the old scanner report", async () => {
+  const { scanSummary } = await import("./overrides.js");
+  const s = scanSummary({
+    analysis_id: "a-1", region_analyzed: "ap-south-1", total_resources_scanned: 41, scan_duration_seconds: 33,
+    overall_risk_score: 26, overall_risk_level: "CRITICAL", critical_risks: [{ x: 1 }], recommended_improvements: ["y"],
+    warnings: [], note: "Scans remaining today: 4/5 (resets midnight UTC).",
+  });
+  assert.equal(s.scan, "done");
+  assert.equal(s.resources, 41);
+  assert.equal(s.quota, "Scans remaining today: 4/5 (resets midnight UTC).");
+  const text = JSON.stringify(s);
+  for (const word of ["overall_risk", "CRITICAL", "critical_risks", "recommended_improvements"]) {
+    assert.equal(text.includes(word), false, word);
+  }
+  assert.match(String((s.next as string[])[0]), /context inventory --analysis a-1/);
+});

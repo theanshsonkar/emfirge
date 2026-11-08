@@ -83,6 +83,18 @@ function shouldRetrySignIn(): boolean {
   return !process.env.EMFIRGE_API_KEY;
 }
 
+/** A short plain-text reason from an error body: never an HTML error page from a proxy or gateway. */
+export function plainBody(status: number, text: string): string {
+  if (/<\s*(!doctype|html|head|body)\b/i.test(text)) {
+    if (status === 504 || status === 502 || status === 503) {
+      return `the server did not answer in time (gateway HTTP ${status}). Try again later; if you sent a change, check the branch before sending it again.`;
+    }
+    return `the server returned an HTML error page (HTTP ${status}).`;
+  }
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 300 ? flat.slice(0, 300) + "…" : flat;
+}
+
 export class BackendHttpError extends Error {
   constructor(public readonly status: number, public readonly body: unknown, path: string, detail?: string) {
     super(String(redactDeep(`Backend ${status} on ${path}${detail ? `: ${detail}` : ""}`)));
@@ -156,19 +168,19 @@ export async function backendCall<T = unknown>(
       if (res.status === 403) {
         throw new HttpStatusError(403,
           detail ??
-          "Access denied. Check the role's trust policy and your project ExternalId from emfirge_setup. " +
-            "If you don't have a role yet, call emfirge_setup_help.",
+          "Access denied. Check the role's trust policy and your project ExternalId (`emfirge connect`). " +
+            "If you don't have a role yet, run `emfirge connect` (MCP: emfirge_setup_help).",
         );
       }
       if (res.status === 404) {
         const hint = path.startsWith("/branches")
-          ? "Branch not found. Call emfirge_list_branches to see available branches."
-          : `Not found at ${path}. If you passed an analysis_id, run emfirge_scan first.`;
+          ? "Branch not found. List your branches with `emfirge branch list` (MCP: emfirge_list_branches)."
+          : `Not found at ${path}. If you passed an analysis id, run a scan first: \`emfirge context --refresh\` (MCP: emfirge_scan).`;
         const suffix = detail && detail !== "Not Found" ? ` Backend says: ${detail}` : "";
         throw new HttpStatusError(404, `${hint}${suffix}`);
       }
 
-      throw new HttpStatusError(res.status, String(redactDeep(`Backend ${res.status} on ${path}: ${surfacedDetail ?? text.slice(0, 300)}`)));
+      throw new HttpStatusError(res.status, String(redactDeep(`Backend ${res.status} on ${path}: ${surfacedDetail ?? plainBody(res.status, text)}`)));
     }
 
     return (await res.json()) as T;
@@ -280,18 +292,18 @@ export async function backendCallSSE<T = unknown>(
       if (res.status === 403) {
         throw new HttpStatusError(403,
           detail ??
-            "Access denied. Check the role's trust policy and your project ExternalId from emfirge_setup. " +
-              "If you don't have a role yet, call emfirge_setup_help.",
+            "Access denied. Check the role's trust policy and your project ExternalId (`emfirge connect`). " +
+              "If you don't have a role yet, run `emfirge connect` (MCP: emfirge_setup_help).",
         );
       }
       if (res.status === 404) {
         const hint = path.startsWith("/branches")
-          ? "Branch not found. Call emfirge_list_branches to see available branches."
-          : `Not found at ${path}. If you passed an analysis_id, run emfirge_scan first.`;
+          ? "Branch not found. List your branches with `emfirge branch list` (MCP: emfirge_list_branches)."
+          : `Not found at ${path}. If you passed an analysis id, run a scan first: \`emfirge context --refresh\` (MCP: emfirge_scan).`;
         const suffix = detail && detail !== "Not Found" ? ` Backend says: ${detail}` : "";
         throw new HttpStatusError(404, `${hint}${suffix}`);
       }
-      throw new HttpStatusError(res.status, `Backend ${res.status} on ${path}: ${detail ?? text.slice(0, 300)}`);
+      throw new HttpStatusError(res.status, `Backend ${res.status} on ${path}: ${detail ?? plainBody(res.status, text)}`);
     }
 
     if (!res.body) {
