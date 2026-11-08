@@ -1,58 +1,28 @@
-import type { Metadata } from "next";
-import { Geist, Geist_Mono, Space_Grotesk } from "next/font/google";
-import { ThemeProvider } from "@/components/theme-provider";
-import { ThemeSync } from "@/components/theme-sync";
+import type { Metadata, Viewport } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
+import { SITE } from "@/content/site";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-mono",
-  subsets: ["latin"],
-});
-
-// Display face for headings / wordmark, editorial-technical per brand brief (§6).
-const spaceGrotesk = Space_Grotesk({
-  variable: "--font-display",
-  subsets: ["latin"],
-  weight: ["500", "600", "700"],
-});
+const sans = Geist({ subsets: ["latin"], variable: "--font-geist", display: "swap" });
+const mono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono", display: "swap", weight: ["400", "500"] });
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://emfirge.cloud"),
-  title: "Emfirge — The harness between AI and cloud",
-  description:
-    "Give your AI agent a safe branch of your cloud before anything touches production.",
+  title: SITE.title,
+  description: SITE.description,
+  alternates: { types: { "text/markdown": "/index.md" } },
+  openGraph: { type: "website", url: "/", siteName: "Emfirge", title: SITE.title, description: SITE.description },
+  twitter: { card: "summary", title: SITE.title, description: SITE.description },
 };
+export const viewport: Viewport = { themeColor: "#ffffff" };
 
-export default function RootLayout({
-  children,
-}: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" data-scroll-behavior="smooth" suppressHydrationWarning className={`${geistSans.variable} ${geistMono.variable} ${spaceGrotesk.variable} h-full`}>
-      <body className="min-h-full font-sans antialiased">
-        {/* Before first paint: opt into reveal animations only when the user
-            hasn't asked for reduced motion. No-JS / reduced-motion users get
-            fully-visible content (see .gsap-anim rules in globals.css). */}
-        <script
-          dangerouslySetInnerHTML={{
-            __html:
-              "(function(){try{if(!matchMedia('(prefers-reduced-motion: reduce)').matches){document.documentElement.classList.add('gsap-anim')}}catch(e){}})()",
-          }}
-        />
-        <ThemeProvider
-          attribute="class"
-          defaultTheme="dark"
-          enableSystem
-          disableTransitionOnChange
-        >
-          <ThemeSync />
-          {children}
-        </ThemeProvider>
-      </body>
+    <html lang="en" className={`${sans.variable} ${mono.variable} no-js`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: "document.documentElement.classList.remove('no-js')" }} />
+      </head>
+      <body>{children}</body>
     </html>
   );
 }

@@ -1,6 +1,6 @@
 import type { Page } from "./types.ts";
 
-// Facts here come from backend/app/check_facts.py, aws_check.py, verdict.py and the CLI; see landing/FACTS.md, sections 2 to 4.
+// Facts here come from backend/app/check_facts.py, aws_check.py, verdict.py and the CLI; see site/FACTS.md, sections 2 to 4.
 export const howItWorks: Page = {
   slug: "how-it-works",
   href: "/how-it-works/",

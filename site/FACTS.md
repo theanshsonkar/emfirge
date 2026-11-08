@@ -377,11 +377,11 @@ Notes recorded in the scorecards: (a) after the fixes, role entries stay `missed
 | `mcp/src/cli/verbs.ts` summary of `request` | "NOT BUILT YET (v2)" | consistent; the site says so (v7 site described it as built). |
 | `docs/AGENT-GUIDE.md:91` | exit 5 conflict is "the branch changed since you read it, or a limit was hit" | only stale-revision conflicts are HTTP 409. Hitting the open-branch limit is HTTP 429, so exit 4 `rate_limited` (`be/main.py:1615,1688`). The site follows the code. |
 | `be/main.py:2204-2206` comment says scanners are off | code default `EMFIRGE_RUN_SCANNERS=0` | production sets `EMFIRGE_RUN_SCANNERS=1` (`.github/workflows/deploy.yml:76`), so "Checkov runs on every verdict" is true on the hosted engine, false for a default self-hosted run. |
-| `landing` v7 site | exit codes 0/1/2/3 = pass/warn/block/error | 0-6 as in 1.6; a verdict never changes the exit code. |
-| `landing` v7 site | `@emfirge/cli` package | the package is `emfirge`; `@emfirge/cli` does not exist on npm. |
-| `landing` v7 site | check prints a BLOCK / PASS verdict line | `check` prints six answers and no verdict; the verdict is `check --verdict` and `try`. |
-| `landing` v7 site | 14 types, 24 tools, 2,432 / 102 tests, 48 laws, 30 reason codes | 18, 27, 3,247 / 206, 88, 32. |
-| `landing` v7 site `/security` | 90-day retention in PRIVACY.md, purge incomplete, discard only closes, plan text kept | all four are false now (section 6). |
+| `site/` v7 | exit codes 0/1/2/3 = pass/warn/block/error | 0-6 as in 1.6; a verdict never changes the exit code. |
+| `site/` v7 | `@emfirge/cli` package | the package is `emfirge`; `@emfirge/cli` does not exist on npm. |
+| `site/` v7 | check prints a BLOCK / PASS verdict line | `check` prints six answers and no verdict; the verdict is `check --verdict` and `try`. |
+| `site/` v7 | 14 types, 24 tools, 2,432 / 102 tests, 48 laws, 30 reason codes | 18, 27, 3,247 / 206, 88, 32. |
+| `site/` v7 `/security` | 90-day retention in PRIVACY.md, purge incomplete, discard only closes, plan text kept | all four are false now (section 6). |
 | `PRIVACY.md` vs `iam-role.yaml` | evidence uses `cloudtrail:LookupEvents` | the template does not list it (it may come from `SecurityAudit`; not checked). |
 | `backend/BRANCH-CLI.md` | a separate Python client `backend/scripts/emfirge-branch.py`, errors exit 2 | unrelated to the npm `emfirge` command; not mentioned on the site. |
 

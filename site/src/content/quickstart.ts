@@ -2,7 +2,7 @@ import type { Page } from "./types.ts";
 import { SETUP_PROMPT } from "./site.ts";
 
 // The Set up page (the route keeps its v8 name, /quickstart/). It lists only what a person does; the agent's side is on /cli/.
-// Who does what, with sources: landing/FACTS.md section 13. Commands and output are real: sections 1 and 2.
+// Who does what, with sources: site/FACTS.md section 13. Commands and output are real: sections 1 and 2.
 export const quickstart: Page = {
   slug: "quickstart",
   href: "/quickstart/",

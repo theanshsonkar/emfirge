@@ -12,7 +12,7 @@ References (study them before building, at
 - `sm/fig-sheet.png`: Figure 1, 8 frames over time. `sm/frames-sheet.png`: a scroll recording.
 - `sm/supermemory-walkthrough.mp4`: the live recording, if you need it.
 - `sm/product0.png`, `sm/pricing0.png`, `sm/research0.png`: other pages (later rounds).
-- `/home/user/emfirge/landing/RESEARCH-supermemory.md`: how their site is built and why it works.
+- `/home/user/emfirge/site/RESEARCH-supermemory.md`: how their site is built and why it works.
 
 ## Exact layout and tokens (measured from their site at 1440px)
 
@@ -153,7 +153,7 @@ References (study them before building, at
   Mirror `?agent=1` in the URL like theirs.
 
 ## Build rules
-- Rebuild `landing/` on the existing stack (Next.js 16, React 19, TS, Tailwind v4, static export).
+- Rebuild `site/` on the existing stack (Next.js 16, React 19, TS, Tailwind v4, static export).
   Delete all v5 components and copy. All copy in `src/content.ts`. Canvas/SVG generators in `src/graphics/`.
 - No new heavy deps (no three.js, no lottie, no motion libs needed; CSS + small scripts like theirs).
 - Placeholders for anything unknown are written as `[TODO Ansh: …]` in content.ts and listed in your report.

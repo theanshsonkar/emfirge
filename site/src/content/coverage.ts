@@ -2,7 +2,7 @@ import type { Page } from "./types.ts";
 
 const T = (type: string, add: string, mod: string, del: string, note: string) => [`\`${type}\``, add, mod, del, note];
 
-// Read from backend/app/mutations.py (_MUTATION_CAPABILITIES, 18 types) on 2026-11-08. See landing/FACTS.md, sections 2 and 4.
+// Read from backend/app/mutations.py (_MUTATION_CAPABILITIES, 18 types) on 2026-11-08. See site/FACTS.md, sections 2 and 4.
 export const coverage: Page = {
   slug: "coverage",
   href: "/coverage/",

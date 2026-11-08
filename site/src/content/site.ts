@@ -1,6 +1,6 @@
 // Home-page copy and numbers (v6 look, v7 links). Inner pages live in the other files of this folder. See DESIGN-v7.md.
 //
-// REAL NUMBERS (counted from the repo on 2026-11-08, never estimated; sources in landing/FACTS.md, section 4.1):
+// REAL NUMBERS (counted from the repo on 2026-11-08, never estimated; sources in site/FACTS.md, section 4.1):
 //  - Engine tests 3,247: `cd backend && python3 -m pytest --collect-only -q` ("3247 tests collected"; parametrized cases
 //    included). A full run on 2026-11-08: 3243 passed, 3 skipped, 1 xfailed.
 //  - MCP + CLI tests 206: `cd mcp && npm test` -> "# tests 206, pass 206".
@@ -38,7 +38,7 @@ export const SITE = {
 };
 
 // The prompt a person gives their agent. Built from docs/AGENT-GUIDE.md and the real CLI (login -> connect -> context --refresh;
-// branch open -> try -> check -> report). Who does what is in landing/FACTS.md, section 13. Keep it short.
+// branch open -> try -> check -> report). Who does what is in site/FACTS.md, section 13. Keep it short.
 export const SETUP_PROMPT = [
   "Set up emfirge for my AWS account and use it for every AWS change from now on.",
   "emfirge is a CLI. Run it as `npx -y emfirge <command>` (Node.js 20 or later). Run `npx -y emfirge guide` first; the full reference is https://emfirge.cloud/cli.md.",

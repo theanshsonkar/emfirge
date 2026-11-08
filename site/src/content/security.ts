@@ -1,7 +1,7 @@
 import type { Page } from "./types.ts";
 
 // Everything here is from PRIVACY.md (updated 2026-11-08 and checked against the code by law L71h), iam-role.yaml, SECURITY.md and
-// the code. See landing/FACTS.md, section 6.
+// the code. See site/FACTS.md, section 6.
 export const security: Page = {
   slug: "security",
   href: "/security/",

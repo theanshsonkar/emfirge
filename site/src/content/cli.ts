@@ -1,7 +1,7 @@
 import type { Page } from "./types.ts";
 
 // Every command, flag and exit code here is read from the code: backend/app/cli_manifest.py (the server's command list),
-// mcp/src/cli/*.ts (the CLI) and docs/AGENT-GUIDE.md. Sources are in landing/FACTS.md, section 1.
+// mcp/src/cli/*.ts (the CLI) and docs/AGENT-GUIDE.md. Sources are in site/FACTS.md, section 1.
 export const cli: Page = {
   slug: "cli",
   href: "/cli/",
