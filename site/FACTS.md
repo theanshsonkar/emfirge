@@ -82,7 +82,7 @@ So there are **eleven commands**: six manifest commands (`context`, `branch`, `t
 | `branch discard BRANCH` | `--revision`, `--expected-count` | `POST /branches/{id}/discard` (deletes the branch and every linked row, `be/branches.py:561-566`, law L71b) |
 | `branch compare BRANCH...` | two or more branch ids | `POST /branches/compare` |
 
-`--revision` is the `branch_revision` (SHA-256 hex, 64 chars) you last saw; a stale one is rejected (HTTP 409). `--expected-count` is the change count you last saw. Branch `new`, `show` and `rollback --to` from the old site do **not** exist (they are `open`, `get`, `rollback-to --count`). Open-branch limit: 10 per base analysis (`be/branches.py:92`, env `EMFIRGE_MAX_OPEN_BRANCHES`); hitting it answers HTTP 429, so the CLI exits 4 with code `rate_limited` (`be/main.py:1615-1616,1688-1689`).
+`--revision` is the `branch_revision` (SHA-256 hex, 64 chars) you last saw; a stale one is rejected (HTTP 409). `--expected-count` is the change count you last saw. Branch `new`, `show` and `rollback --to` from the old site do **not** exist (they are `open`, `get`, `rollback-to --count`). Open-branch limit: 10 per base analysis (`be/branches.py:92`, env `EMFIRGE_MAX_OPEN_BRANCHES`); since PR #89 (`34e6fc3`) hitting it answers HTTP 409, so the CLI exits 5 with code `conflict` (`be/main.py:1687-1689,1761-1763`; `backend/tests/test_branch_api.py:155`).
 
 **`try`** (`be/cli_manifest.py:169-199`, client code `mcp/src/cli/overrides.ts:17-61`)
 
@@ -239,7 +239,7 @@ Most types also carry `tags` (a tag change replaces the complete user tag set, `
 |---|---|---|
 | Backend test cases | **3,247** | `cd backend && python3 -m pytest --collect-only -q -p no:warnings \| tail -3` -> `3247 tests collected` (old site: 2,432) |
 | MCP + CLI tests | **206** | `cd mcp && npm test` -> `# tests 206`, `# pass 206`, `# fail 0` (old site: 102) |
-| Laws | **88** (L1 to L88, none missing) | distinct `L<n>` ids in `backend/tests/**/*.py` (87; L81 lives in `mcp/src/tokenize-leaks.test.ts:1`) plus the MCP tests = 88. `L99` in `test_privacy_doc_law.py:220` is a test of the marker checker, not a law. README says 48, see section 12. |
+| Laws | **88** (numbered L1 to L91; L37, L38 and L39 do not exist anywhere in the repo, checked 2026-11-08 after PR #89 added L90 and L91; L89 came with PR #86) | distinct `L<n>` ids in `backend/tests/**/*.py` (87; L81 lives in `mcp/src/tokenize-leaks.test.ts:1`) plus the MCP tests = 88. `L99` in `test_privacy_doc_law.py:220` is a test of the marker checker, not a law. README says 48, see section 12. |
 | Resource types | **18** | section 4 |
 | Privilege-escalation paths (pathfinding.cloud) | **92** | `len(backend/app/data/pathfinding_paths.json["paths"])`; source `https://github.com/DataDog/pathfinding.cloud`, commit `ecc3d092...`, Apache-2.0 |
 | Scanner check reads | **55** | `len(backend/app/data/scanner_check_reads.json)` |
@@ -379,14 +379,14 @@ Notes recorded in the scorecards: (a) after the fixes, role entries stay `missed
 
 | Where | Says | Code says |
 |---|---|---|
-| `README.md:96` | "There are 48 [laws] so far" | L1 to L88 are all present in the tests: 88 laws (87 in `backend/tests`, L81 in `mcp/src`). |
+| `README.md:96` | "There are 48 [laws] so far" | 88 laws in the tests, numbered L1 to L91 with L37 to L39 unused (L81 is in `mcp/src`, the rest in `backend/tests`). |
 | `README.md:79` and the install text | install with `npx @emfirge/mcp install`; no mention of the CLI | the CLI is `npx emfirge login` / `npx emfirge connect`; the MCP install still works. |
 | `README.md:109-125` (resource table) | 14 types; IAM user add only; no CloudFront, DynamoDB, Scheduler, instance profile | 18 types; IAM user add + modify; CloudFront modify; DynamoDB modify + delete; Scheduler add / modify / delete; instance profile add. |
 | `mcp/README.md:39` | heading "Tools (24)" (the body lists 25 names) | the registry has 27 tools; the README lacks `emfirge_check` and `emfirge_context` (`comm` of registry names against README names). |
 | `mcp/README.md:76-83` and `README.md` | the CLI section lists `status`, `privacy`, `tokens`, `purge` as the CLI | they are `@emfirge/mcp` subcommands, not `emfirge`. |
 | `be/cli_manifest.py` (`branch rollback` summary) | "Clear the changes on a branch." | `rollback_last` removes the **most recent** change only (`be/branches.py:447-452`); `rollback-to --count 0` clears. The site follows the code. |
 | `mcp/src/cli/verbs.ts` summary of `request` | "NOT BUILT YET (v2)" | consistent; the site says so (v7 site described it as built). |
-| `docs/AGENT-GUIDE.md:91` | exit 5 conflict is "the branch changed since you read it, or a limit was hit" | only stale-revision conflicts are HTTP 409. Hitting the open-branch limit is HTTP 429, so exit 4 `rate_limited` (`be/main.py:1615,1688`). The site follows the code. |
+| `docs/AGENT-GUIDE.md:91` | exit 5 conflict is "the branch changed since you read it, or a limit was hit" | true since PR #89 (`34e6fc3`): the open-branch limit is HTTP 409 (`be/main.py:1688,1762`). Before that it was 429; the site was corrected on 2026-11-08. |
 | `be/main.py:2204-2206` comment says scanners are off | code default `EMFIRGE_RUN_SCANNERS=0` | production sets `EMFIRGE_RUN_SCANNERS=1` (`.github/workflows/deploy.yml:76`), so "Checkov runs on every verdict" is true on the hosted engine, false for a default self-hosted run. |
 | `site/` v9 (before this update), FACTS 13 and the `quickstart` TODO | "No command or endpoint issues an API key"; remote agents cannot sign in; the repo CLI is `0.2.9` and must be published to catch up | `emfirge key create` exists (section 14); the CLI is `0.1.1` in the repo and `0.1.1` on npm (own version line). |
 | `mcp/src/cli/version.ts` run from `mcp/` | prints the package version of whichever `package.json` is two levels up | from source that is `@emfirge/mcp`'s `0.2.9`, not the CLI's; the built CLI prints `0.1.1`. |
@@ -508,3 +508,13 @@ Read from the merged code. Checked by running: `cd backend && python3 -m pytest 
 | npm's `emfirge@0.1.1` (06:41 UTC) was published before the key commits (07:15 and 07:19 UTC). Its `dist/emfirge.js` has the spinner (`EMFIRGE_NO_SPINNER` found) but no `reveal` handling and no `emf_` masking (both counts 0), and its bundled manifest has no `key` commands. Because the CLI takes its commands from the server and the live server already lists `key`, `npx emfirge key create` sends the right request, but `0.1.1` does not have the code that deliberately prints the key and masks keys elsewhere. I ran the tokenizer from before the key commits: it leaves an `emf_...` string in a `key` field unchanged, so `0.1.1` most likely prints it (not tested end to end). To ship the printing and masking, bump `cli/package.json` above `0.1.1` and publish. Written on the site as a TODO for Ansh. | `npm pack emfirge@0.1.1` then `grep -c reveal package/dist/emfirge.js` -> 0, `grep -c 'emf_REDACTED'` -> 0, `grep -c EMFIRGE_NO_SPINNER` -> 1, `grep -c 'key revoke'` -> 0; `git show ed791eb~1:mcp/src/tokenize.ts` run through `redactDeep` on `{key: "emf_..."}` returned the key unchanged; `curl https://emfirge.cloud/api/cli/manifest` lists the `key` group |
 | The spinner: shown only on stderr, only when stderr is a terminal; off in CI, with `TERM=dumb` or `EMFIRGE_NO_SPINNER=1`, so an agent reading stdout as JSON never sees it. | `mcp/src/cli/spinner.ts:1-18`; commit `fb2af52` |
 | `npx emfirge` always fetches the `latest` tag, so the site needs no version number; it says none. | `cli/package.json:3`; site grep for `0.1.` and `0.2.` finds only the TODO list |
+
+
+## PR #89 (merged 2026-11-08, merge `b8f5c24`)
+
+- `cli/package.json` is `0.1.2` (`34e6fc3`). npm's `latest` is still `0.1.1` (`npm view emfirge dist-tags` on 2026-11-08), so key printing and masking are still unpublished.
+- Open-branch limit is HTTP 409, exit 5 (`34e6fc3`, `be/main.py:1687-1689`).
+- Check time budget, scanners in parallel, `EMFIRGE_SCANNER_BUDGET_S` default 12, `EMFIRGE_SCANNER_BACKOFF_S` 60 (`747df76`, L90).
+- `/analyze/stream` uses the shared collector, adding DynamoDB, Scheduler, CloudFront, API Gateway, ElastiCache, SQS, with collection status and `collected_at` (`51c2565`, L91).
+- `try` answers `saved: true` when the verdict call fails, verdict `null` (`fb24910`).
+- HTML gateway pages never become the error detail (`7cee216`); deploy syncs the S3 role template (`86ef1d2`).

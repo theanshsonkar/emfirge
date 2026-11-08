@@ -4,7 +4,7 @@
 //  - Engine tests 3,247: `cd backend && python3 -m pytest --collect-only -q` ("3247 tests collected"; parametrized cases
 //    included). A full run on 2026-11-08: 3243 passed, 3 skipped, 1 xfailed.
 //  - MCP + CLI tests 206: `cd mcp && npm test` -> "# tests 206, pass 206".
-//  - Laws 88: distinct L1..L88 ids in backend/tests (87) plus mcp/src/tokenize-leaks.test.ts (L81). README still says 48.
+//  - Laws 88: distinct ids L1..L91 in backend/tests plus mcp/src/tokenize-leaks.test.ts (L81); L37-L39 do not exist. README still says 48.
 //  - Resource types 18: len(app.mutations.SUPPORTED_RESOURCE_TYPES).
 //  - Escalation paths 92: len(app/data/pathfinding_paths.json["paths"]).
 //  - Scanner check reads 55: len(app/data/scanner_check_reads.json).
@@ -242,7 +242,7 @@ export const TODOS: Todo[] = [
   { page: "", text: "X handle for the footer Connect column; shown as plain text without a link." },
   { page: "", text: "Status page URL; the footer status dot is not linked." },
   { page: "", text: "The typed-change row of \"Same change, same answer\" has no law that compares it with the AWS API call (L18, L19 and L21 cover the CLI, CloudFormation and Terraform); add one or keep the note." },
-  { page: "", text: "The repo's CLI and npm's emfirge are both 0.1.1, but npm's was published before the API key code: it has no key printing (`response.reveal`) and no masking of `emf_` keys in other output. Bump `cli/package.json` above 0.1.1 and publish. After that, add to Security and the Agent reference: every other output shows keys as `emf_REDACTED`, and a key is never written to the token map." },
+  { page: "", text: "The repo's CLI is 0.1.2 but npm's emfirge is still 0.1.1, which was published before the API key code: it has no key printing (`response.reveal`) and no masking of `emf_` keys in other output. Publish 0.1.2. After that, add to Security and the Agent reference: every other output shows keys as `emf_REDACTED`, and a key is never written to the token map." },
   { page: "", text: "Writing posts: titles are placeholders with no dates or links." },
   { page: "pricing", text: "Confirm the beta limits the production server sets (shown as \"Beta usage limits: not published yet.\"). The engine's code defaults are 5 scans per AWS account per day, 30 branch requests per minute and 10 open branches per base scan." },
   { page: "pricing", text: "Post-beta pricing, whether a free tier stays for one account, and how much notice beta users get. Nothing has been decided, so none of it is promised (shown as \"Not decided yet.\")." },

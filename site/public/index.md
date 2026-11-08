@@ -71,7 +71,7 @@ Numbers, counted from the repository:
 |---|---|---|
 | Engine tests (backend) | 3,247 | `pytest --collect-only` in backend/ |
 | MCP + CLI tests | 206 | `npm test` in mcp/ |
-| Laws | 88 | distinct L1 to L88 ids in the tests |
+| Laws | 88 | distinct law ids in the tests, numbered L1 to L91 (L37 to L39 not used) |
 | Modeled resource types | 18 | `SUPPORTED_RESOURCE_TYPES` in backend/app/mutations.py |
 | pathfinding.cloud escalation paths | 92 | backend/app/data/pathfinding_paths.json |
 | Scanner check reads | 55 | backend/app/data/scanner_check_reads.json |

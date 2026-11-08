@@ -62,11 +62,11 @@ Your agent should use the exact ID printed by `emfirge branch list`, against the
 **A change was rejected**
 The branch must be open, the resource type supported, and the target must exist for a modify or delete. Unknown fields are rejected. Check [Coverage](https://emfirge.cloud/coverage.md#resources) and run `emfirge try` again with the exact ID.
 
-**HTTP 409 on a change, rollback or discard**
-Someone else changed the branch. Run `emfirge branch get` for the new revision token and pass it with `--revision`. This is exit code 5.
+**HTTP 409 on a change, rollback, discard or new branch**
+Someone else changed the branch: run `emfirge branch get` for the new revision token and pass it with `--revision`. Or 10 branches are already open on one base scan: discard branches you no longer need. This is exit code 5.
 
 **Timeouts or HTTP 429**
-A scan can take a while on a large account; the client waits up to 240 seconds. For 429 (exit code 4, `rate_limited`), follow the limit and reset time in the message. The open-branch limit is also a 429: discard branches you no longer need.
+A scan can take a while on a large account; the client waits up to 240 seconds. For 429 (exit code 4, `rate_limited`), follow the limit and reset time in the message.
 
 **Exit code 6, "needs a newer emfirge"**
 The server's command is newer than the install. Your agent runs `npx emfirge@latest`, then retries.
