@@ -91,6 +91,7 @@ we do not promise any. <!-- law: L71h -->
 | Postgres `branch_policy_check_logs` | Opt-in policy check results for a branch | yes | until you discard the branch or purge |
 | Postgres `projects` | Your login workspace: name and your ExternalId | no | until you ask us to delete your login |
 | Postgres `api_keys` | Your API keys as hashes, with project name, active flag and last-used time | no | until you ask us to delete your login |
+| Postgres `api_key_labels` | The optional name you gave an API key and its first 8 characters after `emf_`, to tell keys apart | no | until you ask us to delete your login |
 | Postgres `supabase_identities` | Your sign-in user ID and the project it maps to | no | until you ask us to delete your login |
 | Postgres `tf_resources` | Legacy GitHub integration only: repo name, file path and the raw HCL of indexed Terraform resource blocks | no | until you ask us to delete it |
 | Postgres `ci_api_keys` | Legacy GitHub integration only: hashed CI keys, GitHub installation ID, repo name | no | until you ask us to delete it |

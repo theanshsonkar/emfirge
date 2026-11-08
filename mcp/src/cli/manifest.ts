@@ -68,7 +68,7 @@ export interface ManifestCommand {
   client?: string;
   variants?: ManifestVariant[];
   variants_exclusive?: boolean;
-  response?: { list_key?: string };
+  response?: { list_key?: string; reveal?: string[] };
   human?: HumanHint;
   requires?: string[];
 }

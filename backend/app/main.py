@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, Request, Query, Depends
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware  # NEW
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -49,7 +49,7 @@ from app.diffing import graph_warning_strings
 from app import branches, field_catalog, identifiers
 from app import policy_checks, aws_policy_checks
 from app.in_use_evidence import EvidenceRequest, EvidenceEstimate, build_estimate, read_evidence, SOURCES, WINDOW_DAYS
-from app.database import Project, SupabaseIdentity
+from app.database import Project, SupabaseIdentity, APIKeyLabel
 from app.aws_collector import collect_infrastructure, ROLE_SESSION_NAME
 from app.rules import run_all_checks, find_toxic_combos
 from app.scoring import calculate_score, count_scored_resources, score_snapshot
@@ -408,6 +408,78 @@ def logs(account_id: str = None, caller: Caller = Depends(get_caller), db=Depend
             account_ids = {account_id} if account_id in account_ids else set()
         recent_logs = get_recent_logs(limit=20, account_ids=account_ids)
     return {'logs': recent_logs, 'count': len(recent_logs)}
+
+
+MAX_ACTIVE_API_KEYS = 10
+
+
+class ApiKeyCreate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    name: Optional[str] = Field(default=None, max_length=80)
+
+
+def _key_project(caller: Caller) -> str:
+    if caller.mode != 'hosted' or not caller.project_name:
+        raise HTTPException(status_code=400, detail='API keys belong to a signed-in project; this server has none.')
+    return caller.project_name
+
+
+def _own_key(db, caller: Caller, key_id: int):
+    key = db.get(auth.APIKey, key_id)
+    if key is None or key.project_name != _key_project(caller):
+        raise HTTPException(status_code=404, detail='Key not found')
+    return key
+
+
+@app.post('/auth/api-keys')
+def create_project_api_key(body: Optional[ApiKeyCreate] = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    """Make an API key for the caller's own project (browser sign-in only). The raw key is in this response only."""
+    project = _key_project(caller)
+    if caller.auth != 'sign_in':  # a leaked key must not be able to mint more keys
+        raise HTTPException(status_code=403, detail='Create keys from a signed-in session: run `emfirge login` on '
+                                                    'your own computer, then `emfirge key create`.')
+    active = db.query(auth.APIKey).filter(auth.APIKey.project_name == project, auth.APIKey.active.is_(True)).count()
+    if active >= MAX_ACTIVE_API_KEYS:
+        raise HTTPException(status_code=409, detail=f'This project already has {MAX_ACTIVE_API_KEYS} active keys. Revoke one first.')
+    raw = auth.generate_api_key()
+    row = auth.APIKey(key_hash=auth.hash_key(raw), project_name=project, active=True, created_at=datetime.utcnow())
+    db.add(row)
+    db.flush()
+    prefix = raw[4:12]
+    db.add(APIKeyLabel(key_id=row.id, name=(body.name.strip() or None) if body and body.name else None, prefix=prefix))
+    db.commit()
+    return {
+        'key': raw, 'key_id': row.id, 'prefix': prefix, 'created_at': row.created_at.isoformat(),
+        'warning': 'This is the only time the key is shown. Store it now as EMFIRGE_API_KEY in your '
+                   "environment's secret settings. Never paste it into a chat or commit it.",
+    }
+
+
+@app.get('/auth/api-keys')
+def list_project_api_keys(caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    """The caller's own keys: never the key or its hash."""
+    project = _key_project(caller)
+    rows = db.query(auth.APIKey, APIKeyLabel).outerjoin(APIKeyLabel, APIKeyLabel.key_id == auth.APIKey.id) \
+        .filter(auth.APIKey.project_name == project).order_by(auth.APIKey.id).all()
+    return {'keys': [{
+        'key_id': k.id, 'name': label.name if label else None, 'prefix': label.prefix if label else None,
+        'created_at': k.created_at.isoformat() if k.created_at else None,
+        'last_used_at': k.last_used_at.isoformat() if k.last_used_at else None, 'active': bool(k.active),
+    } for k, label in rows]}
+
+
+@app.delete('/auth/api-keys/{key_id}')
+def revoke_project_api_key(key_id: int, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    key = _own_key(db, caller, key_id)
+    key.active = False
+    db.commit()
+    return {'key_id': key.id, 'active': False}
+
+
+@app.post('/auth/api-keys/{key_id}/revoke')
+def revoke_project_api_key_post(key_id: int, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    """Same as DELETE; the CLI manifest can only describe GET and POST."""
+    return revoke_project_api_key(key_id, caller, db)
 
 
 @app.post('/auth/link-project')

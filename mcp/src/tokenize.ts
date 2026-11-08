@@ -459,7 +459,7 @@ function redactLabel(s: string): string {
 // echoed back through the tool channel.
 function scrubCredentialsOnly(obj: unknown): unknown {
   if (obj == null) return obj;
-  if (typeof obj === "string") return scrubPresignedUrls(obj);
+  if (typeof obj === "string") return maskApiKeys(scrubPresignedUrls(obj));
   if (Array.isArray(obj)) return obj.map(scrubCredentialsOnly);
   if (typeof obj === "object") {
     const out: Record<string, unknown> = {};
@@ -488,23 +488,24 @@ function collectNames(obj: unknown, parentKey = ""): void {
   if (obj == null) return;
 
   if (typeof obj === "string") {
+    const str: string = maskApiKeys(obj); // never seed an API key into the token dictionary (it is written to disk)
     // Any whole-string AWS id (hex OR friendly-prefix) under ANY key: seed it
     // into the dictionary (typed, honoring balanced/generic) so narrative
     // strings referencing the same id later get scrubbed too.
-    if (classifyStrict(obj)) {
-      tokenizeWholeId(obj);
+    if (classifyStrict(str)) {
+      tokenizeWholeId(str);
       return;
     }
     // Graph identifiers (node ids, attack_path elements, …): tokenize the whole
     // value even without an AWS-hex prefix, so captions/labels referencing the
     // same id later get scrubbed via the dictionary.
     if (IDENTIFIER_KEYS.has(parentKey)) {
-      tokenizeIdentifier(obj);
+      tokenizeIdentifier(str);
       return;
     }
     if (!SENSITIVE_KEYS.has(parentKey)) return;
-    if (isNeverSensitive(obj, parentKey) || obj.length < 2) return;
-    tokenize(obj, "NAME");
+    if (isNeverSensitive(str, parentKey) || str.length < 2) return;
+    tokenize(str, "NAME");
     return;
   }
 
@@ -546,6 +547,8 @@ function isTagKey(key: string): boolean {
 
 function tagValueToken(real: string): string {
   if (real === "") return real;
+  const masked = maskApiKeys(real);
+  if (masked !== real) return masked; // an API key is never a tag value to remember (the store is written to disk)
   if (TOKEN_PATTERN.test(real) && store.tokenToReal[real] !== undefined) return real; // already issued
   const whole = tokenizeWholeId(real); // typed token when it is an id, so it matches the rest of the output
   if (whole !== null && whole !== real) return whole;
@@ -610,6 +613,16 @@ const PRESIGNED_CREDENTIAL_PARAMS = new Set([
   "x-amz-security-token",
 ]);
 
+// An Emfirge API key ("emf_" + 43 URL-safe characters). It is the user's own credential: it is shown only by the
+// one command that makes it (`emfirge key create`, via the manifest's response.reveal, see cli/generic.ts) and is
+// masked everywhere else, in every privacy mode including off. A cloud or CI agent that can see one can act as the user.
+const API_KEY_PATTERN = /(?<![A-Za-z0-9])emf_[A-Za-z0-9_-]{16,}/g;
+export const API_KEY_EXACT = /^emf_[A-Za-z0-9_-]{16,}$/;
+
+export function maskApiKeys(value: string): string {
+  return value.includes("emf_") ? value.replace(API_KEY_PATTERN, "emf_REDACTED") : value;
+}
+
 // Replace credential-bearing query values in any URL inside `value`, leaving
 // the rest of the URL (host, path, expiry) intact so it stays diagnosable.
 // Deliberately NOT gated on MODE: an access key is not a resource name the
@@ -672,8 +685,8 @@ function redactDeepInner(obj: unknown, parentKey = ""): unknown {
     //    host/path may also contain a bucket name those rules then tokenize.
     //    Bound to a typed local rather than reassigning `obj`, which is
     //    declared `unknown` and would lose its narrowing.
-    const text: string = scrubPresignedUrls(obj);
-    if (isNeverSensitive(text, parentKey)) return text;
+    const text: string = maskApiKeys(scrubPresignedUrls(obj));
+    if (isNeverSensitive(text, parentKey) || text === "emf_REDACTED") return text;
     // 1. Whole-string AWS id (hex OR friendly-prefix) under ANY key — single
     //    typed token (honors balanced/off/generic). Catches vpc_id, allocation_id,
     //    flow_logs[] entries, etc., not just fields we enumerate.

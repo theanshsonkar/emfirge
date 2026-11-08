@@ -43,6 +43,7 @@ PURGE_PLAN: dict[str, Rule] = {
     "branch_policy_check_logs": Rule(BRANCH_IDS, "branch_id"),
     "projects": Rule(KEPT, "the user's login/workspace, not AWS account data"),
     "api_keys": Rule(KEPT, "the user's login credential (hashed), not AWS account data"),
+    "api_key_labels": Rule(KEPT, "the user's own label and display prefix for a login credential, not AWS account data"),
     "supabase_identities": Rule(KEPT, "the user's login identity, not AWS account data"),
     "tf_resources": Rule(KEPT, "legacy GitHub-installation index keyed by installation, not by AWS account; legacy routes are disabled when auth is on"),
     "ci_api_keys": Rule(KEPT, "legacy GitHub-installation keys keyed by installation, not by AWS account; legacy routes are disabled when auth is on"),
