@@ -96,3 +96,22 @@ test("check error message is redacted", async () => {
   stubFetch({ detail: `branch ${SG} not found` }, 404);
   await assert.rejects(check.checkHandler({ branch_id: "b1" }), (e: Error) => !e.message.includes(SG));
 });
+
+test("check masks the resource id of a changed setting and keeps the field name readable", async () => {
+  const fields = ["web_acl_id", "role_arn", "instance_profile_arn", "target_role_arn", "name", "aliases", "imdsv2_required", "tags", "rules", "policy"];
+  stubFetch({
+    ...reply,
+    changed_settings: fields.map((field) => ({
+      resource_id: SG, resource_type: "security_group", field, judged: field === "rules", judged_by: field === "rules" ? ["exposure"] : [],
+    })),
+  });
+  const out = text(await check.checkHandler({ branch_id: "b1" }));
+  assert.equal(out.includes(SG), false);
+  const parsed = JSON.parse(out);
+  assert.deepEqual(parsed.changed_settings.map((s: { field: string }) => s.field), fields);
+  for (const s of parsed.changed_settings) {
+    assert.notEqual(s.resource_id, SG);
+    assert.equal(s.resource_type, "security_group");
+  }
+  assert.deepEqual(parsed.changed_settings.find((s: { field: string }) => s.field === "rules").judged_by, ["exposure"]);
+});

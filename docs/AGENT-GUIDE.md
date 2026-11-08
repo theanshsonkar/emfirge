@@ -38,6 +38,7 @@ Run it from the shell: `emfirge <verb>`. Output is JSON on stdout.
 Add `--human` for short readable output. Add `--help` to any verb.
 Inputs for `try` can be a file path, inline JSON, or `-` for stdin.
 `emfirge check` answers come in the order data, exposure, money, availability, control, outside_world, then the baseline.
+`changed_settings` sits outside the six answers: every setting that differs on a resource, by name only (never a value). `judged: true` with `judged_by` means a check reads that setting; `judged: false` means it changed and no check reads it (human form: "Changed, not judged:"). Judged does not mean it produced a fact; read the answers. Not judged is not safe.
 
 ## Old MCP tool to verb option
 

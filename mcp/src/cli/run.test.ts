@@ -287,6 +287,26 @@ test("check --human prints a short readable form, not JSON", async () => {
   assert.match(r.stdout, /\(1 change\(s\)\)/);
 });
 
+test("check --human lists changed settings that no check judges, with ids masked", async () => {
+  stub({ body: { ...checkReply, changed_settings: [
+    { resource_id: SG, resource_type: "security_group", field: "rules", judged: true, judged_by: ["exposure"] },
+    { resource_id: SG, resource_type: "security_group", field: "egress_rules", judged: false, judged_by: [] },
+    { resource_id: "i-0123456789abcdef0", resource_type: "ec2_instance", field: "imdsv2_required", judged: false, judged_by: [] },
+  ] } });
+  const r = await run(["check", "b1", "--human"]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /Changed, not judged:/);
+  assert.match(r.stdout, /egress_rules/);
+  assert.match(r.stdout, /imdsv2_required/);
+  assert.doesNotMatch(r.stdout, /: rules$/m);
+  assert.equal(r.stdout.includes(SG), false);
+  assert.equal(r.stdout.includes("i-0123456789abcdef0"), false);
+  assert.match(r.stdout, /1 judged by a check, 2 not judged/);
+  stub({ body: checkReply });
+  const clean = await run(["check", "b1", "--human"]);
+  assert.doesNotMatch(clean.stdout, /Changed, not judged/);
+});
+
 // ---- report ----
 test("report maps to the handback", async () => {
   let calls = stub({ body: { calls: [], input_sha256: "a".repeat(64), base_analysis_id: "a1", branch_revision: "r", verdict_id: "v" } });

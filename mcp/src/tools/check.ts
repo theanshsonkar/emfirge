@@ -9,7 +9,8 @@ import { redactDeep, expandTokens } from "../tokenize.js";
 export const CHECK_DESCRIPTION =
   "Runs the check on a branch and returns facts about consequences for six damages " +
   "(data, exposure, money, availability, control, outside world), with what was checked " +
-  "and what is unknown. Unknown means not checked, never safe. Facts, not advice.";
+  "and what is unknown, plus changed_settings: every changed setting by name, judged by a check or listed as not judged. " +
+  "Unknown means not checked, never safe. Not judged means no check reads it, never safe. Facts, not advice.";
 
 export const checkSchema = {
   branch_id: z.string().min(1).describe("Branch ID returned by emfirge_create_branch"),
