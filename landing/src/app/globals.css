@@ -1,47 +1,42 @@
 @import "tailwindcss";
 
-/* Design tokens: v4, see DESIGN-v4.md */
+/* Design tokens: v5, see DESIGN-v5.md */
 @theme {
-  --color-bg: #f4f4f4;
-  --color-surface: #ffffff;
+  --color-paper: #ffffff;
+  --color-bench: #ecedee;
   --color-ink: #000000;
-  --color-ink-2: rgba(0, 0, 0, 0.64);
-  --color-ink-3: rgba(0, 0, 0, 0.48);
-  --color-pass: #0a8754;
-  --color-block: #d93f3f;
-  --color-warn: #d98a0b;
-  --color-hl: #fff3b0;
-  --color-sidebar: #efeff0;
-  --color-titlebar: #f6f6f6;
-  --color-tl-red: #ff5f57;
-  --color-tl-yellow: #febc2e;
-  --color-tl-green: #28c840;
-  --shadow-hairline: 0 0 0 0.5px rgba(0, 0, 0, 0.12);
-  --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.12), 0 20px 50px -20px rgba(0, 0, 0, 0.18);
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", var(--font-geist), system-ui, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", var(--font-geist-mono), monospace;
-  --font-hand: var(--font-caveat), cursive;
+  --color-ink-2: #4a4a4a;
+  --color-ink-3: #8a8a8a;
+  --color-rule: #d6d7d9;
+  --color-crash: #ffd60a;
+  --color-block: #e5341d;
+  --color-pass: #1f9d55;
+  --font-sans: var(--font-archivo), system-ui, sans-serif;
+  --font-mono: var(--font-plex), ui-monospace, monospace;
 }
 
 @layer base {
   html {
-    background: var(--color-bg);
+    background: var(--color-paper);
     scroll-behavior: smooth;
-    scroll-padding-top: 72px;
+    scroll-padding-top: 56px;
     -webkit-text-size-adjust: 100%;
   }
   body {
-    background: var(--color-bg);
+    background: var(--color-paper);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    font-size: 16px;
-    line-height: 24px;
+    font-variation-settings: "wdth" 100;
+    font-size: 17px;
+    line-height: 1.55;
     -webkit-font-smoothing: antialiased;
     overflow-x: clip;
   }
+  /* 3px yellow ring, pushed out by a 2px black one */
   :focus-visible {
-    outline: 2px solid #0a67f5;
+    outline: 3px solid #ffd60a;
     outline-offset: 2px;
+    box-shadow: 0 0 0 2px #000;
   }
   summary::-webkit-details-marker {
     display: none;
@@ -53,41 +48,131 @@
   }
 }
 
-.no-scrollbar {
-  scrollbar-width: none;
+/* Display voice: Archivo expanded, 800 */
+.display {
+  font-variation-settings: "wdth" 125;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.02;
 }
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
+.label {
+  font-variation-settings: "wdth" 100;
+  font-weight: 500;
+  font-size: 14px;
+  line-height: 1.3;
 }
 
-/* Terminal cursor: blinks only while the hero script is typing */
-@keyframes blink {
+/* ---------- live dot ---------- */
+@keyframes pulse {
   50% {
+    opacity: 0.35;
+  }
+}
+.live-dot {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* ---------- guarded switch ---------- */
+.sw {
+  perspective: 420px;
+}
+.sw-cover {
+  position: absolute;
+  inset: -3px;
+  background: #e5341d;
+  border: 2px solid #000;
+  border-radius: 6px;
+  box-shadow: 2px 2px 0 #000;
+  transform-origin: 50% 0;
+  transition:
+    transform 180ms cubic-bezier(0.3, 1.25, 0.5, 1),
+    box-shadow 180ms;
+  z-index: 2;
+}
+.sw-cover::after {
+  /* the lip you lift it by */
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  width: 22px;
+  height: 4px;
+  margin-left: -11px;
+  border-radius: 2px;
+  background: #000;
+}
+.sw:not(:disabled):not([aria-pressed="true"]):hover .sw-cover {
+  transform: rotateX(-16deg);
+}
+.sw[data-open="true"] .sw-cover {
+  transform: rotateX(-112deg);
+  box-shadow: 0 0 0 #000;
+}
+.sw:not(:disabled):active:not([data-open="true"]) .sw-cover {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0 #000;
+}
+.sw-lever {
+  position: absolute;
+  left: 3px;
+  top: 12px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 2px #8a8a8a;
+  transform: translateY(10px);
+  transition: transform 150ms cubic-bezier(0.3, 1.7, 0.5, 1);
+}
+.sw[data-thrown="true"] .sw-lever {
+  transform: translateY(-10px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sw-cover,
+  .sw-lever {
+    transition: none;
+  }
+}
+
+/* ---------- report ---------- */
+.stamp-thump {
+  animation: thump 140ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+@keyframes thump {
+  from {
+    transform: rotate(-7deg) scale(1.15);
+    opacity: 0;
+  }
+  to {
+    transform: rotate(-7deg) scale(1);
+    opacity: 1;
+  }
+}
+.branch-in {
+  animation: branch-in 180ms ease-out both;
+}
+@keyframes branch-in {
+  from {
+    transform: translateY(4px);
     opacity: 0;
   }
 }
-.cursor {
-  animation: blink 1s steps(1) infinite;
+.draw-in {
+  stroke-dasharray: 600;
+  animation: draw 420ms ease-out both;
 }
-@media (prefers-reduced-motion: reduce) {
-  .cursor {
-    animation: none;
+@keyframes draw {
+  from {
+    stroke-dashoffset: 600;
   }
 }
-
-/* Notification stack fans in once, on view */
-.notif {
-  transition:
-    transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1),
-    opacity 0.45s ease-out;
-  transition-delay: var(--d, 0ms);
-}
-.notif-armed:not(.notif-in) .notif {
-  opacity: 0;
-  transform: translateY(-16px) scale(0.97);
-}
 @media (prefers-reduced-motion: reduce) {
-  .notif {
-    transition: none;
+  .stamp-thump {
+    animation: none;
+    transform: rotate(-7deg);
+  }
+  .branch-in,
+  .draw-in {
+    animation: none;
   }
 }

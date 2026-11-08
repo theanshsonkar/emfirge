@@ -1,41 +1,37 @@
-import { BranchWindow } from "@/components/BranchWindow";
-import { Compare } from "@/components/Compare";
 import { Faq } from "@/components/Faq";
-import { FinalCta, Footer } from "@/components/FinalCta";
 import { FounderNote } from "@/components/FounderNote";
-import { ForkPattern } from "@/components/ForkPattern";
+import { Footer } from "@/components/Footer";
+import { Header } from "@/components/Header";
 import { Hero } from "@/components/Hero";
-import { HowItWorks } from "@/components/HowItWorks";
-import { Nav } from "@/components/Nav";
-import { Notifications } from "@/components/Notifications";
-import { PricingCard } from "@/components/PricingCard";
-import { Tweets } from "@/components/Tweets";
+import { LabDefs } from "@/components/LabDefs";
+import { LabProvider } from "@/components/LabProvider";
+import { LiveBar } from "@/components/LiveBar";
+import { Pricing } from "@/components/Pricing";
+import { Questions } from "@/components/Questions";
+import { Transcript } from "@/components/Transcript";
 import { NAV } from "@/content";
 
 export default function Page() {
   return (
-    <div className="relative">
+    <LabProvider>
       <a
         href="#main"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-2 focus:z-[60] focus:rounded-lg focus:bg-white focus:px-3 focus:py-2 focus:text-ink"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-2 focus:top-12 focus:z-[60] focus:rounded-md focus:bg-white focus:px-3 focus:py-2"
       >
         {NAV.skip}
       </a>
-      <ForkPattern />
-      <Nav />
-      <main id="main" className="relative">
+      <LabDefs />
+      <LiveBar />
+      <Header />
+      <main id="main">
         <Hero />
-        <HowItWorks />
-        <BranchWindow />
-        <Notifications />
-        <Compare />
-        <Tweets />
+        <Transcript />
+        <Questions />
         <FounderNote />
-        <PricingCard />
+        <Pricing />
         <Faq />
-        <FinalCta />
       </main>
       <Footer />
-    </div>
+    </LabProvider>
   );
 }

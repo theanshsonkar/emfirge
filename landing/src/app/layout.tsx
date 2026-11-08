@@ -1,25 +1,39 @@
 import type { Metadata, Viewport } from "next";
-import { Caveat, Geist, Geist_Mono } from "next/font/google";
+import { Archivo, IBM_Plex_Mono } from "next/font/google";
 import { SITE } from "@/content";
 import "./globals.css";
 
-// Geist is only the non-Apple fallback; on a Mac the system font (SF) is used first.
-const sans = Geist({ subsets: ["latin"], variable: "--font-geist", display: "swap" });
-const mono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono", display: "swap" });
-// Handwriting: the hand note and the signature only.
-const hand = Caveat({ subsets: ["latin"], variable: "--font-caveat", display: "swap" });
+// Archivo's width axis carries the display voice (wdth 125, 800).
+const sans = Archivo({
+  subsets: ["latin"],
+  axes: ["wdth"],
+  variable: "--font-archivo",
+  display: "swap",
+});
+const mono = IBM_Plex_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-plex",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: SITE.title,
   description: SITE.description,
 };
 
-export const viewport: Viewport = { themeColor: "#F4F4F4" };
+export const viewport: Viewport = { themeColor: "#000000" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${sans.variable} ${mono.variable} ${hand.variable}`}>
-      <body>{children}</body>
+    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
+      <body>
+        <noscript>
+          {/* Without JS the bench is a finished example: test 001, switches disabled. */}
+          <style>{`[data-js]{display:none!important}[data-sw="1"] .sw-cover{transform:rotateX(-112deg)}[data-sw="1"] .sw-lever{transform:translateY(-10px)}`}</style>
+        </noscript>
+        {children}
+      </body>
     </html>
   );
 }

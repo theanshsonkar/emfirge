@@ -1,260 +1,427 @@
-// All copy for the v4 landing page. See DESIGN-v4.md.
+// All copy and demo data for the v5 landing page. See DESIGN-v5.md.
 export const LINKS = {
   docs: "https://emfirge.cloud/docs",
   quickstart: "https://emfirge.cloud/docs/quickstart",
   github: "https://github.com/theanshsonkar/emfirge",
   ansh: "https://github.com/theanshsonkar",
-  changelog: "https://github.com/theanshsonkar/emfirge/releases",
-  privacy: "https://github.com/theanshsonkar/emfirge/blob/main/PRIVACY.md",
-  security: "https://github.com/theanshsonkar/emfirge/blob/main/SECURITY.md",
 };
 
 export const SITE = {
-  title: "emfirge. let your agent touch your aws",
+  title: "Emfirge: go on, break it",
   description:
-    "Your agent tries every change on a branch of your cloud, sees what would break, and fixes its own plan before production ever sees it.",
+    "A demo cloud you try to break. Every switch is something an AI agent might do. Emfirge tries it on a branch, measures the damage, and live never moves.",
 };
+
+export const COMMAND = "npx @emfirge/cli connect";
 
 export const NAV = {
   skip: "skip to content",
-  items: [
-    { id: "top", label: "emfirge", href: "#top", strong: true },
-    { id: "how", label: "how it works", href: "#how" },
-    { id: "why", label: "why", href: "#why" },
-    { id: "pricing", label: "pricing", href: "#pricing" },
-    { id: "faq", label: "faq", href: "#faq" },
-    { id: "docs", label: "docs", href: LINKS.docs, external: true },
+  links: [
+    { label: "how it works", href: "#how", hideOnMobile: true },
+    { label: "pricing", href: "#pricing" },
+    { label: "docs", href: LINKS.docs },
+    { label: "github", href: LINKS.github },
   ],
 };
 
-/* ---------- terminal scripts ---------- */
-export type TKind = "prompt" | "user" | "agent" | "cmd" | "out" | "fail" | "blank";
-export type TLine = { k: TKind; t: string };
-
-export const HERO_SCRIPT: TLine[] = [
-  { k: "prompt", t: "~/infra % claude" },
-  { k: "user", t: "clean up the unused databases in ap-south-1" },
-  { k: "blank", t: "" },
-  { k: "agent", t: "I'll try it on a branch first." },
-  { k: "cmd", t: "emfirge branch new cleanup-dbs" },
-  { k: "out", t: "branch #1 forked from live · 0 changes" },
-  { k: "cmd", t: "emfirge try --delete rds:orders-db rds:legacy-reports-db" },
-  { k: "out", t: "2 changes on branch #1" },
-  { k: "cmd", t: "emfirge check" },
-  { k: "out", t: "block · 2 of 6 checks failed" },
-  { k: "fail", t: "data          orders-db has no recovery point" },
-  { k: "fail", t: "availability  orders-db served 1,240 queries/day" },
-  { k: "agent", t: "orders-db is live. Keeping it and retrying with legacy-reports-db only." },
-  { k: "cmd", t: "emfirge check --branch 2" },
-  { k: "out", t: "pass · 6 of 6 · saves $41.20/mo" },
-  { k: "agent", t: "Safe to apply. Want me to delete legacy-reports-db?" },
-];
-
-export const TABS: { id: string; label: string; lines: TLine[] }[] = [
-  {
-    id: "everyone",
-    label: "everyone",
-    lines: [
-      { k: "prompt", t: "~/infra % claude" },
-      { k: "user", t: "clean up the unused databases in ap-south-1" },
-      { k: "agent", t: "I'll try it on a branch first." },
-      { k: "cmd", t: "emfirge try --delete rds:orders-db rds:legacy-reports-db" },
-      { k: "out", t: "block · orders-db has no recovery point and serves 1,240 queries/day" },
-      { k: "agent", t: "orders-db is live. Retrying with legacy-reports-db only." },
-      { k: "cmd", t: "emfirge check --branch 2" },
-      { k: "out", t: "pass · 6 of 6 · saves $41.20/mo" },
-    ],
-  },
-  {
-    id: "cleanup",
-    label: "cleanup",
-    lines: [
-      { k: "user", t: "delete legacy-reports-db, nobody uses it" },
-      { k: "agent", t: "Trying the delete on a branch." },
-      { k: "cmd", t: "emfirge try --delete rds:legacy-reports-db" },
-      { k: "cmd", t: "emfirge check" },
-      { k: "out", t: "pass · 6 of 6" },
-      { k: "out", t: "data           recovery point exists" },
-      { k: "out", t: "availability   nothing live depends on it" },
-    ],
-  },
-  {
-    id: "cost",
-    label: "cost",
-    lines: [
-      { k: "user", t: "make staging cheaper" },
-      { k: "agent", t: "I'll try a smaller instance class on a branch." },
-      { k: "cmd", t: "emfirge try --modify rds:staging-db --class db.t4g.small" },
-      { k: "cmd", t: "emfirge check" },
-      { k: "out", t: "money         −$62.10/mo" },
-      { k: "out", t: "availability  nothing live depends on it" },
-      { k: "out", t: "pass · 6 of 6" },
-    ],
-  },
-  {
-    id: "security",
-    label: "security",
-    lines: [
-      { k: "user", t: "is anything public that shouldn't be?" },
-      { k: "cmd", t: "emfirge context --exposure" },
-      { k: "out", t: "1 security group is open to the internet on port 22" },
-      { k: "agent", t: "I'll close it on a branch and check." },
-      { k: "cmd", t: "emfirge try --revoke sg:ssh-open 0.0.0.0/0:22" },
-      { k: "cmd", t: "emfirge check" },
-      { k: "out", t: "pass · 6 of 6 · nothing newly reachable" },
-    ],
-  },
-  {
-    id: "incidents",
-    label: "incidents",
-    lines: [
-      { k: "user", t: "the feed is 404ing, fix it" },
-      { k: "agent", t: "Trying the cache-policy change on a branch." },
-      { k: "cmd", t: "emfirge try --modify cloudfront:feed-cdn --cache-policy forward-all" },
-      { k: "cmd", t: "emfirge check" },
-      { k: "out", t: "block · availability: feed.xml → S3 (OAC) receives Host header · predicted 404" },
-      { k: "agent", t: "That would break it. Retrying with a managed policy." },
-      { k: "cmd", t: "emfirge try --modify cloudfront:feed-cdn --cache-policy managed:caching-optimized" },
-      { k: "out", t: "pass · 6 of 6" },
-    ],
-  },
-  {
-    id: "what-if",
-    label: "what-if",
-    lines: [
-      { k: "user", t: "rds public vs private?" },
-      { k: "agent", t: "Forking two branches to compare." },
-      { k: "cmd", t: "emfirge branch new public --modify rds:app-db --public" },
-      { k: "cmd", t: "emfirge branch new private --modify rds:app-db --private" },
-      { k: "cmd", t: "emfirge compare 1 2" },
-      { k: "out", t: "#2 private   pass · 6 of 6" },
-      { k: "out", t: "#1 public    block · exposure: database newly reachable from the internet" },
-    ],
-  },
-];
-
-export const HOW = {
-  title: "built for *every* kind of cloud work.",
-  sub: "pick a kind of work. watch the agent try it on a branch first.",
-};
-
-/* ---------- hero ---------- */
-export const HERO = {
-  lead: "meet",
-  name: "emfirge",
-  subA: ["let your agent", " touch your aws,"],
-  subB: ["without", " losing sleep over it."],
+export const LIVE_BAR = {
+  resources: 9,
   cta: { label: "get started", href: LINKS.quickstart },
-  meta: "free while in beta · works with any agent · read-only access",
-  lock: "your ids are tokenized before any model sees them",
-  built: { pre: "built in public by ", name: "ansh", href: LINKS.ansh },
-  toast: {
-    chip: "placeholder",
-    text: "“your tweet here. try emfirge and tell us what it caught.”",
-    handle: "— you, @yourhandle",
+};
+
+export const HERO = {
+  h1: "Go on. Break it.",
+  body:
+    "This is a demo cloud. Every switch is something an AI agent might do to yours. Emfirge tries it on a branch, measures the damage, and tells your agent what would break. Live never moves.",
+  then: "Then give your agent the same thing:",
+};
+
+/* ---------- the demo cloud ---------- */
+export type NodeId =
+  | "internet"
+  | "cdn"
+  | "web-alb"
+  | "api"
+  | "orders-db"
+  | "legacy-reports-db"
+  | "assets"
+  | "nightly-sync"
+  | "deploy-role";
+
+export type CloudNode = {
+  id: NodeId;
+  kind: string;
+  metric: string;
+  dim?: boolean;
+};
+
+export const NODES: CloudNode[] = [
+  { id: "internet", kind: "", metric: "" },
+  { id: "cdn", kind: "cloudfront", metric: "98% cache hit" },
+  { id: "web-alb", kind: "alb", metric: "41 req/s" },
+  { id: "api", kind: "ecs service", metric: "3 instances" },
+  { id: "orders-db", kind: "rds", metric: "1,240 q/day" },
+  { id: "legacy-reports-db", kind: "rds · idle", metric: "0 q/day · 90d", dim: true },
+  { id: "assets", kind: "s3", metric: "212 GB · private" },
+  { id: "nightly-sync", kind: "lambda", metric: "1 run/night" },
+  { id: "deploy-role", kind: "iam role", metric: "12 deploys/wk" },
+];
+
+export const EDGES: [NodeId, NodeId][] = [
+  ["internet", "cdn"],
+  ["cdn", "web-alb"],
+  ["web-alb", "api"],
+  ["api", "orders-db"],
+  ["cdn", "assets"],
+  ["nightly-sync", "orders-db"],
+];
+
+export type Pos = { x: number; y: number };
+export type RouteSpec = { d: string; label: Pos };
+export type Layout = {
+  w: number;
+  h: number;
+  nodeW: number;
+  nodeH: number;
+  pos: Partial<Record<NodeId, Pos>>;
+  /** edge paths, keyed "from>to"; an edge missing here is not drawn in this layout */
+  edges: Record<string, string>;
+  /** red exposure routes from the internet node, by target */
+  routes: Partial<Record<NodeId, RouteSpec>>;
+};
+
+export const LAYOUTS: { wide: Layout; narrow: Layout } = {
+  wide: {
+    w: 752,
+    h: 256,
+    nodeW: 124,
+    nodeH: 64,
+    pos: {
+      internet: { x: 6, y: 44 },
+      cdn: { x: 160, y: 44 },
+      "web-alb": { x: 314, y: 44 },
+      api: { x: 468, y: 44 },
+      "orders-db": { x: 622, y: 44 },
+      assets: { x: 160, y: 176 },
+      "deploy-role": { x: 314, y: 176 },
+      "nightly-sync": { x: 468, y: 176 },
+      "legacy-reports-db": { x: 622, y: 176 },
+    },
+    edges: {
+      "internet>cdn": "M130 76 H160",
+      "cdn>web-alb": "M284 76 H314",
+      "web-alb>api": "M438 76 H468",
+      "api>orders-db": "M592 76 H622",
+      "cdn>assets": "M222 108 V176",
+      "nightly-sync>orders-db": "M592 208 H684 V108",
+    },
+    routes: {
+      api: { d: "M68 44 V16 H530 V44", label: { x: 299, y: 16 } },
+      assets: { d: "M68 108 V142 H222 V176", label: { x: 145, y: 142 } },
+    },
   },
-  hand: "watch it catch a mistake",
+  narrow: {
+    w: 360,
+    h: 356,
+    nodeW: 156,
+    nodeH: 58,
+    pos: {
+      internet: { x: 10, y: 24 },
+      "web-alb": { x: 194, y: 24 },
+      api: { x: 10, y: 112 },
+      "orders-db": { x: 194, y: 112 },
+      assets: { x: 10, y: 200 },
+      "nightly-sync": { x: 194, y: 200 },
+      "deploy-role": { x: 10, y: 288 },
+      "legacy-reports-db": { x: 194, y: 288 },
+    },
+    edges: {
+      "internet>web-alb": "M166 53 H194",
+      "web-alb>api": "M272 82 V97 H88 V112",
+      "api>orders-db": "M166 141 H194",
+      "nightly-sync>orders-db": "M272 200 V170",
+    },
+    routes: {
+      api: { d: "M40 82 V112", label: { x: 128, y: 97 } },
+      assets: { d: "M10 53 H3 V229 H10", label: { x: 98, y: 186 } },
+    },
+  },
 };
 
-/* ---------- branch window ---------- */
-export const BRANCH = {
-  title: "your cloud on a branch. *zero* risk to prod.",
-  sidebar: ["live", "#1 cleanup-dbs", "#2 cleanup-dbs"],
-  selected: 2,
-  card: { title: "branch #2 · cleanup-dbs", sub: "1 change · forked from live 2 min ago", right: "6 of 6 checks passed" },
-  legend: ["data", "exposure", "money", "availability", "control", "outside world"],
-  top: { title: "emfirge · safe to apply", sub: "checked against your live account", value: "pass" },
-  rows: [
-    { key: "data", name: "data", value: "recovery point exists" },
-    { key: "exposure", name: "exposure", value: "nothing newly reachable" },
-    { key: "money", name: "money", value: "−$41.20/mo" },
-    { key: "availability", name: "availability", value: "nothing live depends on it" },
-    { key: "control", name: "control", value: "no access lost" },
-    { key: "world", name: "outside world", value: "no side effects" },
+/* ---------- the six questions ---------- */
+export type QuestionId = "data" | "exposure" | "money" | "availability" | "control" | "outside";
+
+export const QUESTIONS: { id: QuestionId; name: string; short: string; sentence: string }[] = [
+  { id: "data", name: "Data", short: "data", sentence: "Did something holding data disappear with no recovery point?" },
+  { id: "exposure", name: "Exposure", short: "exposure", sentence: "Is anything newly reachable from the internet or another account?" },
+  { id: "money", name: "Money", short: "money", sentence: "Did the monthly cost go above your limit?" },
+  { id: "availability", name: "Availability", short: "availability", sentence: "Did something live traffic depends on break?" },
+  { id: "control", name: "Control", short: "control", sentence: "Was access or logging lost: an admin role, a KMS key, CloudTrail?" },
+  { id: "outside", name: "Outside world", short: "outside world", sentence: "Does it leave the cloud: support cases, quota requests, emails, domains?" },
+];
+
+/* ---------- the seven switches and their results ---------- */
+export type Mark = "ok" | "fail" | "ask";
+export type Verdict = "blocked" | "ask" | "passed";
+export type Fact = { text: string; code?: string; note?: string };
+export type Row = { mark: Mark; facts: Fact[] };
+
+export type Damage = {
+  removed?: NodeId[];
+  broken?: NodeId[];
+  flagged?: NodeId[];
+  /** replaces a node's metric line on the branch */
+  metrics?: Partial<Record<NodeId, string>>;
+  exposure?: { to: NodeId; label: string };
+};
+
+export type SwitchDef = {
+  id: number;
+  line1: string;
+  line2: string;
+  action: string;
+  target: NodeId;
+  verdict: Verdict;
+  rows: Record<QuestionId, Row>;
+  damage: Damage;
+  commands: string[];
+  summary: string;
+};
+
+const ok = (...facts: Fact[]): Row => ({ mark: "ok", facts });
+const fail = (...facts: Fact[]): Row => ({ mark: "fail", facts });
+const ask = (...facts: Fact[]): Row => ({ mark: "ask", facts });
+
+export const SWITCHES: SwitchDef[] = [
+  {
+    id: 1,
+    line1: "delete",
+    line2: "orders-db",
+    action: "delete orders-db",
+    target: "orders-db",
+    verdict: "blocked",
+    rows: {
+      data: fail({ text: "no recovery point", code: "data_store_deleted_no_recovery_point" }),
+      exposure: ok(),
+      money: ok({ text: "−$96.40/mo" }),
+      availability: fail(
+        { text: "1,240 queries/day", code: "recently_used" },
+        { text: "nightly-sync depends on it", code: "lost_dependency" },
+      ),
+      control: ok(),
+      outside: ok(),
+    },
+    damage: {
+      removed: ["orders-db"],
+      broken: ["api", "nightly-sync"],
+      metrics: { "orders-db": "deleted", api: "queries failing", "nightly-sync": "lost orders-db" },
+    },
+    commands: ["$ emfirge branch new", "$ emfirge try --delete rds:orders-db", "$ emfirge check", "  BLOCKED · data, availability"],
+    summary: "orders-db is removed; api and nightly-sync are broken",
+  },
+  {
+    id: 2,
+    line1: "open port 22",
+    line2: "to the world",
+    action: "open port 22 to the world",
+    target: "api",
+    verdict: "blocked",
+    rows: {
+      data: ok(),
+      exposure: fail({ text: "api ×3 reachable from 0.0.0.0/0 on :22", code: "introduced_critical_exposure" }),
+      money: ok(),
+      availability: ok(),
+      control: ok(),
+      outside: ok(),
+    },
+    damage: {
+      broken: ["api"],
+      metrics: { api: "ssh open to world" },
+      exposure: { to: "api", label: "0.0.0.0/0 :22" },
+    },
+    commands: ["$ emfirge branch new", "$ emfirge try --open sg:api 22 0.0.0.0/0", "$ emfirge check", "  BLOCKED · exposure"],
+    summary: "api is reachable from the internet on port 22",
+  },
+  {
+    id: 3,
+    line1: "make the assets",
+    line2: "bucket public",
+    action: "make the assets bucket public",
+    target: "assets",
+    verdict: "blocked",
+    rows: {
+      data: ok(),
+      exposure: fail({ text: "assets readable by anyone", code: "newly_internet_reachable" }),
+      money: ok(),
+      availability: ok(),
+      control: ok(),
+      outside: ok(),
+    },
+    damage: {
+      broken: ["assets"],
+      metrics: { assets: "public read" },
+      exposure: { to: "assets", label: "public read" },
+    },
+    commands: ["$ emfirge branch new", "$ emfirge try --set s3:assets public-read", "$ emfirge check", "  BLOCKED · exposure"],
+    summary: "assets is readable by anyone on the internet",
+  },
+  {
+    id: 4,
+    line1: "give deploy-role",
+    line2: "iam:PassRole on *",
+    action: "give deploy-role iam:PassRole on *",
+    target: "deploy-role",
+    verdict: "blocked",
+    rows: {
+      data: ok(),
+      exposure: ok(),
+      money: ok(),
+      availability: ok(),
+      control: fail({
+        text: "deploy-role can become admin in 2 steps",
+        code: "privilege_escalation",
+        note: "path from pathfinding.cloud",
+      }),
+      outside: ok(),
+    },
+    damage: { broken: ["deploy-role"], metrics: { "deploy-role": "admin in 2 steps" } },
+    commands: ["$ emfirge branch new", "$ emfirge try --grant iam:deploy-role PassRole '*'", "$ emfirge check", "  BLOCKED · control"],
+    summary: "deploy-role can become admin in two steps",
+  },
+  {
+    id: 5,
+    line1: "triple",
+    line2: "the api fleet",
+    action: "triple the api fleet",
+    target: "api",
+    verdict: "ask",
+    rows: {
+      data: ok(),
+      exposure: ok(),
+      money: ask({ text: "+$187.20/mo, over your $30 limit", code: "capacity" }),
+      availability: ok(),
+      control: ok(),
+      outside: ok(),
+    },
+    damage: { flagged: ["api"], metrics: { api: "9 instances" } },
+    commands: ["$ emfirge branch new", "$ emfirge try --scale ecs:api 9", "$ emfirge check", "  ASK OWNER · money"],
+    summary: "api grows to 9 instances and needs your sign-off",
+  },
+  {
+    id: 6,
+    line1: "ask aws for a",
+    line2: "quota increase",
+    action: "ask aws for a quota increase",
+    target: "nightly-sync",
+    verdict: "ask",
+    rows: {
+      data: ok(),
+      exposure: ok(),
+      money: ok(),
+      availability: ok(),
+      control: ok(),
+      outside: ask({ text: "opens an aws support case" }),
+    },
+    damage: { flagged: ["nightly-sync"], metrics: { "nightly-sync": "quota 1,000 → 3,000" } },
+    commands: ["$ emfirge branch new", "$ emfirge try --request-quota lambda 3000", "$ emfirge check", "  ASK OWNER · outside world"],
+    summary: "a lambda quota request would open an aws support case",
+  },
+  {
+    id: 7,
+    line1: "delete",
+    line2: "legacy-reports-db",
+    action: "delete legacy-reports-db",
+    target: "legacy-reports-db",
+    verdict: "passed",
+    rows: {
+      data: ok({ text: "snapshot from today" }),
+      exposure: ok(),
+      money: ok({ text: "−$41.20/mo" }),
+      availability: ok({ text: "no queries in 90 days" }),
+      control: ok(),
+      outside: ok(),
+    },
+    damage: { removed: ["legacy-reports-db"], metrics: { "legacy-reports-db": "deleted · snapshot" } },
+    commands: ["$ emfirge branch new", "$ emfirge try --delete rds:legacy-reports-db", "$ emfirge check", "  PASSED · all six clear"],
+    summary: "legacy-reports-db is removed; nothing depended on it",
+  },
+];
+
+export const VERDICT = {
+  blocked: {
+    stamp: "BLOCKED",
+    next: "your agent reads this, changes its plan, and tries again. nothing reached live.",
+  },
+  ask: {
+    stamp: "ASK OWNER",
+    next: "emfirge asks you. your agent keeps working on something else.",
+  },
+  passed: {
+    stamp: "PASSED",
+    next: "safe to apply. your agent applies it with its own access; emfirge records it.",
+  },
+} as const;
+
+export const BENCH = {
+  idleHeader: "test 000 · waiting for you to flip a switch",
+  noJs: "turn on JavaScript to run tests",
+  reset: "reset bench",
+  liveNote: "live · read-only. nothing you flip here touches it.",
+  branchNote: "a private copy of live. nothing here reached live.",
+  tryAgain: "already tried. showing its branch.",
+  duration: "0.4s",
+};
+
+/* ---------- what your agent would have run ---------- */
+export const TRANSCRIPT = {
+  title: "What your agent would have run",
+  steps: [
+    { n: "1", name: "branch", text: "a copy of your live cloud" },
+    { n: "2", name: "try", text: "the change goes on the copy" },
+    { n: "3", name: "check", text: "six questions, answered with facts" },
   ],
-  lines: [
-    "a branch is a private copy of your cloud as it is right now. nothing on it touches production.",
-    "your agent tries the change there, and six checks say what would break, with the evidence.",
-    "when a plan passes, you apply it. when it blocks, the agent fixes its own plan first.",
-  ],
+  agents: "Works with any agent that can run a shell: Claude Code, Codex, Cursor, Gemini CLI, Kiro, Cline.",
+  captionTest: "the last test you ran",
+  captionExample: "test 1, as an example",
 };
 
-/* ---------- notifications ---------- */
-export const FAMILIAR = {
-  title: "sound *familiar*?",
-  items: [
-    { icon: "support", app: "aws support", body: "case opened: lambda concurrency quota increase. you didn't ask for this." },
-    { icon: "feed", app: "feed.xml", body: "returned 404 after a cache policy change" },
-    { icon: "schedule", app: "eventbridge scheduler", body: "nightly-sync is ENABLED again after a redeploy" },
-    { icon: "budget", app: "budget", body: "your agent's test run counted the whole account" },
-  ],
-  line: "every one of these happened to me in one week. the agent wasn't dumb. it just had nowhere safe to try.",
+/* ---------- six questions ---------- */
+export const SIX = {
+  title: "Six questions. Every change.",
+  note: "Yellow means you decide. Thresholds like the $30 limit are yours to set in emfirge.md.",
 };
 
-/* ---------- why ---------- */
-export const WHY = {
-  title: "why *emfirge*?",
-  without: "without emfirge",
-  with: "with emfirge",
-  rows: [
-    ["every aws command is the real thing", "every change is tried on a branch first"],
-    ["you find out from a support email", "nothing leaves the cloud without asking you"],
-    ["“trust me, it's safe”", "six checks, as facts, with evidence"],
-    ["a wall of api calls", "one record, checked against cloudtrail"],
-    ["you watch over its shoulder", "you write your rules once in emfirge.md"],
-  ],
-};
-
-/* ---------- placeholder wall ---------- */
-export const WALL = {
-  title: "loved by *early* builders.",
-  lead: "emfirge is brand new. try it and be the first one here.",
-  link: { label: "read the docs", href: LINKS.docs },
-  card: { chip: "placeholder", text: "your tweet here", name: "your name", handle: "@yourhandle" },
-  count: 6,
-};
-
-/* ---------- founder note (draft for Ansh to edit; keep verbatim) ---------- */
+/* ---------- why i built it ---------- */
 export const NOTE = {
-  title: "why i built emfirge.",
-  app: "notes",
+  title: "Why I built it",
   paragraphs: [
-    "hey, i'm ansh 👋. i build things with ai agents every day.",
-    "a few weeks ago i gave claude code my aws to ship a small podcast project. it was good at it. it was also quiet about things. 🤐",
-    "it asked aws for a lambda quota increase without telling me. i found out from a support case email. a cache policy change sent my feed to a 404. a deploy script turned a paused schedule back on.",
-    "none of it was the agent being dumb. it just had no safe place to try a change, and i had no way to see what it was about to do.",
-    "so i built what i wanted: ==emfirge. your agent tries every change on a branch of your cloud, sees what would break, and fixes its own plan before production ever sees it.==",
-    "it's early. try it, and tell me what breaks. ✌️",
+    "I gave an AI agent my AWS to ship a small podcast project. It was good at it, and quiet about things. It asked AWS for a Lambda quota increase without telling me; I found out from a support case. A cache policy change sent my feed to a 404. A deploy script turned a paused schedule back on.",
+    "None of it was the agent being dumb. It had nowhere safe to try a change, and I had no way to see what it was about to do. Switches 1 to 6 above are those moments.",
+    "So I built the crash test I wanted. It's early. Break it, and tell me what it missed.",
   ],
-  author: { initial: "a", name: "ansh,", role: "founder" },
-  signature: "emfirge",
+  signedAs: "Ansh",
 };
 
 /* ---------- pricing ---------- */
 export const PRICING = {
-  title: "one plan. *free* while in beta.",
-  badge: "beta",
-  sub: "everything, for one aws account",
-  price: "$0",
-  per: "/month while in beta",
-  note: "no card needed. we'll tell you before anything changes.",
-  features: [
-    { icon: "terminal", t: "works with any agent that runs a shell" },
-    { icon: "branch", t: "branches of your live aws" },
-    { icon: "checks", t: "six checks on every change" },
-    { icon: "code", t: "terraform, cloudformation, cli and api changes" },
-    { icon: "key", t: "read-only role, revoke any time" },
-    { icon: "lock", t: "ids tokenized on your machine" },
-    { icon: "file", t: "emfirge.md boundaries" },
-    { icon: "record", t: "record checked against cloudtrail" },
-    { icon: "open", t: "open source engine" },
-  ],
+  title: "Free while in beta.",
+  sub: "One AWS account, every feature, no card.",
   cta: { label: "get started", href: LINKS.quickstart },
+  features: [
+    "works with any agent that runs a shell",
+    "branches of your live aws",
+    "six checks on every change",
+    "terraform, cloudformation, cli and api changes",
+    "read-only role, revoke any time",
+    "ids tokenized on your machine",
+    "emfirge.md boundaries",
+    "record checked against cloudtrail",
+  ],
 };
 
-/* ---------- faq ---------- */
+/* ---------- faq (text carried over from v4) ---------- */
 export const FAQ = {
-  title: "questions, *answered*.",
+  title: "Questions, answered.",
   items: [
     {
       q: "does emfirge change my aws?",
@@ -283,20 +450,12 @@ export const FAQ = {
   ],
 };
 
-/* ---------- final cta + footer ---------- */
-export const CTA = {
-  title: "stop *babysitting* your agent in the cloud.",
-  button: { label: "get started", href: LINKS.quickstart },
-};
-
 export const FOOTER = {
+  line: "Crash-test every change before it touches your cloud.",
   links: [
-    { label: "privacy", href: LINKS.privacy },
-    { label: "security", href: LINKS.security },
     { label: "docs", href: LINKS.docs },
     { label: "github", href: LINKS.github },
-    { label: "changelog", href: LINKS.changelog },
   ],
-  copy: "© 2026 emfirge",
-  built: { pre: "built by ansh ", heart: "❤️", href: LINKS.ansh },
+  built: "Built by Ansh Sonkar",
+  copy: "© 2026 Emfirge",
 };
