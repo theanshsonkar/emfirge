@@ -1,126 +1,104 @@
 "use client";
 import { useEffect, useRef } from "react";
-import { BAYER4, fbm } from "./noise";
-import { DH, DW, SEGS } from "./deltaGeom";
+import { MAX_DPR, paintBackdrop, type MaskStops } from "./bgdeltaPaint";
+import type { BgJob, BgResult } from "./bgdelta.worker";
 
-// Full-width, static river-delta backdrop for desktop (>= 1024px). One fixed canvas behind the rail and the page.
+// Full-width, static river-delta backdrop for desktop (>= 1024px). One fixed element behind the rail and the page.
 // Same geometry and dither as the hero delta (Delta.tsx), scaled to the viewport width and centred vertically.
-// A CSS mask fades it out behind the reading column, so it only shows in the margins.
-const CELL = 5;          // device-independent px per dither cell
-const GLOW = 11;         // design px: how far a channel lights its banks (beyond this the distance no longer matters)
-const GRID = 16;         // design px: spatial-grid cell, >= max channel radius + GLOW so a 1-cell lookup is exact
-const LEVELS = 10;       // land-dot alpha buckets (batched fills instead of one fillStyle per dot)
-const G = "10,122,75";
+// The reading column is faded out so the delta only shows in the margins. The fade is baked into the bitmap's alpha
+// (not a CSS mask, and not a live <canvas>): both made the compositor re-commit the layer on every frame and made
+// scrolling janky. The bitmap is drawn offscreen (worker when possible), turned into a blob URL and shown as a
+// background-image on a plain fixed div.
 const DESKTOP = "(min-width: 1024px)";
 
-type Pt = [number, number, number];
-
-// Channel points bucketed into a coarse grid: each point is stored in every cell its influence box touches,
-// so the nearest-channel lookup for a cell only has to scan that one cell's list.
-function buildGrid() {
-  const pts: Pt[] = [];
-  for (const s of SEGS) s.pts.forEach((p, i, a) => { const k = i / (a.length - 1); pts.push([p[0], p[1], s.w * (1 - 0.25 * k)]); });
-  const cells = new Map<number, Pt[]>();
-  const key = (gx: number, gy: number) => gx * 4096 + gy; // gy offset keeps keys unique for the ranges used here
-  for (const p of pts) {
-    const rr = p[2] + GLOW;
-    for (let gx = Math.floor((p[0] - rr) / GRID); gx <= Math.floor((p[0] + rr) / GRID); gx++)
-      for (let gy = Math.floor((p[1] - rr) / GRID); gy <= Math.floor((p[1] + rr) / GRID); gy++) {
-        const k = key(gx, gy + 1024);
-        const l = cells.get(k);
-        if (l) l.push(p); else cells.set(k, [p]);
-      }
-  }
-  return (x: number, y: number) => {
-    const l = cells.get(key(Math.floor(x / GRID), Math.floor(y / GRID) + 1024));
-    let sd = GLOW; // capped: past GLOW only "not water, no bank glow" matters
-    if (l) for (const p of l) { const dx = p[0] - x, dy = p[1] - y, d = Math.sqrt(dx * dx + dy * dy) - p[2]; if (d < sd) sd = d; } // sqrt, not hypot: much faster
-    return sd;
-  };
-}
-
-function paint(cv: HTMLCanvasElement, w: number, h: number) {
-  const t0 = performance.now();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
-  const ctx = cv.getContext("2d");
-  if (!ctx) return;
-  ctx.scale(dpr, dpr);
-  const sc = w / DW;
-  const yOff = (DH * sc - h) / 2 / sc; // centre the delta vertically
-  const cols = Math.ceil(w / CELL), rows = Math.ceil(h / CELL);
-  const nearest = buildGrid();
-  const water: number[] = [];
-  const land: number[][] = Array.from({ length: LEVELS }, () => []);
-  for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
-    const sd = nearest(((i + 0.5) * CELL) / sc, ((j + 0.5) * CELL) / sc + yOff);
-    if (sd < 0.5) { water.push(i, j); continue; }
-    const nx = i * 0.06, ny = j * 0.11;
-    let v = 0.1 + 0.55 * fbm(nx, ny, 3, 3) + 0.12 * Math.sin((nx + ny * 0.6) * 3.1 + fbm(nx * 2, ny * 2, 9, 2) * 4);
-    const bank = Math.max(0, 1 - sd / GLOW);
-    v += 0.32 * bank * bank;
-    v = Math.min(1, Math.max(0, v));
-    if (v <= BAYER4[(j & 3) * 4 + (i & 3)] * 0.72 + 0.08) continue;
-    land[Math.min(LEVELS - 1, Math.floor(v * LEVELS))].push(i, j);
-  }
-  const fill = (cells: number[], size: number) => {
-    const o = (CELL - size) / 2;
-    ctx.beginPath();
-    for (let k = 0; k < cells.length; k += 2) ctx.rect(cells[k] * CELL + o, cells[k + 1] * CELL + o, size, size);
-    ctx.fill();
-  };
-  for (let L = 0; L < LEVELS; L++) {
-    const v = (L + 0.5) / LEVELS; // bucket centre
-    ctx.fillStyle = `rgba(${G},${(0.03 + 0.11 * v).toFixed(3)})`;
-    fill(land[L], CELL * 0.4);
-  }
-  ctx.fillStyle = `rgba(${G},.30)`;
-  fill(water, CELL * 0.62);
-  try { performance.measure("bgdelta-draw", { start: t0, end: performance.now() }); } catch { /* User Timing unavailable */ }
-}
-
 // Mask: faint behind the rail, a touch stronger at the rail edge, gone behind the column, back to full beyond it.
-function mask(cv: HTMLCanvasElement, w: number) {
+// Positions are fractions of the viewport width, rounded to 0.1% and kept ascending within 0..1 (as CSS would clamp them).
+function maskStops(w: number): MaskStops | null {
   const col = document.querySelector(".col")?.getBoundingClientRect();
   const rail = document.querySelector(".rail")?.getBoundingClientRect();
-  if (!col || !rail) return;
-  const p = (v: number) => `${((v / w) * 100).toFixed(1)}%`;
-  const m = `linear-gradient(to right,rgba(0,0,0,.28) 0,rgba(0,0,0,.28) ${p(rail.right - 40)},rgba(0,0,0,.5) ${p(rail.right)},rgba(0,0,0,0) ${p(col.left + 40)},rgba(0,0,0,0) ${p(col.right - 20)},#000 ${p(Math.min(w, col.right + 180))})`;
-  cv.style.webkitMaskImage = m;
-  cv.style.maskImage = m;
+  if (!col || !rail) return null;
+  let prev = 0;
+  const p = (v: number) => (prev = Math.max(prev, Math.min(1, Math.max(0, Math.round((v / w) * 1000) / 1000))));
+  return [
+    [p(0), 0.28], [p(rail.right - 40), 0.28], [p(rail.right), 0.5],
+    [p(col.left + 40), 0], [p(col.right - 20), 0], [p(Math.min(w, col.right + 180)), 1],
+  ];
+}
+
+// Main-thread fallback: a detached canvas, drawn in an idle callback.
+function renderHere(job: BgJob): Promise<Blob> {
+  const cv = document.createElement("canvas");
+  cv.width = Math.round(job.w * job.dpr); cv.height = Math.round(job.h * job.dpr);
+  const ctx = cv.getContext("2d");
+  if (!ctx) return Promise.reject(new Error("no 2d context"));
+  paintBackdrop(ctx, job.w, job.h, job.dpr, job.stops);
+  return new Promise((res, rej) => cv.toBlob((b) => (b ? res(b) : rej(new Error("toBlob failed"))), "image/png"));
 }
 
 export function BgDelta() {
-  const ref = useRef<HTMLCanvasElement>(null);
+  const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const cv = ref.current;
-    if (!cv) return;
+    const el = ref.current;
+    if (!el) return;
     const mq = window.matchMedia(DESKTOP);
-    let drawn = "", idle = 0, debounce = 0;
+    let cur: BgJob | null = null, drawn = "", idle = 0, debounce = 0, gen = 0, url = "", worker: Worker | null = null, workerOk = typeof Worker !== "undefined" && typeof OffscreenCanvas !== "undefined";
     const cancelIdle = () => {
       if (!idle) return;
       if (typeof cancelIdleCallback === "function") cancelIdleCallback(idle); else clearTimeout(idle);
       idle = 0;
     };
+    const show = (blob: Blob | null) => {
+      const old = url;
+      url = blob ? URL.createObjectURL(blob) : "";
+      el.style.backgroundImage = url ? `url("${url}")` : "";
+      if (old) URL.revokeObjectURL(old);
+    };
+    const fallback = (job: BgJob) => {
+      idle = typeof requestIdleCallback === "function"
+        ? requestIdleCallback(() => { idle = 0; renderHere(job).then((b) => { if (job.id === gen) show(b); }, () => { /* keep the previous bitmap */ }); }, { timeout: 500 })
+        : window.setTimeout(() => { idle = 0; renderHere(job).then((b) => { if (job.id === gen) show(b); }, () => {}); }, 0);
+    };
+    const render = (job: BgJob) => {
+      cur = job;
+      if (workerOk) {
+        try {
+          if (!worker) {
+            worker = new Worker(new URL("./bgdelta.worker.ts", import.meta.url));
+            worker.onmessage = ({ data }: MessageEvent<BgResult>) => {
+              if (data.id !== gen) return; // superseded by a newer draw
+              if (data.blob) show(data.blob);
+              else { workerOk = false; if (cur) fallback(cur); } // worker could not draw (e.g. no OffscreenCanvas 2d): do it here
+            };
+            worker.onerror = () => { workerOk = false; worker?.terminate(); worker = null; if (cur && cur.id === gen) fallback(cur); };
+          }
+          worker.postMessage(job);
+          return;
+        } catch { workerOk = false; worker = null; }
+      }
+      fallback(job);
+    };
     const update = () => {
-      if (!mq.matches) { cancelIdle(); drawn = ""; cv.width = cv.height = 0; return; } // phones/tablets: compute nothing
+      if (!mq.matches) { cancelIdle(); gen++; drawn = ""; show(null); return; } // phones/tablets: compute nothing
       const w = document.documentElement.clientWidth, h = document.documentElement.clientHeight;
-      mask(cv, w);
-      const key = `${w}x${h}@${window.devicePixelRatio}`;
+      const dpr = Math.min(window.devicePixelRatio || 1, MAX_DPR);
+      const stops = maskStops(w);
+      const key = `${w}x${h}@${dpr}:${JSON.stringify(stops)}`;
       if (key === drawn) return;
+      drawn = key;
       cancelIdle();
-      const run = () => { idle = 0; drawn = key; paint(cv, w, h); };
-      idle = typeof requestIdleCallback === "function" ? requestIdleCallback(run, { timeout: 500 }) : window.setTimeout(run, 0);
+      render({ id: ++gen, w, h, dpr, stops });
     };
     const onResize = () => { clearTimeout(debounce); debounce = window.setTimeout(update, 150); };
     update();
     window.addEventListener("resize", onResize);
     mq.addEventListener("change", update);
     return () => {
-      clearTimeout(debounce); cancelIdle();
+      gen++; clearTimeout(debounce); cancelIdle();
       window.removeEventListener("resize", onResize);
       mq.removeEventListener("change", update);
+      worker?.terminate(); worker = null;
+      if (url) { URL.revokeObjectURL(url); url = ""; }
     };
   }, []);
-  return <canvas ref={ref} className="bgdelta" aria-hidden="true" />;
+  return <div ref={ref} className="bgdelta" aria-hidden="true" />;
 }

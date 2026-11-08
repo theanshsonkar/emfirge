@@ -2,7 +2,8 @@
 import { useCallback, useRef } from "react";
 import { BAYER4, fbm } from "./noise";
 import { useCanvas, type DrawFn } from "./useCanvas";
-import { DW, SEGS, at, hex, mix, type PathName } from "./deltaGeom";
+import { DW, at, hex, mix, type PathName } from "./deltaGeom";
+import { GLOW, nearestChannel } from "./nearestChannel";
 
 // A generated dithered river delta. Design space is 640x266 and scales with the canvas.
 // Channels are Catmull-Rom splines (deltaGeom.ts); land is layered value noise, ordered-dithered into fine dots.
@@ -20,13 +21,9 @@ export function Delta({ opts, className }: { opts: DeltaOpts; className?: string
     const sc = w / DW;
     if (!cache.current || cache.current.key !== key) {
       const water = new Float32Array(cols * rows), bank = new Float32Array(cols * rows);
-      const pts: [number, number, number][] = [];
-      for (const s of SEGS) s.pts.forEach((p, i, a) => { const k = i / (a.length - 1); pts.push([p[0], p[1], s.w * (1 - 0.25 * k)]); });
       for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) {
         const x = ((i + 0.5) * cell) / sc, y = ((j + 0.5) * cell) / sc + (opts.yOff ?? 0);
-        let sd = 1e9;
-        for (const p of pts) { const d = Math.hypot(p[0] - x, p[1] - y) - p[2]; if (d < sd) sd = d; }
-        water[j * cols + i] = sd; // signed distance in design px
+        water[j * cols + i] = nearestChannel(x, y); // signed distance in design px, capped at GLOW (beyond it only "not water, no bank glow" matters)
       }
       cache.current = { key, cols, rows, water, bank };
     }
@@ -42,7 +39,7 @@ export function Delta({ opts, className }: { opts: DeltaOpts; className?: string
       if (sd < 0.5) { big.push(i, j); continue; }
       const nx = (i + off) * 0.06, ny = j * 0.11;
       let v = 0.1 + 0.55 * fbm(nx, ny, 3, 3) + 0.12 * Math.sin((nx + ny * 0.6) * 3.1 + fbm(nx * 2, ny * 2, 9, 2) * 4);
-      const bankGlow = Math.max(0, 1 - sd / 11);
+      const bankGlow = Math.max(0, 1 - sd / GLOW);
       v += 0.32 * bankGlow * bankGlow;
       v = Math.min(1, Math.max(0, v));
       const th = BAYER4[(j & 3) * 4 + (i & 3)] * 0.72 + 0.08;
