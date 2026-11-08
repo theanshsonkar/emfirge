@@ -1685,7 +1685,8 @@ def create_branch_endpoint(payload: dict, request: Request, caller: Caller = Dep
         branch_id = branches.create_branch(base_infra, payload['name'], payload['base_analysis_id'])
         _record_branch_owner(branch_id, caller, db)
     except branches.BranchLimitError as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
+        # A hit limit is a conflict with the caller's state (409), as the agent guide says, not a rate limit.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {'branch_id': branch_id}
 
 
@@ -1758,7 +1759,8 @@ def fork_branch_endpoint(branch_id: str, request: Request, payload: dict, caller
     except branches.BranchConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except branches.BranchLimitError as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
+        # A hit limit is a conflict with the caller's state (409), as the agent guide says, not a rate limit.
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     _record_branch_owner(new_branch_id, caller, db)
@@ -4263,122 +4265,38 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
                 infrastructure = get_demo_infrastructure(credentials.role_arn)
                 yield _emit("progress", {"step": "collecting", "service": "demo", "status": "done", "detail": "Demo data loaded"})
             else:
-                # Inline collector with per-service progress events
-                from botocore.exceptions import ClientError as _ClientError
-                from botocore.config import Config as _BotoConfig
-                from app.aws_collector import (
-                    collect_ec2, collect_s3, collect_rds, collect_iam,
-                    collect_cloudtrail, collect_cost, collect_cloudwatch,
-                    collect_guardduty, collect_lambda, collect_secrets_manager,
-                    collect_vpc, collect_kms, collect_config, collect_sns,
-                    collect_ecs, collect_waf, BOTO_CONFIG
-                )
-                from app.models import (
-                    EC2Data, S3Data, RDSData, IAMData, CloudTrailData,
-                    CostData, CloudWatchData, GuardDutyData, LambdaData,
-                    SecretsManagerData, VPCData, KMSData, ConfigData,
-                    SNSData, ECSData, WAFData
-                )
-
-                key = assumed_credentials['AccessKeyId']
-                secret = assumed_credentials['SecretAccessKey']
-                token = assumed_credentials['SessionToken']
-
+                # The one shared scan (aws_collector.collect_infrastructure), run in a thread; its
+                # per-collector progress is streamed as it happens. A separate inline copy used to
+                # live here and drifted: it skipped six collectors (DynamoDB, Scheduler, CloudFront,
+                # API Gateway, ElastiCache, SQS) and never recorded collection status or collected_at.
+                import queue as _queue
                 yield _emit("progress", {"step": "collecting", "service": "sts", "status": "done", "detail": "Role assumed successfully"})
+                progress_q: "_queue.Queue" = _queue.Queue()
+                outcome: dict = {}
 
-                # Parallel collection with progress tracking
-                warnings = []
-                warnings_lock = threading.Lock()
-                results = {}
-                completed_count = 0
+                def _progress(name, done, total):
+                    progress_q.put((name, done, total))
 
-                collectors = {
-                    'ec2': collect_ec2, 's3': collect_s3, 'rds': collect_rds,
-                    'iam': collect_iam, 'cloudtrail': collect_cloudtrail,
-                    'cost': collect_cost, 'cloudwatch': collect_cloudwatch,
-                    'guardduty': collect_guardduty, 'lambda': collect_lambda,
-                    'secrets_manager': collect_secrets_manager, 'vpc': collect_vpc,
-                    'kms': collect_kms, 'config': collect_config,
-                    'sns': collect_sns, 'ecs': collect_ecs, 'waf': collect_waf,
-                }
+                def _scan():
+                    try:
+                        outcome["infra"] = collect_infrastructure(credentials, assumed_credentials, on_progress=_progress)
+                    except Exception as exc:  # noqa: BLE001 - reported to the caller below
+                        outcome["error"] = exc
+                    finally:
+                        progress_q.put(None)
 
-                defaults = {
-                    'ec2': EC2Data(), 's3': S3Data(), 'rds': RDSData(),
-                    'iam': IAMData(), 'cloudtrail': CloudTrailData(),
-                    'cost': CostData(), 'cloudwatch': CloudWatchData(),
-                    'guardduty': GuardDutyData(), 'lambda': LambdaData(),
-                    'secrets_manager': SecretsManagerData(), 'vpc': VPCData(),
-                    'kms': KMSData(), 'config': ConfigData(),
-                    'sns': SNSData(), 'ecs': ECSData(), 'waf': WAFData(),
-                }
-
-                def safe_collect(name, fn):
-                    local_warnings = []
-                    result = fn(key, secret, token, credentials.region, local_warnings)
-                    if local_warnings:
-                        with warnings_lock:
-                            warnings.extend(local_warnings)
-                    return name, result
-
-                # Run collectors in thread pool, yield progress as each completes
-                loop = asyncio.get_event_loop()
-                # Stagger groups to reduce AWS API throttling
-                _STREAM_GROUPS = [
-                    ['ec2', 'rds', 'cloudtrail', 'kms'],
-                    ['s3', 'guardduty', 'sns'],
-                    ['iam', 'cost', 'cloudwatch', 'config'],
-                    ['lambda', 'vpc', 'ecs', 'waf'],
-                    ['secrets_manager'],
-                ]
-                import time as _t
-                with ThreadPoolExecutor(max_workers=16) as executor:
-                    future_to_name = {}
-                    for _gi, _group in enumerate(_STREAM_GROUPS):
-                        for name in _group:
-                            if name in collectors:
-                                future = executor.submit(safe_collect, name, collectors[name])
-                                future_to_name[future] = name
-                        if _gi < len(_STREAM_GROUPS) - 1:
-                            _t.sleep(0.2)
-                    # Safety: ungrouped collectors
-                    _grouped = {n for g in _STREAM_GROUPS for n in g}
-                    for name, fn in collectors.items():
-                        if name not in _grouped:
-                            future = executor.submit(safe_collect, name, fn)
-                            future_to_name[future] = name
-                    for future in as_completed(future_to_name):
-                        name = future_to_name[future]
-                        try:
-                            _, result = future.result(timeout=20)
-                            results[name] = result
-                        except TimeoutError:
-                            msg = f'{name} collector timed out — results excluded'
-                            warnings.append(msg)
-                            results[name] = defaults[name]
-                        except Exception as e:
-                            results[name] = defaults[name]
-
-                        completed_count += 1
-                        yield _emit("progress", {
-                            "step": "collecting",
-                            "service": name,
-                            "status": "done",
-                            "completed": completed_count,
-                            "total": len(collectors),
-                            "detail": f"Collected {name} ({completed_count}/{len(collectors)})"
-                        })
-
-                from app.models import AWSInfrastructure as _AWSInfra
-                infrastructure = _AWSInfra(
-                    ec2=results['ec2'], s3=results['s3'], rds=results['rds'],
-                    iam=results['iam'], cloudtrail=results['cloudtrail'],
-                    cost=results['cost'], cloudwatch=results['cloudwatch'],
-                    guardduty=results['guardduty'], lambda_data=results['lambda'],
-                    secrets_manager=results['secrets_manager'], vpc=results['vpc'],
-                    kms=results['kms'], config=results['config'],
-                    sns=results['sns'], ecs=results['ecs'], waf=results['waf'],
-                    region=credentials.region, warnings=warnings
-                )
+                threading.Thread(target=_scan, name="scan", daemon=True).start()
+                while True:
+                    item = await asyncio.get_event_loop().run_in_executor(None, progress_q.get)
+                    if item is None:
+                        break
+                    name, done, total = item
+                    yield _emit("progress", {"step": "collecting", "service": name, "status": "done",
+                                             "completed": done, "total": total,
+                                             "detail": f"Collected {name} ({done}/{total})"})
+                if "error" in outcome:
+                    raise outcome["error"]
+                infrastructure = outcome["infra"]
 
             # ── STEP 2: Build graph + run rules ───────────────────
             yield _emit("progress", {"step": "analyzing", "detail": "Building infrastructure graph..."})

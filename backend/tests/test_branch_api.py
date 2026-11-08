@@ -152,7 +152,7 @@ def test_fork_endpoint_maps_missing_quota_and_conflict_errors():
     with patch("app.main.branches.fork_branch", side_effect=branches.BranchNotFoundError("Branch not found")):
         assert client.post("/branches/missing/fork", json={"name": "child"}).status_code == 404
     with patch("app.main.branches.fork_branch", side_effect=branches.BranchLimitError("limit")):
-        assert client.post("/branches/full/fork", json={"name": "child"}).status_code == 429
+        assert client.post("/branches/full/fork", json={"name": "child"}).status_code == 409
     with patch("app.main.branches.fork_branch", side_effect=branches.BranchConflictError("changed")):
         assert client.post("/branches/raced/fork", json={"name": "child"}).status_code == 409
 

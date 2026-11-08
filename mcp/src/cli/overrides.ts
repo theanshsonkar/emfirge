@@ -60,8 +60,34 @@ async function tryVerb(p: Parsed, io: CliIo): Promise<unknown> {
   return tool("emfirge_plan_verdict", { branch_id: branchId, format: kind, plan });
 }
 
+/**
+ * `context --refresh` answers with what happened, not the old scanner report (scores, CRITICAL labels,
+ * recommendations): facts, not verdicts. The old report stays reachable with `context --findings`.
+ */
+export function scanSummary(raw: unknown): Record<string, unknown> {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const id = typeof r.analysis_id === "string" ? r.analysis_id : null;
+  const out: Record<string, unknown> = {
+    scan: "done",
+    analysis_id: id,
+    region: r.region_analyzed ?? null,
+    resources: r.total_resources_scanned ?? null,
+    seconds: r.scan_duration_seconds ?? null,
+    warnings: Array.isArray(r.warnings) ? r.warnings : [],
+    next: id
+      ? [`emfirge context inventory --analysis ${id}`, `emfirge branch open --analysis ${id} --name NAME`]
+      : ["emfirge context inventory"],
+    note: "What was and was not read is listed under `unknown` in every context answer. " +
+      "The old scanner report (scores, findings) is still there: emfirge context --findings --analysis ID.",
+  };
+  if (typeof r.note === "string") out.quota = r.note;
+  if (r.message && !id) out.message = r.message;
+  return out;
+}
+
 export const OVERRIDES: Record<string, Override> = {
-  "context.refresh": async (p) => tool("emfirge_scan", { role_arn: need(p, "role-arn"), region: need(p, "region") }),
+  "context.refresh": async (p) =>
+    scanSummary(await tool("emfirge_scan", { role_arn: need(p, "role-arn"), region: need(p, "region") })),
   "context.findings": async (p) =>
     tool("emfirge_get_findings", dropUndefined({ analysis_id: need(p, "analysis"), severity: str(p, "severity") })),
   "context.attack-paths": async (p) => tool("emfirge_attack_paths", { analysis_id: need(p, "analysis") }),

@@ -103,6 +103,10 @@ def _data_lines(infra: AWSInfrastructure, graph: Graph) -> list[DataLine]:
     return lines
 
 
+# AWS resource types that live in no region (IAM and CloudFront are global services).
+GLOBAL_TYPES = ("cloudfront_distribution", "iam_role", "iam_user", "iam_policy", "iam_role_policy", "iam_instance_profile")
+
+
 def _cost_lines(infra: AWSInfrastructure, graph: Graph) -> tuple[list[CostLine], str]:
     estimate = estimate_monthly_cost(infra)
     lines = []
@@ -198,6 +202,10 @@ def build_bundle(infra: AWSInfrastructure, graph: Graph, *, source: SourceInfo,
                   if untagged_types else []),
     }
     known = {"cost": [Note("price_table", price_note)]}
+    price_region = price_note.split()[1] if price_note.startswith("AWS ") else None
+    if infra.region and price_region and infra.region != price_region:
+        unknown["cost"] = [Note("price_region", f"prices are {price_region} list prices; this snapshot is in {infra.region}, "
+                                                "where AWS prices can differ, so the amounts are approximate")]
     if evidence:
         known["live"] = [Note("branch_evidence", f"{len(evidence)} stored evidence records read; no provider call is made")]
     return FactsBundle(
@@ -213,6 +221,7 @@ def build_bundle(infra: AWSInfrastructure, graph: Graph, *, source: SourceInfo,
         permissions=permissions,
         permission_notes=permission_notes,
         known=known,
+        global_types=GLOBAL_TYPES,
         unknown=unknown,
     )
 

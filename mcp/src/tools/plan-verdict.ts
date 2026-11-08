@@ -44,6 +44,15 @@ export const PLAN_BINDING_NOTE =
   "list, {\"format\":\"aws-cli/1\",\"commands\":[...]}). A plan whose sha256 differs is not the one this " +
   "verdict covers; re-run emfirge_plan_verdict on it.";
 
+/** A short, single-line reason: status and message, never an HTML error page. */
+function shortError(err: unknown): string {
+  const status = (err as { status?: number })?.status;
+  let message = err instanceof Error ? err.message : String(err);
+  message = message.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  if (message.length > 160) message = message.slice(0, 160) + "…";
+  return status ? `HTTP ${status}: ${message}` : message;
+}
+
 function ok(result: unknown) {
   return {
     content: [
@@ -68,16 +77,39 @@ export async function planVerdictHandler(args: PlanVerdictArgs) {
     `/branches/${branchId}/plans/${pathFormat}`,
     body,
   );
-  const branchVerdict = await backendCall<BranchVerdict>(
-    "GET",
-    `/branches/${branchId}/verdict`,
-  );
-  const handback = await backendCall<PlanHandback>(
-    "GET",
-    `/branches/${branchId}/plans/${encodeURIComponent(ingest.plan_id)}/handback`,
-  );
+  // The change is on the branch once the ingest answers. A verdict or hand-back failure after that
+  // must not read as "try failed": an agent would try the same change again and add it twice.
+  let branchVerdict: BranchVerdict | null = null;
+  let handback: PlanHandback | null = null;
+  let verdictError: string | null = null;
+  try {
+    branchVerdict = await backendCall<BranchVerdict>("GET", `/branches/${branchId}/verdict`);
+    handback = await backendCall<PlanHandback>(
+      "GET",
+      `/branches/${branchId}/plans/${encodeURIComponent(ingest.plan_id)}/handback`,
+    );
+  } catch (err) {
+    verdictError = shortError(err);
+  }
+  if (!branchVerdict || !handback) {
+    return ok({
+      saved: true,
+      plan_id: ingest.plan_id,
+      input_sha256: ingest.input_sha256,
+      applied: ingest.applied,
+      rejected: ingest.rejected,
+      unmodeled: ingest.unmodeled,
+      unknown_fields: ingest.unknown_fields,
+      branch_revision: ingest.branch_revision ?? null,
+      verdict: null,
+      verdict_error: verdictError ?? "verdict not available",
+      next_step: `The change is saved on the branch. Do not try it again. Run \`emfirge check ${expanded.branch_id}\` ` +
+        "for the answers once the server responds; `emfirge report` gives the hand-back.",
+    });
+  }
 
   return ok({
+    saved: true,
     plan_id: ingest.plan_id,
     input_sha256: ingest.input_sha256,
     applied: ingest.applied,

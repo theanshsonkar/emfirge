@@ -10,6 +10,8 @@ Run it from the shell: `emfirge <verb>`. Output is JSON on stdout.
 - Unknown means not checked. It never means safe. Read every `unknown` entry.
 - Names and ids come back as tokens (`S3_001`, `NAME_003`, `TAG_001`). Pass them back as they are. Emfirge turns them into real ids on your machine.
 - Emfirge keeps no plan text. Apply your own original plan. The hand-back is tied to it by sha256.
+- `try` answers `saved: true` once the change is on the branch. If it also says `verdict: null`, the server did not finish the verdict: do not send the change again; run `emfirge check BRANCH` later.
+- A borrowed scanner that did not finish in time is listed in the check as not run. Not run is not safe.
 
 ## The loop
 

@@ -100,6 +100,7 @@ test("plan verdict returns the ingest, verdict, and handback result", async () =
     branch_id: "b1", format: "terraform", plan: { format_version: "1.0" },
   })));
   assert.deepEqual(result, {
+    saved: true,
     plan_id: ingest.plan_id,
     input_sha256: ingest.input_sha256,
     applied: ingest.applied,
@@ -130,4 +131,25 @@ test("plan verdict surfaces backend validation detail", async () => {
     () => planVerdict.planVerdictHandler({ branch_id: "b1", format: "aws-cli", plan: [] }),
     /Invalid AWS CLI commands document/,
   );
+});
+
+test("a saved change is reported as saved when the verdict call fails (never 'failed', so it is not tried twice)", async () => {
+  stubFetch([
+    { body: ingest },
+    { status: 504, body: "<html>Gateway Time-out</html>" },
+  ]);
+  const result = await planVerdict.planVerdictHandler({
+    branch_id: "b1",
+    format: "aws-api",
+    plan: { format: "aws-api-calls/1", calls: [] },
+  });
+  const payload = JSON.parse(textOf(result));
+  assert.equal(payload.saved, true);
+  assert.equal(payload.plan_id, "plan-1");
+  assert.deepEqual(payload.applied, ["aws_instance.web"]);
+  assert.equal(payload.verdict, null);
+  assert.match(payload.verdict_error, /504/);
+  assert.doesNotMatch(payload.verdict_error, /<html/i);
+  assert.match(payload.next_step, /saved/i);
+  assert.match(payload.next_step, /emfirge check/);
 });
