@@ -97,3 +97,17 @@ Errors are JSON on stderr: `{"error":{"code","message","exit"}}`. Stdout is empt
 
 `emfirge login`, then `emfirge connect` for the read-only AWS role link, then `emfirge context --refresh`.
 Set `EMFIRGE_API_KEY` to skip browser sign-in.
+
+## Using Emfirge where browser sign-in can't work
+
+A cloud agent session or CI has no browser, and `emfirge login` needs one (it waits for a callback on 127.0.0.1).
+Sign in once on a machine that has a browser, then make a key for your own project:
+
+```
+emfirge key create --name ci
+```
+
+The key is shown once. Store it as `EMFIRGE_API_KEY` in your environment's secret settings. Never paste it into a chat
+or commit it. Where the key is set, the CLI uses it and skips browser sign-in. `emfirge key list` shows your keys
+(never the key itself); `emfirge key revoke KEY_ID` stops one at once. A project can hold 10 active keys.
+`key create` is the only command that prints a key; every other output masks `emf_...` values.

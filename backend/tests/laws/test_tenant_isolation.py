@@ -78,3 +78,15 @@ def test_tenant_routes_have_caller_dependency():
             assert has_dependency(route.dependant.dependencies, legacy_ci_enabled), route.path
         else:
             assert has_caller(route.dependant.dependencies), route.path
+
+
+def test_api_keys_are_scoped_to_the_callers_project(tenant_client):
+    client, key_a, key_b, _ = tenant_client
+    ha, hb = {'X-API-Key': key_a}, {'X-API-Key': key_b}
+    made_b = client.post('/auth/api-keys', headers=hb, json={}).json()
+    assert made_b['key_id'] not in {k['key_id'] for k in client.get('/auth/api-keys', headers=ha).json()['keys']}
+    assert client.delete(f"/auth/api-keys/{made_b['key_id']}", headers=ha).status_code == 404
+    assert client.post(f"/auth/api-keys/{made_b['key_id']}/revoke", headers=ha).status_code == 404
+    assert client.get('/project', headers={'X-API-Key': made_b['key']}).status_code == 200
+    assert client.delete(f"/auth/api-keys/{made_b['key_id']}", headers=hb).status_code == 200
+    assert client.get('/project', headers={'X-API-Key': made_b['key']}).status_code == 401

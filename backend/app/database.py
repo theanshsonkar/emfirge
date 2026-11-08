@@ -192,6 +192,14 @@ class APIKey(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     last_used_at = Column(DateTime, nullable=True)
 
+class APIKeyLabel(Base):
+    """Optional name and display prefix for an API key. A new table, because create_all cannot add columns to api_keys."""
+    __tablename__ = 'api_key_labels'
+    key_id = Column(Integer, ForeignKey('api_keys.id'), primary_key=True)
+    name = Column(String(80), nullable=True)
+    prefix = Column(String(8), nullable=False)
+
+
 CI_KEY_PREFIX = 'sha256:'
 
 

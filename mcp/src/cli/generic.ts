@@ -5,7 +5,7 @@
 // Redaction and token expansion are the same functions the MCP tool handlers use (tokenize.ts).
 
 import { backendCall } from "../client.js";
-import { expandTokens, redactDeep } from "../tokenize.js";
+import { API_KEY_EXACT, expandTokens, redactDeep } from "../tokenize.js";
 import { UsageError, type Parsed } from "./args.js";
 import {
   unsupportedReason, updateNeededMessage, EXIT_UPDATE_NEEDED,
@@ -131,5 +131,22 @@ export async function runManifestCommand(
   let result: unknown = await backendCall(request.method, path, body);
   const listKey = cmd.response?.list_key;
   if (listKey && Array.isArray(result)) result = { [listKey]: result, count: result.length };
-  return redactDeep(result);
+  const redacted = redactDeep(result);
+  return revealFields(result, redacted, cmd.response?.reveal);
+}
+
+/**
+ * Put back, unmasked, the named TOP-LEVEL fields of the answer, and only when the value is an API key the server
+ * just made for the caller (the one command that returns one: `key create`). Every other field, nested value, and
+ * any other command stays masked. A value that is not an API key is never revealed, whatever the manifest says.
+ */
+function revealFields(raw: unknown, redacted: unknown, reveal: unknown): unknown {
+  if (!Array.isArray(reveal) || raw === null || typeof raw !== "object" || Array.isArray(raw)) return redacted;
+  if (redacted === null || typeof redacted !== "object" || Array.isArray(redacted)) return redacted;
+  const out = { ...(redacted as Record<string, unknown>) };
+  for (const field of reveal) {
+    const v = typeof field === "string" ? (raw as Record<string, unknown>)[field] : undefined;
+    if (typeof v === "string" && API_KEY_EXACT.test(v)) out[field as string] = v;
+  }
+  return out;
 }
