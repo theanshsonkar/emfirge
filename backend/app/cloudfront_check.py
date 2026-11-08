@@ -41,9 +41,11 @@ def _origin(dist: CloudFrontDistribution, behavior: CloudFrontCacheBehavior) -> 
 
 def _host_to_protected_bucket(infra: AWSInfrastructure, dist: CloudFrontDistribution,
                               behavior: CloudFrontCacheBehavior) -> tuple[Optional[bool], Optional[CloudFrontOrigin]]:
-    """(does the viewer Host reach an S3 origin behind origin access control: True / False / None unknown, that origin)."""
+    """(does the viewer Host reach an S3 bucket origin: True / False / None unknown, that origin).
+
+    Whether the origin has access control is the caller's question (``origin_access_control_id``)."""
     origin = _origin(dist, behavior)
-    if origin is None or origin.origin_type != "s3" or not origin.origin_access_control_id:
+    if origin is None or origin.origin_type != "s3":
         return False, origin
     return infra.cloudfront.behavior_forwards_host(behavior), origin
 
@@ -76,6 +78,14 @@ def compare(base: AWSInfrastructure, branch: AWSInfrastructure, branch_graph: An
             compared += 1
             if previous is not None and _signature(base, old, previous) == _signature(branch, dist, behavior):
                 continue  # nothing about how this behavior reaches its origin changed
+            if origin is not None and origin.origin_type == "s3" and not origin.origin_access_control_id:
+                # An OAI or public S3 origin: the observed incident is with OAC only, so never a fact, and never silent.
+                if after_state is not False and before_state is not True:
+                    doubts.append(("origin_host_header_s3_without_oac",
+                                   "a behavior serving an S3 bucket without origin access control (an origin access identity or a public bucket) "
+                                   f"{'now passes' if after_state else 'may now pass'} the viewer Host header to it; whether that breaks the path is not observed "
+                                   "(the observed incident is with origin access control), so it is not stated as a fact", dist.id))
+                continue
             if after_state is True and before_state is not True:
                 facts.append(EdgeOriginFact(
                     resource_id=dist.id, resource_type="cloudfront_distribution", change=CHANGE,
