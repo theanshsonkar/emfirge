@@ -19,6 +19,7 @@ import { loadManifest, updateNeededMessage, EXIT_UPDATE_NEEDED, SUPPORTED_PROTOC
 import { OVERRIDES, CLIENT_KEYS } from "./overrides.js";
 import { runManifestCommand } from "./generic.js";
 import { CliError, tool, on, type CliIo } from "./support.js";
+import { startSpinner } from "./spinner.js";
 
 export type { CliIo } from "./support.js";
 
@@ -145,7 +146,12 @@ export async function runCli(argv: string[], partial: Partial<CliIo> = {}): Prom
   try {
     let result: unknown;
     if (parsed.command && !isLocal(parsed.verb)) {
-      result = await runManifestCommand(parsed.command, parsed, io, OVERRIDES);
+      const stop = (io.spinner ?? startSpinner)("Asking Emfirge");
+      try {
+        result = await runManifestCommand(parsed.command, parsed, io, OVERRIDES);
+      } finally {
+        stop();
+      }
       io.out(formatOk(result, parsed.human, parsed.command.human));
       return 0;
     }

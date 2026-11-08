@@ -1,6 +1,6 @@
 {
   "name": "emfirge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The emfirge command: the harness between AI agents and your cloud. Agents use it to see what is true in your AWS, try changes on a branch, and check what would break. Read-only by design.",
   "type": "module",
   "bin": {
