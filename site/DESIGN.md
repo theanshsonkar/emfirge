@@ -33,7 +33,7 @@ A completely new look, unrelated to the docs site. Editorial and confident, dark
   Sections fade/slide up 12px on scroll (IntersectionObserver). Nothing else moves.
 - Layout: max width 1200px, 24px gutters (16px on phones), generous vertical rhythm (120px between sections desktop, 72px mobile).
   No horizontal scroll at 360px width.
-- Logo: the "e" mark from `site/public/emfirge-logo.svg`, rendered in paper color, plus the wordmark "emfirge" in Inter semibold.
+- Logo: the fork mark (an ink trunk with a green branch curving off it) plus the wordmark "emfirge" in Geist semibold; `site/public/emfirge-logo.svg` has both. Favicon and app icons: ink tile, white trunk, green branch (`src/app/icon.svg`, `favicon.ico`, `icon.png`, `apple-icon.png`).
 
 ## Page sections (in order)
 
