@@ -1,0 +1,8 @@
+# emfirge
+
+> The harness for AI agents that work on your cloud: a true model of your AWS, a branch for every change, six checks with no AI inside.
+
+- [Home as markdown, with agent instructions](https://emfirge.cloud/index.md): the whole page plus "How to use emfirge (for agents)".
+- [Docs](https://emfirge.cloud/docs)
+- [Quickstart](https://emfirge.cloud/docs/quickstart)
+- [Source](https://github.com/theanshsonkar/emfirge)

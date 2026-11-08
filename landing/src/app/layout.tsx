@@ -1,48 +1,28 @@
 import type { Metadata, Viewport } from "next";
-import { Archivo, IBM_Plex_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import { SITE } from "@/content";
 import "./globals.css";
 
-// Archivo's width axis carries the display voice (wdth 125, 800).
-const sans = Archivo({
-  subsets: ["latin"],
-  axes: ["wdth"],
-  variable: "--font-archivo",
-  display: "swap",
-});
-const mono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  variable: "--font-plex",
-  display: "swap",
-});
+const sans = Geist({ subsets: ["latin"], variable: "--font-geist", display: "swap" });
+const mono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono", display: "swap", weight: ["400", "500"] });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(SITE.url),
+  metadataBase: new URL("https://emfirge.cloud"),
   title: SITE.title,
   description: SITE.description,
-  openGraph: {
-    type: "website",
-    url: "/",
-    siteName: "Emfirge",
-    title: SITE.title,
-    description: SITE.description,
-  },
-  twitter: { card: "summary_large_image", title: SITE.title, description: SITE.description },
+  alternates: { types: { "text/markdown": "/index.md" } },
+  openGraph: { type: "website", url: "/", siteName: "Emfirge", title: SITE.title, description: SITE.description },
+  twitter: { card: "summary", title: SITE.title, description: SITE.description },
 };
-
-export const viewport: Viewport = { themeColor: "#000000" };
+export const viewport: Viewport = { themeColor: "#ffffff" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${sans.variable} ${mono.variable}`}>
-      <body>
-        <noscript>
-          {/* Without JS the bench is a finished example: test 001, switches disabled. */}
-          <style>{`[data-js]{display:none!important}[data-sw="1"] .sw-cover{transform:rotateX(-110deg)}[data-sw="1"] .sw-lever{transform:translateY(-8px)}`}</style>
-        </noscript>
-        {children}
-      </body>
+    <html lang="en" className={`${sans.variable} ${mono.variable} no-js`}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: "document.documentElement.classList.remove('no-js')" }} />
+      </head>
+      <body>{children}</body>
     </html>
   );
 }

@@ -1,21 +1,63 @@
-import { HERO } from "@/content";
-import { Bench } from "./Bench";
-import { CopyCommand } from "./CopyCommand";
+"use client";
+import { useEffect, useRef, useState } from "react";
+import { HERO, LINKS, SETUP_PROMPT } from "@/content";
+import { Mark } from "@/graphics/Mark";
+import { Delta, HERO_DELTA } from "@/graphics/Delta";
+import { Caret, Check, Copy, Ext } from "./Icons";
+
+function CopyBar() {
+  const [open, setOpen] = useState(false);
+  const [done, setDone] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const off = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", off); document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("mousedown", off); document.removeEventListener("keydown", esc); };
+  }, []);
+  const enc = encodeURIComponent(SETUP_PROMPT);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(SETUP_PROMPT); } catch {
+      const t = document.createElement("textarea"); t.value = SETUP_PROMPT; document.body.appendChild(t); t.select();
+      try { document.execCommand("copy"); } catch {} t.remove();
+    }
+    setDone(true); setTimeout(() => setDone(false), 1800);
+  };
+  return (
+    <div className="copybar" ref={ref}>
+      <button className="main-b" onClick={copy} aria-live="polite">{done ? "Copied" : HERO.copy}</button>
+      <span className="ico" aria-hidden="true">{done ? <Check /> : <Copy />}</span>
+      <button className="car" aria-label="More ways to open the setup prompt" aria-expanded={open} onClick={() => setOpen(!open)}><Caret /></button>
+      {open && (
+        <div className="menu" role="menu">
+          <a role="menuitem" href={`https://claude.ai/new?q=${enc}`} target="_blank" rel="noreferrer">Open in Claude</a>
+          <a role="menuitem" href={`https://chatgpt.com/?q=${enc}`} target="_blank" rel="noreferrer">Open in ChatGPT</a>
+          <a role="menuitem" href={`cursor://anysphere.cursor-deeplink/prompt?text=${enc}`}>Open in Cursor</a>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Hero() {
   return (
-    <section id="top" aria-labelledby="h1" className="mx-auto max-w-[1440px] px-4 pb-16 pt-6 sm:px-8 lg:pb-24">
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-10 lg:grid-cols-[minmax(0,5fr)_minmax(0,8fr)] lg:gap-12 xl:grid-cols-[minmax(0,4fr)_minmax(0,9fr)] xl:gap-8">
-        <div className="lg:sticky lg:top-[72px] lg:self-start lg:pt-6">
-          <h1 id="h1" className="display text-[40px] sm:text-[56px] lg:text-[64px] xl:text-[56px]">
-            {HERO.h1}
-          </h1>
-          <p className="mt-6 max-w-[34em] text-[17px]">{HERO.body}</p>
-          <p className="mb-2.5 mt-8 text-[14px] text-ink-2">{HERO.then}</p>
-          <CopyCommand />
-        </div>
-        <Bench />
+    <section>
+      <div className="pill stagger" style={{ animationDelay: "60ms" }}>
+        <span><i className="dot" />{HERO.pill}</span>
+        <a href={LINKS.docs}>{HERO.pillLink} <Ext size={9} /></a>
       </div>
+      <h1 className="h1">{HERO.h1}</h1>
+      <p className="sub">{HERO.sub}</p>
+      <div className="btns">
+        <a className="btn btn-p" href={LINKS.quickstart}><span className="tile"><Mark size={24} trunk="#0A7A4B" branch="#0A7A4B" /></span>{HERO.primary}</a>
+        <a className="btn btn-s" href={LINKS.mail}>{HERO.secondary} <Ext size={11} /></a>
+      </div>
+      <CopyBar />
+      <div className="works">
+        <span className="label">Works with</span>
+        {HERO.worksWith.map((w) => <a key={w} href={LINKS.docs}>{w}</a>)}
+      </div>
+      <div className="media" aria-hidden="true"><Delta opts={HERO_DELTA} /></div>
     </section>
   );
 }
