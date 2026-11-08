@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // emfirge CLI entry. The logic is in run.ts; this only wires argv and the exit code.
 //
-// TODO(owner): the package/bin NAME is undecided. The bin entry `emfirge` in
-// mcp/package.json points here. Renaming is a one-line change in the "bin" map
-// (and the `emfirge ...` strings in verbs.ts / docs/AGENT-GUIDE.md if the command changes).
+// The `emfirge` command is published as the npm package `emfirge` (folder cli/),
+// a thin package that imports this file. The code lives here only.
 
 import { runCli } from "./run.js";
 

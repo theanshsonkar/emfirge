@@ -1,0 +1,33 @@
+{
+  "name": "emfirge",
+  "version": "0.2.9",
+  "description": "The emfirge command: the harness between AI agents and your cloud. Agents use it to see what is true in your AWS, try changes on a branch, and check what would break. Read-only by design.",
+  "type": "module",
+  "bin": {
+    "emfirge": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@emfirge/mcp": "0.2.9"
+  },
+  "keywords": ["aws", "cloud", "agents", "cli", "harness"],
+  "author": "Ansh Sonkar <theanshsonkar@gmail.com>",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/theanshsonkar/emfirge.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/theanshsonkar/emfirge",
+  "bugs": "https://github.com/theanshsonkar/emfirge/issues"
+}
