@@ -154,6 +154,7 @@ def test_plan_verify_validation(typed_client):
     assert typed_client.post(f"/branches/{bid}/plans/terraform", content=raw).status_code == 200
     plan_id = branches.list_plans(bid)[0]["plan_id"]
     handback = typed_client.get(f"/branches/{bid}/plans/{plan_id}/handback").json()
+    handback["plan_text"] = raw.decode()  # the server keeps only the hash; the caller supplies its own copy
     missing = dict(handback); missing.pop("base_analysis_id")
     assert typed_client.post("/handback/verify", json=missing).status_code == 422
     assert typed_client.post("/handback/verify", json={**handback, "base_analysis_id": "wrong"}).json()["reason_code"] == "base_snapshot_changed"

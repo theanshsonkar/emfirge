@@ -7,6 +7,7 @@ broken resource, enabling surgical diffs instead of standalone HCL dumps.
 """
 
 import re
+from app.log_safe import safe_exc
 from typing import Optional
 from dataclasses import dataclass, field
 from github import Github
@@ -168,7 +169,7 @@ def index_repo(gh: Github, repo_full_name: str) -> list[TFResource]:
             file_resources = parse_tf_content(content, file_path)
             resources.extend(file_resources)
         except Exception as e:
-            print(f"[tf_indexer] Error reading {file_path}: {e}")
+            print(f"[tf_indexer] Error reading a Terraform file: {safe_exc(e)}")
             continue
 
     return resources

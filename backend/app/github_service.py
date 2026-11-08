@@ -1,5 +1,6 @@
 import os
 import base64
+from app.log_safe import safe_exc
 from typing import Optional
 from github import Github, GithubIntegration
 
@@ -92,7 +93,7 @@ def create_fix_pr(
             )
             file_path = tf_file_path
         except Exception as e:
-            print(f"[github_service] Surgical fix failed, falling back: {e}")
+            print(f"[github_service] Surgical fix failed, falling back: {safe_exc(e)}")
             # Fall back to standalone file
             file_path = f"emfirge-fixes/{rule_id}.tf"
             repo.create_file(

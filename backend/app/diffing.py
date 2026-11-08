@@ -182,8 +182,29 @@ def _changed_node_fields(before: Any, after: Any) -> list[str]:
     return sorted(set(changed))
 
 
+def _changed_values(before: Any, after: Any, changed: list[str]) -> dict[str, dict[str, Any]]:
+    """Before/after of changed fields the node schema declares reportable (state, expression, ...)."""
+    resource_type, before_layers = _node_layers(before)
+    _, after_layers = _node_layers(after)
+    schema = NODE_SCHEMAS.get(resource_type)
+    if schema is None or not schema.diff_values:
+        return {}
+    left, right = before_layers.get("base"), after_layers.get("base")
+    if not isinstance(left, Mapping) or not isinstance(right, Mapping):
+        return {}
+    return {
+        f"base.{key}": {"before": _canonical_value(left.get(key)), "after": _canonical_value(right.get(key))}
+        for key in schema.diff_values if f"base.{key}" in changed
+    }
+
+
 def _modified_detail(before: Any, after: Any) -> dict[str, Any]:
-    return {**_resource_detail(after), "changed": _changed_node_fields(before, after)}
+    changed = _changed_node_fields(before, after)
+    detail = {**_resource_detail(after), "changed": changed}
+    values = _changed_values(before, after, changed)
+    if values:
+        detail["values"] = values
+    return detail
 
 
 def _node_structure(node: Any) -> tuple[str, str]:
@@ -380,11 +401,20 @@ def _iam_policy_changed(base_infra: Any, branch_infra: Any) -> bool:
     return policies(base_infra) != policies(branch_infra)
 
 
+def _instance_profile_arns(infra: Any) -> set[str]:
+    profiles = _value(_value(infra, "iam", {}), "instance_profile_roles", {}) or {}
+    return {str(key) for key in profiles if str(key).startswith("arn:")}
+
+
 def _model_only_diff(base_infra: Any, branch_infra: Any) -> tuple[list[dict], list[dict], list[dict]]:
     """Diff mutable model collections that have no graph node representation."""
     added: list[dict] = []
     removed: list[dict] = []
     modified: list[dict] = []
+    base_profiles = _instance_profile_arns(base_infra)
+    branch_profiles = _instance_profile_arns(branch_infra)
+    added.extend({"id": arn, "resource_type": "iam_instance_profile"} for arn in sorted(branch_profiles - base_profiles))
+    removed.extend({"id": arn, "resource_type": "iam_instance_profile"} for arn in sorted(base_profiles - branch_profiles))
     for resource_type in sorted(MODEL_ONLY_TYPES):
         base_items = {_identity(resource_type, item): item for item in _collection(base_infra, resource_type)}
         branch_items = {_identity(resource_type, item): item for item in _collection(branch_infra, resource_type)}
@@ -403,6 +433,69 @@ def _model_only_diff(base_infra: Any, branch_infra: Any) -> tuple[list[dict], li
             )
             modified.append({"id": str(resource_id), "resource_type": resource_type, "changed": changed})
     return added, removed, modified
+
+
+# Node types whose settings live in an infrastructure model collection too: the graph node carries only some of them.
+MODEL_COMPARED_TYPES = tuple(sorted(
+    {resource_type for resource_type, capability in _MUTATION_CAPABILITIES.items()
+     if capability["model"] is not None and resource_type in NODE_SCHEMAS} | {"iam_role"}))
+
+
+def _graph_node_id(graph: Any, resource_type: str, resource_id: str, item: Any) -> str:
+    """The id the graph diff uses for a model item: the identity, except a role (``iam-role-<name>`` or its node id)."""
+    if resource_type != "iam_role":
+        return resource_id
+    for node in graph.nodes:
+        if _value(node, "resource_type") == "iam_role" and _value(_value(node, "base", {}) or {}, "arn") == resource_id:
+            return str(_value(node, "id"))
+    return f"iam-role-{item.role_name}"
+
+
+def _node_base_keys(graph: Any) -> dict[str, set[str]]:
+    keys: dict[str, set[str]] = {}
+    for node in graph.nodes:
+        base = _value(node, "base", None)
+        keys[str(_value(node, "id", ""))] = {str(key) for key in base} if isinstance(base, Mapping) else set()
+    return keys
+
+
+def _model_field_changes(base_infra: Any, branch_infra: Any, base_graph: Any, branch_graph: Any) -> list[dict]:
+    """Field names of model settings that differ for resources on both sides, for types that also have a graph node.
+
+    The graph node holds a subset of the model. Comparing the model as well means a setting that lives only on the
+    model (backup retention, encryption, versioning, ...) is never invisible. A field the node already carries is
+    reported by the graph diff (``base.<field>``) and not repeated. Names only, never values.
+    """
+    modified: list[dict] = []
+    node_keys = [_node_base_keys(base_graph), _node_base_keys(branch_graph)]
+    for resource_type in MODEL_COMPARED_TYPES:
+        collection_type = "iam_role" if resource_type == "iam_role" else resource_type
+        base_items = {_identity(collection_type, item): item for item in _collection(base_infra, collection_type)}
+        branch_items = {_identity(collection_type, item): item for item in _collection(branch_infra, collection_type)}
+        for resource_id in sorted(set(base_items) & set(branch_items)):
+            before = _canonical_value(base_items[resource_id].model_dump())
+            after = _canonical_value(branch_items[resource_id].model_dump())
+            changed = sorted(key for key in set(before) | set(after)
+                             if _canonical_json(before.get(key)) != _canonical_json(after.get(key)))
+            node_id = _graph_node_id(branch_graph, resource_type, resource_id, branch_items[resource_id])
+            carried = node_keys[0].get(str(node_id), set()) | node_keys[1].get(str(node_id), set())
+            changed = [key for key in changed if key not in carried]
+            if changed:
+                modified.append({"id": str(node_id), "resource_type": resource_type, "changed": changed})
+    return modified
+
+
+def _merge_modified(*groups: list[dict]) -> list[dict]:
+    """One entry per (type, id); ``changed`` is the union and any other key (``values``) is kept."""
+    merged: dict[tuple[str, str], dict] = {}
+    for group in groups:
+        for item in group:
+            key = (item["resource_type"], item["id"])
+            entry = merged.setdefault(key, {**item, "changed": []})
+            entry["changed"] = sorted(set(entry["changed"]) | set(item.get("changed", [])))
+            for name, value in item.items():
+                entry.setdefault(name, value)
+    return list(merged.values())
 
 
 def _with_tag_changes(modified: list[dict], base_infra: Any, branch_infra: Any) -> list[dict]:
@@ -430,7 +523,9 @@ def diff_infrastructure(base_infra: Any, branch_infra: Any) -> DiffResult:
     graph_diff["resources_added"] = sorted(graph_diff["resources_added"] + model_added, key=lambda item: (item["resource_type"], item["id"]))
     graph_diff["resources_removed"] = sorted(graph_diff["resources_removed"] + model_removed, key=lambda item: (item["resource_type"], item["id"]))
     graph_diff["resources_modified"] = sorted(
-        _with_tag_changes(graph_diff["resources_modified"] + model_modified, base_infra, branch_infra),
+        _with_tag_changes(_merge_modified(graph_diff["resources_modified"], model_modified,
+                                          _model_field_changes(base_infra, branch_infra, base_graph, branch_graph)),
+                          base_infra, branch_infra),
         key=lambda item: (item["resource_type"], item["id"]))
     coverage_warnings = []
     collection_warnings = sorted({

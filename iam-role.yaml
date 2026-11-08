@@ -77,6 +77,13 @@ Resources:
                   - apigatewayv2:GetAuthorizers
                   - sqs:ListQueues
                   - sqs:GetQueueAttributes
+                  - scheduler:ListSchedules
+                  - scheduler:GetSchedule
+                  - cloudfront:GetDistributionConfig
+                  - cloudfront:ListTagsForResource
+                  - cloudfront:ListCachePolicies
+                  - cloudfront:ListOriginRequestPolicies
+                  - cloudfront:ListOriginAccessControls
                 Resource: '*'
 
 Outputs:

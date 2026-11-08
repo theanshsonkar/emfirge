@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 from tests.test_aws_api_route import _branch
@@ -84,9 +85,10 @@ def test_cloudformation_exact_handback_and_one_character_rejection(plan_client):
     assert response.status_code == 200, response.text
     plan_id = response.json()["plan_id"]
     handback = plan_client.get(f"/branches/{branch}/plans/{plan_id}/handback").json()
-    assert handback["plan_text"].encode() == raw
-    assert plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": handback["plan_text"], "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"]}).json() == {"ok": True}
-    changed = handback["plan_text"][:-1] + ("0" if handback["plan_text"][-1] != "0" else "1")
+    assert "plan_text" not in handback and handback["input_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": raw.decode(), "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"]}).json() == {"ok": True}
+    original = raw.decode()
+    changed = original[:-1] + ("0" if original[-1] != "0" else "1")
     rejected = plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": handback["verdict_id"], "plan_text": changed, "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"]})
     assert rejected.status_code == 409 and rejected.json() == {"ok": False, "reason_code": "input_hash_mismatch"}
 

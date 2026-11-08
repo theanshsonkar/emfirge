@@ -1,0 +1,54 @@
+{
+  "repo": "https://github.com/bridgecrewio/terragoat",
+  "commit": "729f8da62c6a85ce4af5ad3d123de97776d954c4",
+  "license": "Apache-2.0",
+  "license_file": "LICENSE",
+  "license_sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+  "files": [
+    {
+      "path": "terraform/aws/consts.tf",
+      "upstream_path": "terraform/aws/consts.tf",
+      "sha256": "517810c105054c1a64b8e58dafd4edc3ae958fa0416869cc5a64c742ea9c546a"
+    },
+    {
+      "path": "terraform/aws/db-app.tf",
+      "upstream_path": "terraform/aws/db-app.tf",
+      "sha256": "242feb266e4ed7fc3a2725f88bade8b0029d46bbda3d66b60c4936381f7deda9"
+    },
+    {
+      "path": "terraform/aws/ec2.tf",
+      "upstream_path": "terraform/aws/ec2.tf",
+      "sha256": "55e3311016a8cdc09231a8537ae7163a24697475a757697bbe038be0ed59d6f5",
+      "upstream_sha256": "5fcc2d4cf052fb2032d9470179f63a903d280b99cf5b1bb2db6e15200ecd9428"
+    },
+    {
+      "path": "terraform/aws/kms.tf",
+      "upstream_path": "terraform/aws/kms.tf",
+      "sha256": "f1f3d5f95507b15f2c5c0b18c0aae888452b1bee722199b989c3288371cd2f27"
+    },
+    {
+      "path": "terraform/aws/lambda.tf",
+      "upstream_path": "terraform/aws/lambda.tf",
+      "sha256": "873fd285159d2de95d3021c5bb853cccb07e658e5e2e3453ab87147e545088d2"
+    },
+    {
+      "path": "terraform/aws/s3.tf",
+      "upstream_path": "terraform/aws/s3.tf",
+      "sha256": "860ce876f7c4144f560517f16ef46e57b97b2917dc81b6db5ac32594a7ea643e"
+    }
+  ],
+  "note": "providers.tf (s3 backend + aliased provider with literal example keys), ecr/eks/elb/es/iam/neptune/rds.tf and resources/ (binary payloads) intentionally not vendored; the harness supplies a provider block and stub payload files at run time.",
+  "redactions": [
+    {
+      "file": "terraform/aws/ec2.tf",
+      "lines": "15-16",
+      "upstream_sha256": "5fcc2d4cf052fb2032d9470179f63a903d280b99cf5b1bb2db6e15200ecd9428",
+      "vendored_sha256": "55e3311016a8cdc09231a8537ae7163a24697475a757697bbe038be0ed59d6f5",
+      "replaced": [
+        "AWS_ACCESS_KEY_ID value",
+        "AWS_SECRET_ACCESS_KEY value"
+      ],
+      "reason": "GitHub push protection blocks the push on TerraGoat's deliberately fake keys; replaced by placeholders, nothing else changed (the user_data still embeds exported AWS key variables)"
+    }
+  ]
+}

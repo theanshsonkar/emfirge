@@ -20,7 +20,7 @@ APP_DIR = Path(__file__).resolve().parents[2] / "app"
 CORE_MODULES = {
     "branches", "diffing", "verdict", "exposure", "scoring", "delete_lens",
     "cost", "limits", "graph_schema", "evidence_models", "in_use_evidence",
-    "egraph",
+    "egraph", "context_query", "check_facts", "permission_facts",
 }
 
 # AWS-adapter modules (app.<name>).  Ambiguous calls: `models` (defines
@@ -34,6 +34,20 @@ ADAPTER_MODULES = {
     "tf_indexer", "serializer", "scanners", "drift_service", "fix_mutations",
     # AWS rule packs and their mappings: every check is AWS-specific.
     "rules", "compliance", "compliance_sources", "mitre",
+    # Turns AWSInfrastructure into the neutral facts bundle for context_query.
+    "aws_context",
+    # Turn a branch into the neutral inputs for check_facts; the outside-world
+    # table is hand-written AWS service knowledge with AWS documentation URLs.
+    "aws_check", "aws_check_fields", "aws_outside_world",
+    # Provider action catalog (botocore / IAM data) and the glue that feeds the
+    # neutral permission expansion (permission_facts) from collected role policies.
+    "aws_actions", "aws_permissions",
+    # EventBridge Scheduler schedule parsing shared by collector, mutations and ingest.
+    "scheduler_schedule",
+    # CloudFront distribution parsing / hand-back / collector, and the check's CloudFront availability fact.
+    "cloudfront_distribution", "cloudfront_check",
+    # DynamoDB table call / template parsing shared by collector, mutations and ingest.
+    "dynamodb_table",
 }
 AWS_LIBS = {"boto3", "botocore"}
 
@@ -54,6 +68,9 @@ ALLOWED: dict[str, set[str]] = {
     "evidence_models": set(),
     "in_use_evidence": {"boto3", "botocore", "mutations"},
     "egraph": {"models", "iam_classifier", "iam_escalation", "rds_ports"},
+    "context_query": set(),
+    "check_facts": set(),
+    "permission_facts": set(),
 }
 
 

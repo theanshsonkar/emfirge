@@ -1,0 +1,175 @@
+{
+  "repo": "https://github.com/terraform-aws-modules/terraform-aws-rds",
+  "commit": "175da043429cbbe41c512f976105719f6d0e538c",
+  "license": "Apache-2.0",
+  "license_file": "LICENSE",
+  "license_sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+  "entrypoint": "examples/complete-postgres",
+  "registry_modules_downloaded_by_terraform_init": {
+    "terraform-aws-modules/kms/aws": "~> 1.0",
+    "terraform-aws-modules/vpc/aws": "~> 6.0",
+    "terraform-aws-modules/security-group/aws": "~> 5.0"
+  },
+  "files": [
+    {
+      "path": "main.tf",
+      "upstream_path": "main.tf",
+      "sha256": "1798d85d7a91fa2ab7dff73eeedf5d9518da033c7732f59bbf58fd5bf7ebc4e6"
+    },
+    {
+      "path": "outputs.tf",
+      "upstream_path": "outputs.tf",
+      "sha256": "656ef947e8d4052ae9f72a439f2d6a877b7538e16e721dd939fbeca9ebc90dae"
+    },
+    {
+      "path": "variables.tf",
+      "upstream_path": "variables.tf",
+      "sha256": "a1112269d9ba7ca2051f90d571e9de5cbab914860f2f565032ad1a61a5a4b9ba"
+    },
+    {
+      "path": "versions.tf",
+      "upstream_path": "versions.tf",
+      "sha256": "70c1808c5bbb09932f9aba529f5a5c9b1bf216b69de936645be92d29fece044b"
+    },
+    {
+      "path": "examples/complete-postgres/main.tf",
+      "upstream_path": "examples/complete-postgres/main.tf",
+      "sha256": "0ea5929083947c3d26a15b093dde1a20167d099cdde1ff428871c12ac8484ca5"
+    },
+    {
+      "path": "examples/complete-postgres/outputs.tf",
+      "upstream_path": "examples/complete-postgres/outputs.tf",
+      "sha256": "eeee102b495a0b6494cd16e3eec2bb78ca11a1b625f1d9f1668933da7be5fe60"
+    },
+    {
+      "path": "examples/complete-postgres/variables.tf",
+      "upstream_path": "examples/complete-postgres/variables.tf",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "examples/complete-postgres/versions.tf",
+      "upstream_path": "examples/complete-postgres/versions.tf",
+      "sha256": "e600425f3e11db9ab34958e8d2e0fa251a1392ef167ac581eaa3ad32316ec487"
+    },
+    {
+      "path": "modules/db_instance/main.tf",
+      "upstream_path": "modules/db_instance/main.tf",
+      "sha256": "ad40815d1c2f2440309aa14a0c2e242f297b21be5442e5c086d63f5c1ad0369d"
+    },
+    {
+      "path": "modules/db_instance/outputs.tf",
+      "upstream_path": "modules/db_instance/outputs.tf",
+      "sha256": "8839866fb8083aea7fa88fa5e4babaec4925c451238195d1e9b6172e3a8b6566"
+    },
+    {
+      "path": "modules/db_instance/variables.tf",
+      "upstream_path": "modules/db_instance/variables.tf",
+      "sha256": "8de2548c947a271989a37fd1c0fd2b73500095acba8d76f35b7ccaca64478ecf"
+    },
+    {
+      "path": "modules/db_instance/versions.tf",
+      "upstream_path": "modules/db_instance/versions.tf",
+      "sha256": "aaf30f2519bf14460afeef04a058161702df6f598ee2d3a21ac3cd0375b7e385"
+    },
+    {
+      "path": "modules/db_instance_automated_backups_replication/main.tf",
+      "upstream_path": "modules/db_instance_automated_backups_replication/main.tf",
+      "sha256": "85092becdce50fc711cbab81d79227b7f5e6fef8f861638fc3f633bbb18167d7"
+    },
+    {
+      "path": "modules/db_instance_automated_backups_replication/outputs.tf",
+      "upstream_path": "modules/db_instance_automated_backups_replication/outputs.tf",
+      "sha256": "f5cf585e57eef31265e7bc3f39fc3fc1960c659eca9ea19c056bf358704d851e"
+    },
+    {
+      "path": "modules/db_instance_automated_backups_replication/variables.tf",
+      "upstream_path": "modules/db_instance_automated_backups_replication/variables.tf",
+      "sha256": "d618d581cff12a1c47449d4e1c7dd20cc455919749ece692bb75e24979352091"
+    },
+    {
+      "path": "modules/db_instance_automated_backups_replication/versions.tf",
+      "upstream_path": "modules/db_instance_automated_backups_replication/versions.tf",
+      "sha256": "70c1808c5bbb09932f9aba529f5a5c9b1bf216b69de936645be92d29fece044b"
+    },
+    {
+      "path": "modules/db_instance_role_association/main.tf",
+      "upstream_path": "modules/db_instance_role_association/main.tf",
+      "sha256": "ba6ac6c3ab0fa750056856a51b8c51d805e4a301570eb6540035072dca7b9c3e"
+    },
+    {
+      "path": "modules/db_instance_role_association/outputs.tf",
+      "upstream_path": "modules/db_instance_role_association/outputs.tf",
+      "sha256": "823b203330e3f37668b70dc32c3124a895633c9bae8a4f4957617e1c624ef217"
+    },
+    {
+      "path": "modules/db_instance_role_association/variables.tf",
+      "upstream_path": "modules/db_instance_role_association/variables.tf",
+      "sha256": "ddee25aa08f0899c5f0e2e2b728d4bb376d390c79cfed9793f4534e46cfa3f4a"
+    },
+    {
+      "path": "modules/db_instance_role_association/versions.tf",
+      "upstream_path": "modules/db_instance_role_association/versions.tf",
+      "sha256": "70c1808c5bbb09932f9aba529f5a5c9b1bf216b69de936645be92d29fece044b"
+    },
+    {
+      "path": "modules/db_option_group/main.tf",
+      "upstream_path": "modules/db_option_group/main.tf",
+      "sha256": "c6608d2d6bf610be01c9320513cbbe3e8da19d09064e3b1fb87477a221e393d2"
+    },
+    {
+      "path": "modules/db_option_group/outputs.tf",
+      "upstream_path": "modules/db_option_group/outputs.tf",
+      "sha256": "de589781a3e646d6bc0699083eb2d19f09988257f7a6cee83e639cb2cd53ef7e"
+    },
+    {
+      "path": "modules/db_option_group/variables.tf",
+      "upstream_path": "modules/db_option_group/variables.tf",
+      "sha256": "fee3ab703d18cca24d074732173b435a2aa8f253a5af69df3029218985b68810"
+    },
+    {
+      "path": "modules/db_option_group/versions.tf",
+      "upstream_path": "modules/db_option_group/versions.tf",
+      "sha256": "70c1808c5bbb09932f9aba529f5a5c9b1bf216b69de936645be92d29fece044b"
+    },
+    {
+      "path": "modules/db_parameter_group/main.tf",
+      "upstream_path": "modules/db_parameter_group/main.tf",
+      "sha256": "161b204e1adef864452b4a8184ad064940b5b37668fa8cbc3ee13695c38e56c0"
+    },
+    {
+      "path": "modules/db_parameter_group/outputs.tf",
+      "upstream_path": "modules/db_parameter_group/outputs.tf",
+      "sha256": "8d7806763e646b08d29a8c2cc5aab97b0c557c990427d5ccbb238650fdb60e8a"
+    },
+    {
+      "path": "modules/db_parameter_group/variables.tf",
+      "upstream_path": "modules/db_parameter_group/variables.tf",
+      "sha256": "83582e540e2b1c27d69717122ab0a1b1ff4fb08fe302a06a31829088dec4102b"
+    },
+    {
+      "path": "modules/db_parameter_group/versions.tf",
+      "upstream_path": "modules/db_parameter_group/versions.tf",
+      "sha256": "70c1808c5bbb09932f9aba529f5a5c9b1bf216b69de936645be92d29fece044b"
+    },
+    {
+      "path": "modules/db_subnet_group/main.tf",
+      "upstream_path": "modules/db_subnet_group/main.tf",
+      "sha256": "cabd1acc1af4c254a54745bbea5a627552c6e5e38484aa43a78e2bdd4257922b"
+    },
+    {
+      "path": "modules/db_subnet_group/outputs.tf",
+      "upstream_path": "modules/db_subnet_group/outputs.tf",
+      "sha256": "8f0b2298ed3a7c89902e4726b184601203d162d05168a2554d88d598a3248ade"
+    },
+    {
+      "path": "modules/db_subnet_group/variables.tf",
+      "upstream_path": "modules/db_subnet_group/variables.tf",
+      "sha256": "734476fac934d6de09f37ed803b740f8f08a7f5f8847428f4c10f0031e408772"
+    },
+    {
+      "path": "modules/db_subnet_group/versions.tf",
+      "upstream_path": "modules/db_subnet_group/versions.tf",
+      "sha256": "70c1808c5bbb09932f9aba529f5a5c9b1bf216b69de936645be92d29fece044b"
+    }
+  ]
+}

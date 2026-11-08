@@ -4,7 +4,7 @@ import pytest
 
 from app.diffing import diff_infrastructure
 from app.graph_schema import NODE_SCHEMAS
-from app.models import NetworkACL
+from app.models import DynamoDBData, DynamoDBTable, NetworkACL, SchedulerData, SchedulerSchedule
 from app.mutations import (
     Change,
     _MUTATION_CAPABILITIES,
@@ -24,15 +24,20 @@ def _base():
     ec2 = base.ec2.model_copy(update={"instances": instances})
     groups = [group.model_copy(update={"rules": [], "egress_rules": []}) for group in ec2.security_groups]
     ec2 = ec2.model_copy(update={"security_groups": groups})
-    return base.model_copy(update={"ec2": ec2, "vpc": base.vpc.model_copy(update={"nacls": [acl]})})
+    schedule = SchedulerSchedule(name="sched-law-base", state="DISABLED")
+    return base.model_copy(update={"ec2": ec2, "vpc": base.vpc.model_copy(update={"nacls": [acl]}),
+                                   "scheduler": SchedulerData(schedules=[schedule]),
+                                   "dynamodb": DynamoDBData(total_tables=1, tables=[DynamoDBTable(
+                                       name="ddb-law-base", arn="arn:aws:dynamodb:us-east-1:000000000000:table/ddb-law-base", item_count=1)])})
 
 
 def _add_samples(base):
     samples = {}
     samples['iam_role'] = Change(op='add', resource_type='iam_role', resource_id='arn:aws:iam::000000000000:role/law-add', fields={'trust_policy': {'Statement': [{'Effect': 'Allow', 'Principal': {'Service': 'ec2.amazonaws.com'}, 'Action': 'sts:AssumeRole'}]}})
     samples['iam_user'] = Change(op='add', resource_type='iam_user', resource_id='law-user-add', fields={})
+    samples['iam_instance_profile'] = Change(op='add', resource_type='iam_instance_profile', resource_id='arn:aws:iam::000000000000:instance-profile/law-add', fields={'role_arn': 'arn:aws:iam::000000000000:role/law-add'})
     for resource_type, capability in _MUTATION_CAPABILITIES.items():
-        if resource_type in {'iam_role', 'iam_user'}:
+        if resource_type in {'iam_role', 'iam_user', 'iam_instance_profile'}:
             continue
         if "add" not in capability["operations"]:
             continue
@@ -44,6 +49,8 @@ def _add_samples(base):
             samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="nat-law-add", fields={"subnet_id": subnet.id, "allocation_id": "eipalloc-law-add"})
         elif resource_type == "route_table":
             samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="rtb-law-add", fields={"vpc_id": base.vpc.route_tables[0].vpc_id})
+        elif resource_type == "scheduler_schedule":
+            samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="default/sched-law-add", fields={"state": "DISABLED"})
         elif resource_type == "ebs_volume":
             samples[resource_type] = Change(op="add", resource_type=resource_type, resource_id="vol-law-add", fields={"size_gb": 8})
         elif resource_type == "network_acl":

@@ -56,6 +56,7 @@ CATALOG: dict[str, dict[str, Source]] = {
         "sg_ids": Aws("ec2", "RunInstances", "SecurityGroupIds"),
         "state": Aws("ec2", "", "", shape="InstanceStateName"),
         "imdsv2_required": Normalized("RunInstances / ModifyInstanceMetadataOptions MetadataOptions.HttpTokens", "true when HttpTokens is required"),
+        "user_data_has_secrets": Normalized("RunInstances UserData", "true when the user data holds a literal secret; the user data itself is never stored"),
         "has_public_ip": Normalized("RunInstances NetworkInterfaces[].AssociatePublicIpAddress"),
         "instance_profile_arn": Aws("ec2", "RunInstances", "IamInstanceProfile.Arn"),
         "detailed_monitoring": Aws("ec2", "RunInstances", "Monitoring.Enabled"),
@@ -98,6 +99,7 @@ CATALOG: dict[str, dict[str, Source]] = {
         "ignore_public_acls": Aws("s3", "PutPublicAccessBlock", "PublicAccessBlockConfiguration.IgnorePublicAcls"),
         "block_public_policy": Aws("s3", "PutPublicAccessBlock", "PublicAccessBlockConfiguration.BlockPublicPolicy"),
         "restrict_public_buckets": Aws("s3", "PutPublicAccessBlock", "PublicAccessBlockConfiguration.RestrictPublicBuckets"),
+        "logging_enabled": Normalized("PutBucketLogging", "true when server access logging is configured"),
         "tags": _TAGS,
     },
     "lambda_function": {
@@ -149,6 +151,62 @@ CATALOG: dict[str, dict[str, Source]] = {
     },
     "iam_user": {
         "has_console_access": Normalized("CreateLoginProfile / DeleteLoginProfile"),
+        "access_statements": Normalized("PutUserPolicy / AttachUserPolicy", "complete normalized statement list"),
+        "policy_documents": Normalized("PutUserPolicy / AttachUserPolicy", "normalized policy documents"),
+        "has_access_keys": Normalized("CreateAccessKey / DeleteAccessKey", "true when the user has programmatic credentials"),
+    },
+    "iam_instance_profile": {
+        "role_arn": Normalized("CreateInstanceProfile / AddRoleToInstanceProfile", "the one role the profile carries; the profile ARN is the change's resource_id"),
+    },
+    # EventBridge Scheduler schedules have no tags (only schedule groups do). The Target.Input
+    # payload is deliberately not a field: it can hold secrets and is never stored.
+    "scheduler_schedule": {
+        "group_name": Derived("part of the resource_id <group>/<name>"),
+        "arn": Derived("set by AWS"),
+        "state": Aws("scheduler", "CreateSchedule", "State"),
+        "schedule_expression": Aws("scheduler", "CreateSchedule", "ScheduleExpression"),
+        "schedule_expression_timezone": Aws("scheduler", "CreateSchedule", "ScheduleExpressionTimezone"),
+        "flexible_time_window_mode": Aws("scheduler", "CreateSchedule", "FlexibleTimeWindow.Mode"),
+        "flexible_time_window_minutes": Aws("scheduler", "CreateSchedule", "FlexibleTimeWindow.MaximumWindowInMinutes"),
+        "target_arn": Aws("scheduler", "CreateSchedule", "Target.Arn"),
+        "target_role_arn": Aws("scheduler", "CreateSchedule", "Target.RoleArn"),
+        "start_date": Normalized("CreateSchedule / UpdateSchedule StartDate", "UTC timestamp text, YYYY-MM-DDTHH:MM:SSZ"),
+        "end_date": Normalized("CreateSchedule / UpdateSchedule EndDate", "UTC timestamp text, YYYY-MM-DDTHH:MM:SSZ"),
+        "action_after_completion": Aws("scheduler", "CreateSchedule", "ActionAfterCompletion"),
+        "has_input": Normalized("CreateSchedule / UpdateSchedule Target.Input", "true when an input payload is set; the payload itself is never stored"),
+        "unmodeled_settings": Normalized("CreateSchedule / UpdateSchedule", "names of other members that are set but not modeled (Description, KmsKeyArn, Target.RetryPolicy, ...)"),
+    },
+    # CloudFront distributions: modify only (UpdateDistribution replaces the whole DistributionConfig). Adding or
+    # deleting a distribution is not modeled. The sub-fields of behaviors and origins are traced to botocore in
+    # app.cloudfront_distribution (BEHAVIOR_SOURCES / ORIGIN_SOURCES).
+    "cloudfront_distribution": {
+        "arn": Derived("set by AWS"),
+        "domain_name": Derived("set by AWS"),
+        "status": Derived("set by AWS"),
+        "etag": Derived("the concurrency token of the collected configuration (UpdateDistribution IfMatch)"),
+        "tags": Derived("not settable on a branch; collected for reading"),
+        "aliases": Aws("cloudfront", "UpdateDistribution", "DistributionConfig.Aliases.Items"),
+        "enabled": Aws("cloudfront", "UpdateDistribution", "DistributionConfig.Enabled"),
+        "price_class": Aws("cloudfront", "UpdateDistribution", "DistributionConfig.PriceClass"),
+        "web_acl_id": Aws("cloudfront", "UpdateDistribution", "DistributionConfig.WebACLId"),
+        "default_cache_behavior": Normalized("UpdateDistribution DistributionConfig.DefaultCacheBehavior",
+                                             "object of the behavior fields to change (cache_policy_id, origin_request_policy_id, target_origin_id, viewer_protocol_policy, allowed_methods)"),
+        "cache_behaviors": Normalized("UpdateDistribution DistributionConfig.CacheBehaviors",
+                                      "object keyed by path_pattern with the fields to change, or the complete ordered behavior list"),
+        "origins": Normalized("UpdateDistribution DistributionConfig.Origins", "complete origin list"),
+        "extra": Normalized("UpdateDistribution DistributionConfig", "members that are not modeled, kept as AWS reports them"),
+        "withheld_settings": Normalized("UpdateDistribution DistributionConfig", "names of settings stored without their values (origin custom headers)"),
+    },
+    # Only the two settings AWS lets a call change are settable; the rest of the table is what was collected.
+    "dynamodb_table": {
+        "pitr_enabled": Aws("dynamodb", "UpdateContinuousBackups", "PointInTimeRecoverySpecification.PointInTimeRecoveryEnabled"),
+        "deletion_protection_enabled": Aws("dynamodb", "UpdateTable", "DeletionProtectionEnabled"),
+        "arn": Derived("set by AWS"),
+        "encryption_type": Derived("collected from DescribeTable SSEDescription; changing it (UpdateTable SSESpecification) is not modeled"),
+        "has_backup": Derived("collected from ListBackups: an AVAILABLE on-demand backup exists"),
+        "billing_mode": Derived("collected from DescribeTable BillingModeSummary; changing it (UpdateTable BillingMode) is not modeled"),
+        "item_count_reported": Derived("set by the collector when DescribeTable returned ItemCount; absent in scans made before it existed"),
+        "item_count": Derived("collected from DescribeTable ItemCount, which AWS refreshes about every six hours"),
     },
     "iam_role_policy": {
         "access_statements": Normalized("PutRolePolicy / AttachRolePolicy", "complete normalized statement list"),
@@ -157,7 +215,8 @@ CATALOG: dict[str, dict[str, Source]] = {
 }
 
 # Identity fields are the change's resource_id, never a field.
-IDENTITY_FIELDS = {"s3_bucket": "name", "lambda_function": "name", "iam_user": "username"}
+IDENTITY_FIELDS = {"s3_bucket": "name", "lambda_function": "name", "iam_user": "username", "scheduler_schedule": "name",
+                   "dynamodb_table": "name"}
 
 
 @lru_cache(maxsize=None)

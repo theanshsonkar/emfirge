@@ -9,7 +9,8 @@ from app.field_catalog import CATALOG, IDENTITY_FIELDS, Aws, Derived, resolve, v
 from app.mutations import _MUTATION_CAPABILITIES, Change, apply_change
 from tests.incidents.synthetic_base import load_synthetic_base
 
-_MODEL_LESS = {"iam_role": {"trust_policy"}, "iam_role_policy": {"access_statements", "policy_documents"}}
+_MODEL_LESS = {"iam_role": {"trust_policy"}, "iam_role_policy": {"access_statements", "policy_documents"},
+               "iam_instance_profile": {"role_arn"}}
 
 
 def _settable_types():

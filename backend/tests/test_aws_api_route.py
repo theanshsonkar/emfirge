@@ -56,7 +56,7 @@ def test_malformed_aws_api_does_not_echo_input(plan_client):
         assert marker not in response.text
 
 
-def test_aws_api_handback_preserves_raw_input(plan_client):
+def test_aws_api_handback_binds_to_original_input_by_hash(plan_client):
     raw = b'''{  "calls" : [ { "parameters" : { "InstanceIds" : [ "i-dl-web" ] }, "operation" : "TerminateInstances", "service" : "ec2" } ] , "format" : "aws-api-calls/1" }\n'''
     branch_id, _, response = _post(plan_client, {}, raw)
     assert response.status_code == 200, response.text
@@ -64,10 +64,11 @@ def test_aws_api_handback_preserves_raw_input(plan_client):
     handback = plan_client.get(f"/branches/{branch_id}/plans/{plan_id}/handback")
     assert handback.status_code == 200
     values = handback.json()
-    assert values["plan_text"].encode() == raw
-    verified = plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": values["verdict_id"], "plan_text": values["plan_text"], "base_analysis_id": values["base_analysis_id"], "branch_revision": values["branch_revision"]})
+    assert "plan_text" not in values and values["input_sha256"] == hashlib.sha256(raw).hexdigest()
+    verified = plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": values["verdict_id"], "plan_text": raw.decode(), "base_analysis_id": values["base_analysis_id"], "branch_revision": values["branch_revision"]})
     assert verified.json() == {"ok": True}
-    changed = values["plan_text"][:-1] + ("0" if values["plan_text"][-1] != "0" else "1")
+    original = raw.decode()
+    changed = original[:-1] + ("0" if original[-1] != "0" else "1")
     conflict = plan_client.post("/handback/verify", json={"plan_id": plan_id, "verdict_id": values["verdict_id"], "plan_text": changed, "base_analysis_id": values["base_analysis_id"], "branch_revision": values["branch_revision"]})
     assert conflict.status_code == 409
     assert conflict.json() == {"ok": False, "reason_code": "input_hash_mismatch"}

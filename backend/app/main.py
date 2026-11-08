@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from botocore.exceptions import ClientError, NoCredentialsError
 from typing import Optional
 import boto3
+from app.log_safe import safe_exc
 import os
 import time
 import uuid
@@ -63,6 +64,10 @@ from app.database import create_tables, save_analysis, get_recent_logs, get_log_
 from app.storage import save_report, get_report_url
 from app.egraph import build_graph, get_simulation_slice, validate_simulation_response, classify_query, format_graph_for_claude, bfs_from_internet, find_attack_path, Graph
 from app.exposure import compute_exposures
+from app.aws_check import check_for_branch
+from app.aws_context import answer_for_infra
+from app.check_facts import CheckResult
+from app.context_query import ContextRequest, ContextResponse, ResourceNotFound
 from app.drift_service import compare_findings
 from app.compliance import evaluate_all_frameworks
 
@@ -201,7 +206,7 @@ def _load_analysis_record(analysis_id: str, caller: Caller | None = None, db=Non
             except Exception:
                 continue
     except Exception as exc:
-        logger.error(f'analysis load failed: {exc}')
+        logger.error(f'analysis load failed: {safe_exc(exc)}')
     finally:
         if close_session:
             session.close()
@@ -315,11 +320,15 @@ def _lookup_resource_name(resource_id: str, resource_type: str) -> Optional[str]
         # S3: bucket name IS the resource_id in our system, so no lookup needed
         return None
     except Exception as e:
-        print(f"[_lookup_resource_name] Error: {e}")
+        print(f"[_lookup_resource_name] Error: {safe_exc(e)}")
         return None
 
 # Raw mode = caller is an LLM host (MCP, etc.) so we skip Gemini/Claude calls.
 # The host renders the response itself, no need to spend tokens here.
+class _RawModeNoLLM(Exception):
+    """Control flow only: raw mode skips the LLM and uses the deterministic narrative."""
+
+
 def _is_raw_mode(request: Request, raw: bool = False) -> bool:
     if raw:
         return True
@@ -382,6 +391,12 @@ def health():
     except Exception:
         db_ok = False
     return {'status': 'healthy' if db_ok else 'degraded', 'db': 'ok' if db_ok else 'unreachable'}
+
+@app.get('/cli/manifest')
+def cli_manifest_endpoint():
+    """The commands the emfirge CLI offers. Public (help works before sign-in) and static: no customer data."""
+    from app.cli_manifest import build_manifest
+    return build_manifest()
 
 @app.get('/logs')
 def logs(account_id: str = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):
@@ -447,7 +462,7 @@ def link_project(request: Request, db=Depends(get_db)):
         if current is not None and current.name == f'sb-{sub}':
             db.delete(current)
         db.commit()
-        logger.info('Supabase project link: project_id=%s target_project_id=%s', current.id if current is not None else target.id, target.id)
+        logger.info('Supabase project link completed')
         return {'linked': True, 'project': target.name}
     except HTTPException:
         raise
@@ -511,7 +526,7 @@ def unbind_account(aws_account_id: str, request: Request, db=Depends(get_db)):
     db.add(AccountBindingEvent(aws_account_id=aws_account_id, project_id=project_id,
                                action='unbind', actor='admin'))
     db.commit()
-    logger.warning('Admin unbound AWS account %s', aws_account_id)
+    logger.warning('Admin unbound an AWS account')
     return {'unbound': unbound}
 
 @app.get('/drift/events')
@@ -544,6 +559,53 @@ def get_log_by_uuid(analysis_id: str, account_id: str = None, caller: Caller = D
     if not log:
         raise HTTPException(status_code=404, detail='Analysis not found')
     return log
+
+def _context_source(payload: ContextRequest, caller: Caller, db):
+    """Resolve the snapshot a context question is about: (infra, base_infra, analysis_id, branch_id, evidence).
+
+    Every path is tenant-scoped and answers 404 for anything the caller cannot see.
+    """
+    if payload.branch_id is not None:
+        _require_visible_branch(payload.branch_id, caller, db)
+        try:
+            branch = branches.get_branch(payload.branch_id)
+        except branches.BranchNotFoundError:
+            raise HTTPException(status_code=404, detail=f'Branch not found: {payload.branch_id}')
+        return (branches.rebuild_branch_state(branch), branch.base, branch.base_analysis_id,
+                payload.branch_id, branches.list_evidence(payload.branch_id))
+    if payload.analysis_id is not None:
+        infrastructure, data = _load_analysis_record(payload.analysis_id, caller=caller, db=db)
+        if infrastructure is None:
+            raise HTTPException(status_code=404, detail='Analysis not found')
+    else:
+        accounts = allowed_accounts(caller, db)
+        recent = get_recent_logs(limit=1, account_ids=accounts)
+        log = get_log_by_id(recent[0]['id'], account_ids=accounts) if recent else None
+        if not log:
+            raise HTTPException(status_code=404, detail='Analysis not found')
+        try:
+            data = json.loads(log['findings_json'])
+            infrastructure = AWSInfrastructure.model_validate(data.get('infrastructure', {}))
+        except Exception:
+            raise HTTPException(status_code=404, detail='Analysis not found')
+    if 'infrastructure' not in data:
+        raise HTTPException(status_code=404, detail='This scan has no stored infrastructure snapshot')
+    return infrastructure, None, data.get('analysis_id'), None, ()
+
+
+@app.post('/context', dependencies=[Depends(require_api_key)], response_model=ContextResponse)
+def context_query_endpoint(payload: ContextRequest, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+    """Read-only context query: facts about the snapshot, what was checked and what was not.
+
+    Never advice or a verdict; no AWS call and no database write.
+    """
+    infrastructure, base_infra, analysis_id, branch_id, evidence = _context_source(payload, caller, db)
+    try:
+        return answer_for_infra(payload.question, infrastructure, analysis_id=analysis_id, branch_id=branch_id,
+                                base_infra=base_infra, evidence=evidence, resource_id=payload.resource_id)
+    except ResourceNotFound:
+        raise HTTPException(status_code=404, detail='Resource not found in this snapshot')
+
 
 @app.get('/egraph/{analysis_id}', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def get_graph(analysis_id: str, caller: Caller = Depends(get_caller), db=Depends(get_db)):
@@ -818,7 +880,7 @@ async def simulate(request: SimulateRequest, http_request: Request, raw: bool = 
         finally:
             session.close()
     except Exception as e:
-        logger.error(f"simulate: DB load failed: {e}")
+        logger.error(f"simulate: DB load failed: {safe_exc(e)}")
 
     if not infrastructure:
         async def error_stream():
@@ -1146,7 +1208,7 @@ Respond with ONLY JSON (no markdown):
                     haiku_data = identifiers.tokenize_obj(json.loads(haiku_raw), customer_ids)
                     break  # success
                 except Exception as e:
-                    logger.warning(f"simulate: Haiku attempt {attempt + 1} failed: {e}")
+                    logger.warning(f"simulate: Haiku attempt {attempt + 1} failed: {safe_exc(e)}")
                     if attempt == 0:
                         # Retry with even shorter prompt
                         haiku_prompt = f"""AWS security query: "{safe_query}"
@@ -1193,7 +1255,7 @@ Respond JSON only: {{"verdict": "1 sentence", "severity": "low|moderate|critical
             try:
                 save_simulation_log(aws_account_id, request.analysis_id, request.query)
             except Exception as sim_log_err:
-                logger.warning(f"simulate: failed to save simulation log: {sim_log_err}")
+                logger.warning(f"simulate: failed to save simulation log: {safe_exc(sim_log_err)}")
 
     return StreamingResponse(event_stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -1332,7 +1394,7 @@ Respond with valid JSON only — no markdown, no code fences:
         )
     except Exception as e:
         # Graceful fallback — never surface an error to the frontend
-        logger.warning(f"Gemini insight generation failed for {request.resource_id}: {type(e).__name__}: {e}")
+        logger.warning(f"Gemini insight generation failed: {safe_exc(e)}")
         return RemediationInsightResponse(
             what_this_fixes=request.recommendation,
             why_it_matters=f'This {request.severity.lower()} security issue in {request.aws_service} could expose your infrastructure to unauthorized access or data loss if left unresolved.'
@@ -1514,7 +1576,7 @@ resource "aws_vpc_security_group_ingress_rule" "fix_ssh" {{
 
         return TerraformGenerateResponse(hcl=hcl, filename=filename, valid=valid, errors=errors)
     except Exception as e:
-        logger.error(f"Terraform generation failed for {request.rule_id}: {type(e).__name__}: {e}")
+        logger.error(f"Terraform generation failed for {request.rule_id}: {safe_exc(e)}")
         return TerraformGenerateResponse(hcl='', filename='fix.tf', valid=False, errors=str(e))
 
 
@@ -1672,7 +1734,7 @@ async def _ingest_plan_endpoint(
             rejected.append({'address': address, 'reason_code': reason, 'op': change.op})
     final_branch = branches.get_branch(branch_id)
     plan_id = str(uuid.uuid4())
-    branches.save_plan(plan_id, branch_id, digest, raw.decode('utf-8', errors='replace'),
+    branches.save_plan(plan_id, branch_id, digest,
                        branches.branch_revision(final_branch), rejected,
                        translated['unmodeled'], translated['unknown_fields'])
     revision = branches.branch_revision(final_branch)
@@ -1691,7 +1753,9 @@ def _terraform_translator(branch_id: str, document):
         group.id: {"rules": copy.deepcopy(group.rules), "egress_rules": copy.deepcopy(group.egress_rules)}
         for group in state.ec2.security_groups
     }
-    return translate_plan(document, sg_rules=sg_rule_map, nacls={acl.id: acl for acl in state.vpc.nacls})
+    return translate_plan(document, sg_rules=sg_rule_map, nacls={acl.id: acl for acl in state.vpc.nacls},
+                          iam_roles=state.iam.role_policies, iam_users=state.iam.iam_users,
+                          instance_profiles=state.iam.instance_profile_roles)
 
 
 @app.post('/branches/{branch_id}/plans/terraform', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
@@ -1991,10 +2055,7 @@ def plan_handback_endpoint(branch_id: str, plan_id: str, request: Request, calle
         branch, result, revision = _current_handback_state(branch_id)
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail='Not found') from exc
-    plan_text = plan['raw_input']
-    # A persisted receipt must remain bound to exactly the bytes represented by
-    # its recorded digest; never synthesize or regenerate a plan here.
-    assert hashlib.sha256(plan_text.encode('utf-8')).hexdigest() == plan['input_sha256']
+    # The server keeps only the plan's sha256, never its text; the caller applies its own original file.
     verdict = result.verdict
     verdict_id = _handback_verdict_id(
         plan['input_sha256'], branch.base_analysis_id, revision, verdict,
@@ -2006,7 +2067,11 @@ def plan_handback_endpoint(branch_id: str, plan_id: str, request: Request, calle
         'branch_revision': revision,
         'verdict_id': verdict_id,
         'verdict': verdict,
-        'plan_text': plan_text,
+        'instruction': (
+            'Apply your own original plan file, the exact bytes you uploaded, whose sha256 equals '
+            'input_sha256. Emfirge does not store plan text. Then call /handback/verify with that '
+            'file as plan_text.'
+        ),
     }
 
 
@@ -2121,9 +2186,11 @@ def branch_diff_endpoint(branch_id: str, request: Request, caller: Caller = Depe
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.get('/branches/{branch_id}/verdict', response_model=CombinedVerdict, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def branch_verdict_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
-    _check_branch_rate_limit(_rate_key(request, caller))
+def _branch_verdict(branch_id: str):
+    """The verdict of one branch and what it was built from: (branch, rebuilt, plans, evidence, policy_notes, result).
+
+    One assembly for /verdict and /check, so the check reads the very verdict the agent would be handed.
+    """
     try:
         branch = branches.get_branch(branch_id)
         rebuilt = branches.rebuild_branch_state(branch)
@@ -2148,8 +2215,29 @@ def branch_verdict_endpoint(branch_id: str, request: Request, caller: Caller = D
     if policy_notes:
         verdict_kwargs["policy_notes"] = policy_notes
     result = combined_verdict(branch.base, rebuilt, **verdict_kwargs)
+    return branch, rebuilt, plans, evidence, policy_notes, result
+
+
+@app.get('/branches/{branch_id}/verdict', response_model=CombinedVerdict, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def branch_verdict_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
+    _check_branch_rate_limit(_rate_key(request, caller))
+    branch, _rebuilt, plans, _evidence, _notes, result = _branch_verdict(branch_id)
     return result.model_copy(update={"branch_revision": branches.branch_revision(branch), "status": branch.status,
         "plans": [{"plan_id": item["plan_id"], "input_sha256": item["input_sha256"]} for item in plans]})
+
+
+@app.get('/branches/{branch_id}/check', response_model=CheckResult, dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
+def branch_check_endpoint(branch_id: str, request: Request, caller: Caller = Depends(get_caller)):
+    """Facts about what this branch damages: data, exposure, money, availability, control, outside world.
+
+    Never a verdict, a score or a rule id; says what was checked and what is unknown. Read-only:
+    no AWS call and no database write.
+    """
+    _check_branch_rate_limit(_rate_key(request, caller))
+    branch, rebuilt, plans, evidence, notes, result = _branch_verdict(branch_id)
+    return check_for_branch(branch.base, rebuilt, branch_id=branch_id, base_analysis_id=branch.base_analysis_id,
+                            branch_revision=branches.branch_revision(branch), plans=plans, evidence=evidence,
+                            policy_notes=notes, verdict=result)
 
 
 @app.post('/branches/{branch_id}/rollback', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
@@ -2632,7 +2720,7 @@ def unified_fix(request: TerraformGenerateRequest, http_request: Request, raw: b
             finally:
                 session.close()
         except Exception as e:
-            logger.error(f"unified_fix: DB load failed: {e}")
+            logger.error(f"unified_fix: DB load failed: {safe_exc(e)}")
 
     # ── GENERATE HCL (Claude) ─────────────────────────────────────
     # ── GENERATE HCL (Claude) ─────────────────────────────────────
@@ -2693,7 +2781,7 @@ CRITICAL RULES:
             save_llm_usage(account_id, "terraform")
 
       except Exception as e:
-        logger.error(f"unified_fix: HCL generation failed: {e}")
+        logger.error(f"unified_fix: HCL generation failed: {safe_exc(e)}")
         hcl = f"# Generation failed: {str(e)[:50]}"
 
     # ── VERIFY THE FIX ────────────────────────────────────────────
@@ -2741,7 +2829,7 @@ CRITICAL RULES:
                 if applied:
                     verification["method"] = "llm_simulated"
             except Exception as e:
-                logger.warning(f"unified_fix: rule-based mutation failed: {e}")
+                logger.warning(f"unified_fix: rule-based mutation failed: {safe_exc(e)}")
 
             # Fallback: try parsing Claude's HCL if rule-based didn't work
             if not applied:
@@ -2789,7 +2877,7 @@ CRITICAL RULES:
                         if applied:
                             verification["method"] = "llm_simulated"
                 except Exception as e:
-                    logger.warning(f"unified_fix: HCL parse fallback failed: {e}")
+                    logger.warning(f"unified_fix: HCL parse fallback failed: {safe_exc(e)}")
 
         # Run simulation if mutation was applied
         if applied:
@@ -2845,7 +2933,7 @@ CRITICAL RULES:
                     "safe_to_apply": safe,
                 }
             except Exception as e:
-                logger.error(f"unified_fix: simulation failed: {e}")
+                logger.error(f"unified_fix: simulation failed: {safe_exc(e)}")
 
     return {
         "verification": verification,
@@ -2961,7 +3049,7 @@ async def github_webhook(http_request: Request):
     payload = json.loads(body)
     if payload.get('action') == 'closed' and payload.get('pull_request', {}).get('merged'):
         pr_url = payload['pull_request']['html_url']
-        logger.info(f"Emfirge PR merged: {pr_url}")
+        logger.info("Emfirge PR merged")
 
     # ── PULL REQUEST EVENTS — Auto-analyze .tf changes ────────────
     if payload.get('action') in ('opened', 'synchronize') and 'pull_request' in payload:
@@ -2973,7 +3061,7 @@ async def github_webhook(http_request: Request):
 
         # Skip analysis on Emfirge's own fix PRs (avoid analyzing our own fixes)
         if head_branch.startswith('emfirge/fix-'):
-            logger.info(f"Skipping CI analysis on Emfirge fix branch: {head_branch}")
+            logger.info("Skipping CI analysis on an Emfirge fix branch")
         elif installation_id and repo_full_name:
             import threading
             def _run_ci_on_pr():
@@ -3219,12 +3307,12 @@ async def github_webhook(http_request: Request):
                     try:
                         create_check_run(gh, repo_full_name, head_sha, status, summary_text, comment_body)
                     except Exception as e:
-                        logger.warning(f"Check run creation failed (may need 'checks:write' permission): {e}")
+                        logger.warning(f"Check run creation failed (may need 'checks:write' permission): {safe_exc(e)}")
 
-                    logger.info(f"CI auto-review posted on {repo_full_name}#{pr_number}: {status}")
+                    logger.info(f"CI auto-review posted: {status}")
 
                 except Exception as e:
-                    logger.error(f"Auto CI review failed for {repo_full_name}#{pr_number}: {e}")
+                    logger.error(f"Auto CI review failed: {safe_exc(e)}")
 
             # Run in background thread so webhook returns quickly
             threading.Thread(target=_run_ci_on_pr, daemon=True).start()
@@ -3248,9 +3336,9 @@ async def github_webhook(http_request: Request):
                     gh = get_github_client(installation_id)
                     resources = build_index_for_installation(gh, installation_id, repo_full_name)
                     save_tf_index(installation_id, repo_full_name, resources)
-                    logger.info(f"Re-indexed {len(resources)} TF resources for {repo_full_name}")
+                    logger.info(f"Re-indexed {len(resources)} TF resources")
                 except Exception as e:
-                    logger.error(f"TF re-index failed for {repo_full_name}: {e}")
+                    logger.error(f"TF re-index failed: {safe_exc(e)}")
 
     return {"status": "ok"}
 
@@ -3309,7 +3397,7 @@ def create_ci_key(request: CIAPIKeyRequest):
 
 @app.get('/ci/api-keys', dependencies=[Depends(legacy_ci_enabled)])
 def list_ci_keys(installation_id: int):
-    """List CI/CD API keys for an installation (shows prefixes only)."""
+    """List CI/CD API keys for an installation (masked; key material is never returned)."""
     return get_ci_api_keys(installation_id)
 
 
@@ -3674,7 +3762,7 @@ def ci_analyze(request: CIAnalyzeRequest, http_request: Request):
         )
 
     except Exception as e:
-        logger.error(f"CI/CD analysis failed: {e}")
+        logger.error(f"CI/CD analysis failed: {safe_exc(e)}")
         return CIAnalyzeResponse(
             status="skip",
             summary=f"Analysis failed: {str(e)[:100]}",
@@ -3833,7 +3921,7 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
                     credentials.region
                 )
             except Exception as gemini_error:
-                print(f'Gemini failed: {gemini_error}')
+                print(f'Gemini failed: {safe_exc(gemini_error)}')
                 warnings.append('AI summary unavailable — Gemini failed. Priority actions may be empty.')
                 ai_result = {
                     'ai_summary': 'AI summary temporarily unavailable. Please review the findings manually.',
@@ -3926,11 +4014,11 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
             db_result, db_error = db_future.result()
 
         if s3_error:
-            print(f'S3 save failed: {s3_error}')
+            print(f'S3 save failed: {safe_exc(s3_error)}')
             warnings.append('Report could not be saved to S3. Download link unavailable.')
 
         if db_error:
-            print(f'Database save failed: {db_error}')
+            print(f'Database save failed: {safe_exc(db_error)}')
         elif db_result == -1:
             warnings.append('Scan result could not be saved to database. Graph will not be available for this scan.')
 
@@ -3943,9 +4031,9 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
                     prev_all = prev_report.get('critical_risks', []) + prev_report.get('moderate_risks', [])
                     curr_all = [f.dict() for f in critical_risks + moderate_risks]
                     new_f, fixed_f, _severity_changed = compare_findings(curr_all, prev_all)
-                    logger.info(f"Drift: {len(new_f)} new, {len(fixed_f)} fixed vs scan {prev['id']}")
-                    logger.info(f"Drift new_f: {[{'rule_id': f.get('rule_id'), 'resource_id': f.get('resource_id'), 'severity': f.get('severity')} for f in new_f]}")
-                    logger.info(f"Drift fixed_f: {[{'rule_id': f.get('rule_id'), 'resource_id': f.get('resource_id'), 'severity': f.get('severity')} for f in fixed_f]}")
+                    logger.info(f"Drift: {len(new_f)} new, {len(fixed_f)} fixed vs previous scan")
+                    logger.info(f"Drift new findings: {len(new_f)} (resource ids not logged)")
+                    logger.info(f"Drift fixed findings: {len(fixed_f)} (resource ids not logged)")
                     drift_rows = []
                     for f in new_f:
                         drift_rows.append({'aws_account_id': account_id, 'change_type': 'new_finding',
@@ -3967,8 +4055,8 @@ def analyze(credentials: AWSCredentials, request: Request, raw: bool = False, ca
                         if fixed_count > 0:
                             warnings.append(f"✅ Drift: {fixed_count} finding(s) resolved since last scan")
         except Exception as drift_err:
-            logger.warning(f"Drift detection skipped: {drift_err}")
-            print(f"DRIFT ERROR: {drift_err}")
+            logger.warning(f"Drift detection skipped: {safe_exc(drift_err)}")
+            print(f"DRIFT ERROR: {safe_exc(drift_err)}")
 
         # STEP 6.7 — Simulation baseline
         from app.models import SimulationBaseline
@@ -4284,7 +4372,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
                 try:
                     ai_result = generate_explanation(findings, scores['overall_risk_score'], credentials.region)
                 except Exception as gemini_error:
-                    logger.warning(f'Gemini failed in stream: {gemini_error}')
+                    logger.warning(f'Gemini failed in stream: {safe_exc(gemini_error)}')
                     local_warnings.append('AI summary unavailable — Gemini failed.')
                     ai_result = {
                         'ai_summary': 'AI summary temporarily unavailable.',
@@ -4372,7 +4460,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
             if s3_error:
                 local_warnings.append('Report could not be saved to S3.')
             if db_error:
-                logger.warning(f'DB save failed in stream: {db_error}')
+                logger.warning(f'DB save failed in stream: {safe_exc(db_error)}')
             elif db_result == -1:
                 local_warnings.append('Scan result could not be saved to database.')
 
@@ -4406,7 +4494,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
                             if fixed_count > 0:
                                 local_warnings.append(f"✅ Drift: {fixed_count} finding(s) resolved since last scan")
             except Exception as drift_err:
-                logger.warning(f"Drift detection skipped in stream: {drift_err}")
+                logger.warning(f"Drift detection skipped in stream: {safe_exc(drift_err)}")
 
             # ── Simulation baseline ───────────────────────────────
             public_count = 0
@@ -4462,7 +4550,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
             yield "\n"
 
         except Exception as e:
-            logger.error(f"analyze/stream error: {e}")
+            logger.error(f"analyze/stream error: {safe_exc(e)}")
             yield _emit("error", {"message": "Request could not be completed"})
 
     return StreamingResponse(
@@ -4476,7 +4564,7 @@ async def analyze_stream(credentials: AWSCredentials, request: Request, raw: boo
 # Deterministic mutation: Python mutates graph, Claude only writes prose.
 
 @app.post('/simulate/component', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
-def simulate_component(request: ComponentRequest, http_request: Request, caller: Caller = Depends(get_caller), db=Depends(get_db)):
+def simulate_component(request: ComponentRequest, http_request: Request, raw: bool = False, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     """
     Simulate adding/modifying a component in the infrastructure.
     
@@ -4534,7 +4622,7 @@ def simulate_component(request: ComponentRequest, http_request: Request, caller:
         finally:
             session.close()
     except Exception as e:
-        logger.error(f"simulate_component: DB load failed: {e}")
+        logger.error(f"simulate_component: DB load failed: {safe_exc(e)}")
 
     if not infrastructure:
         raise HTTPException(status_code=404, detail='Scan data not found for this analysis ID. Please run a new scan first.')
@@ -4776,6 +4864,9 @@ def simulate_component(request: ComponentRequest, http_request: Request, caller:
     # ── CLAUDE NARRATIVE (Haiku — fast) ───────────────────────────
     narrative = {'verdict': '', 'severity': 'low', 'summary': '', 'recommendations': []}
     try:
+        if _is_raw_mode(http_request, raw):
+            # Raw (MCP) mode: the host is already an LLM; never send data to a second one.
+            raise _RawModeNoLLM()
         anthropic_client = anthropic_lib.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'), timeout=30)
 
         findings_summary = f"{len(new_findings)} new findings"
@@ -4820,7 +4911,8 @@ Respond with ONLY this JSON (no markdown):
         raw = msg.content[0].text.strip().replace('```json', '').replace('```', '').strip()
         narrative = json.loads(raw)
     except Exception as e:
-        logger.warning(f"simulate_component: Claude narrative failed (non-fatal): {e}")
+        if not isinstance(e, _RawModeNoLLM):
+            logger.warning(f"simulate_component: Claude narrative failed (non-fatal): {safe_exc(e)}")
         # Fallback: generate narrative from facts
         if new_findings:
             max_sev = 'critical' if any(f.get('severity') == 'Critical' for f in new_findings) else 'medium'
@@ -4843,7 +4935,7 @@ Respond with ONLY this JSON (no markdown):
         try:
             save_simulation_log(aws_account_id, request.analysis_id, f"[add_component] {component_type}")
         except Exception as sim_log_err:
-            logger.warning(f"simulate_component: failed to save simulation log: {sim_log_err}")
+            logger.warning(f"simulate_component: failed to save simulation log: {safe_exc(sim_log_err)}")
 
     # ── RETURN RESPONSE ───────────────────────────────────────────
     return {
@@ -4872,68 +4964,15 @@ def purge_user_data(payload: PurgeRequest, request: Request, caller: Caller = De
     """
     Delete all stored data for the AWS account that owns this role.
     Re-assumes the role to verify caller controls the account.
-    Deletes from analysis_logs, drift_events, simulation_logs + S3 reports.
+    Deletes every table in app.privacy.PURGE_PLAN for the account + S3 reports.
     """
     assume_customer_role(payload.role_arn, caller, db)
     account_id = payload.role_arn.split(':')[4]
-
-    # Collect analysis UUIDs first (needed for S3 cleanup), then delete DB rows
-    from app.database import SessionLocal, AnalysisLog, DriftEvent, SimulationLog
-    deleted_counts = {'analysis_logs': 0, 'drift_events': 0, 'simulation_logs': 0, 's3_objects': 0}
-    analysis_uuids = []
-    session = SessionLocal()
+    from app import privacy
     try:
-        rows = session.query(AnalysisLog).filter_by(aws_account_id=account_id).all()
-        for row in rows:
-            try:
-                data = json.loads(row.findings_json) if row.findings_json else {}
-                uid = data.get('analysis_id')
-                if uid:
-                    analysis_uuids.append(uid)
-            except Exception:
-                pass
-
-        deleted_counts['analysis_logs'] = session.query(AnalysisLog).filter_by(aws_account_id=account_id).delete()
-        deleted_counts['drift_events'] = session.query(DriftEvent).filter_by(aws_account_id=account_id).delete()
-        deleted_counts['simulation_logs'] = session.query(SimulationLog).filter_by(aws_account_id=account_id).delete()
-        session.commit()
-    except Exception as e:
-        session.rollback()
+        deleted_counts = privacy.purge_account(account_id)
+    except Exception:
         raise HTTPException(status_code=500, detail='Database purge failed')
-    finally:
-        session.close()
-
-    # S3 cleanup. Best-effort: errors are logged, not raised.
-    try:
-        bucket = os.getenv('S3_BUCKET_NAME')
-        if bucket and analysis_uuids:
-            s3 = boto3.client(
-                's3',
-                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-                region_name=os.getenv('AWS_REGION', 'ap-south-1'),
-            )
-            uid_set = set(analysis_uuids)
-            for prefix in ('reports/', 'snapshots/'):
-                token = None
-                while True:
-                    kwargs = {'Bucket': bucket, 'Prefix': prefix}
-                    if token:
-                        kwargs['ContinuationToken'] = token
-                    resp = s3.list_objects_v2(**kwargs)
-                    for obj in resp.get('Contents', []):
-                        key = obj['Key']
-                        if any(uid in key for uid in uid_set):
-                            try:
-                                s3.delete_object(Bucket=bucket, Key=key)
-                                deleted_counts['s3_objects'] += 1
-                            except Exception as del_err:
-                                logger.warning(f'S3 delete failed for {key}: {del_err}')
-                    if not resp.get('IsTruncated'):
-                        break
-                    token = resp.get('NextContinuationToken')
-    except Exception as e:
-        logger.warning(f'S3 purge step failed: {e}')
 
     return {
         'status': 'purged',

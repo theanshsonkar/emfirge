@@ -7,6 +7,12 @@ import json
 
 from app.mutations import Change
 from app.aws_api_ingest import remove_security_group_rule
+from app.scheduler_schedule import DEFAULT_GROUP, api_fields as scheduler_api_fields, unsupported_members as scheduler_unsupported
+from app.cloudfront_distribution import tf_fields as cloudfront_tf_fields
+from app.dynamodb_table import plan_fields as dynamodb_plan_fields
+from app.plan_ingest_compute import instance_fields, lambda_fields
+from app.plan_ingest_s3 import S3_SEPARATE_TYPES, S3Model, inline_fields as s3_inline_fields, order_key as s3_order_key
+from app.plan_ingest_iam import IAM_POLICY_TYPES, IamModel, iam_context, identity_arn
 
 _AWS_PROVIDER_TYPES = {"aws", "awscc"}
 
@@ -59,7 +65,7 @@ _RESOURCE_MAP = {
 }
 _TAGGED_RESOURCES = frozenset({"aws_instance", "aws_db_instance", "aws_security_group", "aws_s3_bucket",
                                "aws_lambda_function", "aws_nat_gateway", "aws_ebs_volume"})
-_DELETE_ORDER = ["ec2_instance", "lambda_function", "rds_instance", "ebs_volume",
+_DELETE_ORDER = ["scheduler_schedule", "dynamodb_table", "ec2_instance", "lambda_function", "rds_instance", "ebs_volume",
                  "ebs_snapshot", "rds_snapshot", "s3_bucket", "security_group", "iam_role"]
 
 
@@ -241,16 +247,183 @@ def _fields(resource: str, change: dict, address: str, unknown: list[dict], *, u
     if resource == "aws_iam_user":
         return fields
     if resource == "aws_instance":
-        if "metadata_options" in after and not update and not _unknown(change, address, "metadata_options", unknown):
-            metadata = after.get("metadata_options") or {}
-            if "http_tokens" in metadata and not _unknown(change, address, "metadata_options.http_tokens", unknown):
-                fields["imdsv2_required"] = metadata.get("http_tokens") == "required"
         if not update:
             fields.setdefault("state", "running")
     return fields
 
 
 _TF_ROUTE_TARGETS = (("gateway_id", "internet_gateway"), ("nat_gateway_id", "nat_gateway"))
+
+
+_TF_SCHEDULE_TOP = {"state": "State", "schedule_expression": "ScheduleExpression",
+                    "schedule_expression_timezone": "ScheduleExpressionTimezone", "start_date": "StartDate", "end_date": "EndDate",
+                    "action_after_completion": "ActionAfterCompletion", "description": "Description", "kms_key_arn": "KmsKeyArn"}
+_TF_SCHEDULE_TARGET = {"dead_letter_config": "DeadLetterConfig", "ecs_parameters": "EcsParameters",
+                       "eventbridge_parameters": "EventBridgeParameters", "kinesis_parameters": "KinesisParameters",
+                       "retry_policy": "RetryPolicy", "sagemaker_pipeline_parameters": "SageMakerPipelineParameters",
+                       "sqs_parameters": "SqsParameters"}
+_TF_SCHEDULE_FIELD_OF = {"state": ("state",), "schedule_expression": ("schedule_expression",),
+                         "schedule_expression_timezone": ("schedule_expression_timezone",), "start_date": ("start_date",),
+                         "end_date": ("end_date",), "action_after_completion": ("action_after_completion",),
+                         "flexible_time_window": ("flexible_time_window_mode", "flexible_time_window_minutes"),
+                         "flexible_time_window.mode": ("flexible_time_window_mode",),
+                         "flexible_time_window.maximum_window_in_minutes": ("flexible_time_window_minutes",),
+                         "target": ("target_arn", "target_role_arn", "has_input"), "target.arn": ("target_arn",),
+                         "target.role_arn": ("target_role_arn",), "target.input": ("has_input",)}
+
+
+def _block(value: Any) -> dict:
+    """A Terraform nested block (a list of at most one object) as an object."""
+    if isinstance(value, list):
+        value = value[0] if value else {}
+    return value if isinstance(value, dict) else {}
+
+
+def _unknown_paths(unknown: Any, prefix: str = "") -> set[str]:
+    paths: set[str] = set()
+    if isinstance(unknown, list):
+        unknown = unknown[0] if unknown and isinstance(unknown[0], dict) else ({} if not unknown else unknown[0])
+    if unknown is True:
+        return {prefix}
+    if isinstance(unknown, dict):
+        for key, value in unknown.items():
+            paths |= _unknown_paths(value, f"{prefix}.{key}" if prefix else key)
+    return paths
+
+
+def _schedule_params(after: dict) -> dict:
+    """aws_scheduler_schedule attributes as CreateSchedule / UpdateSchedule parameters."""
+    params = {api: after[tf] for tf, api in _TF_SCHEDULE_TOP.items() if after.get(tf) not in (None, "")}
+    window, target = _block(after.get("flexible_time_window")), _block(after.get("target"))
+    if window:
+        params["FlexibleTimeWindow"] = {key: value for key, value in (
+            ("Mode", window.get("mode")), ("MaximumWindowInMinutes", window.get("maximum_window_in_minutes"))) if value is not None}
+    if target:
+        converted = {key: value for key, value in (("Arn", target.get("arn")), ("RoleArn", target.get("role_arn")),
+                                                   ("Input", target.get("input"))) if value not in (None, "")}
+        for tf, api in _TF_SCHEDULE_TARGET.items():
+            value = _block(target.get(tf)) if isinstance(target.get(tf), (list, dict)) else target.get(tf)
+            if tf == "retry_policy" and value:
+                value = {"MaximumEventAgeInSeconds": value.get("maximum_event_age_in_seconds"),
+                         "MaximumRetryAttempts": value.get("maximum_retry_attempts")}
+            if value:
+                converted[api] = value
+        params["Target"] = converted
+    return params
+
+
+_TF_SCHEDULE_NAMES = {
+    **{api: tf for tf, api in _TF_SCHEDULE_TOP.items()},
+    **{f"Target.{api}": f"target.{tf}" for tf, api in _TF_SCHEDULE_TARGET.items()},
+    "FlexibleTimeWindow": "flexible_time_window", "Target.Arn": "target.arn", "Target.RoleArn": "target.role_arn",
+}
+
+
+def _tf_schedule_name(api_name: str) -> str:
+    """The Terraform spelling of an API member, so unknown fields name what the plan author wrote."""
+    return _TF_SCHEDULE_NAMES.get(api_name, api_name)
+
+
+def _schedule_changes(item: dict, address: str, actions: list, unknown: list[dict]) -> tuple[list[Change], dict | None]:
+    """aws_scheduler_schedule: the same branch changes as the API calls, from the plan's full after-state."""
+    change = item.get("change") or {}
+    before, after, after_unknown = change.get("before") or {}, change.get("after") or {}, change.get("after_unknown") or {}
+    deleting = actions == ["delete"] or actions in (["delete", "create"], ["create", "delete"])
+    creating = actions == ["create"] or actions in (["delete", "create"], ["create", "delete"])
+    result: list[Change] = []
+    if deleting:
+        result.append(Change(op="delete", resource_type="scheduler_schedule",
+                             resource_id=f"{before.get('group_name') or DEFAULT_GROUP}/{before.get('name')}"))
+    if not (creating or actions == ["update"]):
+        return result, None
+    paths = _unknown_paths(after_unknown) - {"arn", "id"}  # computed by AWS, not part of the change
+    name = after.get("name")
+    if not name or "name" in paths:
+        unknown.append({"address": address, "field": "name", "reason": "unknown Terraform value"})
+        return result, {"address": address, "type": item.get("type", ""), "actions": actions, "outside_view": False,
+                        "detail": "the schedule name is unknown at plan time, so its identity cannot be built"}
+    group = after.get("group_name")
+    if "group_name" in paths or not group:
+        # Never the default group: the schedule may be a different one, so its identity cannot be built.
+        unknown.append({"address": address, "field": "group_name", "reason": "unknown Terraform value"})
+        return result, {"address": address, "type": item.get("type", ""), "actions": actions, "outside_view": False,
+                        "detail": "the schedule group is unknown at plan time, so its identity cannot be built"}
+    params = _schedule_params(after)
+    fields, problems = scheduler_api_fields(params, replace=actions == ["update"])
+    for path in sorted(paths):
+        unknown.append({"address": address, "field": path, "reason": "unknown Terraform value"})
+        for field in _TF_SCHEDULE_FIELD_OF.get(path, ()):
+            fields.pop(field, None)
+    for member, reason in problems:
+        name_in_plan = _tf_schedule_name(member)
+        if any(path == name_in_plan or path.startswith(name_in_plan + ".") or name_in_plan.startswith(path + ".") for path in paths):
+            continue  # already reported as unknown
+        unknown.append({"address": address, "field": name_in_plan, "reason": reason})
+    for member in scheduler_unsupported(params):
+        unknown.append({"address": address, "field": _tf_schedule_name(member), "reason": "unsupported_attribute"})
+    result.append(Change(op="add" if creating else "modify", resource_type="scheduler_schedule", resource_id=f"{group}/{name}", fields=fields))
+    return result, None
+
+
+# Terraform computes these; a difference in them is not a change the author made.
+_TF_TABLE_COMPUTED = frozenset({"arn", "id", "tags_all", "stream_arn", "stream_label", "stream_enabled_computed"})
+_TF_TABLE_MODELED = frozenset({"point_in_time_recovery", "deletion_protection_enabled"})
+
+
+def _table_changes(item: dict, address: str, actions: list, unknown: list[dict]) -> tuple[list[Change], dict | None]:
+    """aws_dynamodb_table: delete, and point-in-time recovery / deletion protection on update.
+
+    Creating a table is not modeled. A replace deletes the table (its data is gone) and the new table is unmodeled.
+    """
+    change = item.get("change") or {}
+    before, after, after_unknown = change.get("before") or {}, change.get("after") or {}, change.get("after_unknown") or {}
+    deleting = actions == ["delete"] or actions in (["delete", "create"], ["create", "delete"])
+    creating = actions == ["create"] or actions in (["delete", "create"], ["create", "delete"])
+    result: list[Change] = []
+    if deleting:
+        name = before.get("name") or before.get("id")
+        if not isinstance(name, str) or not name:
+            return result, {"address": address, "type": item.get("type", ""), "actions": actions, "outside_view": False,
+                            "detail": "the table name is not in the plan, so the table cannot be identified"}
+        result.append(Change(op="delete", resource_type="dynamodb_table", resource_id=name))
+    if creating:
+        return result, {"address": address, "type": item.get("type", ""), "actions": actions, "provider_name": "aws", "outside_view": False,
+                        "detail": "creating a DynamoDB table is not modeled"}
+    if actions != ["update"]:
+        return result, None
+    paths = _unknown_paths(after_unknown)
+    name = after.get("name") or before.get("name") or before.get("id")
+    if not isinstance(name, str) or not name or "name" in paths:
+        unknown.append({"address": address, "field": "name", "reason": "unknown Terraform value"})
+        return result, {"address": address, "type": item.get("type", ""), "actions": actions, "outside_view": False,
+                        "detail": "the table name is unknown at plan time, so its identity cannot be built"}
+    fields, unknown_paths = dynamodb_plan_fields(before, after, paths)
+    for path in unknown_paths:
+        unknown.append({"address": address, "field": path, "reason": "unknown Terraform value"})
+    for key in sorted(set(before) | set(after)):
+        if (key not in _TF_TABLE_MODELED | _TF_TABLE_COMPUTED and before.get(key) != after.get(key)
+                and not any(path == key or path.startswith(key + ".") for path in paths)):
+            unknown.append({"address": address, "field": key, "reason": "unsupported_attribute"})
+    if fields:
+        result.append(Change(op="modify", resource_type="dynamodb_table", resource_id=name, fields=fields))
+    return result, None
+
+
+def _distribution_changes(item: dict, address: str, unknown: list[dict]) -> tuple[list[Change], dict | None]:
+    """aws_cloudfront_distribution update: the modeled attributes that differ, as a partial change of the stored distribution."""
+    change = item.get("change") or {}
+    before, after, after_unknown = change.get("before") or {}, change.get("after") or {}, change.get("after_unknown") or {}
+    distribution_id = after.get("id") or before.get("id")
+    if not distribution_id or "id" in _unknown_paths(after_unknown):
+        unknown.append({"address": address, "field": "id", "reason": "unknown Terraform value"})
+        return [], {"address": address, "type": item.get("type", ""), "actions": ["update"], "outside_view": False,
+                    "detail": "the distribution id is unknown at plan time, so its identity cannot be built"}
+    fields, unknown_names, unmodeled = cloudfront_tf_fields(before, after, _unknown_paths(after_unknown) - {"arn", "id", "etag", "status", "last_modified_time"})
+    for name in unknown_names:
+        unknown.append({"address": address, "field": name, "reason": "unknown Terraform value"})
+    for name in unmodeled:
+        unknown.append({"address": address, "field": name, "reason": "unsupported_attribute"})
+    return ([Change(op="modify", resource_type="cloudfront_distribution", resource_id=str(distribution_id), fields=fields)] if fields else []), None
 
 
 def _route_table_add(item: dict, address: str, unknown: list[dict]) -> list[Change]:
@@ -400,7 +573,7 @@ def _nacl_changes(item: dict, nacls: dict[str, Any], config_resources: dict[str,
     return [], None
 
 
-def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[str, Any] | None = None, config_resources: dict[str, dict] | None = None, created_ids: dict[str, str] | None = None, nacls: dict[str, Any] | None = None, acl_counter: list[int] | None = None) -> tuple[list[Change], dict | None]:
+def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[str, Any] | None = None, config_resources: dict[str, dict] | None = None, created_ids: dict[str, str] | None = None, nacls: dict[str, Any] | None = None, acl_counter: list[int] | None = None, iam: IamModel | None = None, s3: S3Model | None = None, unmodeled_sink: list[dict] | None = None) -> tuple[list[Change], dict | None]:
     if item.get("mode", "managed") != "managed":
         return [], None
     address = item.get("address", "")
@@ -440,6 +613,22 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         return _rule_change(item, sg_rules or {}, config_resources or {}, created_ids or {}, unknown_fields)
     if typ == "aws_route_table" and actions == ["create"]:
         return _route_table_add(item, address, unknown_fields), None
+    if typ == "aws_scheduler_schedule":
+        return _schedule_changes(item, address, actions, unknown_fields)
+    if typ == "aws_dynamodb_table":
+        return _table_changes(item, address, actions, unknown_fields)
+    if typ == "aws_cloudfront_distribution" and actions == ["update"]:
+        return _distribution_changes(item, address, unknown_fields)
+    if typ in IAM_POLICY_TYPES and iam is not None:
+        sink: list[dict] = []
+        iam.handle(item, unknown_fields, sink)
+        if unmodeled_sink is not None:
+            unmodeled_sink.extend(sink[1:])
+        return [], (sink[0] if sink else None)
+    if typ in S3_SEPARATE_TYPES and s3 is not None:
+        return s3.separate(item, unknown_fields)
+    if typ == "aws_iam_instance_profile" and iam is not None:
+        return iam.profile_change(item, unknown_fields)
     if typ not in _RESOURCE_MAP:
         return [], {"address": address, "type": typ, "actions": actions,
                      "provider_name": provider_name if isinstance(provider_name, str) else None,
@@ -462,7 +651,13 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
         result.append(Change(op="delete", resource_type=resource, resource_id=str(resource_id or ""), fields=options))
     if actions == ["create"] or actions in (["delete", "create"], ["create", "delete"]):
         fields = _fields(typ, change, address, unknown_fields)
-        if resource in {"lambda_function", "s3_bucket", "ebs_snapshot"}:
+        if resource == "s3_bucket":
+            fields = {key: value for key, value in fields.items() if key == "tags"}
+            fields.update(s3_inline_fields(item, unknown_fields))
+        elif resource == "lambda_function" and iam is not None:
+            fields = {key: value for key, value in fields.items() if key == "tags"}
+            fields.update(lambda_fields(item, iam, unknown_fields))
+        elif resource in {"lambda_function", "ebs_snapshot"}:
             fields = {key: value for key, value in fields.items() if key == "tags"}
         elif resource in {"nat_gateway", "ebs_volume"}:
             fields = {key: value for key, value in fields.items() if value is not None}
@@ -472,7 +667,26 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
                 fields = {"db_instance_id": db_identifier}
             else:
                 fields = {}
-        result.append(Change(op="add", resource_type=resource, resource_id=str((after or {}).get(id_key, resource_id) or ""), fields=fields))
+        add_id = str((after or {}).get(id_key, resource_id) or "")
+        role_arn = None
+        if typ == "aws_iam_role" and iam is not None:
+            role_arn, notes = iam.identity(address)
+            if role_arn is None:
+                identity_arn(item, iam.iam, unknown_fields, "role")
+                return result, {"address": address, "type": typ, "actions": actions,
+                                "provider_name": provider_name if isinstance(provider_name, str) else None,
+                                "outside_view": False,
+                                "detail": "the role name or path is unknown at plan time, so its identity cannot be built"}
+            unknown_fields.extend(notes)
+            add_id = role_arn
+        if typ == "aws_instance" and iam is not None:
+            fields.update(instance_fields(item, iam.config, unknown_fields))
+            profile = iam.profile_arn_for_instance(item, unknown_fields)
+            if profile:
+                fields["instance_profile_arn"] = profile
+        result.append(Change(op="add", resource_type=resource, resource_id=add_id, fields=fields))
+        if role_arn:
+            iam.role_inline_blocks(item, role_arn, unknown_fields)
     elif actions == ["update"]:
         fields = _fields(typ, change, address, unknown_fields, update=True)
         supported = {"aws_security_group": {"ingress"}, "aws_db_instance": {"backup_retention_period", "deletion_protection"}, "aws_iam_role": {"assume_role_policy"}}
@@ -487,7 +701,8 @@ def _translate_item(item: dict, unknown_fields: list[dict], *, sg_rules: dict[st
     return result, None
 
 
-def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dict[str, Any] | None = None) -> dict[str, Any]:
+def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dict[str, Any] | None = None,
+                   iam_roles: Any = None, iam_users: Any = None, instance_profiles: Any = None) -> dict[str, Any]:
     if not isinstance(plan, dict):
         raise ValueError("Terraform plan must be a JSON object")
     if not isinstance(plan.get("format_version"), str) or not plan["format_version"].startswith("1."):
@@ -505,6 +720,8 @@ def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dic
     }
     created_ids = {}
     acl_counter = [0]
+    s3 = S3Model(plan)
+    iam = IamModel(plan, iam_context(plan, iam_roles), iam_roles, iam_users, instance_profiles)
     for resource in plan["resource_changes"]:
         if isinstance(resource, dict) and resource.get("type") == "aws_security_group":
             after = (resource.get("change") or {}).get("after") or {}
@@ -524,12 +741,19 @@ def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dic
             raise ValueError("Terraform plan change actions must be a non-empty list of strings")
         changes, unsupported = _translate_item(item, unknown_fields, sg_rules=sg_rules,
                                                  config_resources=config_resources, created_ids=created_ids,
-                                                 nacls=nacls, acl_counter=acl_counter)
+                                                 nacls=nacls, acl_counter=acl_counter, iam=iam, s3=s3, unmodeled_sink=unmodeled)
         if unsupported:
             unmodeled.append(unsupported)
         for change in changes:
             target = deletes if change.op == "delete" else modifies if change.op == "modify" else adds
-            target.append((change, item.get("address", ""), item))
+            late_item = {**item, "_late": True} if (item.get("type") in S3_SEPARATE_TYPES and change.op == "modify") else item
+            target.append((change, item.get("address", ""), late_item))
+    # Settings that land on a resource created in the same plan, and permissions, are applied last, in this order.
+    late = sorted((entry for entry in modifies if entry[2].get("_late") is True), key=lambda entry: s3_order_key(entry[0]))
+    modifies = [entry for entry in modifies if entry[2].get("_late") is not True]
+    late += [(c, a, i) for c, a, i in iam.finalize(unknown_fields, unmodeled)]
+    late = [(c, a, {**i, "_late_seq": n}) for n, (c, a, i) in enumerate(late)]
+    modifies.extend(late)
     sg_delete = {c.resource_id: (c, a, i) for c, a, i in deletes if c.resource_type == "security_group"}
     ordered_sg: list[tuple[Change, str, dict]] = []
     remaining = dict(sg_delete)
@@ -548,8 +772,10 @@ def translate_plan(plan: Any, sg_rules: dict[str, Any] | None = None, nacls: dic
         modifies + adds,
         key=lambda item: (
             0 if item[0].op == "add" and item[0].resource_type == "security_group" else
+            3 if item[2].get("_late_seq") is not None else
             1 if item[0].op == "modify" else 2,
-            item[1],
+            # permission changes keep their emission order: each carries the complete list so far
+            f"{item[2]['_late_seq']:09d}" if item[2].get("_late_seq") is not None else item[1],
         ),
     )
     return {"changes": [c for c, _, _ in ordered], "addresses": [a for _, a, _ in ordered],

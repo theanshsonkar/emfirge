@@ -1,5 +1,4 @@
 import boto3
-import datetime
 import json
 import time as _time_module
 import threading
@@ -8,6 +7,9 @@ from botocore.exceptions import ClientError, NoCredentialsError, EndpointResolut
 from botocore.config import Config
 from app.cidr import is_internet_cidr, rule_opens_port_to_internet
 from app.tags import tag_map
+from app.log_safe import safe_exc, safe_choice
+from app.scheduler_schedule import aws_schedule_fields
+from app.cloudfront_distribution import collect_cloudfront
 from app.s3_public import acl_grants_are_public, effective_is_public, policy_is_public
 from app.models import (
     AWSCredentials, AWSInfrastructure,
@@ -18,7 +20,7 @@ from app.models import (
     APIGatewayData, APIGatewayInstance,
     ElastiCacheData, ElastiCacheCluster,
     SQSData, SQSQueue,
-    DynamoDBData, DynamoDBTable,
+    DynamoDBData, DynamoDBTable, SchedulerData, SchedulerSchedule, CloudFrontData,
     EBSVolume, EBSSnapshot, ElasticIP, Route, RouteTable, NACLEntry, NetworkACL, NetworkInterface,
     VPCPeeringConnection, TransitGatewayAttachment, VPNGateway, InterfaceEndpoint, BlockDevice,
     RDSSnapshot, PolicyDocumentRecord, merge_policy_statements, AccessStatement
@@ -117,6 +119,8 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         'elasticache':     collect_elasticache,
         'sqs':             collect_sqs,
         'dynamodb':        collect_dynamodb,
+        'scheduler':       collect_scheduler,
+        'cloudfront':      collect_cloudfront,
     }
 
     results = {}
@@ -128,7 +132,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         ['s3', 'guardduty', 'sns', 'sqs'],
         ['iam', 'cost', 'cloudwatch', 'config'],
         ['lambda', 'vpc', 'ecs', 'waf'],
-        ['secrets_manager', 'api_gateway', 'elasticache', 'dynamodb'],
+        ['secrets_manager', 'api_gateway', 'elasticache', 'dynamodb', 'scheduler', 'cloudfront'],
     ]
 
     with ThreadPoolExecutor(max_workers=16) as executor:
@@ -154,7 +158,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
                 results[name] = future.result(timeout=20)
             except TimeoutError:
                 msg = f'{name} collector timed out — results excluded from this scan'
-                print(msg)
+                print(f'{safe_choice(name, collectors)} collector timed out — results excluded from this scan')
                 warnings.append(msg)
                 defaults = {
                     'ec2':             EC2Data(),
@@ -177,10 +181,12 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
                     'elasticache':     ElastiCacheData(),
                     'sqs':             SQSData(),
                     'dynamodb':        DynamoDBData(),
+                    'scheduler':       SchedulerData(),
+                    'cloudfront':      CloudFrontData(),
                 }
                 results[name] = defaults[name]
             except Exception as e:
-                print(f'{name} collector crashed unexpectedly: {e}')
+                print(f'{safe_choice(name, collectors)} collector crashed unexpectedly: {safe_exc(e)}')
                 defaults = {
                     'ec2':             EC2Data(),
                     's3':              S3Data(),
@@ -202,6 +208,8 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
                     'elasticache':     ElastiCacheData(),
                     'sqs':             SQSData(),
                     'dynamodb':        DynamoDBData(),
+                    'scheduler':       SchedulerData(),
+                    'cloudfront':      CloudFrontData(),
                 }
                 results[name] = defaults[name]
 
@@ -226,6 +234,10 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
 
     lambda_data.functions_with_admin_role = functions_with_admin
 
+    # A collector that timed out or crashed never reported: say so rather than leave the status unrecorded.
+    collection_status.setdefault('dynamodb', 'error')
+    collection_status.setdefault('scheduler', 'error')
+    collection_status.setdefault('cloudfront', 'error')
     return AWSInfrastructure(
         ec2=results['ec2'],
         s3=results['s3'],
@@ -247,10 +259,12 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         elasticache=results['elasticache'],
         sqs=results['sqs'],
         dynamodb=results['dynamodb'],
+        scheduler=results['scheduler'],
+        cloudfront=results['cloudfront'],
         network_interfaces=results['ec2'].network_interfaces,
         collection={**collection_status, 'network_interfaces': results['ec2'].network_interfaces_status},
         region=region,
-        collected_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        collected_at=datetime.now(timezone.utc).isoformat(),
         warnings=warnings
     )
 
@@ -411,15 +425,15 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'EC2 scan skipped: insufficient permissions'
-            print(msg)
+            print('EC2 scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'EC2 scan skipped: {code}'
-            print(msg)
+            print(f'EC2 scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'EC2 scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'EC2 scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     try:
@@ -447,7 +461,7 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
     except Exception as e:
         network_interfaces_status = 'error'
         network_interfaces = None
-        print(f'Network interfaces scan skipped: {e}')
+        print(f'Network interfaces scan skipped: {safe_exc(e)}')
 
     try:
         elb = boto3.client('elbv2', aws_access_key_id=key,
@@ -489,7 +503,7 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
             warnings.append('Load Balancer scan skipped: insufficient permissions')
         print(f'ELB scan skipped: {code}')
     except Exception as e:
-        print(f'ELB scan skipped: {e}')
+        print(f'ELB scan skipped: {safe_exc(e)}')
 
     try:
         asg = boto3.client('autoscaling', aws_access_key_id=key,
@@ -504,7 +518,7 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
             warnings.append('Auto Scaling scan skipped: insufficient permissions')
         print(f'Auto Scaling scan skipped: {code}')
     except Exception as e:
-        print(f'Auto Scaling scan skipped: {e}')
+        print(f'Auto Scaling scan skipped: {safe_exc(e)}')
 
     try:
         paginator = ec2.get_paginator('describe_volumes')
@@ -556,7 +570,7 @@ def collect_ec2(key, secret, token, region, warnings) -> EC2Data:
         else:
             print(f'Elastic IPs scan skipped: {code}')
     except Exception as e:
-        print(f'Elastic IPs scan skipped: {e}')
+        print(f'Elastic IPs scan skipped: {safe_exc(e)}')
 
     return EC2Data(
         instance_count=instance_count,
@@ -671,7 +685,7 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                 acl = s3.get_bucket_acl(Bucket=name)
                 result['acl_public'] = acl_grants_are_public(acl.get('Grants', []))
             except ClientError as e:
-                print(f'S3 ACL check skipped for {name}: {get_error_code(e)}')
+                print(f'S3 ACL check skipped for 1 bucket: {get_error_code(e)}')
             except Exception:
                 pass
 
@@ -683,7 +697,7 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                 if get_error_code(e) == 'NoSuchPublicAccessBlockConfiguration':
                     bucket_bpa = {}
                 else:
-                    print(f'S3 public access block check skipped for {name}: {get_error_code(e)}')
+                    print(f'S3 public access block check skipped for 1 bucket: {get_error_code(e)}')
             except Exception:
                 pass
             for field, key in _BPA_FIELDS:
@@ -700,7 +714,7 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                 if get_error_code(e) == 'ServerSideEncryptionConfigurationNotFoundError':
                     result['flags']['unencrypted'] = True
                 else:
-                    print(f'S3 encryption check skipped for {name}: {get_error_code(e)}')
+                    print(f'S3 encryption check skipped for 1 bucket: {get_error_code(e)}')
             except Exception:
                 result['flags']['unencrypted'] = True
 
@@ -710,7 +724,7 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                 if versioning.get('Status') != 'Enabled':
                     result['flags']['no_versioning'] = True
             except ClientError as e:
-                print(f'S3 versioning check skipped for {name}: {get_error_code(e)}')
+                print(f'S3 versioning check skipped for 1 bucket: {get_error_code(e)}')
             except Exception:
                 result['flags']['no_versioning'] = True
 
@@ -720,7 +734,7 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                 if 'LoggingEnabled' not in logging_resp:
                     result['flags']['no_logging'] = True
             except ClientError as e:
-                print(f'S3 logging check skipped for {name}: {get_error_code(e)}')
+                print(f'S3 logging check skipped for 1 bucket: {get_error_code(e)}')
             except Exception:
                 result['flags']['no_logging'] = True
 
@@ -736,7 +750,7 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                 if get_error_code(e) == 'NoSuchBucketPolicy':
                     result['policy_public'] = False
                 else:
-                    print(f'S3 policy check skipped for {name}: {get_error_code(e)}')
+                    print(f'S3 policy check skipped for 1 bucket: {get_error_code(e)}')
             except Exception:
                 pass
 
@@ -752,7 +766,7 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                 if get_error_code(e) == 'NoSuchTagSet':
                     result['tags'] = {}
                 else:
-                    print(f'S3 tagging check skipped for {name}: {get_error_code(e)}')
+                    print(f'S3 tagging check skipped for 1 bucket: {get_error_code(e)}')
             except Exception:
                 pass
 
@@ -761,7 +775,7 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
                 response = s3.list_objects_v2(Bucket=name, MaxKeys=1)
                 result['is_empty'] = response.get('KeyCount', 0) == 0
             except ClientError as e:
-                print(f'S3 object count check skipped for {name}: {get_error_code(e)}')
+                print(f'S3 object count check skipped for 1 bucket: {get_error_code(e)}')
             except Exception:
                 pass
 
@@ -798,15 +812,15 @@ def collect_s3(key, secret, token, region, warnings) -> S3Data:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'S3 scan skipped: insufficient permissions'
-            print(msg)
+            print('S3 scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'S3 scan skipped: {code}'
-            print(msg)
+            print(f'S3 scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'S3 scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'S3 scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return S3Data(
@@ -904,15 +918,15 @@ def collect_rds(key, secret, token, region, warnings) -> RDSData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'RDS scan skipped: insufficient permissions'
-            print(msg)
+            print('RDS scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'RDS scan skipped: {code}'
-            print(msg)
+            print(f'RDS scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'RDS scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'RDS scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     try:
@@ -1041,6 +1055,17 @@ def _parse_role_trust_policy(document, role_arn):
 
     return trusted_role_arns, trusted_services, trust_allows_external, trust_has_conditions
 
+def lambda_secret_refs(env_vars: dict) -> list:
+    """Secret-looking variable names and Secrets Manager ARNs in a Lambda's environment."""
+    secret_refs = []
+    for k, value in (env_vars or {}).items():
+        if any(word in k.upper() for word in ['SECRET', 'PASSWORD', 'TOKEN', 'API_KEY', 'CREDENTIAL']):
+            secret_refs.append(f"env:{k}")
+        elif isinstance(value, str) and value.startswith('arn:aws:secretsmanager'):
+            secret_id = value.split(':')[-1]
+            secret_refs.append(secret_id)
+    return secret_refs
+
 def collect_iam(key, secret, token, region, warnings) -> IAMData:
     root_has_keys = False
     users_without_mfa = []
@@ -1144,7 +1169,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                 if get_error_code(e) == 'NoSuchEntity':
                     has_console_access = False
                 else:
-                    print(f'IAM console access check skipped for {username}: {get_error_code(e)}')
+                    print(f'IAM console access check skipped for 1 user: {get_error_code(e)}')
             except Exception:
                 pass
             
@@ -1160,7 +1185,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                 if len(mfa['MFADevices']) == 0:
                     users_without_mfa.append(username)
             except ClientError as e:
-                print(f'IAM MFA check skipped for {username}: {get_error_code(e)}')
+                print(f'IAM MFA check skipped for 1 user: {get_error_code(e)}')
             except Exception:
                 pass
 
@@ -1172,7 +1197,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                         if age > 90:
                             old_access_keys.append(f"{username} ({age} days)")
             except ClientError as e:
-                print(f'IAM access key check skipped for {username}: {get_error_code(e)}')
+                print(f'IAM access key check skipped for 1 user: {get_error_code(e)}')
             except Exception:
                 pass
 
@@ -1183,7 +1208,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                     users_with_admin_policy.append(username)
                     continue  # no need to check inline policies
             except ClientError as e:
-                print(f'IAM attached policy check skipped for {username}: {get_error_code(e)}')
+                print(f'IAM attached policy check skipped for 1 user: {get_error_code(e)}')
             except Exception:
                 pass
 
@@ -1209,7 +1234,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                     except Exception:
                         pass
             except ClientError as e:
-                print(f'IAM inline policy check skipped for {username}: {get_error_code(e)}')
+                print(f'IAM inline policy check skipped for 1 user: {get_error_code(e)}')
             except Exception:
                 pass
 
@@ -1355,7 +1380,7 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
                         if get_error_code(e) == 'Throttling':
                             _time.sleep(0.2)
                         else:
-                            print(f'IAM role policy check skipped for {role_name}: {get_error_code(e)}')
+                            print(f'IAM role policy check skipped for 1 role: {get_error_code(e)}')
                         continue
                     except Exception:
                         continue
@@ -1414,21 +1439,21 @@ def collect_iam(key, secret, token, region, warnings) -> IAMData:
             else:
                 print(f'IAM role policy scan skipped: {get_error_code(e)}')
         except Exception as e:
-            print(f'IAM role policy scan skipped: {str(e)}')
+            print(f'IAM role policy scan skipped: {safe_exc(e)}')
 
     except ClientError as e:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'IAM scan skipped: insufficient permissions'
-            print(msg)
+            print('IAM scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'IAM scan skipped: {code}'
-            print(msg)
+            print(f'IAM scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'IAM scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'IAM scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     if role_last_used_denied:
@@ -1486,15 +1511,15 @@ def collect_cloudtrail(key, secret, token, region, warnings) -> CloudTrailData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'CloudTrail scan skipped: insufficient permissions'
-            print(msg)
+            print('CloudTrail scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'CloudTrail scan skipped: {code}'
-            print(msg)
+            print(f'CloudTrail scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'CloudTrail scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'CloudTrail scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return CloudTrailData(
@@ -1527,12 +1552,12 @@ def collect_cost(key, secret, token, region, warnings) -> CostData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'Budgets scan skipped: insufficient permissions'
-            print(msg)
+            print('Budgets scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             print(f'Budgets scan skipped: {code}')
     except Exception as e:
-        print(f'Budgets scan skipped: {e}')
+        print(f'Budgets scan skipped: {safe_exc(e)}')
 
     try:
         cw = boto3.client('cloudwatch', aws_access_key_id=key,
@@ -1547,7 +1572,7 @@ def collect_cost(key, secret, token, region, warnings) -> CostData:
     except ClientError as e:
         print(f'CloudWatch billing check skipped: {get_error_code(e)}')
     except Exception as e:
-        print(f'CloudWatch billing check skipped: {e}')
+        print(f'CloudWatch billing check skipped: {safe_exc(e)}')
 
     return CostData(
         has_budget_alerts=has_budget_alerts,
@@ -1576,15 +1601,15 @@ def collect_cloudwatch(key, secret, token, region, warnings) -> CloudWatchData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'CloudWatch scan skipped: insufficient permissions'
-            print(msg)
+            print('CloudWatch scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'CloudWatch scan skipped: {code}'
-            print(msg)
+            print(f'CloudWatch scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'CloudWatch scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'CloudWatch scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return CloudWatchData(
@@ -1616,15 +1641,15 @@ def collect_guardduty(key, secret, token, region, warnings) -> GuardDutyData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'GuardDuty scan skipped: insufficient permissions'
-            print(msg)
+            print('GuardDuty scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'GuardDuty scan skipped: {code}'
-            print(msg)
+            print(f'GuardDuty scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'GuardDuty scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'GuardDuty scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return GuardDutyData(
@@ -1688,14 +1713,7 @@ def collect_lambda(key, secret, token, region, warnings) -> LambdaData:
                     functions_with_no_timeout.append(fn_name)
 
                 # Add to relationship tracking
-                secret_refs = []
-                env_vars = fn.get('Environment', {}).get('Variables', {})
-                for k, value in env_vars.items():
-                    if any(word in k.upper() for word in ['SECRET', 'PASSWORD', 'TOKEN', 'API_KEY', 'CREDENTIAL']):
-                        secret_refs.append(f"env:{k}")
-                    elif isinstance(value, str) and value.startswith('arn:aws:secretsmanager'):
-                        secret_id = value.split(':')[-1]
-                        secret_refs.append(secret_id)
+                secret_refs = lambda_secret_refs(fn.get('Environment', {}).get('Variables', {}))
 
                 functions.append({
                     'name': fn_name,
@@ -1711,15 +1729,15 @@ def collect_lambda(key, secret, token, region, warnings) -> LambdaData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'Lambda scan skipped: insufficient permissions'
-            print(msg)
+            print('Lambda scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'Lambda scan skipped: {code}'
-            print(msg)
+            print(f'Lambda scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'Lambda scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'Lambda scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     # NOTE: functions_with_admin_role is populated post-collection in
@@ -1763,15 +1781,15 @@ def collect_secrets_manager(key, secret, token, region, warnings) -> SecretsMana
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'Secrets Manager scan skipped: insufficient permissions'
-            print(msg)
+            print('Secrets Manager scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'Secrets Manager scan skipped: {code}'
-            print(msg)
+            print(f'Secrets Manager scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'Secrets Manager scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'Secrets Manager scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return SecretsManagerData(
@@ -1858,7 +1876,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         except ClientError as e:
             print(f'VPC peering connections check skipped: {get_error_code(e)}')
         except Exception as e:
-            print(f'VPC peering connections check skipped: {e}')
+            print(f'VPC peering connections check skipped: {safe_exc(e)}')
 
         # Get all VPCs
         vpcs_response = ec2.describe_vpcs()
@@ -1881,7 +1899,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
                 if len(flow_logs['FlowLogs']) == 0:
                     vpcs_without_flow_logs.append(vpc_id)
             except ClientError as e:
-                print(f'VPC flow logs check skipped for {vpc_id}: {get_error_code(e)}')
+                print(f'VPC flow logs check skipped for 1 VPC: {get_error_code(e)}')
             except Exception:
                 pass
 
@@ -2125,7 +2143,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         except ClientError as e:
             print(f'Network ACLs check skipped: {get_error_code(e)}')
         except Exception as e:
-            print(f'Network ACLs check skipped: {e}')
+            print(f'Network ACLs check skipped: {safe_exc(e)}')
 
         # ── TRANSIT GATEWAY ATTACHMENTS ──────────────────────────
         try:
@@ -2154,7 +2172,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         except ClientError as e:
             print(f'Transit Gateway attachments check skipped: {get_error_code(e)}')
         except Exception as e:
-            print(f'Transit Gateway attachments check skipped: {e}')
+            print(f'Transit Gateway attachments check skipped: {safe_exc(e)}')
 
         # ── VPN GATEWAYS ──────────────────────────────────────────
         try:
@@ -2190,7 +2208,7 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         except ClientError as e:
             print(f'VPN Gateways check skipped: {get_error_code(e)}')
         except Exception as e:
-            print(f'VPN Gateways check skipped: {e}')
+            print(f'VPN Gateways check skipped: {safe_exc(e)}')
 
         # Check for VPC endpoints
         try:
@@ -2235,15 +2253,15 @@ def collect_vpc(key, secret, token, region, warnings) -> VPCData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'VPC scan skipped: insufficient permissions'
-            print(msg)
+            print('VPC scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'VPC scan skipped: {code}'
-            print(msg)
+            print(f'VPC scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'VPC scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'VPC scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return VPCData(
@@ -2307,12 +2325,12 @@ def collect_kms(key, secret, token, region, warnings) -> KMSData:
                                 if not rotation_status.get('KeyRotationEnabled', False):
                                     cmks_without_rotation.append(key_id)
                             except ClientError as e:
-                                print(f'KMS rotation check skipped for {key_id}: {get_error_code(e)}')
+                                print(f'KMS rotation check skipped for 1 key: {get_error_code(e)}')
                             except Exception:
                                 pass
                 
                 except ClientError as e:
-                    print(f'KMS key check skipped for {key_id}: {get_error_code(e)}')
+                    print(f'KMS key check skipped for 1 key: {get_error_code(e)}')
                 except Exception:
                     pass
 
@@ -2320,15 +2338,15 @@ def collect_kms(key, secret, token, region, warnings) -> KMSData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'KMS scan skipped: insufficient permissions'
-            print(msg)
+            print('KMS scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'KMS scan skipped: {code}'
-            print(msg)
+            print(f'KMS scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'KMS scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'KMS scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return KMSData(
@@ -2385,15 +2403,15 @@ def collect_config(key, secret, token, region, warnings) -> ConfigData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'AWS Config scan skipped: insufficient permissions'
-            print(msg)
+            print('AWS Config scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'AWS Config scan skipped: {code}'
-            print(msg)
+            print(f'AWS Config scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'AWS Config scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'AWS Config scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return ConfigData(
@@ -2449,13 +2467,13 @@ def collect_sns(key, secret, token, region, warnings) -> SNSData:
                                     break
                     except json.JSONDecodeError:
                         # Treat unparseable policies as potentially public (conservative approach)
-                        print(f'SNS policy parsing failed for {topic_arn}, treating as potentially public')
+                        print(f'SNS policy parsing failed for 1 topic, treating as potentially public')
                         topics_with_public_access.append(topic_arn)
                     except Exception:
                         pass
                 
                 except ClientError as e:
-                    print(f'SNS topic check skipped for {topic_arn}: {get_error_code(e)}')
+                    print(f'SNS topic check skipped for 1 topic: {get_error_code(e)}')
                 except Exception:
                     pass
 
@@ -2463,15 +2481,15 @@ def collect_sns(key, secret, token, region, warnings) -> SNSData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'SNS scan skipped: insufficient permissions'
-            print(msg)
+            print('SNS scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'SNS scan skipped: {code}'
-            print(msg)
+            print(f'SNS scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'SNS scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'SNS scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return SNSData(
@@ -2526,7 +2544,7 @@ def collect_ecs(key, secret, token, region, warnings) -> ECSData:
                         task_role_arns.append(task_role)
                 
                 except ClientError as e:
-                    print(f'ECS task definition check skipped for {task_def_arn}: {get_error_code(e)}')
+                    print(f'ECS task definition check skipped for 1 task definition: {get_error_code(e)}')
                 except Exception:
                     pass
 
@@ -2534,15 +2552,15 @@ def collect_ecs(key, secret, token, region, warnings) -> ECSData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'ECS scan skipped: insufficient permissions'
-            print(msg)
+            print('ECS scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'ECS scan skipped: {code}'
-            print(msg)
+            print(f'ECS scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'ECS scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'ECS scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return ECSData(
@@ -2592,9 +2610,9 @@ def collect_waf(key, secret, token, region, warnings) -> WAFData:
                     albs_without_waf.append(alb_arn)
                 elif code in ['AccessDenied', 'UnauthorizedOperation']:
                     # Permission error - skip this ALB
-                    print(f'WAF check skipped for {alb_arn}: {code}')
+                    print(f'WAF check skipped for 1 load balancer: {code}')
                 else:
-                    print(f'WAF check skipped for {alb_arn}: {code}')
+                    print(f'WAF check skipped for 1 load balancer: {code}')
             except Exception:
                 pass
 
@@ -2602,15 +2620,15 @@ def collect_waf(key, secret, token, region, warnings) -> WAFData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'WAF scan skipped: insufficient permissions'
-            print(msg)
+            print('WAF scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'WAF scan skipped: {code}'
-            print(msg)
+            print(f'WAF scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'WAF scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'WAF scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return WAFData(
@@ -2788,15 +2806,15 @@ def collect_api_gateway(key, secret, token, region, warnings) -> APIGatewayData:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'API Gateway scan skipped: insufficient permissions'
-            print(msg)
+            print('API Gateway scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'API Gateway scan skipped: {code}'
-            print(msg)
+            print(f'API Gateway scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'API Gateway scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'API Gateway scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return APIGatewayData(
@@ -2897,15 +2915,15 @@ def collect_elasticache(key, secret, token, region, warnings) -> ElastiCacheData
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'ElastiCache scan skipped: insufficient permissions'
-            print(msg)
+            print('ElastiCache scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'ElastiCache scan skipped: {code}'
-            print(msg)
+            print(f'ElastiCache scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'ElastiCache scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'ElastiCache scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return ElastiCacheData(
@@ -2940,7 +2958,7 @@ def collect_sqs(key, secret, token, region, warnings) -> SQSData:
             code = get_error_code(e)
             if code in ['AccessDenied', 'UnauthorizedOperation']:
                 msg = 'SQS scan skipped: insufficient permissions'
-                print(msg)
+                print('SQS scan skipped: insufficient permissions')
                 warnings.append(msg)
                 return SQSData()
             raise
@@ -2999,23 +3017,23 @@ def collect_sqs(key, secret, token, region, warnings) -> SQSData:
 
             except ClientError as e:
                 code = get_error_code(e)
-                print(f'SQS attributes check skipped for {url}: {code}')
+                print(f'SQS attributes check skipped for 1 queue: {code}')
             except Exception as e:
-                print(f'SQS attributes check skipped for {url}: {e}')
+                print(f'SQS attributes check skipped for 1 queue: {safe_exc(e)}')
 
     except ClientError as e:
         code = get_error_code(e)
         if code in ['AccessDenied', 'UnauthorizedOperation']:
             msg = 'SQS scan skipped: insufficient permissions'
-            print(msg)
+            print('SQS scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'SQS scan skipped: {code}'
-            print(msg)
+            print(f'SQS scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'SQS scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'SQS scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return SQSData(
@@ -3028,12 +3046,38 @@ def collect_sqs(key, secret, token, region, warnings) -> SQSData:
 
 
 # ── DYNAMODB COLLECTOR ────────────────────────────────────────────
+def _dynamodb_available_backup(ddb, table_name):
+    """Whether an AVAILABLE on-demand backup of the table exists (every ListBackups page is read).
+
+    A backup that is still CREATING or already DELETED restores nothing. ListBackups lists the
+    backups the table's owner made (BackupType defaults to USER); backups made through the
+    AWS Backup service are not listed by it and are not read here.
+    """
+    start = None
+    while True:
+        params = {'TableName': table_name, 'Limit': 100}
+        if start:
+            params['ExclusiveStartBackupArn'] = start
+        page = ddb.list_backups(**params)
+        if any(item.get('BackupStatus') == 'AVAILABLE' for item in page.get('BackupSummaries', [])):
+            return True
+        start = page.get('LastEvaluatedBackupArn')
+        if not start:
+            return False
+
+
 def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
+    """Tables with item count, PITR, an on-demand backup and deletion protection (read only).
+
+    Status dynamodb = ok | denied | error. A refused or failed read of one fact leaves that fact
+    None (unknown) and marks the status; it is never recorded as "no PITR", "no backup" or "empty".
+    """
     total_tables = 0
     tables_without_pitr = []
     tables_without_encryption = []
     tables_without_backup = []
     tables = []
+    status = 'error'
 
     try:
         ddb = boto3.client('dynamodb', aws_access_key_id=key,
@@ -3049,14 +3093,16 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                 table_names.extend(page.get('TableNames', []))
         except ClientError as e:
             code = get_error_code(e)
-            if code in ['AccessDenied', 'UnauthorizedOperation']:
+            if code in _DENIED_CODES:
                 msg = 'DynamoDB scan skipped: insufficient permissions'
-                print(msg)
+                print('DynamoDB scan skipped: insufficient permissions')
                 warnings.append(msg)
-                return DynamoDBData()
+                return DynamoDBData(collection_status={'dynamodb': 'denied'})
             raise
 
         total_tables = len(table_names)
+        denied = False
+        failed = False
 
         # Describe each table
         for table_name in table_names:
@@ -3065,8 +3111,9 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                 table = desc.get('Table', {})
 
                 table_arn = table.get('TableArn', '')
-                item_count = table.get('ItemCount', 0)
+                item_count = table.get('ItemCount')  # approximate (about every six hours); absent -> unknown
                 billing_mode = table.get('BillingModeSummary', {}).get('BillingMode', 'PROVISIONED')
+                deletion_protection = table.get('DeletionProtectionEnabled')
 
                 # Encryption — check SSEDescription
                 sse = table.get('SSEDescription', {})
@@ -3077,7 +3124,7 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                     encryption_type = 'DEFAULT'  # AWS-owned key (default)
 
                 # PITR check
-                pitr_enabled = False
+                pitr_enabled = None
                 try:
                     pitr_resp = ddb.describe_continuous_backups(TableName=table_name)
                     pitr_desc = pitr_resp.get('ContinuousBackupsDescription', {})
@@ -3085,28 +3132,33 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                     pitr_enabled = pitr_status == 'ENABLED'
                 except ClientError as e:
                     code = get_error_code(e)
-                    if code not in ['AccessDenied', 'UnauthorizedOperation']:
-                        print(f'DynamoDB PITR check skipped for {table_name}: {code}')
+                    if code in _DENIED_CODES:
+                        denied = True
+                    else:
+                        failed = True
+                        print(f'DynamoDB PITR check skipped for 1 table: {code}')
                 except Exception:
-                    pass
+                    failed = True
 
-                # Backup check — see if any on-demand backups exist
-                has_backup = False
+                # Backup check — is there an on-demand backup that can be restored from
+                has_backup = None
                 try:
-                    backups = ddb.list_backups(TableName=table_name, Limit=1)
-                    has_backup = len(backups.get('BackupSummaries', [])) > 0
+                    has_backup = _dynamodb_available_backup(ddb, table_name)
                 except ClientError as e:
                     code = get_error_code(e)
-                    if code not in ['AccessDenied', 'UnauthorizedOperation']:
-                        print(f'DynamoDB backup check skipped for {table_name}: {code}')
+                    if code in _DENIED_CODES:
+                        denied = True
+                    else:
+                        failed = True
+                        print(f'DynamoDB backup check skipped for 1 table: {code}')
                 except Exception:
-                    pass
+                    failed = True
 
-                if not pitr_enabled:
+                if pitr_enabled is not True:
                     tables_without_pitr.append(table_name)
                 if encryption_type == 'DEFAULT':
                     tables_without_encryption.append(table_name)
-                if not has_backup:
+                if has_backup is not True:
                     tables_without_backup.append(table_name)
 
                 tables.append(DynamoDBTable(
@@ -3117,27 +3169,41 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                     has_backup=has_backup,
                     billing_mode=billing_mode,
                     item_count=item_count,
+                    item_count_reported=item_count is not None,
+                    deletion_protection_enabled=deletion_protection,
                 ))
 
             except ClientError as e:
                 code = get_error_code(e)
-                print(f'DynamoDB describe skipped for {table_name}: {code}')
+                print(f'DynamoDB describe skipped for 1 table: {code}')
+                if code in _DENIED_CODES:
+                    denied = True
+                else:
+                    failed = True
             except Exception as e:
-                print(f'DynamoDB describe skipped for {table_name}: {e}')
+                failed = True
+                print(f'DynamoDB describe skipped for 1 table: {safe_exc(e)}')
+
+        if denied:
+            warnings.append('DynamoDB table details skipped: insufficient permissions')
+        if failed:
+            warnings.append('DynamoDB table details skipped: read error')
+        status = 'denied' if denied else 'error' if failed else 'ok'
 
     except ClientError as e:
         code = get_error_code(e)
-        if code in ['AccessDenied', 'UnauthorizedOperation']:
+        if code in _DENIED_CODES:
+            status = 'denied'
             msg = 'DynamoDB scan skipped: insufficient permissions'
-            print(msg)
+            print('DynamoDB scan skipped: insufficient permissions')
             warnings.append(msg)
         else:
             msg = f'DynamoDB scan skipped: {code}'
-            print(msg)
+            print(f'DynamoDB scan skipped: {code}')
             warnings.append(msg)
     except Exception as e:
         msg = f'DynamoDB scan skipped: unexpected error — {str(e)}'
-        print(msg)
+        print(f'DynamoDB scan skipped: unexpected error — {safe_exc(e)}')
         warnings.append(msg)
 
     return DynamoDBData(
@@ -3146,7 +3212,68 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
         tables_without_encryption=tables_without_encryption,
         tables_without_backup=tables_without_backup,
         tables=tables,
+        collection_status={'dynamodb': status},
     )
+
+
+# ── EVENTBRIDGE SCHEDULER COLLECTOR ───────────────────────────────
+_DENIED_CODES = ['AccessDenied', 'AccessDeniedException', 'UnauthorizedOperation']
+
+
+def collect_scheduler(key, secret, token, region, warnings) -> SchedulerData:
+    """Schedules with state, expression and target (read-only: ListSchedules + GetSchedule).
+
+    The Target.Input payload may hold secrets and is never stored, only whether one is set.
+    EventBridge Scheduler schedules cannot be tagged (only schedule groups can).
+    Status: ok, denied (a read was refused; what the list gave is kept), or error.
+    """
+    schedules = []
+    status = 'error'
+    try:
+        client = boto3.client('scheduler', aws_access_key_id=key,
+                              aws_secret_access_key=secret,
+                              aws_session_token=token,
+                              region_name=region, config=BOTO_CONFIG)
+        summaries = []
+        for page in client.get_paginator('list_schedules').paginate():
+            summaries.extend(page.get('Schedules', []))
+        denied = False
+        failed = False
+        for summary in summaries:
+            detail = None
+            try:
+                detail = client.get_schedule(Name=summary['Name'], GroupName=summary['GroupName'])
+            except ClientError as e:
+                if get_error_code(e) in _DENIED_CODES:
+                    denied = True
+                else:
+                    failed = True
+            except Exception as e:
+                failed = True
+                print(f'Scheduler get skipped for 1 schedule: {safe_exc(e)}')
+            # The summary has no expression, window or input; without GetSchedule those stay unknown.
+            schedules.append(SchedulerSchedule(**aws_schedule_fields(detail if detail is not None else summary)))
+        if denied:
+            warnings.append('Scheduler schedule details skipped: insufficient permissions')
+            print('Scheduler schedule details skipped: insufficient permissions')
+        if failed:
+            warnings.append('Scheduler schedule details skipped: read error')
+            print('Scheduler schedule details skipped: read error')
+        status = 'denied' if denied else 'error' if failed else 'ok'
+    except ClientError as e:
+        code = get_error_code(e)
+        if code in _DENIED_CODES:
+            status = 'denied'
+            warnings.append('Scheduler scan skipped: insufficient permissions')
+            print('Scheduler scan skipped: insufficient permissions')
+        else:
+            warnings.append(f'Scheduler scan skipped: {code}')
+            print(f'Scheduler scan skipped: {code}')
+    except Exception as e:
+        warnings.append(f'Scheduler scan skipped: unexpected error — {safe_exc(e)}')
+        print(f'Scheduler scan skipped: unexpected error — {safe_exc(e)}')
+
+    return SchedulerData(schedules=schedules, collection_status={'scheduler': status})
 
 
 ROLE_SESSION_NAME = 'EmfirgeSecurityScan'

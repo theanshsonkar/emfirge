@@ -2,7 +2,7 @@
   "name": "@emfirge/mcp",
   "version": "0.2.9",
   "mcpName": "io.github.theanshsonkar/emfirge",
-  "description": "The harness between AI agents and your cloud: give your agent a branch of your AWS, try changes, and get a diff and pass/warn/block verdict across security, dependency, cost and limits lenses. Read-only by design.",
+  "description": "The harness between AI agents and your cloud: give your agent a branch of your AWS, try changes, and see the diff and what they would do: six damage facts (data, exposure, money, availability, control, outside world), each saying what is known and what is unknown. Read-only by design.",
   "main": "dist/index.js",
   "type": "module",
   "bin": {
@@ -10,10 +10,10 @@
     "mcp": "./dist/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-guide.mjs",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
-    "test": "node --import tsx --test --test-timeout=20000 src/tokenize.test.ts src/client.test.ts src/tools/branches.test.ts src/tools/evidence.test.ts src/tools/plan-verdict.test.ts src/tools/branch-handback.test.ts src/tools/branch-handback-guidance.test.ts src/presigned.test.ts src/auth/auth.test.ts src/tokenize-resources.test.ts src/item3.test.ts",
+    "test": "node --import tsx --test --test-timeout=20000 src/tokenize.test.ts src/client.test.ts src/tools/branches.test.ts src/tools/check.test.ts src/tools/evidence.test.ts src/tools/context.test.ts src/tools/plan-verdict.test.ts src/tools/branch-handback.test.ts src/tools/branch-handback-guidance.test.ts src/presigned.test.ts src/auth/auth.test.ts src/tokenize-resources.test.ts src/item3.test.ts src/tokenize-perms.test.ts src/purge.test.ts src/tokenize-tags.test.ts src/tokenize-leaks.test.ts src/cli/args.test.ts src/cli/run.test.ts src/cli/guide.test.ts src/cli/exit-codes.test.ts src/cli/package-name.test.ts src/cli/manifest.test.ts",
     "install-cli": "node dist/index.js install",
     "uninstall-cli": "node dist/index.js uninstall",
     "prepublishOnly": "npm run build"

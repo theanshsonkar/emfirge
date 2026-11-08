@@ -14,6 +14,8 @@ class NodeSchema:
     category: str
     required: dict[str, dict[str, tuple[type, ...]]]
     optional: dict[str, dict[str, tuple[type, ...]]]
+    # Base keys whose before/after values a diff may report (never secrets or free text).
+    diff_values: tuple[str, ...] = ()
 
 
 KEY_TYPES: dict[str, tuple[type, ...]] = {
@@ -47,7 +49,8 @@ KEY_TYPES: dict[str, tuple[type, ...]] = {
     "encrypted": (bool,),
     "arn": (str,),
     "encryption_type": (str,),
-    "pitr_enabled": (bool,),
+    "pitr_enabled": (bool, type(None)),
+    "deletion_protection_enabled": (bool, type(None)),
     "billing_mode": (str,),
     "source": (str,),
     "name": (str,),
@@ -78,15 +81,35 @@ KEY_TYPES: dict[str, tuple[type, ...]] = {
     "service_name": (str, type(None)),
     "public_ip": (str,),
     "is_attached": (bool,),
+    "group_name": (str,),
+    "schedule_expression": (str, type(None)),
+    "schedule_expression_timezone": (str, type(None)),
+    "target_arn": (str, type(None)),
+    "target_role_arn": (str, type(None)),
+    "flexible_time_window_mode": (str, type(None)),
+    "flexible_time_window_minutes": (int, type(None)),
+    "start_date": (str, type(None)),
+    "end_date": (str, type(None)),
+    "action_after_completion": (str, type(None)),
+    "has_input": (bool, type(None)),
+    "unmodeled_settings": (list,),
+    "domain_name": (str, type(None)),
+    "aliases": (list,),
+    "enabled": (bool, type(None)),
+    "price_class": (str, type(None)),
+    "web_acl_id": (str, type(None)),
+    "origins": (list,),
+    "behaviors": (list,),
 }
 
 
-def _node(resource_type, category, required=(), optional=()):
+def _node(resource_type, category, required=(), optional=(), diff_values=()):
     required_keys = {key: KEY_TYPES[key] for key in required}
     optional_keys = {key: KEY_TYPES[key] for key in optional}
     return NodeSchema(resource_type, category,
                       {layer: (required_keys.copy() if layer == "base" else {}) for layer in LAYER_NAMES},
-                      {layer: (optional_keys.copy() if layer == "base" else {}) for layer in LAYER_NAMES})
+                      {layer: (optional_keys.copy() if layer == "base" else {}) for layer in LAYER_NAMES},
+                      diff_values=tuple(diff_values))
 
 
 NODE_SCHEMAS = {
@@ -99,7 +122,9 @@ NODE_SCHEMAS = {
     "s3_bucket": _node("s3_bucket", "storage", ("is_public", "has_cloudfront", "has_policy", "is_empty")),
     "ebs_volume": _node("ebs_volume", "storage", ("state", "size_gb", "volume_type", "availability_zone")),
     "rds_instance": _node("rds_instance", "database", ("publicly_accessible", "encrypted", "sg_ids", "subnet_id")),
-    "dynamodb_table": _node("dynamodb_table", "database", ("arn", "encryption_type", "pitr_enabled", "billing_mode")),
+    "dynamodb_table": _node("dynamodb_table", "database", ("arn", "encryption_type", "pitr_enabled", "billing_mode"),
+                            optional=("deletion_protection_enabled",),
+                            diff_values=("pitr_enabled", "deletion_protection_enabled")),
     "sqs_queue": _node("sqs_queue", "storage", ("arn", "encrypted", "is_public")),
     "secretsmanager_secret": _node("secretsmanager_secret", "storage", ("source",)),
     "security_group": _node("security_group", "network_boundary", ("name", "rules_count", "rules", "egress_rules", "attached_instances")),
@@ -107,7 +132,13 @@ NODE_SCHEMAS = {
     "vpc_subnet": _node("vpc_subnet", "network", ("vpc_id", "cidr", "resource_count")),
     "vpc": _node("vpc", "network", optional=("is_default", "subnet_count", "source", "collected")),
     "vpc_peering_connection": _node("vpc_peering_connection", "network", ("requester_vpc_id", "accepter_vpc_id", "status")),
-    "cloudfront_distribution": _node("cloudfront_distribution", "edge", ("origin_bucket",)),
+    # A collected distribution carries its origins and behaviors; the synthetic node of a snapshot
+    # without CloudFront data carries only origin_bucket.
+    "cloudfront_distribution": _node(
+        "cloudfront_distribution", "edge", (),
+        ("origin_bucket", "arn", "domain_name", "aliases", "enabled", "status", "price_class", "web_acl_id", "origins", "behaviors",
+         "unmodeled_settings"),
+        diff_values=("enabled", "aliases", "price_class", "web_acl_id", "origins", "behaviors", "unmodeled_settings")),
     "iam_role": _node("iam_role", "identity", ("arn", "trusted_services", "trust_allows_external", "trust_has_conditions", "has_privilege_escalation"), ("source", "has_admin", "policies", "privilege_escalation_paths")),
     "internet": _node("internet", "other", ("is_virtual",)),
     "route_table": _node("route_table", "network", ("routes", "is_main", "vpc_id")),
@@ -117,6 +148,14 @@ NODE_SCHEMAS = {
     "vpn_gateway": _node("vpn_gateway", "network_boundary", ("vpc_id",), ("id", "state")),
     "interface_endpoint": _node("interface_endpoint", "network_boundary", ("vpc_id",), ("id", "service_name")),
     "elastic_ip": _node("elastic_ip", "other", ("public_ip", "is_attached")),
+    "scheduler_schedule": _node(
+        "scheduler_schedule", "other",
+        ("name", "group_name", "state", "target_arn"),
+        ("arn", "schedule_expression", "schedule_expression_timezone", "target_role_arn", "flexible_time_window_mode",
+         "flexible_time_window_minutes", "start_date", "end_date", "action_after_completion", "has_input", "unmodeled_settings"),
+        diff_values=("state", "schedule_expression", "schedule_expression_timezone", "target_arn", "target_role_arn",
+                     "flexible_time_window_mode", "flexible_time_window_minutes", "start_date", "end_date",
+                     "action_after_completion", "has_input")),
 }
 
 # Relationship endpoint pairs are deliberately literal: this is the contract
@@ -124,7 +163,8 @@ NODE_SCHEMAS = {
 EDGE_SCHEMAS = {
     RelationshipType.uses_security_group: frozenset({("ec2_instance", "security_group"), ("rds_instance", "security_group"), ("lambda_function", "security_group"), ("elasticache_cluster", "security_group")} ),
     RelationshipType.in_subnet: frozenset({("ec2_instance", "vpc_subnet"), ("lambda_function", "vpc_subnet"), ("rds_instance", "vpc_subnet")} ),
-    RelationshipType.uses_iam_role: frozenset({("ec2_instance", "iam_role"), ("lambda_function", "iam_role")} ),
+    RelationshipType.uses_iam_role: frozenset({("ec2_instance", "iam_role"), ("lambda_function", "iam_role"), ("scheduler_schedule", "iam_role")} ),
+    RelationshipType.invokes: frozenset({("scheduler_schedule", "lambda_function")} ),
     RelationshipType.attached_to_instance: frozenset({("ebs_volume", "ec2_instance"), ("security_group", "ec2_instance"), ("security_group", "rds_instance")} ),
     RelationshipType.REACHES: frozenset({("internet", "security_group"), ("internet", "api_gateway")} ),
     RelationshipType.REACHES_VIA_SG: frozenset({("internet", "ec2_instance")} ),
@@ -152,6 +192,10 @@ EDGE_SCHEMAS = {
 # Explicit edge-attribute catalog. Types are observed in ALL_SNAPSHOTS and in
 # build_graph's ingress/internal/IAM emitters (egraph.py:780, 1008, 2166).
 EDGE_ATTR_TYPES: dict[RelationshipType, dict[str, tuple[type, ...]]] = {
+    # One edge per cache behavior that serves from the bucket; forwards_host None = not known.
+    RelationshipType.serves_from_bucket: {
+        "path_pattern": (str,), "oac": (bool,), "forwards_host": (bool, type(None)),
+    },
     RelationshipType.REACHES: {
         "ports": (list,), "reason": (str,), "confidence": (str,),
     },

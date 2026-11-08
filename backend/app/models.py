@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, PrivateAttr
-from typing import Dict, List, Optional, Literal, Union
+from typing import Any, Dict, List, Optional, Literal, Union
 import json
 
 # ── INPUT MODEL ───────────────────────────────────────────────────
@@ -27,7 +27,8 @@ class EC2Instance(BaseModel):
     sg_ids: List[str] = []
     subnet_id: Optional[str] = None
     state: str
-    imdsv2_required: bool = False
+    imdsv2_required: Optional[bool] = False  # None = unknown (e.g. metadata_options not known at plan time); no IMDS finding
+    user_data_has_secrets: Optional[bool] = Field(default=None, exclude_if=lambda value: value is None)  # raw user data is never stored; None = not known
     has_public_ip: Optional[bool] = None
     instance_profile_arn: Optional[str] = None
     detailed_monitoring: Optional[bool] = None  # None = not collected
@@ -77,6 +78,7 @@ class S3Bucket(BaseModel):
     ignore_public_acls: Optional[bool] = None
     block_public_policy: Optional[bool] = None
     restrict_public_buckets: Optional[bool] = None
+    logging_enabled: Optional[bool] = Field(default=None, exclude_if=lambda value: value is None)  # server access logging; None = not collected
     tags: Optional[Dict[str, str]] = None  # None = not collected
 
 class RDSInstance(BaseModel):
@@ -175,6 +177,128 @@ class NATGateway(BaseModel):
     tags: Optional[Dict[str, str]] = None  # None = not collected
 
 
+class SchedulerSchedule(BaseModel):
+    """One EventBridge Scheduler schedule. Identity is ``group_name/name``.
+
+    The Target.Input payload is never stored (it can hold secrets); ``has_input``
+    only says whether one is set. ``unmodeled_settings`` names other members that
+    are set but not modeled (Description, KmsKeyArn, Target.RetryPolicy, ...).
+    None means not collected / unknown. EventBridge Scheduler schedules have no tags.
+    """
+    name: str
+    group_name: str = "default"
+    arn: Optional[str] = None
+    state: Optional[Literal["ENABLED", "DISABLED"]] = None
+    schedule_expression: Optional[str] = None
+    schedule_expression_timezone: Optional[str] = None
+    flexible_time_window_mode: Optional[Literal["OFF", "FLEXIBLE"]] = None
+    flexible_time_window_minutes: Optional[int] = None
+    target_arn: Optional[str] = None
+    target_role_arn: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    action_after_completion: Optional[Literal["NONE", "DELETE"]] = None
+    has_input: Optional[bool] = None
+    unmodeled_settings: List[str] = Field(default_factory=list)
+
+
+def _says_something(value: Any) -> bool:
+    """True when a configuration member says something: AWS fills in empty structures (Quantity 0, Enabled false) everywhere."""
+    if isinstance(value, dict):
+        return any(_says_something(v) for k, v in value.items() if k != "Quantity") if value else False
+    if isinstance(value, list):
+        return any(_says_something(v) for v in value)
+    return value not in (None, "", False, 0)
+
+
+class CloudFrontOrigin(BaseModel):
+    """One origin of a CloudFront distribution (botocore ``Origin``).
+
+    ``origin_type`` is ``s3`` for an S3 bucket origin (S3OriginConfig), ``custom`` for a custom or S3 website
+    origin (CustomOriginConfig) and ``other`` for anything else (VPC origin, ...). ``extra`` carries the members
+    that are not modeled (OriginPath, timeouts, OriginShield, S3OriginConfig, ...) as AWS reports them, so a
+    full-replace hand-back is exact.
+    """
+    id: str
+    domain_name: str = ""
+    origin_type: Literal["s3", "custom", "other"] = "other"
+    origin_access_control_id: Optional[str] = None
+    s3_bucket: Optional[str] = None
+    extra: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CloudFrontCacheBehavior(BaseModel):
+    """One cache behavior (botocore ``CacheBehavior``; the default behavior has path_pattern ``*``).
+
+    ``uses_legacy_forwarded_values`` is true when the behavior is configured with ForwardedValues instead of
+    a cache policy; the raw ForwardedValues stay in ``extra``.
+    """
+    path_pattern: str
+    target_origin_id: str = ""
+    cache_policy_id: Optional[str] = None
+    origin_request_policy_id: Optional[str] = None
+    viewer_protocol_policy: Optional[Literal["allow-all", "https-only", "redirect-to-https"]] = None
+    allowed_methods: List[str] = Field(default_factory=list)
+    cached_methods: List[str] = Field(default_factory=list)
+    uses_legacy_forwarded_values: bool = False
+    extra: Dict[str, Any] = Field(default_factory=dict)
+
+
+class CloudFrontDistribution(BaseModel):
+    """One CloudFront distribution (botocore ``DistributionConfig``).
+
+    ``etag`` is the concurrency token of the collected configuration (the IfMatch of UpdateDistribution); None
+    means the full configuration was not read. ``extra`` holds the DistributionConfig members that are not
+    modeled; ``withheld_settings`` names settings stored without their values (origin custom header values can
+    be secrets), which make an exact hand-back impossible. ``tags`` None means not collected.
+    """
+    id: str
+    arn: Optional[str] = None
+    domain_name: Optional[str] = None
+    aliases: List[str] = Field(default_factory=list)
+    enabled: Optional[bool] = None
+    status: Optional[str] = None
+    price_class: Optional[str] = None
+    default_cache_behavior: Optional[CloudFrontCacheBehavior] = None
+    cache_behaviors: List[CloudFrontCacheBehavior] = Field(default_factory=list)
+    origins: List[CloudFrontOrigin] = Field(default_factory=list)
+    web_acl_id: Optional[str] = None
+    tags: Optional[Dict[str, str]] = None
+    etag: Optional[str] = None
+    extra: Dict[str, Any] = Field(default_factory=dict)
+    withheld_settings: List[str] = Field(default_factory=list)
+
+    def unmodeled_names(self) -> List[str]:
+        """Names of the settings carried verbatim (not interpreted) that say something, plus withheld ones."""
+        names = {f"DistributionConfig.{k}" for k, v in self.extra.items() if _says_something(v)}
+        for label, items in (("DefaultCacheBehavior", [self.default_cache_behavior] if self.default_cache_behavior else []),
+                             ("CacheBehaviors", self.cache_behaviors), ("Origins", self.origins)):
+            names |= {f"{label}.{k}" for item in items for k, v in item.extra.items() if _says_something(v)}
+        return sorted(names | set(self.withheld_settings))
+
+
+class CloudFrontPolicy(BaseModel):
+    """A CloudFront cache policy or origin request policy, reduced to its header rule.
+
+    ``forwards_host`` is whether the viewer Host header reaches the origin under this policy: True / False when
+    the header rule decides it, None when it cannot be told.
+    """
+    id: str
+    name: Optional[str] = None
+    type: Literal["managed", "custom"] = "custom"
+    headers_behavior: Optional[str] = None
+    headers: List[str] = Field(default_factory=list)
+    forwards_host: Optional[bool] = None
+
+
+class CloudFrontOriginAccessControl(BaseModel):
+    id: str
+    name: Optional[str] = None
+    origin_type: Optional[str] = None
+    signing_behavior: Optional[str] = None
+    signing_protocol: Optional[str] = None
+
+
 class VPCPeeringConnection(BaseModel):
     id: str
     requester_vpc_id: str
@@ -244,10 +368,6 @@ class RDSData(BaseModel):
     rds_snapshots: List[RDSSnapshot] = []
     collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
 
-class IAMUser(BaseModel):
-    username: str
-    has_console_access: Optional[bool] = None
-
 class AccessStatement(BaseModel):
     """A normalized IAM identity-policy access statement."""
     effect: str
@@ -264,6 +384,16 @@ class PolicyDocumentRecord(BaseModel):
     kind: Literal['inline', 'managed']
     arn: Optional[str] = None
     statements: List[AccessStatement] = Field(default_factory=list)
+
+
+class IAMUser(BaseModel):
+    username: str
+    has_console_access: Optional[bool] = None
+    # None = not collected (the collector does not read user policies); a list is the complete
+    # normalized statement view and policy_documents, when present, is its breakdown.
+    access_statements: Optional[List[AccessStatement]] = Field(default=None, exclude_if=lambda value: value is None)
+    policy_documents: Optional[List[PolicyDocumentRecord]] = Field(default=None, exclude_if=lambda value: value is None)
+    has_access_keys: Optional[bool] = Field(default=None, exclude_if=lambda value: value is None)  # None = not collected
 
 
 def merge_policy_statements(records: List[PolicyDocumentRecord]) -> List[AccessStatement]:
@@ -344,6 +474,42 @@ class LambdaData(BaseModel):
     functions_with_no_timeout: List[str] = []    # function names at default 3s or max 900s timeout
     # Relationship tracking
     functions: List[LambdaFunction] = []
+
+class CloudFrontData(BaseModel):
+    distributions: List[CloudFrontDistribution] = Field(default_factory=list)
+    cache_policies: List[CloudFrontPolicy] = Field(default_factory=list)
+    origin_request_policies: List[CloudFrontPolicy] = Field(default_factory=list)
+    origin_access_controls: List[CloudFrontOriginAccessControl] = Field(default_factory=list)
+    collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
+
+    def behavior_forwards_host(self, behavior: CloudFrontCacheBehavior) -> Optional[bool]:
+        """Whether the viewer Host header reaches the origin for a cache behavior.
+
+        True when its cache policy, its origin request policy or its legacy forwarded headers pass Host on;
+        False only when every rule that applies is known and none does; None when a rule that applies is not
+        known (the policy was not collected, or its header rule is not one this model reads).
+        """
+        verdicts: List[Optional[bool]] = []
+        if behavior.cache_policy_id:
+            found = next((p for p in self.cache_policies if p.id == behavior.cache_policy_id), None)
+            verdicts.append(found.forwards_host if found else None)
+        elif behavior.uses_legacy_forwarded_values:
+            headers = (((behavior.extra.get("ForwardedValues") or {}).get("Headers") or {}).get("Items")) or []
+            verdicts.append(any(str(h).lower() in {"host", "*"} for h in headers))
+        else:
+            verdicts.append(None)
+        if behavior.origin_request_policy_id:
+            found = next((p for p in self.origin_request_policies if p.id == behavior.origin_request_policy_id), None)
+            verdicts.append(found.forwards_host if found else None)
+        if any(v is True for v in verdicts):
+            return True
+        return None if any(v is None for v in verdicts) else False
+
+
+class SchedulerData(BaseModel):
+    schedules: List[SchedulerSchedule] = Field(default_factory=list)
+    collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
+
 
 # ── NEW: SECRETS MANAGER MODEL ────────────────────────────────────
 class SecretsManagerData(BaseModel):
@@ -463,10 +629,15 @@ class DynamoDBTable(BaseModel):
     name: str
     arn: str
     encryption_type: str = "DEFAULT"  # "DEFAULT" | "KMS" | "NONE"
-    pitr_enabled: bool = False        # Point-in-time recovery
-    has_backup: bool = False          # On-demand backup exists
+    # None = the provider read was refused or failed: unknown, never "off".
+    pitr_enabled: Optional[bool] = False      # Point-in-time recovery (DescribeContinuousBackups)
+    has_backup: Optional[bool] = False        # An AVAILABLE on-demand backup exists (ListBackups)
     billing_mode: str = "PROVISIONED" # "PROVISIONED" | "PAY_PER_REQUEST"
-    item_count: int = 0
+    # DescribeTable ItemCount, which AWS updates about every six hours; None = not reported.
+    item_count: Optional[int] = None
+    # True only when the scan got ItemCount from DescribeTable. Old scans stored a missing count as 0, so for them 0 proves nothing.
+    item_count_reported: bool = False
+    deletion_protection_enabled: Optional[bool] = None  # DescribeTable DeletionProtectionEnabled; None = not reported
 
 class DynamoDBData(BaseModel):
     total_tables: int = 0
@@ -474,6 +645,7 @@ class DynamoDBData(BaseModel):
     tables_without_encryption: List[str] = []   # Tables using only default encryption
     tables_without_backup: List[str] = []       # No backup plan
     tables: List[DynamoDBTable] = []
+    collection_status: Dict[str, str] = Field(default_factory=dict, exclude=True)
 
 # Master infrastructure object — holds all collected data + warnings from skipped services
 class AWSInfrastructure(BaseModel):
@@ -500,6 +672,8 @@ class AWSInfrastructure(BaseModel):
     elasticache: ElastiCacheData = ElastiCacheData()     # NEW
     sqs: SQSData = SQSData()                             # NEW
     dynamodb: DynamoDBData = DynamoDBData()               # NEW
+    scheduler: SchedulerData = SchedulerData()
+    cloudfront: CloudFrontData = CloudFrontData()
     region: str = ''
     collected_at: Optional[str] = Field(default=None, exclude_if=lambda value: value is None)
     warnings: List[str] = []          # services skipped due to insufficient permissions

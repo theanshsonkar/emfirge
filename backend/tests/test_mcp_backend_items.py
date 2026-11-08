@@ -73,9 +73,7 @@ def test_branch_cap_and_discarded_status(client, monkeypatch):
     assert "Discard branches" in third.json()["detail"]
     assert client.post(f"/branches/{first}/discard").status_code == 200
     for endpoint in ("verdict", "diff"):
-        response = client.get(f"/branches/{first}/{endpoint}")
-        assert response.status_code == 200
-        assert response.json()["status"] == "discarded"
+        assert client.get(f"/branches/{first}/{endpoint}").status_code == 404
     assert client.get(f"/branches/{second}/verdict").json()["status"] == "open"
 
 def test_rate_limit_headers(client, monkeypatch):

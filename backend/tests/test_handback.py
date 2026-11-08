@@ -50,10 +50,10 @@ def test_handback_round_trip_is_original_input(posted_plan):
     response = client.get(f"/branches/{branch_id}/plans/{plan_id}/handback")
     assert response.status_code == 200, response.text
     payload = response.json()
-    assert payload["plan_text"].encode() == raw
-    assert hashlib.sha256(payload["plan_text"].encode()).hexdigest() == payload["input_sha256"]
+    assert "plan_text" not in payload
+    assert hashlib.sha256(raw).hexdigest() == payload["input_sha256"]
     verified = client.post("/handback/verify", json={
-        "plan_id": plan_id, "verdict_id": payload["verdict_id"], "plan_text": payload["plan_text"], "base_analysis_id": payload["base_analysis_id"], "branch_revision": payload["branch_revision"],
+        "plan_id": plan_id, "verdict_id": payload["verdict_id"], "plan_text": raw.decode(), "base_analysis_id": payload["base_analysis_id"], "branch_revision": payload["branch_revision"],
     })
     assert verified.status_code == 200
     assert verified.json() == {"ok": True}
@@ -62,7 +62,8 @@ def test_handback_round_trip_is_original_input(posted_plan):
 def test_handback_conflicts_never_echo_input(posted_plan):
     client, branch_id, raw, plan_id = posted_plan
     handback = client.get(f"/branches/{branch_id}/plans/{plan_id}/handback").json()
-    changed = handback["plan_text"][:-1] + ("0" if handback["plan_text"][-1] != "0" else "1")
+    original = raw.decode()
+    changed = original[:-1] + ("0" if original[-1] != "0" else "1")
     response = client.post("/handback/verify", json={
         "plan_id": plan_id, "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"], "verdict_id": handback["verdict_id"], "plan_text": changed,
     })
@@ -71,7 +72,7 @@ def test_handback_conflicts_never_echo_input(posted_plan):
     assert raw.decode() not in response.text
 
     response = client.post("/handback/verify", json={
-        "plan_id": "unknown", "verdict_id": "x", "plan_text": handback["plan_text"], "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"],
+        "plan_id": "unknown", "verdict_id": "x", "plan_text": raw.decode(), "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"],
     })
     assert response.status_code == 409
     assert response.json() == {"ok": False, "reason_code": "unknown_plan"}
@@ -93,10 +94,10 @@ def test_handback_hash_law(posted_plan, offset):
 
 
 def test_handback_verdict_and_revision_binding(posted_plan):
-    client, branch_id, _raw, plan_id = posted_plan
+    client, branch_id, raw, plan_id = posted_plan
     handback = client.get(f"/branches/{branch_id}/plans/{plan_id}/handback").json()
     tampered = client.post("/handback/verify", json={
-        "plan_id": plan_id, "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"], "verdict_id": "0" * 64, "plan_text": handback["plan_text"],
+        "plan_id": plan_id, "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"], "verdict_id": "0" * 64, "plan_text": raw.decode(),
     })
     assert tampered.status_code == 409
     assert tampered.json() == {"ok": False, "reason_code": "verdict_changed"}
@@ -107,7 +108,7 @@ def test_handback_verdict_and_revision_binding(posted_plan):
     })
     assert changed.status_code == 200, changed.text
     stale = client.post("/handback/verify", json={
-        "plan_id": plan_id, "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"], "verdict_id": handback["verdict_id"], "plan_text": handback["plan_text"],
+        "plan_id": plan_id, "base_analysis_id": handback["base_analysis_id"], "branch_revision": handback["branch_revision"], "verdict_id": handback["verdict_id"], "plan_text": raw.decode(),
     })
     assert stale.status_code == 409
     assert stale.json() == {"ok": False, "reason_code": "branch_revision_changed"}

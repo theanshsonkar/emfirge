@@ -271,11 +271,26 @@ def test_capability_schema_matches_supported_and_executable_mutations(empty_infr
         if resource_type == "iam_role":
             assert operations == {"add", "modify", "delete"}
             continue
-        if resource_type in {"iam_user", "nat_gateway"}:
+        if resource_type == "iam_user":
+            assert operations == {"add", "modify"}
+            continue
+        if resource_type in {"iam_instance_profile", "nat_gateway"}:
             assert operations == {"add"}
             continue
         if resource_type == "rds_snapshot":
             assert operations == {"add", "delete"}
+            continue
+        if resource_type == "dynamodb_table":
+            # identified by table name; exercised in tests/laws/test_dynamodb_table_laws.py
+            assert operations == {"modify", "delete"}
+            continue
+        if resource_type == "scheduler_schedule":
+            # identified by <group>/<name>; exercised in tests/laws/test_scheduler_schedule_laws.py
+            assert operations == {"add", "modify", "delete"}
+            continue
+        if resource_type == "cloudfront_distribution":
+            # modify only (a distribution is not added or deleted); exercised in tests/laws/test_cloudfront_laws.py
+            assert operations == {"modify"}
             continue
         resource_id, identity_field, add_fields = ids[resource_type]
         for operation in SUPPORTED_OPERATIONS:
