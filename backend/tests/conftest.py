@@ -370,3 +370,14 @@ def _reset_scanner_worker_backoff():
     scanners._reset_worker_backoff()
     yield
     scanners._reset_worker_backoff()
+
+
+@pytest.fixture(autouse=True)
+def _reset_branch_read_caches():
+    """L92 caches parsed snapshots and visibility in-process; each test starts clean."""
+    from app import branches, main
+    branches._clear_branch_caches()
+    main._clear_visibility_cache()
+    yield
+    branches._clear_branch_caches()
+    main._clear_visibility_cache()

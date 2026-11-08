@@ -12,6 +12,8 @@ import time
 import uuid
 import secrets
 import json
+from types import SimpleNamespace
+import threading
 import re
 import subprocess
 import tempfile
@@ -220,10 +222,37 @@ def _record_branch_owner(branch_id: str, caller: Caller, db) -> None:
     db.commit()
 
 
+_VISIBILITY_CACHE: dict[tuple, tuple[float, bool]] = {}
+_VISIBILITY_TTL_S = 300.0
+_VISIBILITY_LOCK = threading.Lock()
+
+
+def _clear_visibility_cache() -> None:
+    with _VISIBILITY_LOCK:
+        _VISIBILITY_CACHE.clear()
+
+
 def _branch_is_visible(branch_id: str, caller: Caller, db) -> bool:
+    """L92c: remembered per caller for a short time; a branch's owner never changes."""
+    key = (branch_id, getattr(caller, 'project_id', None), getattr(caller, 'mode', None),
+           tuple(sorted(getattr(caller, 'account_ids', None) or ())))
+    now = time.monotonic()
+    with _VISIBILITY_LOCK:
+        hit = _VISIBILITY_CACHE.get(key)
+    if hit is not None and now - hit[0] < _VISIBILITY_TTL_S:
+        return hit[1]
+    visible = _branch_is_visible_uncached(branch_id, caller, db)
+    with _VISIBILITY_LOCK:
+        if len(_VISIBILITY_CACHE) > 4096:
+            _VISIBILITY_CACHE.clear()
+        _VISIBILITY_CACHE[key] = (now, visible)
+    return visible
+
+
+def _branch_is_visible_uncached(branch_id: str, caller: Caller, db) -> bool:
     """Branches inherit ownership from their base analysis; ownerless branches are hidden hosted."""
     try:
-        branch = branches.get_branch(branch_id)
+        branch = SimpleNamespace(**branches.get_branch_meta(branch_id))  # metadata only, never the snapshot
     except branches.BranchNotFoundError:
         return False
     owner = db.query(BranchOwner).filter(BranchOwner.branch_id == branch_id).first()
@@ -1693,8 +1722,8 @@ def create_branch_endpoint(payload: dict, request: Request, caller: Caller = Dep
 @app.get('/branches', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
 def list_branches_endpoint(request: Request, base_analysis_id: Optional[str] = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     _check_branch_rate_limit(_rate_key(request, caller))
-    return [_branch_summary(branch) for branch in branches.list_branches(base_analysis_id)
-            if _branch_is_visible(branch.branch_id, caller, db)]
+    return [summary for summary in branches.list_branch_summaries(base_analysis_id)
+            if _branch_is_visible(summary['branch_id'], caller, db)]
 
 
 @app.get('/branches/field-catalog', dependencies=[Depends(require_api_key), Depends(branch_tenant_guard)])
@@ -2253,9 +2282,10 @@ def branch_diff_endpoint(branch_id: str, request: Request, caller: Caller = Depe
     _check_branch_rate_limit(_rate_key(request, caller))
     try:
         diff = branches.get_branch_diff(branch_id)
+        status = branches.get_branch(branch_id).status  # cheap: the base snapshot is cached (L92a)
         if isinstance(diff, dict):
-            return {**diff, "status": branches.get_branch(branch_id).status}
-        return diff.model_copy(update={"status": branches.get_branch(branch_id).status})
+            return {**diff, "status": status}
+        return diff.model_copy(update={"status": status})
     except branches.BranchNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
