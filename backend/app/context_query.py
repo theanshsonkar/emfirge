@@ -309,7 +309,7 @@ _FIXED_UNKNOWN: dict[str, tuple[tuple[str, str], ...]] = {
                    ("dns_records", "DNS records that point at this resource are not collected"),
                    ("other_accounts", "other accounts that use this resource are not visible")),
     "reachable": (("observed_traffic", "observed traffic, host firewalls and application-level controls are not collected"),),
-    "access": (("other_policy_layers", "permission boundaries, organization policies and resource policies are not collected, so effective access can differ"),),
+    "access": (("other_policy_layers", "this is the identity-policy view only: permission boundaries, service control policies, resource policies and session policies are not collected, so other layers may further allow or deny these actions"),),
     "data": (("data_contents", "what a data store holds is not read; recovery is judged from snapshots and bucket emptiness only"),),
     "cost": (("usage_charges", "only provisioned list-price charges are estimated; usage-based charges, discounts and taxes are not included"),),
     "live": (("recent_use", "a scan snapshot holds last-used only where the provider reports it; other resources have no usage evidence unless evidence rows were stored for a branch"),),

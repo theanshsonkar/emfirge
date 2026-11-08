@@ -20,8 +20,13 @@ from app.permission_facts import (
 )
 
 NOTE_ACTION_CATALOG = ("action_catalog", ACTION_CATALOG_GAP)
-NOTE_OTHER_LAYERS = ("other_policy_layers", "permission boundaries, organization policies, resource policies and "
-                                             "session policies are not collected, so effective permissions can differ")
+NOTE_OTHER_LAYERS = ("other_policy_layers", "this is the identity-policy view only: permission boundaries, service control "
+                                             "policies, resource policies and session policies are not collected, so "
+                                             "other layers may further allow or deny these actions")
+NOTE_NEVER_GRANTED = ("permission_never_granted", "Emfirge cannot see which actions the application code calls, so it "
+                                                  "cannot tell whether a permission the code needs was never granted to "
+                                                  "this role; compare the code's calls against the allowed actions in "
+                                                  "the context question 'access' for this role")
 NOTE_TARGET_GRANULARITY = ("permission_targets", "actions are expanded only for resources the graph links to the role "
                                                  "(buckets, databases, tables, queues, secrets, functions); access "
                                                  "below the resource level (objects, indexes) is not distinguished")

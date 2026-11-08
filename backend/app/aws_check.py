@@ -22,7 +22,7 @@ from typing import Any, Mapping, Optional, Sequence
 from app.aws_context import answer_for_infra, node_id_for, role_use_lines, safe_warning
 from app.aws_outside_world import SCHEDULER_ENTRY, classify_action
 from app.aws_permissions import (
-    NOTE_ACTION_CATALOG, NOTE_APP_CODE, NOTE_MANAGED_NOT_RECORDED, compute_users, role_node_id, role_node_ids,
+    NOTE_ACTION_CATALOG, NOTE_APP_CODE, NOTE_MANAGED_NOT_RECORDED, NOTE_NEVER_GRANTED, NOTE_OTHER_LAYERS, compute_users, role_node_id, role_node_ids,
     role_permission_diff, statements_differ,
 )
 from app.cloudfront_check import with_cloudfront
@@ -82,8 +82,28 @@ def _role_lines(base: AWSInfrastructure, branch: AWSInfrastructure, base_graph: 
     return control, exposure
 
 
-def _permission_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, base_graph: Graph, branch_graph: Graph
-                       ) -> tuple[list[PermissionChange], list[tuple[str, str, Optional[str]]], list[tuple[str, str]]]:
+def _touched_role_ids(base: AWSInfrastructure, branch: AWSInfrastructure, base_graph: Graph, branch_graph: Graph,
+                      changed_ids: Sequence[str]) -> list[str]:
+    """Graph ids of the visible roles a branch touches: a changed role (or its policy), or a changed compute
+    resource that uses a role the graph can see. Sorted, one entry per role."""
+    changed = set(changed_ids)
+    found: set[str] = set()
+    old = {r.role_arn: r for r in base.iam.role_policies}
+    new = {r.role_arn: r for r in branch.iam.role_policies}
+    for graph, roles, ids in ((base_graph, old, role_node_ids(base_graph)), (branch_graph, new, role_node_ids(branch_graph))):
+        visible = {role_node_id(r, ids) for r in roles.values()}
+        found |= {rid for rid in changed if rid in visible}
+        for edge in graph.edges:
+            if edge.relationship.value == "uses_iam_role" and edge.src in changed and edge.dst in visible:
+                found.add(edge.dst)
+    for arn in set(old) & set(new):
+        if old[arn].model_dump() != new[arn].model_dump():
+            found.add(role_node_id(new[arn], role_node_ids(branch_graph)))
+    return sorted(found)
+
+
+def _permission_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, base_graph: Graph, branch_graph: Graph,
+                       changed_ids: Sequence[str] = ()) -> tuple[list[PermissionChange], list[tuple[str, str, Optional[str]]], list[tuple[str, str]]]:
     """Action-level changes of roles present on both sides whose identity-policy statements differ.
 
     Returns (facts, unknown notes, checked notes). Which actions the application code calls is unknown for every
@@ -114,6 +134,10 @@ def _permission_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, base_
             doubts.add((*NOTE_MANAGED_NOT_RECORDED, rid))
     if compared:
         doubts.add((*NOTE_ACTION_CATALOG, None))
+    for rid in sorted({c.resource_id for c in changes if c.change == "permission_removed"}):
+        doubts.add((*NOTE_OTHER_LAYERS, rid))
+    for rid in _touched_role_ids(base, branch, base_graph, branch_graph, changed_ids):
+        doubts.add((*NOTE_NEVER_GRANTED, rid))
     checked = ([("permissions", f"{compared} roles whose identity policy statements changed were compared action by action "
                                 "for the resources the graph links them to")] if compared else [])
     return changes, sorted(doubts, key=lambda d: (d[0], d[1], d[2] or "")), checked
@@ -241,7 +265,10 @@ def build_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, verdict: Co
     # one line per base role, in role order: keyed by graph id and by ARN (a delete names the ARN)
     for role, line in zip(base.iam.role_policies, role_use_lines(base, base_graph)):
         uses[line.resource_id] = uses[role.role_arn] = line.used
-    permission_changes, permission_doubts, permission_checked = _permission_inputs(base, branch, base_graph, branch_graph)
+    changed_ids = sorted({str(i["id"]) for items in (verdict.resources_added, verdict.resources_removed, verdict.resources_modified)
+                          for i in items or [] if i.get("id")})
+    permission_changes, permission_doubts, permission_checked = _permission_inputs(
+        base, branch, base_graph, branch_graph, changed_ids)
     schedule_changes, schedule_doubts, schedules_compared = _schedule_inputs(base, branch, base_graph, branch_graph)
     baseline = (answer_for_infra("baseline", base, analysis_id=base_analysis_id)
                 if is_unchanged(verdict, gaps) else None)

@@ -13,8 +13,10 @@ L79b  re-enabled schedule: aws-cli update-schedule without --state (AWS default 
       -> outside_world fact schedule_enabled + target_effects unknown
 L79c  Lambda quota request: aws-api servicequotas.RequestServiceQuotaIncrease
       -> outside_world fact with the provider's source_url
-L79d  missing dynamodb:DeleteItem: aws-api iam.PutRolePolicy -> availability fact permission_removed
-      naming the lambdas, and app_code_actions unknown
+L79d  missing dynamodb:DeleteItem, the REAL incident: the role was NEVER granted it (base and branch). Emfirge cannot
+      see app code, so there is no fact; the honest answer is no permission_removed fact plus the
+      permission_never_granted unknown pointing at context `access`. (The separate granted-then-removed case, where
+      a fact IS possible, is a different case and is tested as such.)
 L79e  harmless change (tag on the bucket): no data / exposure / availability / outside_world fact
 L79f  zero-change check: baseline present
 L79g  /context: inventory, dependents of the bucket include the distribution, access shows DeleteItem
@@ -284,7 +286,31 @@ def test_L79c_cli_and_api_give_identical_quota_facts_apart_from_the_plan_address
 
 # ── L79d: the missing dynamodb:DeleteItem ──────────────────────────
 
-def test_L79d_removing_delete_item_is_an_availability_fact_naming_the_lambda(rig):
+def _without_delete_item(infra):
+    from .test_L84_never_granted_laws import never_granted_infra
+    return never_granted_infra(infra)
+
+
+def test_L79d_never_granted_delete_item_is_no_fact_but_a_never_granted_unknown(rig, monkeypatch):
+    """The real incident: DeleteItem was never granted, in base or branch. Not caught as a fact; stated as unknown."""
+    stripped = _without_delete_item(rig.infra)
+    monkeypatch.setattr(main, "get_infrastructure_for_analysis", lambda _id: copy.deepcopy(stripped))
+    branch = rig.branch()
+    plan = rig.api(branch, put_role_policy_call("publisher", ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Scan"]))
+    assert plan["unmodeled"] == [] and plan["unknown_fields"] == []
+    body = rig.check(branch)
+    assert facts_of(body, "availability", change="permission_removed") == []
+    role = f"iam-role-{ROLES['publisher']}"
+    notes = unknown_of(body, "availability", "permission_never_granted")
+    assert [n["resource_id"] for n in notes] == [role]
+    assert "cannot see which actions the application code calls" in notes[0]["reason"] and "'access'" in notes[0]["reason"]
+    # the context answer is where the agent compares: DeleteItem is not among the allowed actions
+    access = {f["resource_id"]: f for f in rig.context(branch, "access")["facts"]}[role]
+    assert "dynamodb:DeleteItem" not in {p["action"] for p in access["permissions"]}
+
+
+def test_L79d_a_DIFFERENT_case_granted_then_removed_delete_item_is_a_fact_naming_the_lambda(rig):
+    """Not the real incident: the base HAD dynamodb:DeleteItem and the branch removes it, so a fact is possible."""
     branch = rig.branch()
     plan = rig.api(branch, put_role_policy_call("publisher", ["dynamodb:GetItem", "dynamodb:PutItem"]))
     assert plan["unmodeled"] == [] and plan["unknown_fields"] == []
