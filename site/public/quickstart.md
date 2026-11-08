@@ -35,7 +35,26 @@ The prompt points your agent to the full reference at [/cli.md](https://emfirge.
 
 Your agent runs `emfirge login`. That opens your browser to a sign-in page served on your own machine, where you choose GitHub or Google. If the browser does not open, your agent shows you the address to open. You have 5 minutes. The session is kept in `~/.emfirge/credentials.json` on your machine, so your agent does not need you again unless the sign-in expires.
 
-> The sign-in page lives on the machine where the command runs, so your browser and your agent must be on the same machine. If your agent runs in a remote sandbox, you cannot reach it.
+> The sign-in page lives on the machine where the command runs, so your browser and your agent must be on the same machine. If your agent runs somewhere you cannot open a browser for it, such as a cloud session or CI, use an API key (below).
+
+### If your agent runs in the cloud or CI
+
+A cloud agent session or a CI job cannot finish `emfirge login`. Give it an API key for your project instead. You make the key once, on your own computer, which has a browser:
+
+Terminal, on your own computer:
+
+```
+npx emfirge login                   # approve the sign-in in your browser
+npx emfirge key create --name ci    # prints a key that starts with emf_, once
+```
+
+- Copy the key now. It is shown once and cannot be shown again.
+- Set it as `EMFIRGE_API_KEY` in the secret settings of the place your agent runs. Never paste it into a chat or commit it. Run `key create` in your own terminal, so the key does not pass through a chat.
+- Your agent then runs `npx -y emfirge ...` with no `login`: where `EMFIRGE_API_KEY` is set, emfirge uses it and skips the browser.
+- You still do step 3 yourself: create the read-only role in your AWS console and give your agent the role ARN and region. A key does not create it.
+- `npx emfirge key list` shows your keys (never the key itself). `npx emfirge key revoke KEY_ID` stops one at once. A project can hold 10 active keys.
+
+> A key works for your whole emfirge project, the same as your sign-in, except that it cannot make more keys: `key create` works only after a browser sign-in. Treat a key like a password.
 
 Emfirge never asks for your AWS access keys. The only thing it holds that can reach your account is the role in step 3.
 
@@ -144,7 +163,7 @@ emfirge try BRANCH_ID --aws-cli "aws ec2 authorize-security-group-ingress --grou
 emfirge check BRANCH_ID --human
 ```
 
-`npm install -g emfirge` puts `emfirge` on your PATH. In CI, where no browser can open, set `EMFIRGE_API_KEY` instead of running `login`. Every verb, flag and exit code is in the [CLI reference](https://emfirge.cloud/cli.md).
+`npm install -g emfirge` puts `emfirge` on your PATH. In CI, where no browser can open, set `EMFIRGE_API_KEY` (made with `emfirge key create`, see [step 2](https://emfirge.cloud/quickstart.md#sign-in)) instead of running `login`. Every verb, flag and exit code is in the [CLI reference](https://emfirge.cloud/cli.md).
 
 ## Next steps
 

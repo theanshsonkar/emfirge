@@ -6,6 +6,17 @@ Human version: https://emfirge.cloud/changelog/
 
 ## Recent changes
 
+### November 8, 2026: API keys from the CLI (key create / list / revoke), CLI 0.1.x line and spinner [CLI]
+
+An agent that cannot open a browser, such as a cloud session or CI, can now use an API key you make once. The CLI also has its own version numbers.
+
+Improvements:
+- `emfirge key create` makes an API key for your own project. It is shown once. `emfirge key list` shows your keys, never the key itself, and `emfirge key revoke KEY_ID` stops one at once. A project can hold 10 active keys, and the server keeps only a hash of each key (laws L89a to L89f).
+- Set the key as `EMFIRGE_API_KEY` in the secret settings of the place your agent runs. The agent then skips the browser sign-in. You still create the read-only role yourself and give your agent its ARN.
+- A key can use emfirge for your project, but it cannot make more keys: `key create` works only after a browser sign-in. `key list` and `key revoke` still work with a key, so a leaked key can be revoked (law L89g).
+- The `emfirge` CLI now has its own version line, starting at 0.1.0, no longer tied to the MCP adapter's version.
+- While it waits for the server, the CLI shows a small spinner on stderr. It appears only when stderr is a terminal and is off in CI, with `TERM=dumb` or with `EMFIRGE_NO_SPINNER=1`, so an agent reading the JSON on stdout never sees it (emfirge 0.1.1).
+
 ### November 8, 2026: The emfirge command is its own npm package, and its commands come from the server [CLI]
 
 `npx emfirge` runs the CLI. The engine serves the list of commands, so a new command works without a new install.

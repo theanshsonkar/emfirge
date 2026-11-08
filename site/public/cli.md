@@ -16,11 +16,12 @@ You run the commands. Your human does three things only they can do: approve the
 |---|---|---|
 | Check it runs | `npx -y emfirge guide` | you (Node.js 20 or later; `-y` skips npx's first-run prompt) |
 | Sign in | `emfirge login` | you start it; **your human approves in the browser** (GitHub or Google). It waits 5 minutes. If the browser does not open, show them the address it prints, then wait. |
+| No browser (cloud session, CI) | `EMFIRGE_API_KEY` | your human makes a key on their own computer (`emfirge key create`) and sets it in your environment's secret settings. Skip `login`. See [API keys](#keys). |
 | Get the role | `emfirge connect` | you run it and **show your human the link**; they create the stack and copy the `RoleArn` from its Outputs. `connect` takes no ARN and does not detect the role. |
 | First scan | `emfirge context --refresh --role-arn ARN --region REGION` | you, with the ARN they gave you. Ask which region; there is no default. Keep the ARN: `check --evidence` needs it again. |
 | Know the account | `emfirge context inventory` | you |
 
-Not signed in is exit code 2 and the CLI never waits for a browser by itself, so run `login` and wait for your human. Sign-in is kept in `~/.emfirge/credentials.json`; you need your human again only if it expires. The sign-in page is served on `127.0.0.1` of the machine you run on.
+Not signed in is exit code 2 and the CLI never waits for a browser by itself, so run `login` and wait for your human. Sign-in is kept in `~/.emfirge/credentials.json`; you need your human again only if it expires. The sign-in page is served on `127.0.0.1` of the machine you run on, so it cannot be used from a remote sandbox: there, use an API key ([API keys](#keys)).
 
 ### The loop
 
@@ -65,11 +66,26 @@ The npm package is `emfirge` and the command is `emfirge`. Node.js 20 or later. 
 | `emfirge logout` | Sign out on this device. |
 | `emfirge connect` | Print the one-click CloudFormation link that creates the read-only role, with the ExternalId and the next steps. Show the link to your human: they create the stack. When it is ready, they give you the role ARN from its Outputs; use it in `emfirge context --refresh --role-arn ARN --region REGION`. |
 | `emfirge connect --link` | Link your saved sign-in to an existing API-key project. Needs `EMFIRGE_API_KEY`. |
+| `emfirge key create`, `key list`, `key revoke` | Make, list and revoke API keys for your human's project, for where no browser can open. See [API keys](#keys). |
 | `emfirge guide` | Print the agent guide: the loop, the rules, the exit codes. |
 | `emfirge --help`, `emfirge help COMMAND`, `emfirge COMMAND --help` | Help, from the server's current command list. |
 | `emfirge --version` | Print the version. |
 
 Nothing here asks for AWS access keys. The only thing that reaches the account is the role from `connect`; see [Security & privacy](https://emfirge.cloud/security.md#role). The commands `status`, `privacy`, `tokens` and `purge` belong to the [MCP adapter](#mcp-adapter), not to `emfirge`.
+
+## API keys
+
+**Where no browser can open, your human gives you a key instead of a sign-in.**
+
+A cloud agent session or CI cannot finish `emfirge login`. Your human makes an API key for their own project, once, on their own computer after `emfirge login`, and sets it as `EMFIRGE_API_KEY` in your environment's secret settings. You do not make keys: a call made with a key cannot create one (HTTP 403, exit code 2, `forbidden`).
+
+| Command | What it does |
+|---|---|
+| `emfirge key create [--name LABEL]` | Make a key for the project. Prints the key once, with `key_id`, `prefix` and `created_at`. Needs a browser sign-in, not a key. A project can hold 10 active keys; the eleventh is exit code 5 (`conflict`). The label is up to 80 characters. |
+| `emfirge key list` | The project's keys: `key_id`, `name`, `prefix` (the first 8 characters after `emf_`), `created_at`, `last_used_at` and `active`. Never the key itself. |
+| `emfirge key revoke KEY_ID` | Stop that key at once. Get the id from `key list`. |
+
+Where `EMFIRGE_API_KEY` is set, every command sends it and skips browser sign-in; `emfirge login` only says so. `key list` and `key revoke` also work with a key. A key works for the whole project, like the sign-in. It does not create the read-only role: your human still creates it and gives you the role ARN and a region. Never print the key into a chat or commit it.
 
 ## Where the commands come from
 
@@ -79,7 +95,7 @@ Nothing here asks for AWS access keys. The only thing that reaches the account i
 
 Only login, logout, connect, guide and `request` are built in. A few manifest commands (`try`, and some modes of `context` and `check`) run code built into the CLI, because they need more than one request, a file or stdin. Run `npx emfirge@latest` only when emfirge tells you to: a command that needs a newer emfirge exits with code 6.
 
-Today the list has 12 commands: `context`, `branch open|fork|list|get|rollback|rollback-to|discard|compare`, `try`, `check` and `report`.
+Today the list has 15 commands: `context`, `branch open|fork|list|get|rollback|rollback-to|discard|compare`, `try`, `check`, `report` and `key create|list|revoke`.
 
 ## Global options and exit codes
 
@@ -90,7 +106,7 @@ Today the list has 12 commands: `context`, `branch open|fork|list|get|rollback|r
 | `--human` | Short readable output instead of JSON. |
 | `-h`, `--help` | Show help for the command. |
 | `--version`, `-v` | Print the version and exit. |
-| `EMFIRGE_API_KEY` | An API key, for CI where no browser can open. Skips browser sign-in. |
+| `EMFIRGE_API_KEY` | An API key made with `emfirge key create`, for a cloud agent or CI where no browser can open. Skips browser sign-in. See [API keys](#keys). |
 | `EMFIRGE_BASE_URL` | Backend API URL. Defaults to `https://emfirge.cloud/api`. |
 | `EMFIRGE_PRIVACY` | `strict` (default), `balanced` or `off`. Strict tokenizes every recognized AWS identifier before a model sees it. |
 | `EMFIRGE_NO_BROWSER` | Set to `1` and `login` does not open a browser; it prints the sign-in address. |

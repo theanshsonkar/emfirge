@@ -12,6 +12,12 @@ No. Your agent uses it. You give your agent the setup prompt once and it runs ev
 **What do I actually do?**
 Set up once: paste the setup prompt into your agent, approve the browser sign-in when your agent shows it, and create the read-only role with one click in AWS, then give your agent the role ARN ([Set up](https://emfirge.cloud/quickstart.md)). After that you ask your agent to change your AWS as usual and read what it hands back. You also say yes before a check that costs money, and you decide what your agent is allowed to apply.
 
+**My agent runs in the cloud or in CI, with no browser. How does it sign in?**
+It does not sign in. On your own computer you run `npx emfirge login`, then `npx emfirge key create --name ci`, and set the key it prints as `EMFIRGE_API_KEY` in your agent environment's secret settings. Your agent then uses the key and skips the browser. You still create the read-only role yourself and give your agent the role ARN. Steps are under [Set up](https://emfirge.cloud/quickstart.md#sign-in); the commands are in the [Agent reference](https://emfirge.cloud/cli.md#keys).
+
+**How do I make, list or revoke an API key?**
+With the CLI, on a computer where you are signed in: `emfirge key create --name LABEL` shows the key once; `emfirge key list` shows your keys (never the key itself); `emfirge key revoke KEY_ID` stops one at once. There is no web page for keys. A project can hold 10 active keys, and a key cannot make more keys. See [Security & privacy](https://emfirge.cloud/security.md#keys).
+
 **Does emfirge change my AWS?**
 No. It is read-only. Your agent applies with its own credentials; emfirge records and verifies.
 
@@ -66,7 +72,10 @@ A scan can take a while on a large account; the client waits up to 240 seconds. 
 The server's command is newer than the install. Your agent runs `npx emfirge@latest`, then retries.
 
 **Your agent says it is not signed in (exit code 2)**
-It runs `emfirge login`; that opens your browser and needs you to sign in with GitHub or Google within 5 minutes. The sign-in page opens on the machine where your agent runs.
+It runs `emfirge login`; that opens your browser and needs you to sign in with GitHub or Google within 5 minutes. The sign-in page opens on the machine where your agent runs. If your agent runs in the cloud or CI, set `EMFIRGE_API_KEY` instead. A key that was revoked also gives exit code 2: run `emfirge key list` on your computer to check, and make a new one.
+
+**`emfirge key create` says forbidden (exit code 2)**
+It was run with a key. Only a browser sign-in can make a key, so a leaked key cannot make more. Run it on your own computer after `emfirge login`, with `EMFIRGE_API_KEY` unset.
 
 **`emfirge request` exits 1**
 It is not built yet. It prints a JSON error, `not_built`, and sends nothing.
@@ -92,6 +101,7 @@ Native results still return. `coverage_warnings` says the result is not full cov
 | Law | A numbered property test the engine must always satisfy, such as L7: the same snapshot and changes give the same verdict. |
 | Request | An ask to the owner, raised by an agent. Not built yet. |
 | Hand-back | What `emfirge report` returns: the exact calls, bound by hash to the verdict they were judged with. |
+| API key | A secret that starts with `emf_`, for an agent that cannot open a browser. You make it with `emfirge key create`; the agent sets it as `EMFIRGE_API_KEY`. |
 | Token | A stand-in such as `SG_001` for a real identifier, made on your machine. |
 | emfirge.md | A planned plain-English file of your marks and limits. Not built yet. |
 | MCP | Model Context Protocol: the interface an agent client uses to call tools. Emfirge offers it as an adapter. |

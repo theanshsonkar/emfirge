@@ -6,13 +6,13 @@ If your human asked you to set up emfirge, read the CLI reference and follow "Se
 
 For your agent:
 
-- [CLI reference (agent reference)](https://emfirge.cloud/cli.md): How to set up emfirge with your human, the loop and the rules, install, global options, exit codes and the verbs (context, branch, try, check, request, report) of the emfirge CLI, plus the MCP adapter.
+- [CLI reference (agent reference)](https://emfirge.cloud/cli.md): How to set up emfirge with your human, the loop and the rules, install, API keys for agents without a browser, global options, exit codes and the verbs (context, branch, try, check, request, report) of the emfirge CLI, plus the MCP adapter.
 - [Home, with agent instructions](https://emfirge.cloud/index.md): the whole home page plus "How to use emfirge (for agents)".
 - [Source](https://github.com/theanshsonkar/emfirge)
 
 For your human:
 
-- [Set up](https://emfirge.cloud/quickstart.md): What you do to set up emfirge: give your agent the setup prompt, approve sign-in, create the read-only role with one click and give your agent its ARN. Then ask your agent to change your AWS as usual.
+- [Set up](https://emfirge.cloud/quickstart.md): What you do to set up emfirge: give your agent the setup prompt, approve sign-in, create the read-only role with one click and give your agent its ARN. If your agent runs in the cloud or CI, make an API key instead of signing in there. Then ask your agent to change your AWS as usual.
 - [How it works](https://emfirge.cloud/how-it-works.md): The emfirge engine in one page: branches, the six checks and what they report as unknown, changed settings, the hand-back record, and what emfirge never does.
 - [Coverage](https://emfirge.cloud/coverage.md): The AWS resource types a branch can add, modify or delete, what each of the six checks is built from, the status of each lens, and where the checks come from.
 - [Security & privacy](https://emfirge.cloud/security.md): The read-only role, identifier tokenization, what the hosted emfirge engine stores, and how retention and deletion work today.

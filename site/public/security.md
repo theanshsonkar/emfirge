@@ -48,6 +48,7 @@ Every `emfirge` answer goes through the same redaction as the MCP tools, so bran
 | Scans | A summary and findings with real AWS resource IDs, your account ID and region, plus the infrastructure snapshot. Newer resource types are kept without their secrets: CloudFront origin custom header values and the Scheduler target `Input` payload are withheld, and DynamoDB table items are never read. |
 | Branches | A full copy of your account's modeled state as the base, and the ordered changes on it. |
 | What your agent sends to `try` | Only a SHA-256 of a Terraform plan, CloudFormation change set or CLI command, never its text. Your agent applies its own original plan. |
+| API keys | A SHA-256 of each key, never the key. The optional label you gave it and its first 8 characters after `emf_`, to tell keys apart, plus when it was made and last used. |
 | Usage evidence (opt-in) | Per resource: status, used and holds-data flags, metric peaks, last event time and event name. Never CloudTrail user names, IP addresses, access keys or raw events. |
 | Policy checks (opt-in) | Which resource was checked and the answers, never the policy text. |
 | Server logs | No account IDs, resource IDs, ARNs, bucket, role or repo names. Errors are logged as the error type. |
@@ -58,6 +59,19 @@ Your AWS access keys; the contents of your resources (S3 objects, database rows,
 
 On the CLI and MCP path the engine never calls an AI model: every request carries the header that tells the backend to skip its AI summaries, and your own agent's model sees only what the CLI prints. [PRIVACY.md](https://github.com/theanshsonkar/emfirge/blob/main/PRIVACY.md) also covers the web dashboard, which does not carry that header and does send real IDs to LLM providers; the CLI path does not use it.
 
+## API keys
+
+**A key is a password for your emfirge project, for an agent that cannot open a browser. You make it, you can list it, and you can end it at once.**
+
+- **Made from a browser sign-in only.** `emfirge key create` works only when you are signed in with GitHub or Google. A call made with a key is refused (HTTP 403), so a leaked key cannot make more keys.
+- **Shown once.** The server keeps only a SHA-256 of the key, so it cannot show it again. It also stores the optional label you gave it and the key's first 8 characters after `emf_`, to tell keys apart.
+- **Yours alone.** A key belongs to your own project. Another project cannot list or revoke it. A project can hold 10 active keys.
+- **Revoked at once.** `emfirge key revoke KEY_ID` ends a key immediately. `emfirge key list` shows each key's label, first characters, when it was made and last used, and whether it is active, but never the key.
+- **No expiry.** A key does not expire by itself. Revoke it when you no longer need it.
+- **Store it as a secret.** Set it as `EMFIRGE_API_KEY` in the secret settings of the place your agent runs. Never paste it into a chat or commit it.
+
+A key can use emfirge for your project the way your sign-in does, except it cannot make keys. `key list` and `key revoke` also work with a key, so a leaked key could revoke your other keys. If that happens, make a new key from a browser sign-in. The key is not an AWS credential: your AWS account is reached only through the read-only role.
+
 ## Retention and deletion
 
 **Nothing expires by itself. You can delete everything linked to an AWS account.**
@@ -65,7 +79,7 @@ On the CLI and MCP path the engine never calls an AI model: every request carrie
 - There is no automatic expiry. Nothing is deleted because of its age, there are no retention sweeps, and no retention period is promised. [PRIVACY.md](https://github.com/theanshsonkar/emfirge/blob/main/PRIVACY.md) says the same.
 - `npx @emfirge/mcp purge --role-arn ARN` first proves you control the account by assuming your role. It then deletes, in one transaction, the scans, drift records, simulation logs, feedback, usage records and account bindings for that account, the branches linked to it with their plans, evidence and policy checks, and the stored scan reports in S3. It returns a count per table, then removes your local token map. A test fails if a table is added without a purge-or-keep decision.
 - `emfirge branch discard` deletes the branch and its plans, evidence and policy checks.
-- Purge does not remove your login (workspace, API keys as hashes, sign-in identity) or the legacy GitHub integration tables. Email [ansh@emfirge.cloud](mailto:ansh@emfirge.cloud) to delete those, or anything else.
+- Purge does not remove your login (workspace, API keys as hashes with their labels, sign-in identity) or the legacy GitHub integration tables. Email [ansh@emfirge.cloud](mailto:ansh@emfirge.cloud) to delete those, or anything else.
 
 > Retention periods and sweeps are not designed yet.
 
