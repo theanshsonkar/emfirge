@@ -79,6 +79,8 @@ jobs:
               -e EMFIRGE_REQUIRE_AUTH=1 \
               -p 8000:8000 \
               ${{ secrets.DOCKERHUB_USERNAME }}/aws-risk-agent:latest
+            # Keep the S3 role template (the `emfirge connect` link) equal to this image's copy. Non-fatal.
+            sudo docker exec emfirge-engine python scripts/sync_role_template.py || echo "role template sync failed (not fatal)"
             # Non-fatal worker check (scanners are off); allow time for the Checkov import.
             ok=0
             for i in 1 2 3 4 5 6; do
