@@ -556,13 +556,16 @@ def _code(error: ClientError) -> str:
 def _marker_pages(call, list_key: str, **kwargs):
     """Items of a Marker / NextMarker listing (the CloudFront operations without a paginator)."""
     marker = None
+    seen: set[str] = set()
     while True:
         response = call(**kwargs, **({"Marker": marker} if marker else {}))
         page = response.get(list_key) or {}
         yield from page.get("Items") or []
         marker = page.get("NextMarker")
-        if not marker:
+        # Stop on no marker, a non-text marker or a repeated one: a listing must always end.
+        if not isinstance(marker, str) or not marker or marker in seen:
             return
+        seen.add(marker)
 
 
 def policy_headers(config: dict[str, Any], key: str) -> tuple[Optional[str], list[str]]:
