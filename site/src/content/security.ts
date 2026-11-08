@@ -73,7 +73,7 @@ export const security: Page = {
           "`emfirge branch discard` deletes the branch and its plans, evidence and policy checks.",
           "Purge does not remove your login (workspace, API keys as hashes, sign-in identity) or the legacy GitHub integration tables. Email [ansh@emfirge.cloud](mailto:ansh@emfirge.cloud) to delete those, or anything else.",
         ] },
-        { t: "note", x: "[TODO Ansh: retention periods and sweeps are not designed yet. Say here when they ship.]" },
+        { t: "note", x: "Retention periods and sweeps are not designed yet." },
       ],
     },
     {

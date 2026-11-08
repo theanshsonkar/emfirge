@@ -10,7 +10,7 @@ const fmt = (n: number) => n.toLocaleString("en-US");
 
 export function Figure() {
   return (
-    <figure className="fig" data-reveal style={{ margin: "58px 0 0" }}>
+    <figure className="fig" data-reveal>
       <div className="fig-frame"><Figure1 /></div>
       <figcaption className="cap">{FIGURE.caption}</figcaption>
     </figure>
@@ -81,8 +81,8 @@ export function Production() {
   const m = METRICS;
   return (
     <section id="in-production" style={{ scrollMarginTop: 40 }}>
-      <hr className="hr" style={{ marginTop: 70 }} />
-      <div className="label" style={{ marginTop: 28, color: "var(--ink-3)", fontSize: 10.5 }} data-reveal>{PRODUCTION.label}</div>
+      <hr className="hr" />
+      <div className="label" style={{ marginTop: 28, color: "var(--ink-3)" }} data-reveal>{PRODUCTION.label}</div>
       <p className="statement" data-reveal>
         Our <b>promise</b> is a world your agent can <b>trust</b>: true facts, unknowns marked honestly, and nothing that ever writes to your cloud.
       </p>
@@ -125,8 +125,8 @@ export function Production() {
 export function Runs() {
   return (
     <section id="runs" style={{ scrollMarginTop: 40 }}>
-      <hr className="hr" style={{ marginTop: 70 }} />
-      <h2 className="h2" style={{ fontSize: 24, lineHeight: "30px", marginTop: 32 }} data-reveal>emfirge runs wherever<br />your agent runs.</h2>
+      <hr className="hr" />
+      <h2 className="h2" data-reveal>emfirge runs wherever<br />your agent runs.</h2>
       <p className="prose" style={{ margin: "30px 0 0", fontSize: 17, lineHeight: "27px" }} data-reveal>{RUNS.text}</p>
       <a className="ext" href={LINKS.quickstart} style={{ marginTop: 22, fontSize: 15, display: "inline-flex" }} data-reveal>{RUNS.link} <Ext size={10} /></a>
       <div className="cards3">
@@ -156,8 +156,8 @@ function TrustMark({ kind }: { kind: string }) {
 export function Trust() {
   return (
     <section id="trust" style={{ scrollMarginTop: 40 }}>
-      <hr className="hr" style={{ marginTop: 34 }} />
-      <h2 className="h2" style={{ marginTop: 28 }} data-reveal>{TRUST.title}</h2>
+      <hr className="hr" />
+      <h2 className="h2" data-reveal>{TRUST.title}</h2>
       <p className="muted" style={{ marginTop: 18 }} data-reveal>{TRUST.text}</p>
       <div className="tiles3" data-reveal>
         {TRUST.tiles.map((t) => (
@@ -186,8 +186,9 @@ export function Cta() {
 
 export function Writing() {
   return (
-    <section id="writing" className="wr" style={{ scrollMarginTop: 40, marginTop: 90 }}>
-      <h2 className="h2" style={{ marginTop: 0 }} data-reveal>{WRITING.title}</h2>
+    <section id="writing" className="wr" style={{ scrollMarginTop: 40 }}>
+      <hr className="hr" />
+      <h2 className="h2" data-reveal>{WRITING.title}</h2>
       {WRITING.rows.map((r) => (
         <div className="it" key={r} data-reveal><span>{r}</span><span className="label">{WRITING.tag}</span></div>
       ))}

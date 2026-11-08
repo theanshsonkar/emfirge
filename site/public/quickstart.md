@@ -35,7 +35,7 @@ The prompt points your agent to the full reference at [/cli.md](https://emfirge.
 
 Your agent runs `emfirge login`. That opens your browser to a sign-in page served on your own machine, where you choose GitHub or Google. If the browser does not open, your agent shows you the address to open. You have 5 minutes. The session is kept in `~/.emfirge/credentials.json` on your machine, so your agent does not need you again unless the sign-in expires.
 
-> The sign-in page lives on the machine where the command runs, so your browser and your agent must be on the same machine. If your agent runs in a remote sandbox, you cannot reach it. [TODO Ansh: there is no other sign-in flow for remote agents, and no command that issues an API key (`EMFIRGE_API_KEY`); say how remote agents and CI get one.]
+> The sign-in page lives on the machine where the command runs, so your browser and your agent must be on the same machine. If your agent runs in a remote sandbox, you cannot reach it.
 
 Emfirge never asks for your AWS access keys. The only thing it holds that can reach your account is the role in step 3.
 

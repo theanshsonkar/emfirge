@@ -20,7 +20,7 @@ export const coverage: Page = {
       title: "Resources a branch can change",
       blocks: [
         { t: "lede", x: "Eighteen resource types today." },
-        { t: "table", head: ["Resource type", "Add", "Modify", "Delete", "Notes"], mono: [0], rows: [
+        { t: "table", head: ["Resource type", "Add", "Modify", "Delete", "Notes"], mono: [0], ops: [1, 2, 3], rows: [
           T("ec2_instance", "yes", "yes", "yes", ""),
           T("security_group", "yes", "yes", "yes", "Attachments derive from instance `sg_ids`."),
           T("rds_instance", "yes", "yes", "yes", ""),

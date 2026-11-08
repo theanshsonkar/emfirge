@@ -3,6 +3,7 @@ import { Shell } from "./Shell";
 import { Blocks, Inline } from "./Blocks";
 import { CopyMd } from "./CopyMd";
 import { Footer } from "./Sections";
+import { TodoList } from "./Todo";
 
 export function DocPage({ page }: { page: Page }) {
   const mdUrl = `/${page.slug}.md`;
@@ -23,6 +24,7 @@ export function DocPage({ page }: { page: Page }) {
           <Blocks blocks={s.blocks} />
         </section>
       ))}
+      <TodoList page={page.slug} />
       <Footer />
     </Shell>
   );

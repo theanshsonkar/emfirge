@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type RefObject } from "react";
 
 // Figure 1: the Emfirge loop, run by one small timeline. Everything is in a 640x360 SVG.
 // A source lights up, a comet rides the edge into the group, verbs cycle try/check/block/retry/pass,
@@ -7,12 +7,24 @@ import { useEffect, useRef } from "react";
 // then a comet carries "pass" to the agent's context.
 const T = 7.8, SPEED = 1.18;
 const INK = "#0B1015", GREEN = "#0A7A4B", RED = "#C4574A";
-const SRC_Y = [88, 176, 264];
 type Pt = [number, number];
-const srcPath = (i: number): Pt[] => [[96, SRC_Y[i]], [124, SRC_Y[i]], [124, 176], [176, 176]];
-const MID: Pt[] = [[240, 176], [368, 176]];
-const OUT: Pt[] = [[432, 176], [456, 176], [508, 176]];
-
+// Two layouts of the same drawing: wide (changes | emfirge | agent, left to right) and tall for phones (top to bottom).
+// The animation below reads its comet paths and the branch-tile centre from the layout, so both play the same loop.
+type Geo = { src: (i: number) => Pt[]; mid: Pt[]; out: Pt[]; ring: Pt };
+const WIDE_Y = [88, 176, 264];
+const WIDE: Geo = {
+  src: (i) => [[96, WIDE_Y[i]], [124, WIDE_Y[i]], [124, 176], [176, 176]],
+  mid: [[240, 176], [368, 176]],
+  out: [[432, 176], [456, 176], [508, 176]],
+  ring: [208, 176],
+};
+const TALL_X = [55, 160, 265];
+const TALL: Geo = {
+  src: (i) => [[TALL_X[i], 118], [TALL_X[i], 138], [160, 138], [160, 168]],
+  mid: [[160, 276], [160, 330]],
+  out: [[160, 394], [160, 414], [160, 458]],
+  ring: [160, 244],
+};
 const clamp = (x: number, a = 0, b = 1) => Math.min(b, Math.max(a, x));
 const ramp = (t: number, a: number, b: number) => clamp((t - a) / (b - a));
 const ease = (x: number) => 1 - Math.pow(1 - x, 3);
@@ -36,8 +48,7 @@ function cometD(p: Pt[], head: number, tail = 34): string {
 }
 const rev = (p: Pt[]) => [...p].reverse();
 
-export function Figure1() {
-  const root = useRef<SVGSVGElement>(null);
+function useLoop(root: RefObject<SVGSVGElement | null>, geo: Geo) {
   useEffect(() => {
     const svg = root.current!;
     const q = (k: string) => svg.querySelector<SVGElement>(`[data-k="${k}"]`)!;
@@ -65,7 +76,7 @@ export function Figure1() {
     };
     const still = () => {
       [el.c1, el.c2, el.c3, el.c4, el.c5, el.c1h, el.c2h, el.c3h, el.c4h, el.c5h, el.ring].forEach((e) => e.setAttribute("opacity", "0"));
-      el.src.forEach((e, i) => { e.setAttribute("stroke", "rgba(11,16,21,.22)"); e.setAttribute("fill", "#fff"); el.srcLab[i].setAttribute("fill", "rgba(11,16,21,.6)"); });
+      el.src.forEach((e, i) => { e.setAttribute("stroke", "rgba(11,16,21,.22)"); e.setAttribute("fill", "#fff"); el.srcLab[i].setAttribute("fill", "rgba(11,16,21,.68)"); });
       el.cells.forEach((c) => { c.setAttribute("fill", GREEN); c.setAttribute("opacity", "1"); });
       el.verb.textContent = "PASS"; el.verb.setAttribute("fill", GREEN); el.verb.setAttribute("opacity", "1");
       el.n1.setAttribute("opacity", "0"); el.n2.setAttribute("opacity", "1"); el.n2.setAttribute("transform", "translate(0 0)");
@@ -82,21 +93,21 @@ export function Figure1() {
         const hot = i === s ? ramp(t, 0.0, 0.25) * (1 - ramp(t, 1.0, 1.5)) : 0;
         e.setAttribute("stroke", hot > 0.02 ? GREEN : "rgba(11,16,21,.22)");
         e.setAttribute("fill", hot > 0.02 ? `rgba(10,122,75,${0.06 + 0.06 * hot})` : "#fff");
-        el.srcLab[i].setAttribute("fill", hot > 0.02 ? GREEN : "rgba(11,16,21,.6)");
+        el.srcLab[i].setAttribute("fill", hot > 0.02 ? GREEN : "rgba(11,16,21,.68)");
       });
-      comet(el.c1, el.c1h, srcPath(s), 0.25, 1.25, t, GREEN);
-      comet(el.c2, el.c2h, MID, 1.55, 2.1, t, GREEN, 40);
-      comet(el.c3, el.c3h, rev(srcPath(s)), 3.7, 4.8, t, RED);
-      comet(el.c4, el.c4h, MID, 4.95, 5.5, t, GREEN, 40);
-      comet(el.c5, el.c5h, OUT, 5.95, 6.7, t, GREEN);
+      comet(el.c1, el.c1h, geo.src(s), 0.25, 1.25, t, GREEN);
+      comet(el.c2, el.c2h, geo.mid, 1.55, 2.1, t, GREEN, 40);
+      comet(el.c3, el.c3h, rev(geo.src(s)), 3.7, 4.8, t, RED);
+      comet(el.c4, el.c4h, geo.mid, 4.95, 5.5, t, GREEN, 40);
+      comet(el.c5, el.c5h, geo.out, 5.95, 6.7, t, GREEN);
       // ring pulse on the branch tile when a change lands
       const rp = ramp(t, 1.2, 1.9);
       el.ring.setAttribute("opacity", String(rp > 0 && rp < 1 ? 0.6 * (1 - rp) : 0));
-      el.ring.setAttribute("transform", `translate(208 176) scale(${1 + rp * 0.18}) translate(-208 -176)`);
+      el.ring.setAttribute("transform", `translate(${geo.ring[0]} ${geo.ring[1]}) scale(${1 + rp * 0.18}) translate(${-geo.ring[0]} ${-geo.ring[1]})`);
       // verbs
-      const verbs: [number, number, string, string][] = [[1.2, 2.1, "TRY", GREEN], [2.1, 3.7, "CHECK", GREEN], [3.7, 4.5, "BLOCK", RED], [4.5, 5.9, "RETRY", GREEN], [5.9, 7.5, "PASS", GREEN]];
+      const verbs: [number, number, string, string][] = [[1.2, 2.1, "TRY", GREEN], [2.1, 3.7, "CHECK", GREEN], [3.7, 4.5, "BLOCK", "#B5483B"], [4.5, 5.9, "RETRY", GREEN], [5.9, 7.5, "PASS", GREEN]];
       const v = verbs.find((x) => t >= x[0] && t < x[1]);
-      if (v) { el.verb.textContent = v[2]; el.verb.setAttribute("fill", v[3]); el.verb.setAttribute("opacity", String(0.7 + 0.3 * Math.sin(t * 7))); }
+      if (v) { el.verb.textContent = v[2]; el.verb.setAttribute("fill", v[3]); el.verb.setAttribute("opacity", String(0.94 + 0.06 * Math.sin(t * 7))); }
       else { el.verb.textContent = ""; }
       // cells
       for (let i = 0; i < 6; i++) {
@@ -119,10 +130,10 @@ export function Figure1() {
       const ag = t >= 6.6 && t < 7.5 ? ramp(t, 6.6, 6.9) : t >= 7.5 ? 1 - ramp(t, 7.5, T) : 0;
       el.agent.setAttribute("stroke", ag > 0.02 ? GREEN : "rgba(11,16,21,.22)");
       el.agent.setAttribute("fill", ag > 0.02 ? `rgba(10,122,75,${0.08 * ag})` : "#fff");
-      el.fact.setAttribute("fill", ag > 0.02 ? GREEN : "rgba(11,16,21,.6)");
+      el.fact.setAttribute("fill", ag > 0.02 ? GREEN : "rgba(11,16,21,.68)");
       // strip text lights while a change is inside the group
       const inside = t > 1.2 && t < 6.9 ? 1 : 0;
-      el.stripT.setAttribute("fill", inside ? GREEN : "rgba(11,16,21,.45)");
+      el.stripT.setAttribute("fill", inside ? GREEN : "rgba(11,16,21,.6)");
     };
 
     let raf = 0, visible = false, start = performance.now(), running = false, paused = 0;
@@ -144,75 +155,163 @@ export function Figure1() {
     mq.addEventListener("change", onMq);
     document.addEventListener("visibilitychange", update);
     return () => { running = false; if (raf) cancelAnimationFrame(raf); io.disconnect(); mq.removeEventListener("change", onMq); document.removeEventListener("visibilitychange", update); };
-  }, []);
+  }, [root, geo]);
+}
 
-  const lab = { fontFamily: "var(--font-geist-mono), monospace", fontSize: 9, letterSpacing: 0.9, fontWeight: 500 } as const;
-  const dotted = { stroke: "rgba(11,16,21,.38)", strokeWidth: 1, strokeDasharray: "1 3", fill: "none" } as const;
-  const icons = [
-    <g key="cli" fill="none" stroke={INK} strokeWidth="1.5" strokeLinecap="square" opacity=".8"><path d="M-7 -5L-1 0L-7 5" /><path d="M2 6H8" /></g>,
-    <g key="tf" fill="none" stroke={INK} strokeWidth="1.4" opacity=".8"><path d="M-8 -7L-2 -4V3L-8 0Z" /><path d="M0 -3L6 -6V1L0 4Z" /><path d="M-2 5L4 2V8L-2 11Z" transform="translate(0 -2)" /></g>,
-    <g key="cfn" fill="none" stroke={INK} strokeWidth="1.5" strokeLinecap="square" opacity=".8"><path d="M-3 -7C-7 -7 -6 -1 -9 0C-6 1 -7 7 -3 7" /><path d="M3 -7C7 -7 6 -1 9 0C6 1 7 7 3 7" /></g>,
-  ];
-  const srcNames = ["AWS CLI", "TERRAFORM", "CLOUDFORMATION"];
+
+const lab = { fontFamily: "var(--font-geist-mono), monospace", fontSize: 11, letterSpacing: 0.5, fontWeight: 500 } as const;
+const dotted = { stroke: "rgba(11,16,21,.38)", strokeWidth: 1, strokeDasharray: "1 3", fill: "none" } as const;
+const MUTED = "rgba(11,16,21,.68)", FAINT = "rgba(11,16,21,.68)", EDGE = "rgba(11,16,21,.22)";
+const icons = [
+  <g key="cli" fill="none" stroke={INK} strokeWidth="1.5" strokeLinecap="square" opacity=".8"><path d="M-7 -5L-1 0L-7 5" /><path d="M2 6H8" /></g>,
+  <g key="tf" fill="none" stroke={INK} strokeWidth="1.4" opacity=".8"><path d="M-8 -7L-2 -4V3L-8 0Z" /><path d="M0 -3L6 -6V1L0 4Z" /><path d="M-2 5L4 2V8L-2 11Z" transform="translate(0 -2)" /></g>,
+  <g key="cfn" fill="none" stroke={INK} strokeWidth="1.5" strokeLinecap="square" opacity=".8"><path d="M-3 -7C-7 -7 -6 -1 -9 0C-6 1 -7 7 -3 7" /><path d="M3 -7C7 -7 6 -1 9 0C6 1 7 7 3 7" /></g>,
+];
+const srcNames = ["AWS CLI", "TERRAFORM", "CLOUDFORMATION"];
+const ARIA = "Figure 1: a change enters Emfirge, runs on a branch, six checks answer, a block returns to the agent, and a pass reaches the agent's context.";
+
+function Comets() {
   return (
-    <svg ref={root} viewBox="0 0 640 360" role="img" aria-label="Figure 1: a change enters Emfirge, runs on a branch, six checks answer, a block returns to the agent, and a pass reaches the agent's context.">
-      <text x="40" y="44" {...lab} fill="rgba(11,16,21,.6)">CHANGES</text>
-      {/* edges */}
-      <path d="M96 88H124V264M96 176H124M96 264H124M124 176H176" {...dotted} />
-      <path d="M152 176H124" {...dotted} />
-      <path d="M240 176H368" {...dotted} />
-      <path d="M432 176H508" {...dotted} />
-      {/* sources */}
-      {SRC_Y.map((y, i) => (
-        <g key={i}>
-          <rect data-k={"src" + i} x="40.5" y={y - 28 + 0.5} width="55" height="55" fill="#fff" stroke="rgba(11,16,21,.22)" />
-          <g transform={`translate(68 ${y})`}>{icons[i]}</g>
-          <text data-k={"srclab" + i} x="68" y={y + 44} textAnchor="middle" {...lab} fontSize={i === 2 ? 8 : 9} fill="rgba(11,16,21,.6)">{srcNames[i]}</text>
-        </g>
-      ))}
-      {/* group */}
-      <rect x="152.5" y="96.5" width="303" height="170" fill="none" stroke="rgba(11,16,21,.3)" />
-      <rect x="164" y="90" width="58" height="14" fill="#fff" />
-      <text data-k="boxlab" x="170" y="100" {...lab} fill={INK}>EMFIRGE</text>
-      <rect x="168.5" y="112.5" width="271" height="22" fill="none" stroke="rgba(11,16,21,.3)" strokeDasharray="3 3" />
-      <text data-k="stripT" x="304" y="127" textAnchor="middle" {...lab} fill="rgba(11,16,21,.45)">A BRANCH OF YOUR LIVE CLOUD</text>
-      {/* branch tile */}
-      <rect x="176" y="144" width="64" height="64" fill={GREEN} />
-      <rect data-k="ring" x="176.5" y="144.5" width="63" height="63" fill="none" stroke={GREEN} opacity="0" />
-      <g transform="translate(208 176) scale(1.6) translate(-12 -12)" fill="none" strokeWidth="2.2" strokeLinecap="square">
-        <path d="M2.5 15H21.5" stroke="#fff" /><path d="M9 15C13.5 15 13.5 7 21.5 7" stroke="#fff" opacity=".7" />
-      </g>
-      <text x="208" y="228" textAnchor="middle" {...lab} fill="rgba(11,16,21,.6)">BRANCH</text>
-      <text data-k="verb" x="304" y="171" textAnchor="middle" {...lab} fill="rgba(11,16,21,.5)" />
-      {/* checks tile */}
-      <rect data-k="checks" x="368.5" y="144.5" width="63" height="63" fill="#fff" stroke="rgba(11,16,21,.22)" />
-      {[0, 1, 2, 3, 4, 5].map((i) => (
-        <rect key={i} data-k={"cell" + i} x={376 + (i % 3) * 18} y={161 + Math.floor(i / 3) * 18} width="12" height="12" fill="rgba(11,16,21,.1)" />
-      ))}
-      <text x="400" y="228" textAnchor="middle" {...lab} fill="rgba(11,16,21,.6)">CHECKS</text>
-      <g fill={GREEN} {...lab}>
-        <text data-k="n1" x="400" y="244" textAnchor="middle" fill={GREEN}>BRANCH #1</text>
-        <text data-k="n2" x="400" y="244" textAnchor="middle" fill={GREEN} opacity="0">BRANCH #2</text>
-      </g>
-      {/* agent */}
-      <text data-k="fact" x="536" y="128" textAnchor="middle" {...lab} fill="rgba(11,16,21,.6)">FACTS VIA CLI</text>
-      <rect data-k="agent" x="508.5" y="148.5" width="55" height="55" fill="#fff" stroke="rgba(11,16,21,.22)" />
-      <g transform="translate(536 176)" fill="none" stroke={INK} strokeWidth="1.5" opacity=".8">
-        <rect x="-9" y="-6" width="18" height="14" /><path d="M0 -6V-11" /><path d="M-4 0V2M4 0V2" strokeLinecap="square" /><path d="M-13 0V3M13 0V3" />
-      </g>
-      <text x="536" y="222" textAnchor="middle" {...lab} fill="rgba(11,16,21,.6)">YOUR AGENT&apos;S CONTEXT</text>
-      <text x="536" y="241" textAnchor="middle" {...lab} fontSize="8" fill="rgba(11,16,21,.45)">OR</text>
-      <g {...lab} fontSize="7.5" fill="rgba(11,16,21,.6)">
-        <rect x="506.5" y="250.5" width="34" height="20" fill="#fff" stroke="rgba(11,16,21,.22)" /><text x="523.5" y="263" textAnchor="middle">MCP</text>
-        <rect x="546.5" y="250.5" width="42" height="20" fill="#fff" stroke="rgba(11,16,21,.22)" /><text x="567.5" y="263" textAnchor="middle">HOOKS</text>
-      </g>
-      {/* comets */}
+    <>
       {["c1", "c2", "c3", "c4", "c5"].map((k) => (
         <g key={k}>
           <path data-k={k} d="M0 0" fill="none" strokeWidth="2" strokeLinecap="square" opacity="0" stroke={GREEN} />
           <rect data-k={k + "h"} width="4" height="4" opacity="0" fill={GREEN} />
         </g>
       ))}
+    </>
+  );
+}
+
+// Wide layout: changes | emfirge | agent, left to right.
+function Wide() {
+  const root = useRef<SVGSVGElement>(null);
+  useLoop(root, WIDE);
+  return (
+    <svg ref={root} className="f1 f1-w" viewBox="0 0 640 360" role="img" aria-label={ARIA}>
+      <text x="40" y="44" {...lab} fill={MUTED}>CHANGES</text>
+      {/* edges */}
+      <path d="M96 88H124V264M96 176H124M96 264H124M124 176H176" {...dotted} />
+      <path d="M152 176H124" {...dotted} />
+      <path d="M240 176H368" {...dotted} />
+      <path d="M432 176H508" {...dotted} />
+      {/* sources */}
+      {WIDE_Y.map((y, i) => (
+        <g key={i}>
+          <rect data-k={"src" + i} x="40.5" y={y - 28 + 0.5} width="55" height="55" fill="#fff" stroke={EDGE} />
+          <g transform={`translate(68 ${y})`}>{icons[i]}</g>
+          <text data-k={"srclab" + i} x="68" y={y + 44} textAnchor="middle" {...lab} letterSpacing={0.3} fill={MUTED}>{srcNames[i]}</text>
+        </g>
+      ))}
+      {/* group */}
+      <rect x="152.5" y="96.5" width="303" height="170" fill="none" stroke="rgba(11,16,21,.3)" />
+      <rect x="164" y="90" width="62" height="14" fill="#fff" />
+      <text data-k="boxlab" x="170" y="101" {...lab} fill={INK}>EMFIRGE</text>
+      <rect x="168.5" y="112.5" width="271" height="22" fill="none" stroke="rgba(11,16,21,.3)" strokeDasharray="3 3" />
+      <text data-k="stripT" x="304" y="127.5" textAnchor="middle" {...lab} letterSpacing={0.4} fill={FAINT}>A BRANCH OF YOUR LIVE CLOUD</text>
+      {/* branch tile */}
+      <rect x="176" y="144" width="64" height="64" fill={GREEN} />
+      <rect data-k="ring" x="176.5" y="144.5" width="63" height="63" fill="none" stroke={GREEN} opacity="0" />
+      <g transform="translate(208 176) scale(1.6) translate(-12 -12)" fill="none" strokeWidth="2.2" strokeLinecap="square">
+        <path d="M2.5 15H21.5" stroke="#fff" /><path d="M9 15C13.5 15 13.5 7 21.5 7" stroke="#fff" opacity=".7" />
+      </g>
+      <text x="208" y="228" textAnchor="middle" {...lab} fill={MUTED}>BRANCH</text>
+      <text data-k="verb" x="304" y="171" textAnchor="middle" {...lab} fill={FAINT} />
+      {/* checks tile */}
+      <rect data-k="checks" x="368.5" y="144.5" width="63" height="63" fill="#fff" stroke={EDGE} />
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <rect key={i} data-k={"cell" + i} x={376 + (i % 3) * 18} y={161 + Math.floor(i / 3) * 18} width="12" height="12" fill="rgba(11,16,21,.1)" />
+      ))}
+      <text x="400" y="228" textAnchor="middle" {...lab} fill={MUTED}>CHECKS</text>
+      <g {...lab} fill={GREEN}>
+        <text data-k="n1" x="400" y="245" textAnchor="middle" fill={GREEN}>BRANCH #1</text>
+        <text data-k="n2" x="400" y="245" textAnchor="middle" fill={GREEN} opacity="0">BRANCH #2</text>
+      </g>
+      {/* agent */}
+      <text data-k="fact" x="536" y="128" textAnchor="middle" {...lab} fill={MUTED}>FACTS VIA CLI</text>
+      <rect data-k="agent" x="508.5" y="148.5" width="55" height="55" fill="#fff" stroke={EDGE} />
+      <g transform="translate(536 176)" fill="none" stroke={INK} strokeWidth="1.5" opacity=".8">
+        <rect x="-9" y="-6" width="18" height="14" /><path d="M0 -6V-11" /><path d="M-4 0V2M4 0V2" strokeLinecap="square" /><path d="M-13 0V3M13 0V3" />
+      </g>
+      <text x="536" y="222" textAnchor="middle" {...lab} letterSpacing={0.3} fill={MUTED}>YOUR AGENT&apos;S CONTEXT</text>
+      <text x="536" y="241" textAnchor="middle" {...lab} fill={FAINT}>OR</text>
+      <g {...lab} fill={MUTED}>
+        <rect x="502.5" y="250.5" width="38" height="22" fill="#fff" stroke={EDGE} /><text x="521.5" y="265" textAnchor="middle">MCP</text>
+        <rect x="546.5" y="250.5" width="50" height="22" fill="#fff" stroke={EDGE} /><text x="571.5" y="265" textAnchor="middle">HOOKS</text>
+      </g>
+      <Comets />
     </svg>
+  );
+}
+
+// Tall layout for phones: changes, then emfirge, then your agent, top to bottom. Same tiles, same loop.
+function Tall() {
+  const root = useRef<SVGSVGElement>(null);
+  useLoop(root, TALL);
+  return (
+    <svg ref={root} className="f1 f1-t" viewBox="0 0 320 572" role="img" aria-label={ARIA}>
+      <text x="20" y="24" {...lab} fill={MUTED}>CHANGES</text>
+      {/* edges */}
+      {TALL_X.map((x) => <path key={x} d={`M${x} 118V134H100`} {...dotted} />)}
+      <path d="M100 134V226M100 290V344M100 408V472" {...dotted} />
+      {/* sources */}
+      {TALL_X.map((x, i) => (
+        <g key={i}>
+          <rect data-k={"src" + i} x={x - 27.5 + 0.5} y="36.5" width="55" height="55" fill="#fff" stroke={EDGE} />
+          <g transform={`translate(${x} 64)`}>{icons[i]}</g>
+          <text data-k={"srclab" + i} x={x} y="109" textAnchor="middle" {...lab} letterSpacing={0.2} fill={MUTED}>{srcNames[i]}</text>
+        </g>
+      ))}
+      {/* group */}
+      <rect x="16.5" y="150.5" width="287" height="274" fill="none" stroke="rgba(11,16,21,.3)" />
+      <rect x="28" y="144" width="62" height="14" fill="#fff" />
+      <text data-k="boxlab" x="34" y="155" {...lab} fill={INK}>EMFIRGE</text>
+      <rect x="28.5" y="166.5" width="263" height="36" fill="none" stroke="rgba(11,16,21,.3)" strokeDasharray="3 3" />
+      <g data-k="stripT" {...lab} letterSpacing={0.3} fill={FAINT} textAnchor="middle">
+        <text x="236" y="181">A BRANCH OF</text>
+        <text x="236" y="195">YOUR LIVE CLOUD</text>
+      </g>
+      {/* branch tile */}
+      <rect x="68" y="226" width="64" height="64" fill={GREEN} />
+      <rect data-k="ring" x="68.5" y="226.5" width="63" height="63" fill="none" stroke={GREEN} opacity="0" />
+      <g transform="translate(100 258) scale(1.6) translate(-12 -12)" fill="none" strokeWidth="2.2" strokeLinecap="square">
+        <path d="M2.5 15H21.5" stroke="#fff" /><path d="M9 15C13.5 15 13.5 7 21.5 7" stroke="#fff" opacity=".7" />
+      </g>
+      <text x="148" y="262" {...lab} fill={MUTED}>BRANCH</text>
+      <text data-k="verb" x="112" y="322" {...lab} fill={FAINT} />
+      {/* checks tile */}
+      <rect data-k="checks" x="68.5" y="344.5" width="63" height="63" fill="#fff" stroke={EDGE} />
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <rect key={i} data-k={"cell" + i} x={76 + (i % 3) * 18} y={361 + Math.floor(i / 3) * 18} width="12" height="12" fill="rgba(11,16,21,.1)" />
+      ))}
+      <text x="148" y="372" {...lab} fill={MUTED}>CHECKS</text>
+      <g {...lab} fill={GREEN}>
+        <text data-k="n1" x="148" y="390" fill={GREEN}>BRANCH #1</text>
+        <text data-k="n2" x="148" y="390" fill={GREEN} opacity="0">BRANCH #2</text>
+      </g>
+      {/* agent */}
+      <text data-k="fact" x="112" y="448" {...lab} fill={MUTED}>FACTS VIA CLI</text>
+      <rect data-k="agent" x="72.5" y="472.5" width="55" height="55" fill="#fff" stroke={EDGE} />
+      <g transform="translate(100 500)" fill="none" stroke={INK} strokeWidth="1.5" opacity=".8">
+        <rect x="-9" y="-6" width="18" height="14" /><path d="M0 -6V-11" /><path d="M-4 0V2M4 0V2" strokeLinecap="square" /><path d="M-13 0V3M13 0V3" />
+      </g>
+      <text x="148" y="497" {...lab} letterSpacing={0.3} fill={MUTED}>YOUR AGENT&apos;S</text>
+      <text x="148" y="512" {...lab} letterSpacing={0.3} fill={MUTED}>CONTEXT</text>
+      <text x="148" y="532" {...lab} fill={FAINT}>OR</text>
+      <g {...lab} fill={MUTED}>
+        <rect x="148.5" y="540.5" width="38" height="22" fill="#fff" stroke={EDGE} /><text x="167.5" y="555" textAnchor="middle">MCP</text>
+        <rect x="194.5" y="540.5" width="50" height="22" fill="#fff" stroke={EDGE} /><text x="219.5" y="555" textAnchor="middle">HOOKS</text>
+      </g>
+      <Comets />
+    </svg>
+  );
+}
+
+export function Figure1() {
+  return (
+    <>
+      <Wide />
+      <Tall />
+    </>
   );
 }

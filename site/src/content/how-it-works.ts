@@ -127,7 +127,6 @@ export const howItWorks: Page = {
           "**`emfirge.md`.** A plain-English file of your marks and limits. Today `emfirge context marks` shows resource tags only, and says that `emfirge.md` is not built.",
           "**Owner thresholds.** There are no tell-or-ask defaults and no spending limits in the engine.",
         ] },
-        { t: "note", x: "[TODO Ansh: decide when to bring back the Tell vs ask and emfirge.md sections once `request`, `emfirge.md` and thresholds ship. The v7 wording is in git history, commit 1c10452.]" },
       ],
     },
     {

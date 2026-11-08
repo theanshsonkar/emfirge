@@ -1,6 +1,7 @@
 // Typed page content for the v7 inner pages. One file per page in this folder.
 // Inline text uses plain Markdown: `code`, **bold**, [label](href). Internal hrefs are site paths ("/cli/#try").
-// [TODO Ansh: ...] strings are rendered visibly (and kept in the markdown for agents) so nothing unknown is hidden.
+// Open unknowns are not written into page text. They live in TODOS (site.ts) and show only with ?todo=1. A stray
+// [TODO Ansh: ...] token in a string is stripped from the markdown and rendered only with ?todo=1.
 // The same data renders the HTML page (components/Blocks.tsx) and the agent markdown (markdown.ts).
 
 export type Line = { x: string; tag?: string };
@@ -12,7 +13,7 @@ export type Block =
   | { t: "lede"; x: string }
   | { t: "h3"; x: string }
   | { t: "code"; title?: string; x: string }
-  | { t: "table"; head: string[]; rows: string[][]; mono?: number[]; key?: boolean }
+  | { t: "table"; head: string[]; rows: string[][]; mono?: number[]; key?: boolean; ops?: number[] }
   | { t: "list"; items: string[] }
   | { t: "card"; parts: { label: string; lines: Line[] }[] }
   | { t: "note"; x: string }

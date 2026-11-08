@@ -42,6 +42,9 @@ function block(b: Block): string {
 import { SETUP_PROMPT } from "./site.ts";
 import { cli } from "./cli.ts";
 
+// Open unknowns never reach the agent files: they live in TODOS (site.ts) and show only on the site with ?todo=1.
+const noTodo = (s: string) => s.replace(/ ?\[TODO Ansh:[^\]]*\]/g, "");
+
 export function pageMd(p: Page): string {
   const out: string[] = [`# ${p.h1.replace(/\n/g, " ")}`, abs(p.lead), `Human version: ${ORIGIN}${p.href}`];
   for (const b of p.intro ?? []) out.push(block(b));
@@ -50,7 +53,7 @@ export function pageMd(p: Page): string {
     for (const b of s.blocks) out.push(block(b));
   }
   out.push(footerMd());
-  return out.join("\n\n") + "\n";
+  return noTodo(out.join("\n\n") + "\n");
 }
 
 function footerMd() {
@@ -58,6 +61,10 @@ function footerMd() {
 }
 
 export function homeMd(): string {
+  return noTodo(homeMdRaw());
+}
+
+function homeMdRaw(): string {
   const m = METRICS;
   const f = (n: number) => n.toLocaleString("en-US");
   return `# emfirge
@@ -200,7 +207,7 @@ Every flag: ${ORIGIN}/cli.md. Run \`emfirge guide\` for the agent guide. When a 
 }
 
 export function llmsTxt(): string {
-  return `# emfirge
+  return noTodo(`# emfirge
 
 > ${SITE.description} People don't use the CLI; their AI agent does. A person sets it up once, then the agent runs it. Every page below is also served as markdown for agents.
 
@@ -215,5 +222,5 @@ For your agent:
 For your human:
 
 ${PAGES.filter((p) => p.slug !== "cli").map((p) => `- [${p.title}](${ORIGIN}/${p.slug}.md): ${p.description}`).join("\n")}
-`;
+`);
 }

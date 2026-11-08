@@ -67,7 +67,7 @@ On the CLI and MCP path the engine never calls an AI model: every request carrie
 - `emfirge branch discard` deletes the branch and its plans, evidence and policy checks.
 - Purge does not remove your login (workspace, API keys as hashes, sign-in identity) or the legacy GitHub integration tables. Email [ansh@emfirge.cloud](mailto:ansh@emfirge.cloud) to delete those, or anything else.
 
-> [TODO Ansh: retention periods and sweeps are not designed yet. Say here when they ship.]
+> Retention periods and sweeps are not designed yet.
 
 ## Open source, reporting and certifications
 

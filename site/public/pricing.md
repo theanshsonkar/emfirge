@@ -13,13 +13,13 @@ Human version: https://emfirge.cloud/pricing/
 - The hosted engine, with the six checks on every branch
 - The read-only role, revocable by deleting one stack
 - Support by email: ansh@emfirge.cloud
-- [TODO Ansh: confirm the beta limits the production server sets. The engine's code defaults are 5 scans per AWS account per day, 30 branch requests per minute and 10 open branches per base scan.]
+- Beta usage limits: not published yet.
 
 The engine is open source (AGPL-3.0). Self-hosting is possible but unsupported.
 
 ## What happens after beta
 
-[TODO Ansh: post-beta pricing, whether a free tier stays for one account, and how much notice beta users get. Nothing has been decided, so none of it is promised here.]
+Not decided yet. Post-beta pricing, whether a free tier stays, and how much notice beta users get have not been decided, so none of it is promised here.
 
 ## Questions
 
@@ -27,7 +27,7 @@ The engine is open source (AGPL-3.0). Self-hosting is possible but unsupported.
 No. There is no charge for the CLI, the engine or the checks.
 
 **Will emfirge add to my AWS bill?**
-Two opt-in features can cost you: AWS IAM Access Analyzer policy checks (about $0.002 a policy, billed to your AWS account) and usage evidence reads from CloudTrail and CloudWatch. Both show an estimate first and run only when it is accepted; your agent asks you. [TODO Ansh: state whether the regular scan's own AWS API reads can be billed.]
+Two opt-in features can cost you: AWS IAM Access Analyzer policy checks (about $0.002 a policy, billed to your AWS account) and usage evidence reads from CloudTrail and CloudWatch. Both show an estimate first and run only when it is accepted; your agent asks you.
 
 **Does emfirge create anything in my account?**
 Only the IAM role, through the CloudFormation stack you create. Delete the stack and it is gone.
@@ -36,7 +36,7 @@ Only the IAM role, through the CloudFormation stack you create. Delete the stack
 No. Emfirge has no AI inside. Your own agent's model usage is billed by whoever provides that model.
 
 **Is there a free tier after beta?**
-[TODO Ansh: not decided.]
+Not decided yet.
 
 **Can I run it myself?**
 The engine is AGPL-3.0 and you can read and deploy it. It is not set up for easy self-hosting and is not supported.

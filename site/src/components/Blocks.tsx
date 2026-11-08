@@ -6,17 +6,18 @@ import { CodeBlock } from "./CodeBlock";
 import { Fig } from "./Fig";
 import { Ext } from "./Icons";
 import { SameCard, SourcesCard } from "./Sections";
+import { TodoMark } from "./Todo";
 
-// Inline Markdown subset: `code`, **bold**, [label](href), and [TODO Ansh: ...] (rendered visibly).
+// Inline Markdown subset: `code`, **bold**, [label](href). A stray [TODO Ansh: ...] token renders only with ?todo=1.
 const TOK = /(\[TODO Ansh:[^\]]*\]|\*\*[^*]+\*\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
 export function Inline({ x }: { x: string }) {
   return (
     <>
       {x.split(TOK).map((p, i) => {
         if (!p) return null;
-        if (p.startsWith("[TODO Ansh:")) return <mark className="todo" key={i}>{p}</mark>;
+        if (p.startsWith("[TODO Ansh:")) return <TodoMark key={i} text={p} />;
         if (p.startsWith("**")) return <b key={i}>{p.slice(2, -2)}</b>;
-        if (p.startsWith("`")) return <code className="ic-code" key={i}>{p.slice(1, -1)}</code>;
+        if (p.startsWith("`")) return <code className={`ic-code${p.length <= 32 ? " nw" : ""}`} key={i}>{p.slice(1, -1)}</code>;
         const m = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(p);
         if (m) {
           const ext = /^(https?:|mailto:)/.test(m[2]);
@@ -76,9 +77,19 @@ export function Blocks({ blocks }: { blocks: Block[] }) {
           case "code": return <div key={i} data-reveal><CodeBlock title={b.title} text={b.x} /></div>;
           case "table": return (
             <div className="dp-tw" key={i} data-reveal>
-              <table className="dp-t">
+              <table className="dp-t" data-cols={b.head.length} data-ops={b.ops ? "" : undefined}>
                 <thead><tr>{b.head.map((h) => <th key={h}>{h}</th>)}</tr></thead>
-                <tbody>{b.rows.map((r, j) => <tr key={j}>{r.map((c, k) => <td key={k} className={`${k === 0 ? "k" : ""} ${b.mono?.includes(k) ? "m" : ""}`}><Inline x={c} /></td>)}</tr>)}</tbody>
+                <tbody>{b.rows.map((r, j) => (
+                  <tr key={j}>{r.map((c, k) => {
+                    const cls = `${k === 0 ? "k" : ""} ${b.mono?.includes(k) ? "m" : ""}`;
+                    if (b.ops?.includes(k)) {
+                      // add / modify / delete: "yes" in the wide table, the figure's pips in the stacked phone layout
+                      const on = c === "yes", op = b.head[k].toLowerCase();
+                      return <td key={k} className="op" data-on={on ? "1" : "0"} data-label={b.head[k]}><span className="yn">{c}</span><i className={`pip pip-${op}`} aria-hidden="true" /><span className="pl">{op}<span className="sr">: {on ? "yes" : "no"}</span></span></td>;
+                    }
+                    return <td key={k} className={`${cls}${b.ops && k === b.head.length - 1 ? " nt" : ""}`} data-label={b.head[k]}><Inline x={c} /></td>;
+                  })}</tr>
+                ))}</tbody>
               </table>
             </div>
           );

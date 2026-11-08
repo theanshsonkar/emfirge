@@ -234,13 +234,21 @@ export const FOOTER = {
   status: "All systems operational",
 };
 
-// Unknowns, written for Ansh. Not rendered on the home page. (Inner-page TODOs are written in place in each page file
-// as [TODO Ansh: ...] and rendered visibly.)
-export const TODOS = [
-  "[TODO Ansh: the CLI announcement post URL; the home pill links to /cli/ until then]",
-  "[TODO Ansh: X handle for the footer Connect column; shown as plain text without a link]",
-  "[TODO Ansh: status page URL; the footer status dot is not linked]",
-  "[TODO Ansh: the typed-change row of \"Same change, same answer\" has no law that compares it with the AWS API call (L18, L19 and L21 cover the CLI, CloudFormation and Terraform); add one or keep the note]",
-  "[TODO Ansh: npm shows emfirge 0.1.1 as latest, while the repo's CLI is 0.2.9; publish the current CLI before the site goes live]",
-  "[TODO Ansh: Writing posts, titles are placeholders with no dates or links]",
+// Open unknowns, written for Ansh. The one place they are kept. They are never in the public HTML or in the .md files:
+// open any page with ?todo=1 (or run `next dev`) to see that page's list at the bottom. `page` is the route slug ("" = home).
+export type Todo = { page: string; text: string };
+export const TODOS: Todo[] = [
+  { page: "", text: "The CLI announcement post URL; the home pill links to /cli/ until then." },
+  { page: "", text: "X handle for the footer Connect column; shown as plain text without a link." },
+  { page: "", text: "Status page URL; the footer status dot is not linked." },
+  { page: "", text: "The typed-change row of \"Same change, same answer\" has no law that compares it with the AWS API call (L18, L19 and L21 cover the CLI, CloudFormation and Terraform); add one or keep the note." },
+  { page: "", text: "npm shows emfirge 0.1.1 as latest, while the repo's CLI is 0.2.9; publish the current CLI before the site goes live." },
+  { page: "", text: "Writing posts: titles are placeholders with no dates or links." },
+  { page: "pricing", text: "Confirm the beta limits the production server sets (shown as \"Beta usage limits: not published yet.\"). The engine's code defaults are 5 scans per AWS account per day, 30 branch requests per minute and 10 open branches per base scan." },
+  { page: "pricing", text: "Post-beta pricing, whether a free tier stays for one account, and how much notice beta users get. Nothing has been decided, so none of it is promised (shown as \"Not decided yet.\")." },
+  { page: "pricing", text: "FAQ \"Will emfirge add to my AWS bill?\": state whether the regular scan's own AWS API reads can be billed." },
+  { page: "pricing", text: "FAQ \"Is there a free tier after beta?\": not decided (shown as \"Not decided yet.\")." },
+  { page: "quickstart", text: "There is no other sign-in flow for remote agents, and no command that issues an API key (`EMFIRGE_API_KEY`); say how remote agents and CI get one." },
+  { page: "security", text: "Retention periods and sweeps are not designed yet. Say so on the page when they ship (it currently says \"not designed yet\")." },
+  { page: "how-it-works", text: "Decide when to bring back the Tell vs ask and emfirge.md sections once `request`, `emfirge.md` and thresholds ship. The v7 wording is in git history, commit 1c10452." },
 ];

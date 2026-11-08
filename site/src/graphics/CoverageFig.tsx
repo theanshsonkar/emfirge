@@ -45,7 +45,7 @@ const ITEMS: Item[] = [
 export function CoverageFig() {
   const cache = useRef<{ key: string; dots: Dot[][]; cw: number; ch: number; n: number } | null>(null);
   const draw = useCallback<DrawFn>((ctx, w, h, t, still) => {
-    const n = w >= 560 ? 6 : 5, nrows = Math.ceil(ITEMS.length / n);
+    const n = w >= 560 ? 6 : w >= 440 ? 4 : 3, nrows = Math.ceil(ITEMS.length / n);
     const cw = w / n, ch = h / nrows, k = `${w}x${h}`;
     const art = Math.min(cw * 0.78, ch * 0.5);
     if (!cache.current || cache.current.key !== k) {
@@ -54,7 +54,7 @@ export function CoverageFig() {
     }
     ctx.clearRect(0, 0, w, h);
     const mono = getComputedStyle(document.documentElement).getPropertyValue("--font-geist-mono") || "monospace";
-    ctx.font = `500 ${cw < 80 ? 7 : 8}px ${mono}`; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+    ctx.font = `500 11px ${mono}`; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
     // Long names break at an underscore to fit the cell; the pips of a row sit under its longest label.
     const labelLines = (name: string): string[] => {
       if (ctx.measureText(name).width <= cw - 6) return [name];
@@ -82,9 +82,9 @@ export function CoverageFig() {
         ctx.fillRect(ox + d.x - size / 2, oy + d.y - size / 2, size, size);
       }
       const ly = top + art * 0.82 + 14;
-      ctx.fillStyle = `rgba(11,16,21,${0.6 * on})`;
-      lines[i].forEach((ln, li) => ctx.fillText(ln, cx, ly + li * 9));
-      const py = ly + (rowLines[Math.floor(i / n)] - 1) * 9;
+      ctx.fillStyle = `rgba(11,16,21,${0.78 * on})`;
+      lines[i].forEach((ln, li) => ctx.fillText(ln, cx, ly + li * 13));
+      const py = ly + (rowLines[Math.floor(i / n)] - 1) * 13;
       // pips: add (green), modify (outlined), delete (red)
       const px = cx - 11;
       [["a", "#0A7A4B"], ["m", "#0B1015"], ["d", "#C4574A"]].forEach(([op, col], j) => {

@@ -166,8 +166,6 @@ Any action of a service that is not in the table is reported as an unclassified 
 - **`emfirge.md`.** A plain-English file of your marks and limits. Today `emfirge context marks` shows resource tags only, and says that `emfirge.md` is not built.
 - **Owner thresholds.** There are no tell-or-ask defaults and no spending limits in the engine.
 
-> [TODO Ansh: decide when to bring back the Tell vs ask and emfirge.md sections once `request`, `emfirge.md` and thresholds ship. The v7 wording is in git history, commit 1c10452.]
-
 ## The record
 
 **After your agent applies a change, `report` hands back exactly what was judged. This is what you read.**
