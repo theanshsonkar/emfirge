@@ -174,3 +174,8 @@ test("an HTML gateway error page becomes one short plain sentence", async () => 
   assert.match(msg, /504/);
   assert.equal(plainBody(400, "bad   input\n here"), "bad input here");
 });
+
+test("an HTML gateway page from the server never becomes the error detail", async () => {
+  const { extractDetail } = await import("./client.js");
+  assert.equal(extractDetail("<!DOCTYPE html><html><body>504 Gateway Time-out</body></html>"), null);
+});

@@ -229,6 +229,7 @@ export function extractDetail(text: string): string | null {
   } catch {
     /* not JSON */
   }
+  if (/<\s*(!doctype|html|head|body)\b/i.test(text)) return null; // an HTML error page is no detail
   return text && text !== "" && text !== "\"\"" ? text.slice(0, 300) : null;
 }
 
