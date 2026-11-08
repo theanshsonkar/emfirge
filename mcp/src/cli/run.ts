@@ -2,7 +2,8 @@
 // All logic lives on the hosted engine; request building, token expansion and
 // redaction are the same code the MCP tools use (tools-registry handlers).
 //
-// Exit codes: 0 ok, 1 usage error, 2 not signed in / forbidden, 3 not found, 4 server or network.
+// Exit codes: 0 ok, 1 usage error (also HTTP 400 and 422), 2 not signed in / forbidden, 3 not found,
+// 4 server, network or rate limit (HTTP 429), 5 conflict (HTTP 409).
 
 import { readFileSync } from "node:fs";
 import { ZodError } from "zod";
@@ -12,7 +13,7 @@ import { redactDeep } from "../tokenize.js";
 import { parseCommand, UsageError, type Parsed } from "./args.js";
 import { VERB_NAMES, verbHelp, topUsage } from "./verbs.js";
 import { formatOk, formatError, type ErrorInfo } from "./output.js";
-import { planHandback } from "./extra.js";
+import { planHandback, findShorthand } from "./extra.js";
 import { loadGuide } from "./guide.js";
 
 export interface CliIo {
@@ -182,6 +183,15 @@ async function tryVerb(p: Parsed, io: CliIo): Promise<unknown> {
       plan = Array.isArray(parsed) ? parsed : (parsed as { commands?: unknown })?.commands;
       if (!Array.isArray(plan)) throw new UsageError("--aws-cli JSON must be a list of commands or {commands:[...]}", p.verb);
     } else plan = values;
+    (plan as unknown[]).forEach((command, index) => {
+      const hit = typeof command === "string" ? findShorthand(command) : undefined;
+      if (hit) {
+        throw new UsageError(
+          `Command ${index + 1}: ${hit.option} uses AWS shorthand syntax (${hit.value.slice(0, 40)}), which is not supported. ` +
+          `Emfirge will not guess what it means; pass the value as JSON, for example ${hit.option} '{"Key":"value"}'.`,
+          p.verb);
+      }
+    });
   } else {
     plan = await jsonInput(io, p.flags[kind] as string, p.verb);
     if (plan === null || typeof plan !== "object" || Array.isArray(plan)) {
@@ -251,6 +261,9 @@ function classify(e: unknown): ErrorInfo {
   const status = (e as { status?: unknown } | null)?.status;
   if (status === 401 || status === 403) return { code: status === 401 ? "not_signed_in" : "forbidden", message, exit: 2 };
   if (status === 404) return { code: "not_found", message, exit: 3 };
+  if (status === 400 || status === 422) return usageInfo(message);
+  if (status === 409) return { code: "conflict", message, exit: 5 };
+  if (status === 429) return { code: "rate_limited", message, exit: 4 };
   return { code: "server_error", message, exit: 4 };
 }
 

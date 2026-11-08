@@ -81,10 +81,11 @@ Run them with `--accept-estimate ID` (and `--approve` for policy) only after the
 | Code | Meaning |
 |---|---|
 | 0 | ok |
-| 1 | usage error (bad verb or option), or `request` (not built) |
+| 1 | usage error (bad verb or option), input the server rejected (HTTP 400 or 422), AWS CLI shorthand (pass JSON instead), or `request` (not built) |
 | 2 | not signed in, or forbidden. Run `emfirge login`. |
 | 3 | not found (branch, analysis) |
-| 4 | server or network error. Try again later. |
+| 4 | server or network error, or rate limited (HTTP 429, code `rate_limited`). Try again later. |
+| 5 | conflict (HTTP 409, code `conflict`): the branch changed since you read it, or a limit was hit. Read it again, then retry. |
 
 Errors are JSON on stderr: `{"error":{"code","message","exit"}}`. Stdout is empty on error.
 

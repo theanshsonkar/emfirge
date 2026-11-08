@@ -179,7 +179,7 @@ export function topUsage(): string {
     "",
     "Run `emfirge <command> --help` for options, or `emfirge guide` for the full agent guide.",
     "Global: --human (readable output), --version.",
-    "Exit codes: 0 ok, 1 usage, 2 not signed in, 3 not found, 4 server.",
+    "Exit codes: 0 ok, 1 usage or rejected input, 2 not signed in, 3 not found, 4 server or rate limit, 5 conflict.",
   );
   return lines.join("\n") + "\n";
 }
