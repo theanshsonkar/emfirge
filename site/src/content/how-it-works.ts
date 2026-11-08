@@ -1,0 +1,157 @@
+import type { Page } from "./types.ts";
+
+// Facts here come from backend/app/check_facts.py, aws_check.py, verdict.py and the CLI; see site/FACTS.md, sections 2 to 4.
+export const howItWorks: Page = {
+  slug: "how-it-works",
+  href: "/how-it-works/",
+  nav: "How it works",
+  title: "How it works",
+  h1: "A branch of your live cloud.\nThe engine, in one page.",
+  lead: "Your agent hands emfirge the change it wants to make. Emfirge puts it on a copy of your live AWS, runs six checks, and answers with facts. The agent reads the facts, fixes its own plan and tries again. You set it up once and read what comes back. No AI runs inside emfirge, and it never writes to your cloud.",
+  description: "The emfirge engine in one page: branches, the six checks and what they report as unknown, changed settings, the hand-back record, and what emfirge never does.",
+  sections: [
+    {
+      id: "loop",
+      title: "The loop",
+      blocks: [
+        { t: "lede", x: "Your agent sends a change in and reads the facts out, until its plan is right." },
+        { t: "fig", id: "loop", caption: "Figure 1. A change enters emfirge in any format and runs on a branch of your live cloud. Six checks answer with facts, and the verdict reads pass, warn or block. The agent reads them, changes its plan and tries again. The change that is left comes back as a hand-back, bound by hash to its verdict." },
+        { t: "p", x: "An agent that changes a codebase has files, a branch, tests and a log. An agent that changes a cloud gets the same from emfirge: **context** (what is true), a **workspace** (a branch), **signals** (what a change did) and a **record** (what was applied). A fifth, **boundaries** (what needs the owner), is not built yet." },
+        { t: "p", x: "The loop is `context → branch → try → check → fix → retry → apply → report`. Your agent runs every step. It applies with its own access; emfirge never does." },
+        { t: "table", head: ["Step", "What your agent does", "Where you come in"], rows: [
+          ["Context", "Asks what is true: `emfirge context`.", "Once, before the first step: you give it emfirge, approve the sign-in and create the read-only role ([Set up](/quickstart/))."],
+          ["Branch", "Opens a safe copy of live and works on it.", ""],
+          ["Try", "Puts its change on the branch, in whatever form it already has.", ""],
+          ["Check", "Reads the six answers, the unknowns and the changed settings.", "Only if a check costs money (policy checks, usage evidence): your agent asks you first."],
+          ["Fix and retry", "Changes its own plan and tries again on the branch.", ""],
+          ["Apply", "Applies the change that is left, with its own AWS access.", "You decide what your agent is allowed to apply. Emfirge does not stop it; it is advisory."],
+          ["Report", "Runs `emfirge report` and tells you what it applied.", "You read the hand-back and decide what comes next."],
+        ] },
+      ],
+    },
+    {
+      id: "branch",
+      title: "A branch of live",
+      blocks: [
+        { t: "lede", x: "A branch is a base snapshot plus an ordered list of changes." },
+        { t: "fig", id: "branch", caption: "Figure 2. A branch is a snapshot plus changes. The base never moves; each change is a layer replayed on it in order. A fork copies the whole stack into an independent second branch." },
+        { t: "card", parts: [
+          { label: "Base snapshot", lines: [{ x: "us-east-1, read through the read-only role at scan time", tag: "immutable" }] },
+          { label: "Ordered changes", lines: [
+            { x: "1  modify  security_group  SG_001  rules", tag: "try" },
+            { x: "2  delete  rds_instance  NAME_002", tag: "try" },
+            { x: "3  add     ebs_volume  size_gb 100", tag: "try" },
+          ] },
+        ] },
+        { t: "p", x: "The engine rebuilds the hypothetical cloud by replaying the changes in order on the base. Live never moves. A snapshot reflects the moment it was read; it is not a continuously synchronized view of production." },
+        { t: "p", x: "An empty branch is live: it scores exactly like the live scan (law L1). That makes `check` on a branch with no changes your baseline." },
+        { t: "h3", x: "Fork." },
+        { t: "p", x: "Copy a branch, base and full change log, into an independent child. Try a variation without losing the original." },
+        { t: "h3", x: "Roll back." },
+        { t: "p", x: "Undo the last change, or truncate the log to the first N changes. Zero returns the branch to its base." },
+        { t: "h3", x: "Compare." },
+        { t: "p", x: "Put two designs on two branches and compare them." },
+        { t: "h3", x: "Discard." },
+        { t: "p", x: "Delete a branch and everything stored with it. It does not change anything in your cloud." },
+        { t: "p", x: "Several agents can share a base safely. Every branch carries a revision token (a SHA-256 of its history); pass it to a fork, rollback or discard, and a stale view is rejected with HTTP 409 instead of silently building on old state." },
+        { t: "link", label: "Branch commands", href: "/cli/#branch" },
+      ],
+    },
+    {
+      id: "ways-in",
+      title: "Many ways in",
+      blocks: [
+        { t: "lede", x: "Your agent hands emfirge the change in the form it already has. Same change, same answer." },
+        { t: "table", head: ["Input", "What your agent gives it", "Example"], mono: [2], rows: [
+          ["Typed", "A small typed change: operation, resource type, ID, fields", "`--typed '{\"op\":\"modify\",…}'`"],
+          ["AWS CLI", "One or more `aws …` commands, written out in full", "`--aws-cli \"aws ec2 authorize-security-group-ingress …\"`"],
+          ["AWS API", "The API calls as JSON", "`--aws-api calls.json`"],
+          ["Terraform", "The JSON from `terraform show -json plan.out`", "`--terraform plan.json`"],
+          ["CloudFormation", "A change set, as JSON", "`--cloudformation changeset.json`"],
+        ] },
+        { t: "p", x: "Every format becomes the same typed change on the branch before anything is judged, so an equivalent change gets the same verdict whichever way it arrives. Three laws pin it to the AWS API: L18 for an AWS CLI command, L19 for a CloudFormation change set and L21 for a Terraform security-group rule. Emfirge never runs your plan." },
+        { t: "fig", id: "ways", caption: "Figure 3. Same change, five ways in. Whatever the format, it becomes one typed change on one branch and gets one verdict." },
+        { t: "same" },
+        { t: "p", x: "Shorthand the engine cannot read is refused with a clear error, not guessed. Anything it reads but cannot model is listed, and makes the verdict stricter." },
+      ],
+    },
+    {
+      id: "checks",
+      title: "The six checks",
+      blocks: [
+        { t: "lede", x: "Six questions, asked about what the branch changed, not about the action." },
+        { t: "p", x: "Emfirge compares the branch with its base and asks the same six questions every time, in the same order. It does not keep a rule per AWS action (policy_sentry's IAM data alone lists more than 20,000); questions about the result do not grow." },
+        { t: "table", head: ["Check", "The question", "What it looks at", "Example fact"], mono: [3], rows: [
+          ["Data", "Did something that holds data disappear with no recovery point?", "Deleted buckets, databases, volumes and DynamoDB tables against surviving snapshots and backups; versioning, backups or point-in-time recovery turned off", "`deleted` with `has_recovery_point: false`"],
+          ["Exposure", "Is anything newly reachable from the internet or another account?", "Security group rules, network ACLs, route tables, bucket policies, role trust", "`newly_exposed`"],
+          ["Money", "How did the monthly cost change?", "Provisioned list-price cost before and after, from AWS's Price List (us-east-1 only); usage-based charges are listed as unknown", "`modified`, `total`"],
+          ["Availability", "Did something live traffic depends on break or disappear?", "The dependency graph (10 levels), lost internet paths, permissions a role lost, a CloudFront Host header, schedules turned off, recent use when evidence was gathered", "`dependent_of_deleted`"],
+          ["Control", "Did who can do what, or what is logged, change?", "Admin access, 92 known privilege-escalation paths, permissions added, S3 access logging", "`admin_access_removed`"],
+          ["Outside world", "Does the change leave the cloud?", "Support cases, quota requests, email, domains, Marketplace and Savings Plans, decided per service; and schedules that start running", "`schedule_enabled`"],
+        ] },
+        { t: "p", x: "Each answer has three lists: **facts** (what changed), **checked** (what was looked at, with counts) and **unknown** (what was not looked at, and why). Unknown means not checked. It never means safe." },
+        { t: "code", title: "emfirge check (abridged JSON from the engine's synthetic test account)", x: "{\n  \"changes\": [ { \"change\": \"modified\", \"resource_ids\": [\"SG_002\", \"SG_001\"] }, … ],\n  \"answers\": [\n    { \"damage\": \"exposure\",\n      \"facts\": [ { \"change\": \"newly_exposed\", \"resource_id\": \"EC2_001\", \"resource_type\": \"ec2_instance\",\n                   \"protocol\": \"tcp\", \"ports\": [22, 22], \"source\": \"0.0.0.0/0\",\n                   \"resource_ids\": [\"SG_001\"], \"state\": \"active\" } ],\n      \"checked\": [ { \"topic\": \"ingress_rules\",\n                     \"detail\": \"1 ingress paths opened and 0 closed, compared between the base and the branch\" }, … ],\n      \"unknown\": [ { \"topic\": \"observed_traffic\",\n                     \"reason\": \"observed traffic, host firewalls and application-level controls are not collected\" } ] },\n    { \"damage\": \"availability\", \"facts\": [],\n      \"unknown\": [ { \"topic\": \"recent_use\", \"resource_id\": \"SG_001\",\n                     \"reason\": \"recent use not checked: no usage evidence was gathered for this resource\" }, … ], … },\n    …\n  ],\n  \"changed_settings\": [\n    { \"resource_id\": \"SG_001\", \"resource_type\": \"security_group\", \"field\": \"rules\",\n      \"judged\": true, \"judged_by\": [\"exposure\"] },\n    { \"resource_id\": \"SG_002\", \"resource_type\": \"security_group\", \"field\": \"attached_to\",\n      \"judged\": false, \"judged_by\": [] }\n  ]\n}" },
+        { t: "h3", x: "Changed settings." },
+        { t: "p", x: "Outside the six answers, `changed_settings` lists every setting that differs on a resource, by name and never by value. `judged: true` means a check reads that setting, and `judged_by` says which answers. `judged: false` means it changed and no check reads it, so it is named here and nowhere else, never dropped. Judged does not mean it produced a fact, and not judged is not safe." },
+        { t: "h3", x: "Verdict and reason codes." },
+        { t: "p", x: "`emfirge check BRANCH --verdict` (and `emfirge try`, for a plan) also gives the older verdict: `pass`, `warn` or `block`, the worst level among its reasons. Each reason has a stable `code`, a plain message and the resources it names. The same branch always gives the same answer." },
+        { t: "table", head: ["Reasons", "Codes"], mono: [1], rows: [
+          ["Data and recovery", "`data_store_deleted_no_recovery_point` (block), `data_store_deleted_recovery_unknown`, `data_store_deleted_with_recovery_point`, `recovery_point_removed`"],
+          ["Exposure and findings", "`introduced_critical_exposure` (block), `introduced_critical_finding` (block), `new_exposure`, `latent_exposure`, `newly_internet_reachable`, `internet_to_broad_data_access` (block or warn), `introduced_finding`, `new_scanner_finding`"],
+          ["Access", "`privilege_escalation` (block), `tag_change_access_unmodeled`"],
+          ["Use and dependencies", "`recently_used` (block), `usage_unknown` (block), `recent_activity`, `lost_ingress`, `lost_dependency`, `lost_connectivity`, `deletion_impact`"],
+          ["Limits", "`capacity`"],
+          ["What it could not model", "`unmodeled_delete` (block), `unmodeled_risky_change` (block), `unseen_change` (block), `plan_delete_rejected` (block), `unmodeled_change`, `outside_view`, `plan_change_rejected`, `unknown_plan_values`, `unspecified_values`, `stateless_replace`"],
+        ] },
+        { t: "p", x: "32 codes in all; a code not marked block is a warn. Money, control and outside world have no reason code: they are answered in `check` only." },
+        { t: "p", x: "A change emfirge cannot model never passes: it is listed as unmodeled, and the verdict gets stricter. A check that could not run is reported, not hidden. A `pass` is evidence, not a guarantee. A branch is a model of your cloud, and every answer says what was checked and what was not." },
+        { t: "link", label: "What each check is built from", href: "/coverage/#built-from" },
+      ],
+    },
+    {
+      id: "outside-world",
+      title: "How outside world is decided",
+      blocks: [
+        { t: "lede", x: "Per service and per action, never by a rulebook of single actions." },
+        { t: "p", x: "A change to a security group or a bucket stays among your own resources. Some AWS actions reach a person or a party outside the account. The check keeps a small table of services where that is what the service does: AWS Support, Service Quotas, SES (v1 and v2), Route 53 Domains, AWS Marketplace (catalog and entitlement) and Savings Plans. An action of one of those services in a plan your agent tries is an outside-world fact, except a read by name (`Get`, `List`, `Describe`), which is not." },
+        { t: "p", x: "Any action of a service that is not in the table is reported as an unclassified unknown, never as fine. Each table entry cites AWS's own documentation. A schedule (EventBridge Scheduler) that starts running on the branch, or whose timing changes while it is enabled, is also a fact, because it runs its target on a timer; what the target does outside the cloud is listed as unknown." },
+      ],
+    },
+    {
+      id: "not-built",
+      title: "Not built yet",
+      blocks: [
+        { t: "lede", x: "Three things you might expect do not exist yet." },
+        { t: "list", items: [
+          "**Asking the owner.** `emfirge request` is listed in the CLI and exits with `not_built`. Nothing in the engine asks a person anything.",
+          "**`emfirge.md`.** A plain-English file of your marks and limits. Today `emfirge context marks` shows resource tags only, and says that `emfirge.md` is not built.",
+          "**Owner thresholds.** There are no tell-or-ask defaults and no spending limits in the engine.",
+        ] },
+      ],
+    },
+    {
+      id: "record",
+      title: "The record",
+      blocks: [
+        { t: "lede", x: "After your agent applies a change, `report` hands back exactly what was judged. This is what you read." },
+        { t: "p", x: "Your agent applies with its own credentials; emfirge never does. `report` returns the hand-back: for a typed branch, the exact AWS API calls its changes stand for; for a plan, its hash. Each is bound to the verdict it was judged with: the input hash, the base scan, the branch revision and a verdict ID. Emfirge keeps no plan text, only a SHA-256, so your agent applies its own original plan." },
+        { t: "code", title: "emfirge report --verify (abridged output from the engine's synthetic test account)", x: "{\n  \"kind\": \"aws-api-calls\",\n  \"calls\": [\n    { \"change_index\": 0, \"service\": \"ec2\", \"operation\": \"AuthorizeSecurityGroupIngress\",\n      \"params\": { \"GroupId\": \"SG_001\", \"IpPermissions\": [ … ] } },\n    { \"change_index\": 0, \"service\": \"ec2\", \"operation\": \"RevokeSecurityGroupIngress\",\n      \"params\": { \"GroupId\": \"SG_001\", \"IpPermissions\": [ … ] } }\n  ],\n  \"input_sha256\": \"3c467190…\",\n  \"branch_revision\": \"90196bc0…\",\n  \"verdict\": \"warn\",\n  \"verdict_id\": \"f7dc5a85…\",\n  \"verification\": { \"ok\": true, \"verdict\": \"warn\", \"verdict_id\": \"f7dc5a85…\" }\n}" },
+        { t: "p", x: "A mismatch is named, not smoothed over: `input_hash_mismatch` (these are not the calls that were judged), `unknown_plan`, `base_snapshot_changed`, `branch_revision_changed` or `verdict_changed`. The check is of the binding. `report` does not read CloudTrail. Your agent tells you in its own words; the hash and the verdict are emfirge's." },
+        { t: "link", label: "The report verb", href: "/cli/#report" },
+      ],
+    },
+    {
+      id: "never",
+      title: "What emfirge never does",
+      blocks: [
+        { t: "list", items: [
+          "**It never writes to your cloud.** The role is read-only and the engine has no apply path. Your agent applies.",
+          "**It has no AI inside.** The same snapshot and changes always give the same verdict (law L7), so it cannot be talked into a pass.",
+          "**It never passes silently.** A change it cannot model, or a check that did not run, is listed as unknown and makes the verdict stricter.",
+          "**It never writes the fix.** It supplies facts. The agent supplies the intelligence.",
+        ] },
+        { t: "p", x: "One honest limit: emfirge is advisory today. It is a safe workspace and a record, not a gate that blocks a live apply. A fact or a block stops nothing unless your agent or pipeline listens to it. That is why the setup prompt tells your agent never to apply a change that did not pass." },
+      ],
+    },
+  ],
+};
