@@ -1,10 +1,16 @@
 # FAQ. Questions, fixes and terms.
 
-Short answers, what to do when something fails, and the words emfirge uses.
+Short answers, what to do when something fails (your agent usually handles it; this is what it sees), and the words emfirge uses.
 
 Human version: https://emfirge.cloud/faq/
 
 ## Questions
+
+**Do I need to learn the CLI?**
+No. Your agent uses it. You give your agent the setup prompt once and it runs every `emfirge` command itself. The [Agent reference](https://emfirge.cloud/cli.md) is written for the agent; you never have to read it.
+
+**What do I actually do?**
+Set up once: paste the setup prompt into your agent, approve the browser sign-in when your agent shows it, and create the read-only role with one click in AWS, then give your agent the role ARN ([Set up](https://emfirge.cloud/quickstart.md)). After that you ask your agent to change your AWS as usual and read what it hands back. You also say yes before a check that costs money, and you decide what your agent is allowed to apply.
 
 **Does emfirge change my AWS?**
 No. It is read-only. Your agent applies with its own credentials; emfirge records and verifies.
@@ -36,16 +42,16 @@ Nothing while in beta. See [Pricing](https://emfirge.cloud/pricing.md).
 ## Troubleshooting
 
 **`emfirge` is not found, or Node errors on start**
-Use Node.js 20 or later. `npx emfirge --version` prints the version that runs, and `npx emfirge --help` prints the commands the server offers.
+Your agent needs Node.js 20 or later. `npx emfirge --version` prints the version that runs, and `npx emfirge --help` prints the commands the server offers.
 
 **Access denied or 403 when reading my account**
-Check the role ARN, the trusted account and the ExternalId in your stack against the link `emfirge connect` prints; run it again to print the link. A role made with an older shared ExternalId must be redeployed with your own. A 403 is exit code 2.
+Check the role ARN, the trusted account and the ExternalId in your stack against the link `emfirge connect` prints; your agent can run it again to print the link. A role made with an older shared ExternalId must be redeployed with your own. A 403 is exit code 2.
 
 **The scan is empty**
 Confirm the region: most resources are regional and emfirge needs one. Check that the role has the read permissions in [iam-role.yaml](https://github.com/theanshsonkar/emfirge/blob/main/iam-role.yaml). An empty result does not mean your account has no risks.
 
 **Branch not found**
-Use the exact ID printed by `emfirge branch list`, against the same backend that created it. This is exit code 3.
+Your agent should use the exact ID printed by `emfirge branch list`, against the same backend that created it. This is exit code 3.
 
 **A change was rejected**
 The branch must be open, the resource type supported, and the target must exist for a modify or delete. Unknown fields are rejected. Check [Coverage](https://emfirge.cloud/coverage.md#resources) and run `emfirge try` again with the exact ID.
@@ -57,7 +63,10 @@ Someone else changed the branch. Run `emfirge branch get` for the new revision t
 A scan can take a while on a large account; the client waits up to 240 seconds. For 429 (exit code 4, `rate_limited`), follow the limit and reset time in the message. The open-branch limit is also a 429: discard branches you no longer need.
 
 **Exit code 6, "needs a newer emfirge"**
-The server's command is newer than your install. Run `npx emfirge@latest`, then retry.
+The server's command is newer than the install. Your agent runs `npx emfirge@latest`, then retries.
+
+**Your agent says it is not signed in (exit code 2)**
+It runs `emfirge login`; that opens your browser and needs you to sign in with GitHub or Google within 5 minutes. The sign-in page opens on the machine where your agent runs.
 
 **`emfirge request` exits 1**
 It is not built yet. It prints a JSON error, `not_built`, and sends nothing.
@@ -73,7 +82,7 @@ Native results still return. `coverage_warnings` says the result is not full cov
 | Snapshot | What emfirge read from your account at one moment. The base of every branch. |
 | Change | One add, modify or delete of a supported resource on a branch. |
 | Context | What is true about your cloud: what exists, what is live, what depends on what, and your marks. |
-| Verb | One of the six CLI commands: context, branch, try, check, request, report. `request` is not built yet. |
+| Verb | One of the six CLI commands your agent runs: context, branch, try, check, request, report. `request` is not built yet. |
 | Check | One of six questions about a branch: data, exposure, money, availability, control, outside world. Each answers with facts, what was checked and what is unknown. |
 | Unknown | What a check could not look at, and why. Unknown means not checked. It never means safe. |
 | Changed setting | A setting that differs between a branch and its base, named without its value: judged by a check, or named as not judged. |

@@ -87,6 +87,8 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .nav a { position: relative; font-size: 15px; line-height: 22px; padding: 6px 0; color: var(--ink-2); display: block; }
 .nav a:hover { color: var(--ink); }
 .nav a.on { color: var(--ink); }
+.nav-g + .nav-g { margin-top: 24px; }
+.nav-gl { color: var(--ink-3); font-size: 10.5px; margin-bottom: 4px; }
 .nav a.on::before { content: ""; position: absolute; left: -16px; top: 50%; width: 5px; height: 5px; margin-top: -2.5px; background: var(--green); border-radius: 0; }
 .stagger { opacity: 0; transform: translateY(6px); animation: rise .6s cubic-bezier(.2,.7,.2,1) forwards; }
 @keyframes rise { to { opacity: 1; transform: none; } }
@@ -329,6 +331,16 @@ mark.todo { background: rgba(255, 196, 0, .22); color: var(--ink); font-family: 
 .codeb-h button:hover { color: var(--ink); }
 .codeb pre { margin: 0; padding: 14px 14px 15px; overflow-x: auto; font-family: var(--font-geist-mono), monospace; font-size: 12px; line-height: 19px; color: var(--ink); tab-size: 2; }
 .codeb code { font-family: inherit; }
+
+/* collapsed block ("Prefer to set it up yourself?"): same hairline box and mono label as the code and card blocks */
+.dp-det { margin-top: 22px; border: 1px solid var(--line); max-width: 640px; }
+.dp-det > summary { list-style: none; cursor: pointer; padding: 12px 16px; color: var(--ink); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.dp-det > summary::-webkit-details-marker { display: none; }
+.dp-det > summary::after { content: "+"; color: var(--green); font-size: 14px; line-height: 1; }
+.dp-det[open] > summary::after { content: "\2212"; }
+.dp-det[open] > summary { border-bottom: 1px solid rgba(11,16,21,.08); }
+.dp-det-b { padding: 0 16px 20px; }
+.dp-det-b > :first-child { margin-top: 18px; }
 
 /* card (their "one message in / memories out" box) */
 .dp-card { margin-top: 22px; border: 1px solid var(--line); padding: 16px 16px 6px; }

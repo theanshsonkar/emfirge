@@ -15,7 +15,7 @@
 
 export const LINKS = {
   site: "https://emfirge.cloud",
-  quickstart: "/quickstart/",
+  quickstart: "/quickstart/", // the Set up page; the route keeps its v8 name so links and /quickstart.md still work
   how: "/how-it-works/",
   cli: "/cli/",
   coverage: "/coverage/",
@@ -37,20 +37,45 @@ export const SITE = {
     "Emfirge gives AI agents a true model of your AWS, a branch for every change, and six checks with no AI inside.",
 };
 
-export const SETUP_PROMPT = "Set up emfirge in this project. Read https://emfirge.cloud/index.md and follow it.";
+// The prompt a person gives their agent. Built from docs/AGENT-GUIDE.md and the real CLI (login -> connect -> context --refresh;
+// branch open -> try -> check -> report). Who does what is in landing/FACTS.md, section 13. Keep it short.
+export const SETUP_PROMPT = [
+  "Set up emfirge for my AWS account and use it for every AWS change from now on.",
+  "emfirge is a CLI. Run it as `npx -y emfirge <command>` (Node.js 20 or later). Run `npx -y emfirge guide` first; the full reference is https://emfirge.cloud/cli.md.",
+  "",
+  "1. Run `login`. It opens my browser so I can sign in with GitHub or Google. If it does not open, show me the address it prints, then wait for me.",
+  "2. Run `connect` and show me the link it prints. I will create the read-only role and send you the role ARN. Ask me which AWS region to use.",
+  "3. Run `context --refresh --role-arn ARN --region REGION`, then `context inventory`. Keep the role ARN: later steps need it.",
+  "",
+  "Before any AWS change: open a branch (`branch open`), try the change on it (`try`), and read `check`. Never apply a change that did not pass. If it fails, fix your plan and try again on the branch. Ask me before `check --policy` or `check --evidence`: they cost money. When a change passes, apply it with your own access, run `report`, and tell me what changed.",
+].join("\n");
 export const COMMAND = "npx emfirge connect";
 
-export const RAIL_NAV = [
-  { label: "Home", href: "/" },
-  { label: "Quickstart", href: "/quickstart/" },
-  { label: "How it works", href: "/how-it-works/" },
-  { label: "CLI", href: "/cli/" },
-  { label: "Coverage", href: "/coverage/" },
-  { label: "Security & privacy", href: "/security/" },
-  { label: "Pricing", href: "/pricing/" },
-  { label: "Changelog", href: "/changelog/" },
-  { label: "FAQ", href: "/faq/" },
-  { label: "GitHub", href: LINKS.github, ext: true },
+// Two labelled groups: what the person reads, and what the agent reads. The routes keep their v8 paths (/quickstart/, /cli/).
+export type NavItem = { label: string; href: string; ext?: boolean };
+export const RAIL_GROUPS: { label: string; items: NavItem[] }[] = [
+  {
+    label: "For you",
+    items: [
+      { label: "Home", href: "/" },
+      { label: "Set up", href: "/quickstart/" },
+      { label: "How it works", href: "/how-it-works/" },
+      { label: "Coverage", href: "/coverage/" },
+      { label: "Security & privacy", href: "/security/" },
+      { label: "Pricing", href: "/pricing/" },
+      { label: "Changelog", href: "/changelog/" },
+      { label: "FAQ", href: "/faq/" },
+    ],
+  },
+  {
+    label: "For your agent",
+    items: [
+      { label: "CLI reference", href: "/cli/" },
+      { label: "/llms.txt", href: "/llms.txt" },
+      { label: "/cli.md", href: "/cli.md" },
+      { label: "GitHub", href: LINKS.github, ext: true },
+    ],
+  },
 ];
 
 export const ON_THIS_PAGE = [
@@ -63,12 +88,13 @@ export const ON_THIS_PAGE = [
 ];
 
 export const HERO = {
-  pill: "Introducing the emfirge CLI",
-  pillLink: "See the CLI",
+  pill: "Your agent runs it",
+  pillLink: "Agent reference",
   h1: "emfirge is building the harness for AI agents that work on your cloud.",
-  sub: "Available through our CLI, any agent's shell, and MCP.",
-  primary: "Get started with emfirge",
-  secondary: "Talk to Ansh",
+  sub: "You set it up once. Your agent does the rest, in its own shell or over MCP.",
+  primary: "Give emfirge to your agent",
+  primaryDone: "Copied. Paste it into your agent",
+  secondary: "Set up, step by step",
   copy: "Copy setup prompt",
   worksWith: ["Claude Code", "Codex", "Cursor", "Gemini CLI", "MCP"],
 };
@@ -158,8 +184,8 @@ export const METRICS = {
 
 export const RUNS = {
   title: "emfirge runs wherever your agent runs.",
-  text: "The CLI is a thin client; the engine is hosted. Your cloud only ever sees a read-only role.",
-  link: "How setup works",
+  text: "Your agent runs the CLI, a thin client; the engine is hosted. Your cloud only ever sees a read-only role.",
+  link: "What you do, once",
   cards: [
     { n: "001", title: "In your terminal", art: "laptop" },
     { n: "002", title: "In CI", art: "pipeline" },
@@ -183,8 +209,8 @@ export const TRUST = {
 
 export const CTA = {
   title: "Letting agents touch production?",
-  text: "If your agents already change your cloud, they should try every change on a branch first. Any agent, through the CLI or MCP.",
-  button: "Get started with emfirge",
+  text: "If your agents already change your cloud, they should try every change on a branch first. Give emfirge to your agent once; it does the rest, through the CLI or MCP.",
+  button: "Give emfirge to your agent",
 };
 
 export const WRITING = {
@@ -200,7 +226,7 @@ export const WRITING = {
 export const FOOTER = {
   tagline: "The harness for AI agents that work on your cloud.",
   cols: [
-    { h: "Product", links: [["Quickstart", "/quickstart/"], ["How it works", "/how-it-works/"], ["CLI", "/cli/"], ["Coverage", "/coverage/"], ["Pricing", "/pricing/"], ["Changelog", "/changelog/"], ["FAQ", "/faq/"]] },
+    { h: "Product", links: [["Set up", "/quickstart/"], ["How it works", "/how-it-works/"], ["Agent reference", "/cli/"], ["Coverage", "/coverage/"], ["Pricing", "/pricing/"], ["Changelog", "/changelog/"], ["FAQ", "/faq/"]] },
     { h: "Company", links: [["Security & privacy", "/security/"], ["GitHub ↗", LINKS.github], ["Contact", LINKS.mail]] },
     { h: "Connect", links: [["X", ""], ["GitHub", LINKS.ansh], ["ansh@emfirge.cloud", LINKS.mail]] },
   ],

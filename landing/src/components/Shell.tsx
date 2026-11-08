@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { RAIL_NAV } from "@/content/site";
+import { RAIL_GROUPS } from "@/content/site";
 import { Mark } from "@/graphics/Mark";
 import { Ext } from "./Icons";
 
@@ -16,17 +16,24 @@ function Logo() {
 
 function Nav({ onNav, delay = 0 }: { onNav?: () => void; delay?: number }) {
   const path = (usePathname() || "/").replace(/\/?$/, "/");
+  let i = 0;
   return (
     <nav className="nav" aria-label="Primary">
-      {RAIL_NAV.map((n, i) => {
-        const active = !n.ext && n.href === path;
-        return (
-        <a key={n.label} href={n.href} className={`stagger ${active ? "on" : ""}`} style={{ animationDelay: `${delay + 120 + i * 45}ms` }}
-          {...(n.ext ? { target: "_blank", rel: "noreferrer" } : {})} onClick={onNav} aria-current={active ? "page" : undefined}>
-          {n.label}{n.ext && <> <Ext /></>}
-        </a>
-        );
-      })}
+      {RAIL_GROUPS.map((g) => (
+        <div className="nav-g" key={g.label} role="group" aria-label={g.label}>
+          <div className="label nav-gl stagger" style={{ animationDelay: `${delay + 120 + i * 45}ms` }}>{g.label}</div>
+          {g.items.map((n) => {
+            const active = !n.ext && n.href === path;
+            const k = i++;
+            return (
+              <a key={n.label} href={n.href} className={`stagger ${active ? "on" : ""}`} style={{ animationDelay: `${delay + 120 + (k + 1) * 45}ms` }}
+                {...(n.ext ? { target: "_blank", rel: "noreferrer" } : {})} onClick={onNav} aria-current={active ? "page" : undefined}>
+                {n.label}{n.ext && <> <Ext /></>}
+              </a>
+            );
+          })}
+        </div>
+      ))}
     </nav>
   );
 }

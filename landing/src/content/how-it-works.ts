@@ -7,17 +7,26 @@ export const howItWorks: Page = {
   nav: "How it works",
   title: "How it works",
   h1: "A branch of your live cloud.\nThe engine, in one page.",
-  lead: "Your agent hands emfirge the change it wants to make. Emfirge puts it on a copy of your live AWS, runs six checks, and answers with facts. The agent reads the facts, fixes its own plan and tries again. No AI runs inside emfirge, and it never writes to your cloud.",
+  lead: "Your agent hands emfirge the change it wants to make. Emfirge puts it on a copy of your live AWS, runs six checks, and answers with facts. The agent reads the facts, fixes its own plan and tries again. You set it up once and read what comes back. No AI runs inside emfirge, and it never writes to your cloud.",
   description: "The emfirge engine in one page: branches, the six checks and what they report as unknown, changed settings, the hand-back record, and what emfirge never does.",
   sections: [
     {
       id: "loop",
       title: "The loop",
       blocks: [
-        { t: "lede", x: "Change in, facts out, until the plan is right." },
+        { t: "lede", x: "Your agent sends a change in and reads the facts out, until its plan is right." },
         { t: "fig", id: "loop", caption: "Figure 1. A change enters emfirge in any format and runs on a branch of your live cloud. Six checks answer with facts, and the verdict reads pass, warn or block. The agent reads them, changes its plan and tries again. The change that is left comes back as a hand-back, bound by hash to its verdict." },
         { t: "p", x: "An agent that changes a codebase has files, a branch, tests and a log. An agent that changes a cloud gets the same from emfirge: **context** (what is true), a **workspace** (a branch), **signals** (what a change did) and a **record** (what was applied). A fifth, **boundaries** (what needs the owner), is not built yet." },
-        { t: "p", x: "The loop is `context → branch → try → check → fix → retry → apply → report`. You apply with your own access; emfirge never does." },
+        { t: "p", x: "The loop is `context → branch → try → check → fix → retry → apply → report`. Your agent runs every step. It applies with its own access; emfirge never does." },
+        { t: "table", head: ["Step", "What your agent does", "Where you come in"], rows: [
+          ["Context", "Asks what is true: `emfirge context`.", "Once, before the first step: you give it emfirge, approve the sign-in and create the read-only role ([Set up](/quickstart/))."],
+          ["Branch", "Opens a safe copy of live and works on it.", ""],
+          ["Try", "Puts its change on the branch, in whatever form it already has.", ""],
+          ["Check", "Reads the six answers, the unknowns and the changed settings.", "Only if a check costs money (policy checks, usage evidence): your agent asks you first."],
+          ["Fix and retry", "Changes its own plan and tries again on the branch.", ""],
+          ["Apply", "Applies the change that is left, with its own AWS access.", "You decide what your agent is allowed to apply. Emfirge does not stop it; it is advisory."],
+          ["Report", "Runs `emfirge report` and tells you what it applied.", "You read the hand-back and decide what comes next."],
+        ] },
       ],
     },
     {
@@ -52,8 +61,8 @@ export const howItWorks: Page = {
       id: "ways-in",
       title: "Many ways in",
       blocks: [
-        { t: "lede", x: "Hand emfirge the change in the form you already have. Same change, same answer." },
-        { t: "table", head: ["Input", "What you give it", "Example"], mono: [2], rows: [
+        { t: "lede", x: "Your agent hands emfirge the change in the form it already has. Same change, same answer." },
+        { t: "table", head: ["Input", "What your agent gives it", "Example"], mono: [2], rows: [
           ["Typed", "A small typed change: operation, resource type, ID, fields", "`--typed '{\"op\":\"modify\",…}'`"],
           ["AWS CLI", "One or more `aws …` commands, written out in full", "`--aws-cli \"aws ec2 authorize-security-group-ingress …\"`"],
           ["AWS API", "The API calls as JSON", "`--aws-api calls.json`"],
@@ -104,7 +113,7 @@ export const howItWorks: Page = {
       title: "How outside world is decided",
       blocks: [
         { t: "lede", x: "Per service and per action, never by a rulebook of single actions." },
-        { t: "p", x: "A change to a security group or a bucket stays among your own resources. Some AWS actions reach a person or a party outside the account. The check keeps a small table of services where that is what the service does: AWS Support, Service Quotas, SES (v1 and v2), Route 53 Domains, AWS Marketplace (catalog and entitlement) and Savings Plans. An action of one of those services in a plan you try is an outside-world fact, except a read by name (`Get`, `List`, `Describe`), which is not." },
+        { t: "p", x: "A change to a security group or a bucket stays among your own resources. Some AWS actions reach a person or a party outside the account. The check keeps a small table of services where that is what the service does: AWS Support, Service Quotas, SES (v1 and v2), Route 53 Domains, AWS Marketplace (catalog and entitlement) and Savings Plans. An action of one of those services in a plan your agent tries is an outside-world fact, except a read by name (`Get`, `List`, `Describe`), which is not." },
         { t: "p", x: "Any action of a service that is not in the table is reported as an unclassified unknown, never as fine. Each table entry cites AWS's own documentation. A schedule (EventBridge Scheduler) that starts running on the branch, or whose timing changes while it is enabled, is also a fact, because it runs its target on a timer; what the target does outside the cloud is listed as unknown." },
       ],
     },
@@ -125,10 +134,10 @@ export const howItWorks: Page = {
       id: "record",
       title: "The record",
       blocks: [
-        { t: "lede", x: "After the agent applies a change, `report` hands back exactly what was judged." },
-        { t: "p", x: "Your agent applies with its own credentials; emfirge never does. `report` returns the hand-back: for a typed branch, the exact AWS API calls its changes stand for; for a plan, its hash. Each is bound to the verdict it was judged with: the input hash, the base scan, the branch revision and a verdict ID. Emfirge keeps no plan text, only a SHA-256, so you apply your own original plan." },
+        { t: "lede", x: "After your agent applies a change, `report` hands back exactly what was judged. This is what you read." },
+        { t: "p", x: "Your agent applies with its own credentials; emfirge never does. `report` returns the hand-back: for a typed branch, the exact AWS API calls its changes stand for; for a plan, its hash. Each is bound to the verdict it was judged with: the input hash, the base scan, the branch revision and a verdict ID. Emfirge keeps no plan text, only a SHA-256, so your agent applies its own original plan." },
         { t: "code", title: "emfirge report --verify (abridged output from the engine's synthetic test account)", x: "{\n  \"kind\": \"aws-api-calls\",\n  \"calls\": [\n    { \"change_index\": 0, \"service\": \"ec2\", \"operation\": \"AuthorizeSecurityGroupIngress\",\n      \"params\": { \"GroupId\": \"SG_001\", \"IpPermissions\": [ … ] } },\n    { \"change_index\": 0, \"service\": \"ec2\", \"operation\": \"RevokeSecurityGroupIngress\",\n      \"params\": { \"GroupId\": \"SG_001\", \"IpPermissions\": [ … ] } }\n  ],\n  \"input_sha256\": \"3c467190…\",\n  \"branch_revision\": \"90196bc0…\",\n  \"verdict\": \"warn\",\n  \"verdict_id\": \"f7dc5a85…\",\n  \"verification\": { \"ok\": true, \"verdict\": \"warn\", \"verdict_id\": \"f7dc5a85…\" }\n}" },
-        { t: "p", x: "A mismatch is named, not smoothed over: `input_hash_mismatch` (these are not the calls that were judged), `unknown_plan`, `base_snapshot_changed`, `branch_revision_changed` or `verdict_changed`. The check is of the binding. `report` does not read CloudTrail." },
+        { t: "p", x: "A mismatch is named, not smoothed over: `input_hash_mismatch` (these are not the calls that were judged), `unknown_plan`, `base_snapshot_changed`, `branch_revision_changed` or `verdict_changed`. The check is of the binding. `report` does not read CloudTrail. Your agent tells you in its own words; the hash and the verdict are emfirge's." },
         { t: "link", label: "The report verb", href: "/cli/#report" },
       ],
     },
@@ -142,7 +151,7 @@ export const howItWorks: Page = {
           "**It never passes silently.** A change it cannot model, or a check that did not run, is listed as unknown and makes the verdict stricter.",
           "**It never writes the fix.** It supplies facts. The agent supplies the intelligence.",
         ] },
-        { t: "p", x: "One honest limit: emfirge is advisory today. It is a safe workspace and a record, not a gate that blocks a live apply. A fact or a block stops nothing unless your agent or pipeline listens to it." },
+        { t: "p", x: "One honest limit: emfirge is advisory today. It is a safe workspace and a record, not a gate that blocks a live apply. A fact or a block stops nothing unless your agent or pipeline listens to it. That is why the setup prompt tells your agent never to apply a change that did not pass." },
       ],
     },
   ],

@@ -1,14 +1,54 @@
-# One command, six verbs. The CLI, in one page.
+# Agent reference. The CLI, in one page.
 
-`emfirge` is a thin client for the hosted engine. It signs in, tokenizes identifiers on your machine, sends one command, and prints the answer as JSON, or as short text with `--human`. The verbs follow an agent's workflow: context, branch, try, check, request, report. `request` is listed but not built yet.
+You don't need to read this. Your agent does. It is also served as [/cli.md](https://emfirge.cloud/cli.md). `emfirge` is a thin client for the hosted engine. It signs in, tokenizes identifiers on your machine, sends one command, and prints the answer as JSON, or as short text with `--human`. The verbs follow an agent's workflow: context, branch, try, check, request, report. `request` is listed but not built yet.
 
 Human version: https://emfirge.cloud/cli/
 
 *Figure 1. The six verbs follow an agent's loop: ask what is true, open a branch, try a change, check it, ask the owner (not built yet), get the hand-back of what was applied. The highlighted verb is the section you are reading.*
 
+## Setup, loop and rules
+
+**Your human gave you emfirge. Set it up with them once, then do the rest yourself.**
+
+You run the commands. Your human does three things only they can do: approve the browser sign-in, create the read-only role in their AWS console, and give you the role ARN. Everything after that is yours.
+
+| Step | Command | Who |
+|---|---|---|
+| Check it runs | `npx -y emfirge guide` | you (Node.js 20 or later; `-y` skips npx's first-run prompt) |
+| Sign in | `emfirge login` | you start it; **your human approves in the browser** (GitHub or Google). It waits 5 minutes. If the browser does not open, show them the address it prints, then wait. |
+| Get the role | `emfirge connect` | you run it and **show your human the link**; they create the stack and copy the `RoleArn` from its Outputs. `connect` takes no ARN and does not detect the role. |
+| First scan | `emfirge context --refresh --role-arn ARN --region REGION` | you, with the ARN they gave you. Ask which region; there is no default. Keep the ARN: `check --evidence` needs it again. |
+| Know the account | `emfirge context inventory` | you |
+
+Not signed in is exit code 2 and the CLI never waits for a browser by itself, so run `login` and wait for your human. Sign-in is kept in `~/.emfirge/credentials.json`; you need your human again only if it expires. The sign-in page is served on `127.0.0.1` of the machine you run on.
+
+### The loop
+
+- `emfirge context inventory`: ask what is true.
+- `emfirge branch open --analysis ID --name NAME`: make a safe copy.
+- `emfirge try BRANCH ...`: put your change on the branch.
+- `emfirge check BRANCH`: read the facts and the unknowns.
+- Not what you wanted? Fix your own plan and go back to `try`. `emfirge branch rollback BRANCH` clears the last change.
+- `emfirge request`: ask the owner. Not built yet: ask your human in your own channel.
+- Apply the change yourself, with your own access. Emfirge never writes to the cloud.
+- `emfirge report BRANCH`: the hand-back for what you applied. Then tell your human what changed.
+
+### Rules
+
+- Emfirge never writes to the cloud. You apply your own change, with your own access.
+- Facts, not fixes. Emfirge will not tell you what to do. You decide.
+- Never apply a change that did not pass. Emfirge is advisory and stops nothing, so this is on you.
+- Unknown means not checked. It never means safe. Read every `unknown` entry.
+- Names and IDs come back as tokens (`S3_001`, `NAME_003`, `TAG_001`). Pass them back as they are. Emfirge turns them into real IDs on your machine.
+- Emfirge keeps no plan text. Apply your own original plan. The hand-back is tied to it by sha256.
+- `check --policy` and `check --evidence` show an estimate first and send nothing. Run them with `--accept-estimate ID` (and `--approve` for policy) only after your human agrees.
+- Run `npx emfirge@latest` only when emfirge tells you to (exit code 6), never as a habit.
+
+`emfirge guide` prints this guide from the package itself. Add `--human` for short readable output, and `--help` to any verb.
+
 ## Install and sign in
 
-**Run it with npx. There is nothing to install.**
+**Run it with npx. There is nothing to install. Two of these steps need your human.**
 
 Terminal:
 
@@ -21,15 +61,15 @@ The npm package is `emfirge` and the command is `emfirge`. Node.js 20 or later. 
 
 | Command | What it does |
 |---|---|
-| `emfirge login` | Sign in with GitHub or Google in your browser. Keeps the session in `~/.emfirge/credentials.json`. If `EMFIRGE_API_KEY` is set, it says so and uses the key. |
+| `emfirge login` | Sign in with GitHub or Google in your browser. Your human approves it there; waits 5 minutes. Keeps the session in `~/.emfirge/credentials.json`. If `EMFIRGE_API_KEY` is set, it says so and uses the key. |
 | `emfirge logout` | Sign out on this device. |
-| `emfirge connect` | Print the one-click CloudFormation link that creates the read-only role, with your ExternalId and the next steps. When the stack is ready, use the role ARN from its Outputs in `emfirge context --refresh --role-arn ARN --region REGION`. |
+| `emfirge connect` | Print the one-click CloudFormation link that creates the read-only role, with the ExternalId and the next steps. Show the link to your human: they create the stack. When it is ready, they give you the role ARN from its Outputs; use it in `emfirge context --refresh --role-arn ARN --region REGION`. |
 | `emfirge connect --link` | Link your saved sign-in to an existing API-key project. Needs `EMFIRGE_API_KEY`. |
 | `emfirge guide` | Print the agent guide: the loop, the rules, the exit codes. |
 | `emfirge --help`, `emfirge help COMMAND`, `emfirge COMMAND --help` | Help, from the server's current command list. |
 | `emfirge --version` | Print the version. |
 
-Nothing here asks for AWS access keys. The only thing that reaches your account is the role from `connect`; see [Security & privacy](https://emfirge.cloud/security.md#role). The commands `status`, `privacy`, `tokens` and `purge` belong to the [MCP adapter](#mcp-adapter), not to `emfirge`.
+Nothing here asks for AWS access keys. The only thing that reaches the account is the role from `connect`; see [Security & privacy](https://emfirge.cloud/security.md#role). The commands `status`, `privacy`, `tokens` and `purge` belong to the [MCP adapter](#mcp-adapter), not to `emfirge`.
 
 ## Where the commands come from
 

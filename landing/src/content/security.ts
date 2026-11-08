@@ -48,11 +48,11 @@ export const security: Page = {
       id: "stored",
       title: "What the hosted engine stores",
       blocks: [
-        { t: "lede", x: "Your account's configuration, your branches, and a fingerprint of what you send to `try`. Not your data." },
+        { t: "lede", x: "Your account's configuration, your branches, and a fingerprint of what your agent sends to `try`. Not your data." },
         { t: "table", head: ["Stored", "Contents"], rows: [
           ["Scans", "A summary and findings with real AWS resource IDs, your account ID and region, plus the infrastructure snapshot. Newer resource types are kept without their secrets: CloudFront origin custom header values and the Scheduler target `Input` payload are withheld, and DynamoDB table items are never read."],
           ["Branches", "A full copy of your account's modeled state as the base, and the ordered changes on it."],
-          ["What you send to `try`", "Only a SHA-256 of a Terraform plan, CloudFormation change set or CLI command, never its text. Your agent applies its own original plan."],
+          ["What your agent sends to `try`", "Only a SHA-256 of a Terraform plan, CloudFormation change set or CLI command, never its text. Your agent applies its own original plan."],
           ["Usage evidence (opt-in)", "Per resource: status, used and holds-data flags, metric peaks, last event time and event name. Never CloudTrail user names, IP addresses, access keys or raw events."],
           ["Policy checks (opt-in)", "Which resource was checked and the answers, never the policy text."],
           ["Server logs", "No account IDs, resource IDs, ARNs, bucket, role or repo names. Errors are logged as the error type."],

@@ -27,7 +27,7 @@ The engine is open source (AGPL-3.0). Self-hosting is possible but unsupported.
 No. There is no charge for the CLI, the engine or the checks.
 
 **Will emfirge add to my AWS bill?**
-Two opt-in features can cost you: AWS IAM Access Analyzer policy checks (about $0.002 a policy, billed to your AWS account) and usage evidence reads from CloudTrail and CloudWatch. Both show an estimate first and run only when you accept it. [TODO Ansh: state whether the regular scan's own AWS API reads can be billed.]
+Two opt-in features can cost you: AWS IAM Access Analyzer policy checks (about $0.002 a policy, billed to your AWS account) and usage evidence reads from CloudTrail and CloudWatch. Both show an estimate first and run only when it is accepted; your agent asks you. [TODO Ansh: state whether the regular scan's own AWS API reads can be billed.]
 
 **Does emfirge create anything in my account?**
 Only the IAM role, through the CloudFormation stack you create. Delete the stack and it is gone.

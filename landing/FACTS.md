@@ -1,4 +1,4 @@
-# Fact sheet for site v8
+# Fact sheet for site v9 (v8 facts plus section 13, who does what)
 
 Counted and read from the merged code on 2026-11-08 (branch `claude/hopeful-shannon-f6t6mf`, HEAD = `origin/main` merged in, 62 commits after the v7 site commit `1c10452`).
 Rule: **the code wins**. Where a README or doc disagrees, the code is used and the disagreement is listed in section 12.
@@ -384,3 +384,50 @@ Notes recorded in the scorecards: (a) after the fixes, role entries stay `missed
 | `landing` v7 site `/security` | 90-day retention in PRIVACY.md, purge incomplete, discard only closes, plan text kept | all four are false now (section 6). |
 | `PRIVACY.md` vs `iam-role.yaml` | evidence uses `cloudtrail:LookupEvents` | the template does not list it (it may come from `SecurityAudit`; not checked). |
 | `backend/BRANCH-CLI.md` | a separate Python client `backend/scripts/emfirge-branch.py`, errors exit 2 | unrelated to the npm `emfirge` command; not mentioned on the site. |
+
+
+---
+
+## 13. Who does what (added for site v9, 2026-11-08)
+
+Question: Ansh's product insight is that people do not use the CLI, their agent does. Which steps need a human, and what can the agent do alone?
+Everything here was read from the code; line numbers are in the repo as of this commit. "Agent" means an AI agent that can run shell commands on the machine where `npx` runs.
+
+### 13.1 The four questions
+
+| Question | Answer | Source |
+|---|---|---|
+| Does `npx emfirge login` need a human? | **Yes, a browser approval. It is not a device code.** `login` starts a one-time web server on `127.0.0.1` (random port) and opens the machine's default browser to it (`open`, `xdg-open` or `cmd start`). The page offers "Continue with GitHub" and "Continue with Google"; the human signs in there (PKCE through Supabase) and is redirected back to the local server, which stores the refresh token. It waits up to 5 minutes (300 000 ms), then fails with exit 2 (`not_signed_in`, "Sign-in did not finish. Run: emfirge login"). The agent can start it and can print the address (the CLI prints `Sign in with GitHub or Google. Opening your browser; if it does not open, go to http://127.0.0.1:PORT/` on stderr), but it cannot complete it: only the person who owns the GitHub or Google account can. There is no device-code flow and no `--code` option in the code. | `mcp/src/auth/login.ts:29-138` (server on 127.0.0.1, `/start/github`, `/start/google`, callback, 300 000 ms timeout, `EMFIRGE_NO_BROWSER`); `mcp/src/cli/run.ts:45-58` (message and exit 2); `cli/README.md:5-9` |
+| What does the agent get after the human approves? | A refresh token saved in `~/.emfirge/credentials.json` (folder 0700, file 0600) on that machine. Every later command reuses it silently and refreshes the access token itself. The human is needed again only if the sign-in expires (refresh answers 400 or 401: "Your sign-in has expired. Please sign in again.") or the file is removed (`emfirge logout`). | `mcp/src/auth/credentials.ts:11-31`; `mcp/src/auth/session.ts:25-62`; `mcp/src/cli/run.ts:144` (`setInteractiveLogin(false)`) |
+| What if nobody has signed in? | Every other command fails fast with exit 2 and `Not signed in. Run: emfirge login (or set EMFIRGE_API_KEY).` The CLI never opens a browser by itself and never waits for one. The agent must run `emfirge login` and wait for the human. | `mcp/src/client.ts:62-67`; `mcp/src/cli/run.test.ts:375` |
+| Is there a way around the browser? | `EMFIRGE_API_KEY` skips browser sign-in (the key is the bearer token). **No command or endpoint in the code issues an API key to a user**: `create_api_key()` exists in `backend/app/auth.py:29` but nothing in `main.py` or the CLI calls it. So today a key is something the operator hands out; a person cannot get one themselves. Treat the key as a CI and self-host route, not the normal setup. | `docs/AGENT-GUIDE.md:99`; `mcp/src/client.ts:55-60`; `backend/app/auth.py:19-44`; `grep create_api_key backend/app` finds only the definition |
+| Does the browser have to be on the agent's machine? | **Yes, in practice.** The sign-in page lives at `127.0.0.1` on the machine running the CLI, and the redirect returns to the same address. If the agent runs in a remote or cloud sandbox and the human's browser is on another computer, the address cannot be reached and the code has no other flow. `EMFIRGE_NO_BROWSER=1` only stops the CLI from opening a browser; it still waits for the callback. | `mcp/src/auth/login.ts:37,40,131` |
+| What does signing in create? | On the first authenticated call the backend creates a project for the signed-in identity with its own random `ExternalId` (`secrets.token_urlsafe(32)`). `connect` reads it from `GET /project`. So `connect` only works after `login`. | `backend/app/auth.py:112-130`; `backend/app/main.py:495-506`; `mcp/src/tools/setup.ts:45-52` |
+| Who creates the read-only role (the CloudFormation one-click link)? | **The human, in their own AWS console.** `emfirge connect` only prints the link (`deploy_url`) with the template, `stackName=EmfirgeReadOnlyStack`, the trusted account and the person's ExternalId pre-filled. A person who is signed in to AWS opens it, ticks "I acknowledge that AWS CloudFormation might create IAM resources", clicks **Create stack** (about 30 seconds), and waits for `CREATE_COMPLETE`. Nothing in emfirge creates the stack, and emfirge has no access to the account until the role exists. The tool text that `connect` returns tells the assistant to "Tell the user these next steps" and to "paste the URL above verbatim in your reply". (An agent that happens to hold its own AWS write access could in principle deploy `iam-role.yaml` itself; no emfirge command or document does or describes this, so the site does not claim it.) | `mcp/src/tools/setup.ts:45-78`; `mcp/src/cli/run.ts:38-43`; `iam-role.yaml:1-30,89-92` |
+| How does the role ARN reach `connect`? | **It does not.** `connect` takes no ARN and does not detect the role. The human copies `RoleArn` from the stack's **Outputs** tab and pastes it to the agent (setup text step 4: "Paste the RoleArn back here and the scan will run"). The agent then passes it to the scan: `emfirge context --refresh --role-arn ARN --region REGION`. `--region` is required, there is no default, and the tool says: "If the user gave a role ARN but no region, ASK them which region to scan ... Do not guess." The ARN must match `arn:aws:iam::<12 digits>:role/<name>`. The CLI does not save the ARN (local state is `credentials.json` and `tokens.json` only), so the agent keeps it; `check --evidence --accept-estimate ID --role-arn ARN` needs it again. | `mcp/src/tools/setup.ts:70`; `mcp/src/cli/overrides.ts:64`; `be/cli_manifest.py:71,85-87,101`; `mcp/src/tools/scan.ts:14-31`; `be/cli_manifest.py:206,218`; `mcp/src/auth/credentials.ts`, `mcp/src/tokenize.ts:18-19` |
+| After that, can the agent do everything? | **Yes, for emfirge itself.** `context` (including `--refresh`), `branch`, `try`, `check`, `report` need only the saved sign-in and the role ARN. No other human approval is built. The agent opens a branch, tries a change in any of five formats, reads `check`, fixes its own plan and tries again, rolls back or discards, and gets the hand-back, all with no person in the loop. It also applies the real change itself, with its own AWS access: emfirge never writes to the account. | `mcp/src/cli/run.ts:144-175`; `docs/AGENT-GUIDE.md:14-27,96-99`; `README.md:101-103` |
+
+### 13.2 What stays with the human (and what is only a convention)
+
+| Item | Who | What the code says | Source |
+|---|---|---|---|
+| Give the agent emfirge (the prompt) | human, once | Nothing installs itself: the agent runs `npx -y emfirge ...` (Node.js 20 or later). | `cli/README.md:14-16`; `cli/package.json:23-25` |
+| Approve sign-in | human, once (again only if it expires) | See 13.1. | `mcp/src/auth/login.ts` |
+| Create the role, give the agent the ARN and the region | human, once | See 13.1. Revoke by deleting the stack. | `mcp/src/tools/setup.ts:62-76` |
+| Agree to a cost before `check --policy` or `check --evidence` | **human, by convention** | The CLI prints an estimate and sends nothing until it is run again with `--accept-estimate ID` (and `--approve` for policy). The guide says to do that "only after the owner agrees". Nothing in the code can tell whether a person agreed; an agent can pass the flags alone. The setup prompt therefore tells the agent to ask. | `docs/AGENT-GUIDE.md:77-80`; `mcp/src/cli/overrides.ts:72-80`; `be/cli_manifest.py:206-218` |
+| Decide to apply a change | **human, by convention** | `emfirge request` (ask the owner) is not built. Emfirge is advisory: a `block` or a failed check stops nothing for an agent that has its own AWS credentials. The only guard is the instruction to the agent ("never apply a change that did not pass") and whatever permissions the agent's own tool gives it. | `mcp/src/cli/run.ts:153-158`; `README.md:101-103`; `landing` FACTS section 7 |
+| Read the hand-back | human | `report` returns the hand-back (exact calls, `input_sha256`, branch revision, verdict, `verdict_id`); `report --verify` checks the binding. The agent summarizes it for the person. | `be/main.py:2111-2175`; `mcp/src/cli/overrides.ts:81` |
+| Get the real names back from tokens | human, optional | In the default `strict` mode the agent sees tokens (`SG_001`) and never the real identifier; the map is `~/.emfirge/tokens.json` on the machine, and `npx @emfirge/mcp tokens` lists it. | `mcp/src/tokenize.ts:18-19`; `landing` FACTS section 6 |
+
+### 13.3 Other paths, for completeness
+
+- MCP: `npx @emfirge/mcp install` is a human command. It detects clients, may prompt for a privacy mode on first install, patches their config and says "Restart your MCP client(s)". After that the agent calls `emfirge_login` (same browser approval, URL returned in the tool text), `emfirge_setup_help` (the same deploy link), `emfirge_scan` and the rest. `mcp/src/installer.ts:402-470`; `mcp/src/tools/login.ts:11-32`.
+- Self-host: with `EMFIRGE_REQUIRE_AUTH` off the server accepts every caller as `self-host` and no sign-in is needed. `backend/app/auth.py:99-103`; `README.md` (self-host).
+- CI: `EMFIRGE_API_KEY`, see above.
+- `cli/README.md:7-9` says "You run two commands, once: `npx emfirge login`, `npx emfirge connect`". That is a person typing them. Site v9 says instead that the agent runs both and the person approves the browser sign-in and the CloudFormation click; the CLI behaves the same either way.
+
+### 13.4 Not verified here
+
+- Whether every agent's shell tool can keep `emfirge login` running for up to 5 minutes (the CLI waits that long; an agent whose tool call times out sooner has to start it in the background or run it again). The site tells the agent to wait for the person, nothing more.
+- How an operator issues an API key today (no code path). Written on the site as `[TODO Ansh]`.
+- Whether a person's sign-in ever expires in practice (the refresh token's lifetime is set at the sign-in provider, not in this repo).

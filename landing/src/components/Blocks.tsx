@@ -100,6 +100,12 @@ export function Blocks({ blocks }: { blocks: Block[] }) {
           case "sources": return <div className="dp-card-wrap" key={i}><SourcesCard /></div>;
           case "same": return <div className="dp-card-wrap" key={i}><SameCard /></div>;
           case "setup": return <div className="dp-setup" key={i} data-reveal><CopyBar /></div>;
+          case "details": return (
+            <details className="dp-det" key={i} data-reveal>
+              <summary className="label">{b.summary}</summary>
+              <div className="dp-det-b"><Blocks blocks={b.blocks} /></div>
+            </details>
+          );
           case "plan": return <PlanCard key={i} plan={b.plan} />;
           case "entries": return <Entries key={i} items={b.items} />;
         }

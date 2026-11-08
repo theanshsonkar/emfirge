@@ -5,9 +5,22 @@ import { Mark } from "@/graphics/Mark";
 import { Delta, HERO_DELTA } from "@/graphics/Delta";
 import { Caret, Check, Copy, Ext } from "./Icons";
 
+// Copies the setup prompt. Shared by the hero button and the copy bar.
+function useCopyPrompt() {
+  const [done, setDone] = useState(false);
+  const copy = async () => {
+    try { await navigator.clipboard.writeText(SETUP_PROMPT); } catch {
+      const t = document.createElement("textarea"); t.value = SETUP_PROMPT; document.body.appendChild(t); t.select();
+      try { document.execCommand("copy"); } catch {} t.remove();
+    }
+    setDone(true); setTimeout(() => setDone(false), 1800);
+  };
+  return { done, copy };
+}
+
 export function CopyBar() {
   const [open, setOpen] = useState(false);
-  const [done, setDone] = useState(false);
+  const { done, copy } = useCopyPrompt();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const off = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
@@ -16,13 +29,6 @@ export function CopyBar() {
     return () => { document.removeEventListener("mousedown", off); document.removeEventListener("keydown", esc); };
   }, []);
   const enc = encodeURIComponent(SETUP_PROMPT);
-  const copy = async () => {
-    try { await navigator.clipboard.writeText(SETUP_PROMPT); } catch {
-      const t = document.createElement("textarea"); t.value = SETUP_PROMPT; document.body.appendChild(t); t.select();
-      try { document.execCommand("copy"); } catch {} t.remove();
-    }
-    setDone(true); setTimeout(() => setDone(false), 1800);
-  };
   return (
     <div className="copybar" ref={ref}>
       <button className="main-b" onClick={copy} aria-live="polite">{done ? "Copied" : HERO.copy}</button>
@@ -40,6 +46,7 @@ export function CopyBar() {
 }
 
 export function Hero() {
+  const { done, copy } = useCopyPrompt();
   return (
     <section>
       <div className="pill stagger" style={{ animationDelay: "60ms" }}>
@@ -49,8 +56,8 @@ export function Hero() {
       <h1 className="h1">{HERO.h1}</h1>
       <p className="sub">{HERO.sub}</p>
       <div className="btns">
-        <a className="btn btn-p" href={LINKS.quickstart}><span className="tile"><Mark size={24} trunk="#0A7A4B" branch="#0A7A4B" /></span>{HERO.primary}</a>
-        <a className="btn btn-s" href={LINKS.mail}>{HERO.secondary} <Ext size={11} /></a>
+        <button className="btn btn-p" onClick={copy} aria-live="polite" data-copy-primary><span className="tile"><Mark size={24} trunk="#0A7A4B" branch="#0A7A4B" /></span>{done ? HERO.primaryDone : HERO.primary}</button>
+        <a className="btn btn-s" href={LINKS.quickstart}>{HERO.secondary} <Ext size={11} /></a>
       </div>
       <CopyBar />
       <div className="works">

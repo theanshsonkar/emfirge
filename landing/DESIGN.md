@@ -199,3 +199,30 @@ Still not built or not decided (the site says "not built yet" or carries a visib
 - A law that compares a typed change with the AWS API call (L18, L19, L21 cover the CLI, CloudFormation and Terraform).
 - Home placeholders: the "Writing" posts, the X handle, the status page (the footer text "All systems operational" has no source), the CLI announcement post.
 - The real-world scorecard numbers are recorded in `FACTS.md` section 10 and are deliberately not on the site.
+
+## v9 reframe (2026-11-08): the agent uses the CLI; the human gives it to their agent
+
+Ansh's insight: people don't use the CLI, their agent does. Look, layout and graphics are unchanged; the words, the nav and one figure's
+labels changed. Who does what, with sources, is `FACTS.md` section 13.
+
+- Home: hero sub "You set it up once. Your agent does the rest."; the primary button **Give emfirge to your agent** copies the setup
+  prompt (the same text as the copy bar below it, whose Claude / ChatGPT / Cursor links stay). The secondary button goes to Set up.
+  The setup prompt is `SETUP_PROMPT` in `src/content/site.ts`; it is also on /quickstart/, in index.md and in every deep link.
+- /quickstart/ is now **Set up** (route kept so links and `/quickstart.md` still work): only what the person does (paste, approve sign-in,
+  create the role and give the agent the ARN, ask as usual), "What you'll see", and the raw commands in a collapsed "Prefer to set it up
+  yourself?" block. The 4-step figure's labels follow those steps.
+- /cli/ is the **Agent reference** ("CLI reference" in the rail): opening line for the human, a new "Setup, loop and rules" section from
+  `docs/AGENT-GUIDE.md`, the full reference unchanged.
+- Rail and mobile Menu: two mono labels, FOR YOU and FOR YOUR AGENT (CLI reference, /llms.txt, /cli.md, GitHub).
+- FAQ: "Do I need to learn the CLI?" and "What do I actually do?". How it works: the loop table says what the agent does and where the person comes in.
+
+Aspirational or unverified after v9 (also listed in `FACTS.md` 13.4):
+- Sign-in needs the person's browser on the machine where the agent runs (the page is on 127.0.0.1); there is no flow for remote or cloud
+  agents, and no command or endpoint issues an `EMFIRGE_API_KEY`. The Set up page shows a visible `[TODO Ansh]` about it.
+- "Ask me before `check --policy` or `check --evidence`" and "never apply a change that did not pass" are instructions in the prompt.
+  Nothing in the code enforces either; emfirge is advisory.
+- The setup prompt has not been run end to end with each named agent. The Claude and ChatGPT deep links open a chat, which cannot run
+  `npx` unless that client has a shell; the Set up page says so.
+- "What you'll see" is an abridged, real-shaped example: the wording is an agent's, the reason codes, fields and hashes are from the
+  engine's synthetic test account.
+- Whether an agent's shell tool can keep `emfirge login` waiting for the full 5 minutes.

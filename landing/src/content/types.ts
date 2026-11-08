@@ -22,6 +22,7 @@ export type Block =
   | { t: "sources" }
   | { t: "same" }
   | { t: "setup" }
+  | { t: "details"; summary: string; blocks: Block[] }
   | { t: "plan"; plan: Plan }
   | { t: "entries"; items: Entry[] };
 
@@ -37,5 +38,3 @@ export type Page = {
   intro?: Block[];
   sections: Section[];
 };
-
-export const SETUP_PROMPT_TEXT = "Set up emfirge in this project. Read https://emfirge.cloud/index.md and follow it.";

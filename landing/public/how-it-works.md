@@ -1,18 +1,28 @@
 # A branch of your live cloud. The engine, in one page.
 
-Your agent hands emfirge the change it wants to make. Emfirge puts it on a copy of your live AWS, runs six checks, and answers with facts. The agent reads the facts, fixes its own plan and tries again. No AI runs inside emfirge, and it never writes to your cloud.
+Your agent hands emfirge the change it wants to make. Emfirge puts it on a copy of your live AWS, runs six checks, and answers with facts. The agent reads the facts, fixes its own plan and tries again. You set it up once and read what comes back. No AI runs inside emfirge, and it never writes to your cloud.
 
 Human version: https://emfirge.cloud/how-it-works/
 
 ## The loop
 
-**Change in, facts out, until the plan is right.**
+**Your agent sends a change in and reads the facts out, until its plan is right.**
 
 *Figure 1. A change enters emfirge in any format and runs on a branch of your live cloud. Six checks answer with facts, and the verdict reads pass, warn or block. The agent reads them, changes its plan and tries again. The change that is left comes back as a hand-back, bound by hash to its verdict.*
 
 An agent that changes a codebase has files, a branch, tests and a log. An agent that changes a cloud gets the same from emfirge: **context** (what is true), a **workspace** (a branch), **signals** (what a change did) and a **record** (what was applied). A fifth, **boundaries** (what needs the owner), is not built yet.
 
-The loop is `context → branch → try → check → fix → retry → apply → report`. You apply with your own access; emfirge never does.
+The loop is `context → branch → try → check → fix → retry → apply → report`. Your agent runs every step. It applies with its own access; emfirge never does.
+
+| Step | What your agent does | Where you come in |
+|---|---|---|
+| Context | Asks what is true: `emfirge context`. | Once, before the first step: you give it emfirge, approve the sign-in and create the read-only role ([Set up](https://emfirge.cloud/quickstart.md)). |
+| Branch | Opens a safe copy of live and works on it. |  |
+| Try | Puts its change on the branch, in whatever form it already has. |  |
+| Check | Reads the six answers, the unknowns and the changed settings. | Only if a check costs money (policy checks, usage evidence): your agent asks you first. |
+| Fix and retry | Changes its own plan and tries again on the branch. |  |
+| Apply | Applies the change that is left, with its own AWS access. | You decide what your agent is allowed to apply. Emfirge does not stop it; it is advisory. |
+| Report | Runs `emfirge report` and tells you what it applied. | You read the hand-back and decide what comes next. |
 
 ## A branch of live
 
@@ -54,9 +64,9 @@ Several agents can share a base safely. Every branch carries a revision token (a
 
 ## Many ways in
 
-**Hand emfirge the change in the form you already have. Same change, same answer.**
+**Your agent hands emfirge the change in the form it already has. Same change, same answer.**
 
-| Input | What you give it | Example |
+| Input | What your agent gives it | Example |
 |---|---|---|
 | Typed | A small typed change: operation, resource type, ID, fields | `--typed '{"op":"modify",…}'` |
 | AWS CLI | One or more `aws …` commands, written out in full | `--aws-cli "aws ec2 authorize-security-group-ingress …"` |
@@ -144,7 +154,7 @@ A change emfirge cannot model never passes: it is listed as unmodeled, and the v
 
 **Per service and per action, never by a rulebook of single actions.**
 
-A change to a security group or a bucket stays among your own resources. Some AWS actions reach a person or a party outside the account. The check keeps a small table of services where that is what the service does: AWS Support, Service Quotas, SES (v1 and v2), Route 53 Domains, AWS Marketplace (catalog and entitlement) and Savings Plans. An action of one of those services in a plan you try is an outside-world fact, except a read by name (`Get`, `List`, `Describe`), which is not.
+A change to a security group or a bucket stays among your own resources. Some AWS actions reach a person or a party outside the account. The check keeps a small table of services where that is what the service does: AWS Support, Service Quotas, SES (v1 and v2), Route 53 Domains, AWS Marketplace (catalog and entitlement) and Savings Plans. An action of one of those services in a plan your agent tries is an outside-world fact, except a read by name (`Get`, `List`, `Describe`), which is not.
 
 Any action of a service that is not in the table is reported as an unclassified unknown, never as fine. Each table entry cites AWS's own documentation. A schedule (EventBridge Scheduler) that starts running on the branch, or whose timing changes while it is enabled, is also a fact, because it runs its target on a timer; what the target does outside the cloud is listed as unknown.
 
@@ -160,9 +170,9 @@ Any action of a service that is not in the table is reported as an unclassified 
 
 ## The record
 
-**After the agent applies a change, `report` hands back exactly what was judged.**
+**After your agent applies a change, `report` hands back exactly what was judged. This is what you read.**
 
-Your agent applies with its own credentials; emfirge never does. `report` returns the hand-back: for a typed branch, the exact AWS API calls its changes stand for; for a plan, its hash. Each is bound to the verdict it was judged with: the input hash, the base scan, the branch revision and a verdict ID. Emfirge keeps no plan text, only a SHA-256, so you apply your own original plan.
+Your agent applies with its own credentials; emfirge never does. `report` returns the hand-back: for a typed branch, the exact AWS API calls its changes stand for; for a plan, its hash. Each is bound to the verdict it was judged with: the input hash, the base scan, the branch revision and a verdict ID. Emfirge keeps no plan text, only a SHA-256, so your agent applies its own original plan.
 
 emfirge report --verify (abridged output from the engine's synthetic test account):
 
@@ -183,7 +193,7 @@ emfirge report --verify (abridged output from the engine's synthetic test accoun
 }
 ```
 
-A mismatch is named, not smoothed over: `input_hash_mismatch` (these are not the calls that were judged), `unknown_plan`, `base_snapshot_changed`, `branch_revision_changed` or `verdict_changed`. The check is of the binding. `report` does not read CloudTrail.
+A mismatch is named, not smoothed over: `input_hash_mismatch` (these are not the calls that were judged), `unknown_plan`, `base_snapshot_changed`, `branch_revision_changed` or `verdict_changed`. The check is of the binding. `report` does not read CloudTrail. Your agent tells you in its own words; the hash and the verdict are emfirge's.
 
 [The report verb](https://emfirge.cloud/cli.md#report)
 
@@ -194,7 +204,7 @@ A mismatch is named, not smoothed over: `input_hash_mismatch` (these are not the
 - **It never passes silently.** A change it cannot model, or a check that did not run, is listed as unknown and makes the verdict stricter.
 - **It never writes the fix.** It supplies facts. The agent supplies the intelligence.
 
-One honest limit: emfirge is advisory today. It is a safe workspace and a record, not a gate that blocks a live apply. A fact or a block stops nothing unless your agent or pipeline listens to it.
+One honest limit: emfirge is advisory today. It is a safe workspace and a record, not a gate that blocks a live apply. A fact or a block stops nothing unless your agent or pipeline listens to it. That is why the setup prompt tells your agent never to apply a change that did not pass.
 
 ---
 

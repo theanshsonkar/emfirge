@@ -1,6 +1,6 @@
 import type { Page } from "@/content/types";
 import { Shell } from "./Shell";
-import { Blocks } from "./Blocks";
+import { Blocks, Inline } from "./Blocks";
 import { CopyMd } from "./CopyMd";
 import { Footer } from "./Sections";
 
@@ -12,7 +12,7 @@ export function DocPage({ page }: { page: Page }) {
       <span id="top" />
       <header className="dp-head">
         <h1 className="dp-h1">{page.h1.split("\n").map((l, i) => <span key={i}>{i > 0 && <br />}{l}</span>)}</h1>
-        <p className="dp-lead">{page.lead.split(/(`[^`]+`)/).map((p, i) => (p.startsWith("`") ? <code className="ic-code" key={i}>{p.slice(1, -1)}</code> : p))}</p>
+        <p className="dp-lead"><Inline x={page.lead} /></p>
         <CopyMd mdUrl={mdUrl} />
       </header>
       {page.intro && <Blocks blocks={page.intro} />}

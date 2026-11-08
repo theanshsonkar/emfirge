@@ -5,8 +5,10 @@ import { FIGURE, HERO, LINKS, METRICS, NOTES, RUNS, SITE, TRUST, WHAT, WRITING }
 
 const ORIGIN = "https://emfirge.cloud";
 // Internal site links become absolute links to the markdown version of the page.
+// A link to a file that already has an extension (/cli.md, /llms.txt) only gets the origin.
 export const abs = (x: string) =>
-  x.replace(/\]\((\/[^)#]*)(#[^)]*)?\)/g, (_m, p: string, h?: string) => `](${ORIGIN}${p === "/" ? "/index" : p.replace(/\/$/, "")}.md${h ?? ""})`);
+  x.replace(/\]\((\/[^)#]*)(#[^)]*)?\)/g, (_m, p: string, h?: string) =>
+    /\.(md|txt)$/.test(p) ? `](${ORIGIN}${p}${h ?? ""})` : `](${ORIGIN}${p === "/" ? "/index" : p.replace(/\/$/, "")}.md${h ?? ""})`);
 
 const cell = (x: string) => abs(x).replace(/\|/g, "\\|");
 
@@ -29,6 +31,7 @@ function block(b: Block): string {
     case "sources": return `Counts from the repository:\n\n| Source | Count |\n|---|---|\n` + METRICS.sources.bars.map((x) => `| ${x.name} | ${x.value} |`).join("\n");
     case "same": return `Same change, same answer: ${METRICS.same.rows.map((r) => `${r.name} (${r.law ?? r.note})`).join(", ")} all produce the same verdict. ${METRICS.same.foot}`;
     case "setup": return `Open the setup prompt in an agent: Claude (https://claude.ai/new?q=${encodeURIComponent(SETUP_PROMPT)}), ChatGPT (https://chatgpt.com/?q=${encodeURIComponent(SETUP_PROMPT)}), or Cursor.`;
+    case "details": return `### ${b.summary}\n\n` + b.blocks.map(block).join("\n\n");
     case "plan": {
       const p = b.plan;
       return `**${p.name}: ${p.price} ${p.unit}.** ${p.blurb}\n\n` + p.includes.map((i) => `- ${i}`).join("\n") + `\n\n${p.foot}`;
@@ -37,6 +40,7 @@ function block(b: Block): string {
   }
 }
 import { SETUP_PROMPT } from "./site.ts";
+import { cli } from "./cli.ts";
 
 export function pageMd(p: Page): string {
   const out: string[] = [`# ${p.h1.replace(/\n/g, " ")}`, abs(p.lead), `Human version: ${ORIGIN}${p.href}`];
@@ -62,15 +66,29 @@ ${HERO.h1}
 
 ${HERO.sub}
 
+## Give emfirge to your agent
+
+People don't use the emfirge CLI; their AI agent does. A person sets it up once (paste the prompt below into the agent, approve the browser sign-in, create the read-only AWS role with one click and give the agent its ARN). The agent does the rest: it opens a branch, tries a change, checks it, fixes its own plan and hands back.
+
+\`\`\`
+${SETUP_PROMPT}
+\`\`\`
+
+For you (the person):
+
 - Site: ${ORIGIN}
-- Quickstart: ${ORIGIN}/quickstart.md
+- Set up: ${ORIGIN}/quickstart.md
 - How it works: ${ORIGIN}/how-it-works.md
-- CLI reference: ${ORIGIN}/cli.md
 - Coverage: ${ORIGIN}/coverage.md
 - Security & privacy: ${ORIGIN}/security.md
 - Pricing: ${ORIGIN}/pricing.md
 - Changelog: ${ORIGIN}/changelog.md
 - FAQ: ${ORIGIN}/faq.md
+
+For your agent:
+
+- CLI reference: ${ORIGIN}/cli.md
+- All pages as markdown: ${ORIGIN}/llms.txt
 - Source: ${LINKS.github}
 - Contact: ansh@emfirge.cloud
 
@@ -144,14 +162,18 @@ ${WRITING.rows.map((r) => `- ${r}`).join("\n")}
 
 ## How to use emfirge (for agents)
 
-### Install
+### Set up (you run the commands; your human approves two things)
 
 \`\`\`
-npx emfirge login
-npx emfirge connect
+npx -y emfirge login
+npx -y emfirge connect
+npx -y emfirge context --refresh --role-arn ARN --region REGION
+npx -y emfirge context inventory
 \`\`\`
 
-\`login\` signs you in with GitHub or Google in your browser. \`connect\` prints a one-click CloudFormation link that creates a read-only IAM role (delete the stack to revoke). Then scan with \`emfirge context --refresh --role-arn ARN --region REGION\`. Add \`-y\` to skip npx's first-run prompt: \`npx -y emfirge ...\`. Node.js 20 or later. Full steps: ${ORIGIN}/quickstart.md
+- \`login\` opens your human's browser to sign in with GitHub or Google (a page on 127.0.0.1 of the machine you run on; it waits 5 minutes). Your human must approve it; if the browser does not open, show them the address it prints, then wait. It is kept in ~/.emfirge/credentials.json, so you need them again only if it expires.
+- \`connect\` prints a one-click CloudFormation link that creates a read-only IAM role (delete the stack to revoke). Show the link to your human. They create the stack, copy the RoleArn from its Outputs and give it to you. \`connect\` takes no ARN. Ask which AWS region to use; there is no default. Keep the ARN: \`check --evidence\` needs it again.
+- After that you can do everything yourself. Node.js 20 or later. Human steps: ${ORIGIN}/quickstart.md
 
 ### The verbs
 
@@ -162,7 +184,7 @@ npx emfirge connect
 5. \`request\`: ask the owner. Not built yet: it exits 1.
 6. \`report\`: the hand-back of what you applied, bound by hash to the verdict (\`--verify\` checks the binding).
 
-Every flag: ${ORIGIN}/cli.md. Run \`emfirge guide\` for the agent guide.
+Every flag: ${ORIGIN}/cli.md. Run \`emfirge guide\` for the agent guide. When a change passes, apply it yourself, run \`emfirge report BRANCH\`, and tell your human what changed.
 
 ### Rules
 
@@ -171,6 +193,8 @@ Every flag: ${ORIGIN}/cli.md. Run \`emfirge guide\` for the agent guide.
 - Unknown means not checked. It never means safe. Read every \`unknown\` entry and every changed setting that is not judged.
 - Names and IDs come back as tokens (\`S3_001\`, \`NAME_003\`, \`TAG_001\`). Pass them back as they are.
 - Emfirge keeps no plan text, only its SHA-256. Apply your own original plan.
+- Never apply a change that did not pass. Emfirge is advisory and stops nothing, so this is on you.
+- Run \`check --policy\` and \`check --evidence\` (they show an estimate first) only after your human agrees.
 - Output is JSON on stdout (\`--human\` for short text); errors are JSON on stderr. Exit codes: 0 ok, 1 usage or rejected input, 2 not signed in, 3 not found, 4 server error or rate limit, 5 conflict, 6 needs a newer emfirge (run \`npx emfirge@latest\`). A finding never changes the exit code.
 `;
 }
@@ -178,10 +202,18 @@ Every flag: ${ORIGIN}/cli.md. Run \`emfirge guide\` for the agent guide.
 export function llmsTxt(): string {
   return `# emfirge
 
-> ${SITE.description} Every page below is also served as markdown for agents.
+> ${SITE.description} People don't use the CLI; their AI agent does. A person sets it up once, then the agent runs it. Every page below is also served as markdown for agents.
 
+If your human asked you to set up emfirge, read the CLI reference and follow "Setup, loop and rules".
+
+For your agent:
+
+- [CLI reference (agent reference)](${ORIGIN}/cli.md): ${cli.description}
 - [Home, with agent instructions](${ORIGIN}/index.md): the whole home page plus "How to use emfirge (for agents)".
-${PAGES.map((p) => `- [${p.title}](${ORIGIN}/${p.slug}.md): ${p.description}`).join("\n")}
 - [Source](${LINKS.github})
+
+For your human:
+
+${PAGES.filter((p) => p.slug !== "cli").map((p) => `- [${p.title}](${ORIGIN}/${p.slug}.md): ${p.description}`).join("\n")}
 `;
 }
