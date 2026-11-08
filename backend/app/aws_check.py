@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional, Sequence
 
+from app.aws_check_fields import derived_map, judged_map
 from app.aws_context import answer_for_infra, node_id_for, role_use_lines, safe_warning
 from app.aws_outside_world import SCHEDULER_ENTRY, classify_action
 from app.aws_permissions import (
@@ -44,6 +45,8 @@ DAMAGE_SOURCES: dict[str, tuple[str, ...]] = {
     "control": (),
     "outside_world": ("scheduler",),
 }
+# Changed settings the check reads (declared in aws_check_fields next to the readers; law L87h greps each reader).
+JUDGED_FIELDS = judged_map()
 ACCOUNT_SETTINGS = ("cloudtrail", "guardduty", "kms", "config")
 
 
@@ -332,7 +335,7 @@ def build_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, verdict: Co
             "control": [("account_settings", "a branch cannot change audit trail, threat detection, key management or configuration recording "
                                              "settings, so changes to them are not modeled")],
         },
-        baseline=baseline,
+        baseline=baseline, judged_fields=JUDGED_FIELDS, derived_fields=derived_map(),
     )
     return with_cloudfront(inputs, base, branch, branch_graph)
 

@@ -209,6 +209,11 @@ def modeled(dist):
     return strip(dist.model_dump(mode="json"))
 
 
+def _graph_keys(changed):
+    """The graph's own keys of a diff entry; the model fields it also names (L87) are checked in the L87 laws."""
+    return [name for name in changed if name.startswith("base.")]
+
+
 def move_feed(policy, dist_id=DIST, **extra):
     return Change(op="modify", resource_type="cloudfront_distribution", resource_id=dist_id,
                   fields={"cache_behaviors": {FEED: {"cache_policy_id": policy, **extra}}})
@@ -549,7 +554,7 @@ def test_L78d_the_policy_change_is_in_the_diff_with_before_and_after():
     branch = apply_change(base, move_feed(USE_ORIGIN_CACHE_CONTROL))
     diff = diff_infrastructure(base, branch)
     entries = [i for i in diff.resources_modified if i["resource_type"] == "cloudfront_distribution"]
-    assert [(e["id"], e["changed"]) for e in entries] == [(DIST, ["base.behaviors"])]
+    assert [(e["id"], _graph_keys(e["changed"])) for e in entries] == [(DIST, ["base.behaviors"])]
     values = entries[0]["values"]["base.behaviors"]
     feed = lambda rows: next(r for r in rows if r["path_pattern"] == FEED)
     assert (feed(values["before"])["cache_policy_id"], feed(values["before"])["forwards_host"]) == (CACHING_OPTIMIZED, False)
@@ -569,7 +574,7 @@ def test_L78d_origin_request_policy_default_behavior_and_enabled():
     assert dist.enabled is False and dist.default_cache_behavior.origin_request_policy_id == ALL_VIEWER
     assert dist.cache_behaviors[0].origin_request_policy_id == ALL_VIEWER_EXCEPT_HOST
     entry = next(i for i in diff_infrastructure(base, branch).resources_modified if i["resource_type"] == "cloudfront_distribution")
-    assert entry["changed"] == ["base.behaviors", "base.enabled"]
+    assert _graph_keys(entry["changed"]) == ["base.behaviors", "base.enabled"]
     assert entry["values"]["base.enabled"] == {"before": True, "after": False}
 
 
@@ -746,7 +751,7 @@ def test_L78e_the_incident_gives_the_same_branch_and_the_same_fact_in_all_four_f
         branch = apply_changes(base, result["changes"])
         states[name] = modeled(find(branch))
         entry = next(i for i in diff_infrastructure(base, branch).resources_modified if i["resource_type"] == "cloudfront_distribution")
-        assert entry["changed"] == ["base.behaviors"], name
+        assert _graph_keys(entry["changed"]) == ["base.behaviors"], name
         assert host_facts(checked(base, branch)) == [EXPECTED_FACT], name
     assert len({json.dumps(v, sort_keys=True) for v in states.values()}) == 1, states
     assert states["api"]["cache_behaviors"][0]["cache_policy_id"] == USE_ORIGIN_CACHE_CONTROL

@@ -21,7 +21,7 @@ No AI, no clock, no randomness, no I/O: the same inputs give identical output
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Mapping, Optional, Sequence, Union
+from typing import Any, Callable, Collection, Literal, Mapping, Optional, Sequence, Union
 
 from pydantic import BaseModel, ConfigDict
 
@@ -156,12 +156,28 @@ class DamageAnswer(_Strict):
     unknown: list[UnknownItem]
 
 
+class ChangedSetting(_Strict):
+    """One setting (by NAME, never its value) that differs between the base and the branch on a resource present on both.
+
+    ``judged`` is True when a check reads this setting, whatever that check found; ``judged_by`` are the damage
+    answers that read it. False (empty ``judged_by``) means the setting changed and no check reads it: it is named
+    here and nowhere else, never dropped. Whether a judged setting produced a fact is in the six answers.
+    """
+    resource_id: str
+    resource_type: str
+    field: str
+    judged: bool
+    judged_by: list[str]
+
+
 class CheckResult(_Strict):
     branch_id: str
     base_analysis_id: Optional[str]
     branch_revision: Optional[str]
     changes: list[ChangeSet]
     answers: list[DamageAnswer]
+    # Outside the six answers: every changed setting, judged or not. Sorted by (resource_type, resource_id, field).
+    changed_settings: list[ChangedSetting]
     baseline: Optional[ContextResponse]
 
 
@@ -247,6 +263,10 @@ class CheckInputs:
     checked_notes: Mapping[str, Sequence[tuple[str, str]]] = field(default_factory=dict)
     unknown_notes: Mapping[str, Sequence[tuple[str, str]]] = field(default_factory=dict)
     baseline: Optional[ContextResponse] = None
+    # resource type -> setting name -> damage names whose checks read that setting (an adapter declares it)
+    judged_fields: Mapping[str, Mapping[str, Sequence[str]]] = field(default_factory=dict)
+    # resource type -> setting names that are computed from other settings (or counts); listed only when nothing else changed
+    derived_fields: Mapping[str, Collection[str]] = field(default_factory=dict)
 
 
 # ── helpers ───────────────────────────────────────────────────────
@@ -588,9 +608,44 @@ def _finish(draft: _Draft) -> DamageAnswer:
     )
 
 
+_LAYERS = ("base.", "security.", "cost.", "limits.", "telemetry.")
+
+
+def _bare(name: str) -> str:
+    """The setting name without its graph layer prefix (``base.state`` -> ``state``)."""
+    return name.split(".", 1)[1] if name.startswith(_LAYERS) else name
+
+
+def _setting_names(changed: Sequence[str], derived: Collection[str]) -> list[str]:
+    """Names of one modified resource's settings, one per setting.
+
+    A graph key (``base.rules``) and the model field it comes from (``rules``) are one setting, named without the layer.
+    Computed settings and counts are dropped when something else changed on the resource; a resource whose only
+    differences are computed ones keeps them, so a changed resource is never listed with nothing.
+    """
+    names = sorted({_bare(n) for n in changed})
+    kept = [n for n in names if n not in derived and not n.endswith("_count")]
+    return kept or names
+
+
+def _changed_settings(verdict: CombinedVerdict, inputs: CheckInputs) -> list[ChangedSetting]:
+    out: dict[tuple[str, str, str], ChangedSetting] = {}
+    for item in verdict.resources_modified:
+        rid, rtype = str(item.get("id") or ""), str(item.get("resource_type") or "unknown")
+        if not rid or rid in VIRTUAL_NODE_IDS:
+            continue
+        judged = inputs.judged_fields.get(rtype, {})
+        for name in _setting_names(item.get("changed") or [], inputs.derived_fields.get(rtype, ())):
+            by = sorted(set(judged.get(name, ())))
+            out[(rtype, rid, name)] = ChangedSetting(resource_id=rid, resource_type=rtype, field=name,
+                                                     judged=bool(by), judged_by=by)
+    return [out[key] for key in sorted(out)]
+
+
 def is_unchanged(verdict: CombinedVerdict, plan_gaps: Sequence[PlanGap]) -> bool:
     """True when the branch changes nothing the snapshot models and carries no plan items."""
     return not (_ids(verdict.resources_added) or _ids(verdict.resources_removed) or _ids(verdict.resources_modified)
+                or any(item.get("changed") for item in verdict.resources_modified)
                 or plan_gaps) and verdict.modeled_state_unchanged
 
 
@@ -622,5 +677,6 @@ def assemble(verdict: CombinedVerdict, inputs: CheckInputs) -> CheckResult:
         changes=[ChangeSet(change="added", resource_ids=added), ChangeSet(change="removed", resource_ids=removed),
                  ChangeSet(change="modified", resource_ids=modified)],
         answers=[_finish(drafts[damage]) for damage in DAMAGES],
+        changed_settings=_changed_settings(verdict, inputs),
         baseline=inputs.baseline if unchanged else None,
     )

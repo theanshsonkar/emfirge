@@ -38,7 +38,7 @@ ADAPTER_MODULES = {
     "aws_context",
     # Turn a branch into the neutral inputs for check_facts; the outside-world
     # table is hand-written AWS service knowledge with AWS documentation URLs.
-    "aws_check", "aws_outside_world",
+    "aws_check", "aws_check_fields", "aws_outside_world",
     # Provider action catalog (botocore / IAM data) and the glue that feeds the
     # neutral permission expansion (permission_facts) from collected role policies.
     "aws_actions", "aws_permissions",
