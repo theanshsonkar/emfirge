@@ -70,17 +70,13 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 }
 .menu-btn { font-family: var(--font-geist-mono), monospace; font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; border: 1px solid var(--line); padding: 6px 10px; }
 .drawer { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; background: #fff; z-index: 29; padding: 24px 20px; overflow: auto; }
+.drawer .nav { margin-top: 0; }
 
 /* logo */
 .logo { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 500; letter-spacing: -0.6px; line-height: 1; }
 .logo svg path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: logo-draw .9s .1s cubic-bezier(.4,0,.2,1) forwards; }
 .logo svg path:nth-child(2) { animation-delay: .35s; }
 @keyframes logo-draw { to { stroke-dashoffset: 0; } }
-
-/* Human | Agent */
-.seg { display: inline-flex; margin-top: 24px; padding: 3px; border: 1px solid var(--line); background: var(--surface); }
-.seg button { font-size: 11px; font-weight: 500; padding: 6px 11px; color: var(--ink-2); line-height: 1.2; }
-.seg button[aria-pressed="true"] { background: #fff; color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
 
 /* nav */
 .nav { margin-top: 35px; display: flex; flex-direction: column; }
@@ -254,8 +250,6 @@ footer.ft { margin-top: 110px; border-top: 1px solid var(--line); padding: 40px 
 .ft-bot { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-top: 44px; padding-top: 18px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-2); }
 .ft-bot .l, .ft-bot .r { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
 .sdot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #12b76a; margin-right: 8px; }
-
-.agent { margin-top: 65px; font-family: var(--font-geist-mono), monospace; font-size: 12.5px; line-height: 20px; white-space: pre-wrap; word-break: break-word; color: var(--ink); }
 
 @media (max-width: 700px) {
   h1.h1 { font-size: 32px; letter-spacing: -.9px; }
@@ -493,8 +487,6 @@ mark.todo { white-space: normal; }
 /* tap targets: every control is at least 32px tall (padding, not bigger type) */
 .logo { min-height: 32px; }
 .menu-btn { min-height: 36px; display: inline-flex; align-items: center; }
-.seg { padding: 2px; }
-.seg button { min-height: 32px; padding: 0 14px; }
 .pill a { min-height: 32px; }
 .pill > span { min-height: 32px; }
 .otp li a { min-height: 32px; padding: 6px 0; }
