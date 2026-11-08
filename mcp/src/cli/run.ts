@@ -259,7 +259,9 @@ export async function runCli(argv: string[], partial: Partial<CliIo> = {}): Prom
   const human = argv.includes("--human");
 
   const fail = (info: ErrorInfo, usage?: string): number => {
-    io.err(formatError(info, human));
+    // Usage errors echo what the caller typed (a bad command, option or file name), so every
+    // error message goes through the same redaction as tool output before it is printed.
+    io.err(formatError({ ...info, message: String(redactDeep(info.message)) }, human));
     if (usage) io.err(usage);
     return info.exit;
   };

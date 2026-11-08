@@ -66,6 +66,10 @@ function canonicalize(real: string): string {
   if (match) return match[1].split("/")[0];
   match = real.match(/^arn:aws:lambda:[\w-]+:\d+:function:([^:]+)/);
   if (match) return match[1];
+  match = real.match(/^arn:aws:dynamodb:[\w-]+:\d+:table\/([^/]+)/);
+  if (match) return match[1];
+  match = real.match(/^arn:aws:(?:sqs|sns):[\w-]+:\d+:([^:]+)$/);
+  if (match) return match[1];
   match = real.match(/^arn:aws:ec2:[\w-]+:\d+:(?:instance|security-group|subnet|vpc)\/(.+)$/);
   if (match) return match[1];
   return real;
@@ -103,6 +107,12 @@ const PATTERNS: Array<[RegExp, string, boolean]> = [
   [/^arn:aws:rds:[\w-]+:\d+:db:.+$/, "RDS", true],
   [/^arn:aws:s3:::.+$/, "S3", true],
   [/^arn:aws:kms:[\w-]+:\d+:key\/.+$/, "KMS", true],
+  [/^arn:aws:dynamodb:[\w-]+:\d+:table\/.+$/, "DYNAMODB", true],
+  [/^arn:aws:sqs:[\w-]+:\d+:.+$/, "SQS", true],
+  [/^arn:aws:sns:[\w-]+:\d+:.+$/, "SNS", true],
+  [/^arn:aws:scheduler:[\w-]+:\d+:schedule(?:-group)?\/.+$/, "SCHEDULER", true],
+  [/^arn:aws:cloudfront::\d+:.+$/, "CLOUDFRONT", true],
+  [/^arn:aws:wafv2:[\w-]+:\d+:.+$/, "WAFV2", true],
 
   [/^sg-[a-f0-9]+$/i, "SG", true],
   [/^i-[a-f0-9]+$/i, "EC2", true],
@@ -256,6 +266,12 @@ const EMBEDDED_PATTERNS: Array<[RegExp, string, boolean]> = [
   // bucket ARNs leak when they appeared inside narrative captions rather than
   // as a standalone field value.
   [/arn:aws:s3:::[\w.\-/]+/g, "S3", true],
+  [/arn:aws:dynamodb:[\w-]+:\d+:table\/[\w+=,.@\-/]+/g, "DYNAMODB", true],
+  [/arn:aws:sqs:[\w-]+:\d+:[\w+=,.@\-]+/g, "SQS", true],
+  [/arn:aws:sns:[\w-]+:\d+:[\w+=,.@\-]+/g, "SNS", true],
+  [/arn:aws:scheduler:[\w-]+:\d+:schedule(?:-group)?\/[\w+=,.@\-/]+/g, "SCHEDULER", true],
+  [/arn:aws:cloudfront::\d+:[\w+=,.@\-/]+/g, "CLOUDFRONT", true],
+  [/arn:aws:wafv2:[\w-]+:\d+:[\w+=,.@\-/]+/g, "WAFV2", true],
 
   // Resource IDs: word boundary on both sides + the AWS prefix is enough
   [/\bsg-[a-f0-9]{8,}\b/gi, "SG", true],
@@ -269,6 +285,12 @@ const EMBEDDED_PATTERNS: Array<[RegExp, string, boolean]> = [
   [/\bigw-[a-f0-9]{8,}\b/gi, "IGW", false],
   [/\bnat-[a-f0-9]{8,}\b/gi, "NAT", false],
   [/\bacl-[a-f0-9]{8,}\b/gi, "ACL", false],
+
+  // A bare 12-digit AWS account id standing alone. Not part of a longer digit
+  // run (timestamps, epoch ms), not glued to a word/hyphen/dot (versions, sg-...),
+  // and not a decimal fraction. A trailing sentence period is fine. Runs last so
+  // account ids inside ARNs are already consumed by the ARN patterns above.
+  [/(?<![\w.-])\d{12}(?![\w-]|\.\d)/g, "ACCOUNT", true],
 ];
 
 // Scan a free-text string for AWS IDs anywhere inside it and replace
@@ -342,6 +364,7 @@ const NEVER_SENSITIVE_PATTERNS = [
   /^(?:ec2|s3|iam|rds|lambda|vpc|sg|sqs|sns|kms|cloudtrail|cloudwatch|guardduty|waf|ecs|elb|alb|api-gateway|secretsmanager|config)$/i,
   /^(?:instance|security[-_ ]?group|subnet|vpc|bucket|role|user|policy|function|database|volume|network[-_ ]?interface|route[-_ ]?table)$/i,
   /^(?:\d{1,5})$/,
+  /^\*$/, // the default CloudFront behavior's path pattern
   /^(?:\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/,
   // IPv6 CIDR ("::/0"): a range, like the IPv4 one above, not a host identifier
   /^(?=[0-9a-f:]*:)[0-9a-f:]+\/\d{1,3}$/i,
@@ -375,6 +398,18 @@ const SENSITIVE_KEYS = new Set([
   "public_ip",
   "private_ip",
   "ip_address",
+  // CloudFront / Scheduler fields (also the field names under a branch diff's values)
+  "aliases",
+  "domain_name",
+  "web_acl_id",
+  "target_arn",
+  "target_role_arn",
+  "origin_access_control_id",
+  "cache_policy_id",
+  "origin_request_policy_id",
+  "target_origin_id",
+  "path_pattern",
+  "s3_bucket",
 ]);
 
 // keys whose values are graph identifiers — often friendly / label-style node
@@ -602,6 +637,31 @@ export function scrubPresignedUrls(value: string): string {
   });
 }
 
+// A branch diff's `values`: { "base.<field>": { before, after } }. The wrapper
+// keys (before/after) say nothing about the value, so the FIELD name decides how
+// it is masked (aliases, web_acl_id, target_arn, ...). Nested objects (origins,
+// behaviors) are then walked with their own keys as usual.
+function isDiffValues(v: unknown): v is Record<string, Record<string, unknown>> {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+  const entries = Object.values(v as Record<string, unknown>);
+  return entries.length > 0 && entries.every(
+    (e) => e !== null && typeof e === "object" && !Array.isArray(e) && "before" in e && "after" in e,
+  );
+}
+
+function redactDiffValues(v: Record<string, Record<string, unknown>>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, change] of Object.entries(v)) {
+    const field = key.slice(key.lastIndexOf(".") + 1);
+    const masked: Record<string, unknown> = {};
+    for (const [side, value] of Object.entries(change)) {
+      masked[side] = redactDeepInner(value, side === "before" || side === "after" ? field : side);
+    }
+    out[key] = masked;
+  }
+  return out;
+}
+
 function redactDeepInner(obj: unknown, parentKey = ""): unknown {
   if (MODE === "off") return obj;
   if (obj == null) return obj;
@@ -648,6 +708,8 @@ function redactDeepInner(obj: unknown, parentKey = ""): unknown {
     for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
       if (isTagKey(k)) {
         out[k] = maskTagValues(v);
+      } else if (k === "values" && isDiffValues(v)) {
+        out[k] = redactDiffValues(v);
       } else {
         out[k] = redactDeepInner(v, k);
       }
