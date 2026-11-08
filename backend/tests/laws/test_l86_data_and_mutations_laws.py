@@ -136,3 +136,91 @@ def test_L86f_an_iam_prefix_that_is_only_a_botocore_endpoint_prefix_still_expand
         assert aws_actions.actions_for_service("not-a-real-service") is None
     finally:
         aws_actions.actions_for_service.cache_clear()
+
+
+# ── L86g CloudFormation security group: egress is diffed, every other changed property is a named unknown ──
+
+import json  # noqa: E402
+
+from app.aws_api_ingest import translate_api_calls  # noqa: E402
+from app.cfn_ingest import convert_change_set  # noqa: E402
+
+SG = "sg-0123456789abcdef0"
+SSH = {"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "CidrIp": "10.0.0.0/8"}
+ALL_OUT = {"IpProtocol": "-1", "CidrIp": "0.0.0.0/0"}
+HTTPS_OUT = {"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "CidrIp": "10.1.0.0/16"}
+
+
+def _sg(before, after, *, replacement="False"):
+    change = {"Action": "Modify", "LogicalResourceId": "Web", "ResourceType": "AWS::EC2::SecurityGroup", "PhysicalResourceId": SG,
+              "Replacement": replacement, "BeforeContext": json.dumps({"Properties": before}),
+              "AfterContext": json.dumps({"Properties": after})}
+    return convert_change_set({"Changes": [{"Type": "Resource", "ResourceChange": change}]})
+
+
+def _ops(doc):
+    return [(c["operation"], c["parameters"]["IpPermissions"]) for c in doc["calls"]]
+
+
+def test_L86g_added_and_removed_egress_rules_are_calls_like_ingress():
+    doc, extras = _sg({"SecurityGroupEgress": [ALL_OUT]}, {"SecurityGroupEgress": [HTTPS_OUT]})
+    assert extras == []
+    assert _ops(doc) == [
+        ("AuthorizeSecurityGroupEgress", [{"IpProtocol": "tcp", "FromPort": 443, "ToPort": 443, "IpRanges": [{"CidrIp": "10.1.0.0/16"}]}]),
+        ("RevokeSecurityGroupEgress", [{"IpProtocol": "-1", "IpRanges": [{"CidrIp": "0.0.0.0/0"}]}]),
+    ]
+    assert all(c["parameters"]["GroupId"] == SG for c in doc["calls"])
+
+
+def test_L86g_egress_changes_reach_the_branch_as_egress_rules_and_not_as_ingress():
+    doc, _ = _sg({"SecurityGroupEgress": [ALL_OUT]}, {"SecurityGroupEgress": [ALL_OUT, HTTPS_OUT]})
+    result = translate_api_calls(doc, sg_rules={SG: {"rules": [], "egress_rules": [
+        {"from_port": None, "to_port": None, "protocol": "-1", "ip_ranges": ["0.0.0.0/0"], "dest_sg_ids": []}]}}.get)
+    fields = [c.fields for c in result["changes"]]
+    assert len(fields) == 1 and set(fields[0]) == {"egress_rules"} and len(fields[0]["egress_rules"]) == 2
+
+
+def test_L86g_destination_security_group_and_ipv6_egress_rules_are_normalized():
+    rule = {"IpProtocol": "tcp", "FromPort": 5432, "ToPort": 5432, "DestinationSecurityGroupId": "sg-db"}
+    doc, extras = _sg({"SecurityGroupEgress": []}, {"SecurityGroupEgress": [rule, {"IpProtocol": "tcp", "CidrIpv6": "::/0"}]})
+    assert extras == []
+    assert _ops(doc)[0] == ("AuthorizeSecurityGroupEgress", [{"IpProtocol": "tcp", "FromPort": 5432, "ToPort": 5432, "UserIdGroupPairs": [{"GroupId": "sg-db"}]}])
+    assert _ops(doc)[1][1] == [{"IpProtocol": "tcp", "Ipv6Ranges": [{"CidrIpv6": "::/0"}]}]
+
+
+def test_L86g_ingress_and_egress_change_together_and_unchanged_egress_makes_no_call():
+    doc, extras = _sg({"SecurityGroupIngress": [], "SecurityGroupEgress": [ALL_OUT]},
+                      {"SecurityGroupIngress": [SSH], "SecurityGroupEgress": [ALL_OUT]})
+    assert extras == [] and [op for op, _ in _ops(doc)] == ["AuthorizeSecurityGroupIngress"]
+
+
+def test_L86g_a_security_group_with_only_egress_properties_does_not_fail():
+    doc, extras = _sg({"SecurityGroupEgress": [ALL_OUT]}, {"SecurityGroupEgress": [ALL_OUT, HTTPS_OUT]})
+    assert extras == [] and len(doc["calls"]) == 1
+
+
+def test_L86g_egress_added_or_removed_as_a_whole_is_a_named_unknown_not_a_guess():
+    """With no SecurityGroupEgress property the group keeps whatever default egress it has; that default is not stated
+    here, so adding or removing the whole property is unknown, never an empty or allow-all egress list."""
+    for before, after in (({}, {"SecurityGroupEgress": [HTTPS_OUT]}), ({"SecurityGroupEgress": [HTTPS_OUT]}, {})):
+        doc, extras = _sg(before, after)
+        assert doc["calls"] == []
+        assert [e.get("field") for e in extras] == ["SecurityGroupEgress"]
+        assert "SecurityGroupEgress" in extras[0]["detail"]
+
+
+def test_L86g_every_other_changed_property_is_a_named_unknown_never_silent():
+    before = {"GroupDescription": "web", "VpcId": "vpc-1", "Tags": [{"Key": "a", "Value": "1"}], "SecurityGroupIngress": [SSH]}
+    after = {"GroupDescription": "web2", "VpcId": "vpc-1", "Tags": [{"Key": "a", "Value": "2"}], "SecurityGroupIngress": [SSH],
+             "SomeNewProperty": 1}
+    doc, extras = _sg(before, after)
+    assert doc["calls"] == []
+    assert sorted(e["field"] for e in extras) == ["GroupDescription", "SomeNewProperty", "Tags"]
+    assert all(e["type"].startswith("ec2.") and e["actions"] == ["update"] for e in extras)
+    assert all(e["field"] in e["detail"] for e in extras)
+
+
+def test_L86g_unchanged_properties_make_no_unknown():
+    props = {"GroupDescription": "web", "VpcId": "vpc-1", "SecurityGroupIngress": [SSH], "SecurityGroupEgress": [ALL_OUT]}
+    doc, extras = _sg(props, json.loads(json.dumps(props)))
+    assert doc["calls"] == [] and extras == []

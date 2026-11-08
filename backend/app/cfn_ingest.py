@@ -71,7 +71,7 @@ def _properties(doc: dict[str, Any] | None) -> dict[str, Any] | None:
     return properties if isinstance(properties, dict) else None
 
 
-def _normalize_rule(rule: dict[str, Any]) -> dict[str, Any]:
+def _normalize_rule(rule: dict[str, Any], egress: bool = False) -> dict[str, Any]:
     result: dict[str, Any] = {}
     protocol = rule.get("IpProtocol", rule.get("Protocol"))
     if protocol is not None:
@@ -86,32 +86,68 @@ def _normalize_rule(rule: dict[str, Any]) -> dict[str, Any]:
         result["IpRanges"] = [{"CidrIp": rule["CidrIp"]}]
     elif "CidrIpv6" in rule:
         result["Ipv6Ranges"] = [{"CidrIpv6": rule["CidrIpv6"]}]
+    elif egress and "DestinationSecurityGroupId" in rule:
+        result["UserIdGroupPairs"] = [{"GroupId": rule["DestinationSecurityGroupId"]}]
+    elif egress and "DestinationPrefixListId" in rule:
+        result["PrefixListIds"] = [{"PrefixListId": rule["DestinationPrefixListId"]}]
     elif "SourceSecurityGroupId" in rule:
         result["UserIdGroupPairs"] = [{"GroupId": rule["SourceSecurityGroupId"]}]
     return result
 
 
-def _sg_calls(resource: dict[str, Any], before: dict[str, Any] | None, after: dict[str, Any] | None, address: str) -> list[dict[str, Any]]:
-    old = (_properties(before) or {}).get("SecurityGroupIngress")
-    new = (_properties(after) or {}).get("SecurityGroupIngress")
-    if not isinstance(old, list) or not isinstance(new, list):
-        raise _invalid()
-    old_rules = {_rule_key(rule): rule for rule in old if isinstance(rule, dict)}
-    new_rules = {_rule_key(rule): rule for rule in new if isinstance(rule, dict)}
+_SG_RULE_PROPERTIES = {"SecurityGroupIngress": ("Ingress", False), "SecurityGroupEgress": ("Egress", True)}
+
+
+def _sg_rule_calls(resource: dict[str, Any], old: list, new: list, kind: str, egress: bool) -> list[dict[str, Any]]:
+    old_rules = {_rule_key(rule, egress): rule for rule in old if isinstance(rule, dict)}
+    new_rules = {_rule_key(rule, egress): rule for rule in new if isinstance(rule, dict)}
     calls = []
     for key, rule in new_rules.items():
         if key not in old_rules:
-            calls.append({"service": "ec2", "operation": "AuthorizeSecurityGroupIngress",
-                          "parameters": {"GroupId": resource.get("PhysicalResourceId"), "IpPermissions": [_normalize_rule(rule)]}})
+            calls.append({"service": "ec2", "operation": f"AuthorizeSecurityGroup{kind}",
+                          "parameters": {"GroupId": resource.get("PhysicalResourceId"), "IpPermissions": [_normalize_rule(rule, egress)]}})
     for key, rule in old_rules.items():
         if key not in new_rules:
-            calls.append({"service": "ec2", "operation": "RevokeSecurityGroupIngress",
-                          "parameters": {"GroupId": resource.get("PhysicalResourceId"), "IpPermissions": [_normalize_rule(rule)]}})
+            calls.append({"service": "ec2", "operation": f"RevokeSecurityGroup{kind}",
+                          "parameters": {"GroupId": resource.get("PhysicalResourceId"), "IpPermissions": [_normalize_rule(rule, egress)]}})
     return calls
 
 
-def _rule_key(rule: dict[str, Any]) -> str:
-    return json.dumps(_normalize_rule(rule), sort_keys=True, separators=(",", ":"))
+def _sg_calls(resource: dict[str, Any], before: dict[str, Any] | None, after: dict[str, Any] | None, address: str
+              ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(calls, unknowns) for a modified security group: ingress and egress rules are diffed; every other changed property is a named unknown.
+
+    A group with no SecurityGroupEgress property keeps a default egress rule the change set does not state, so adding or
+    removing the whole property is unknown, never an empty or allow-all list.
+    """
+    old_props, new_props = _properties(before) or {}, _properties(after) or {}
+    calls: list[dict[str, Any]] = []
+    extras: list[dict[str, Any]] = []
+    for prop, (kind, egress) in _SG_RULE_PROPERTIES.items():
+        old, new = old_props.get(prop), new_props.get(prop)
+        if prop not in old_props and prop not in new_props:
+            continue
+        if isinstance(old, list) and isinstance(new, list):
+            calls.extend(_sg_rule_calls(resource, old, new, kind, egress))
+        elif egress and (old is None) != (new is None) and isinstance(old if new is None else new, list):
+            result = _extra(address, "AWS::EC2::SecurityGroup", "UpdateSecurityGroup")
+            result["field"] = prop
+            result["detail"] = (f"{prop} was {'removed' if new is None else 'added'}; without it the group keeps a default egress rule "
+                                "that the change set does not state, so the resulting egress is unknown")
+            extras.append(result)
+        else:
+            raise _invalid()
+    for prop in sorted((set(old_props) | set(new_props)) - set(_SG_RULE_PROPERTIES)):
+        if old_props.get(prop) != new_props.get(prop):
+            result = _extra(address, "AWS::EC2::SecurityGroup", "UpdateSecurityGroup")
+            result["field"] = prop
+            result["detail"] = f"{prop} changed; Emfirge does not model this security group property, so its effect is unknown"
+            extras.append(result)
+    return calls, extras
+
+
+def _rule_key(rule: dict[str, Any], egress: bool = False) -> str:
+    return json.dumps(_normalize_rule(rule, egress), sort_keys=True, separators=(",", ":"))
 
 
 def _removal(resource: dict[str, Any], address: str, policy_action: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -347,7 +383,9 @@ def convert_change_set(doc: Any, nacls: Any = None) -> tuple[dict[str, Any], lis
                 if before is None or after is None:
                     extras.append(_extra(address, typ, "MissingPropertyValues"))
                 else:
-                    calls.extend(_sg_calls(resource, before, after, address))
+                    sg_calls, sg_extras = _sg_calls(resource, before, after, address)
+                    calls.extend(sg_calls)
+                    extras.extend(sg_extras)
             elif typ == "AWS::RDS::DBInstance":
                 if before is None or after is None or _properties(before) is None or _properties(after) is None:
                     extras.append(_extra(address, typ, "MissingPropertyValues"))
