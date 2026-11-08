@@ -11,6 +11,8 @@ export interface CliIo {
   readStdin: () => Promise<string>;
   /** Where the command list comes from. Tests replace it; the default asks the server, then falls back to the bundled copy. */
   loadManifest?: () => Promise<import("./manifest.js").LoadedManifest>;
+  /** Starts a "working" indicator for a person at a terminal (stderr only); returns a function that stops it. */
+  spinner?: (label: string) => () => void;
 }
 
 export class CliError extends Error {

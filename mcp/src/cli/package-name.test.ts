@@ -21,7 +21,11 @@ test("the CLI package has no dependency on @emfirge/mcp (it publishes alone)", (
   for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
     assert.ok(!(cliPkg[field] && "@emfirge/mcp" in cliPkg[field]), `${field} must not name @emfirge/mcp`);
   }
-  assert.equal(cliPkg.version, mcpPkg.version);
+});
+
+test("the CLI has its own version line, above the 0.0.x name placeholders on npm", () => {
+  const [major, minor] = String(cliPkg.version).split(".").map(Number);
+  assert.ok(major > 0 || minor >= 1, `emfirge version ${cliPkg.version} must be at least 0.1.0`);
 });
 
 test("the CLI package builds a single bundled file from the mcp source", () => {

@@ -1,7 +1,8 @@
 {
   "protocol": 1,
   "groups": {
-    "branch": "Open and manage a branch: a safe copy of the cloud model. Never touches the cloud."
+    "branch": "Open and manage a branch: a safe copy of the cloud model. Never touches the cloud.",
+    "key": "API keys for your own project, for where browser sign-in cannot work (cloud agent, CI)."
   },
   "commands": [
     {
@@ -646,6 +647,66 @@
           "client": "report.verify"
         }
       ]
+    },
+    {
+      "name": "key create",
+      "summary": "Make an API key for your own project, for places where browser sign-in cannot work (a cloud agent session, CI). Run it on your own computer after `emfirge login`: a key cannot make keys. The key is shown once. Store it as EMFIRGE_API_KEY in your environment's secret settings. Never paste it into a chat or commit it.",
+      "usage": [
+        "emfirge key create [--name LABEL]"
+      ],
+      "examples": [
+        "emfirge key create --name ci"
+      ],
+      "args": [
+        {
+          "name": "name",
+          "kind": "flag",
+          "type": "string",
+          "help": "A label to tell this key apart later (up to 80 characters)."
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/auth/api-keys",
+        "body": {
+          "name": "name"
+        }
+      },
+      "response": {
+        "reveal": [
+          "key"
+        ]
+      }
+    },
+    {
+      "name": "key list",
+      "summary": "List your project's API keys: id, label, first characters, when made and last used, and whether still active. The key itself is never shown again.",
+      "args": [],
+      "request": {
+        "method": "GET",
+        "path": "/auth/api-keys"
+      }
+    },
+    {
+      "name": "key revoke",
+      "summary": "Revoke one of your project's API keys. It stops working at once. Get the id from `emfirge key list`.",
+      "examples": [
+        "emfirge key revoke 12"
+      ],
+      "args": [
+        {
+          "name": "key-id",
+          "kind": "positional",
+          "type": "string",
+          "help": "Key id from `emfirge key list`.",
+          "required": true,
+          "pattern": "^[0-9]+$"
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/auth/api-keys/{key-id}/revoke"
+      }
     }
   ]
 }

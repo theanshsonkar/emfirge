@@ -23,7 +23,8 @@ Shape (protocol 1)::
         "client": "key",                    # the CLI runs its own code for this command (needs that key built in)
         "variants": [{"when": "flag", "request": {...} | "client": "key", "require": [...]}],
         "variants_exclusive": bool,         # at most one "when" flag may be given
-        "response": {"list_key": "branches"},   # an array answer is printed as {list_key: [...], count: n}
+        "response": {"list_key": "branches",    # an array answer is printed as {list_key: [...], count: n}
+                     "reveal": ["key"]},        # top-level answer fields printed unmasked (see mcp/src/cli/generic.ts)
         "human": {"title": "text {field}", "sections": ["key", ...]},   # layout hint for --human
         "requires": ["feature"]}]}          # CLI features the command needs; unknown ones => "needs a newer emfirge"
 
@@ -240,10 +241,38 @@ def _build() -> dict[str, Any]:
                 {"when": "verify", "client": "report.verify"},
             ],
         },
+        {
+            "name": "key create",
+            "summary": "Make an API key for your own project, for places where browser sign-in cannot work "
+                       "(a cloud agent session, CI). Run it on your own computer after `emfirge login`: "
+                       "a key cannot make keys. The key is shown once. "
+                       "Store it as EMFIRGE_API_KEY in your environment's secret settings. "
+                       "Never paste it into a chat or commit it.",
+            "usage": ["emfirge key create [--name LABEL]"],
+            "examples": ["emfirge key create --name ci"],
+            "args": [_flag("name", "A label to tell this key apart later (up to 80 characters).")],
+            "request": {"method": "POST", "path": "/auth/api-keys", "body": {"name": "name"}},
+            "response": {"reveal": ["key"]},
+        },
+        {
+            "name": "key list",
+            "summary": "List your project's API keys: id, label, first characters, when made and last used, and whether "
+                       "still active. The key itself is never shown again.",
+            "args": [],
+            "request": {"method": "GET", "path": "/auth/api-keys"},
+        },
+        {
+            "name": "key revoke",
+            "summary": "Revoke one of your project's API keys. It stops working at once. Get the id from `emfirge key list`.",
+            "examples": ["emfirge key revoke 12"],
+            "args": [_pos("key-id", "Key id from `emfirge key list`.", required=True, pattern="^[0-9]+$")],
+            "request": {"method": "POST", "path": "/auth/api-keys/{key-id}/revoke"},
+        },
     ]
     return {
         "protocol": PROTOCOL,
-        "groups": {"branch": "Open and manage a branch: a safe copy of the cloud model. Never touches the cloud."},
+        "groups": {"branch": "Open and manage a branch: a safe copy of the cloud model. Never touches the cloud.",
+                   "key": "API keys for your own project, for where browser sign-in cannot work (cloud agent, CI)."},
         "commands": commands,
     }
 
