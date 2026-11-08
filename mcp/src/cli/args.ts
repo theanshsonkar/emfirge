@@ -1,6 +1,7 @@
 // Argument parsing for the emfirge CLI. Pure: no network, no auth, no fs.
 
-import { VERBS, BRANCH_SUBS, type OptKind, type VerbSpec } from "./verbs.js";
+import { bundledSpecs, type OptKind, type Specs, type VerbSpec } from "./verbs.js";
+import type { ManifestCommand } from "./manifest.js";
 
 export class UsageError extends Error {
   constructor(message: string, public readonly verb?: string) {
@@ -18,17 +19,14 @@ export interface Parsed {
   flags: Record<string, FlagValue>;
   human: boolean;
   help: boolean;
+  /** The manifest command this resolved to (absent for built-in verbs). */
+  command?: ManifestCommand;
 }
 
-/** Flags where more than one of these in one call is a mistake. */
-const EXCLUSIVE_GROUPS: Record<string, string[]> = {
-  context: ["refresh", "findings", "attack-paths", "compliance", "simulate"],
-};
-
-export function parseCommand(argv: string[]): Parsed {
+export function parseCommand(argv: string[], specs: Specs = bundledSpecs()): Parsed {
   const [verb, ...rest] = argv;
   if (!verb) throw new UsageError("No command given.");
-  const spec: VerbSpec | undefined = Object.hasOwn(VERBS, verb) ? VERBS[verb] : undefined;
+  const spec: VerbSpec | undefined = Object.hasOwn(specs, verb) ? specs[verb] : undefined;
   if (!spec) throw new UsageError(`Unknown command: ${verb}`);
 
   const kinds = new Map<string, OptKind>(spec.options.map((o) => [o.name, o.kind]));
@@ -80,21 +78,44 @@ export function parseCommand(argv: string[]): Parsed {
 
   const parsed: Parsed = { verb, positionals, flags, human, help };
 
-  if (verb === "branch" && !help) {
-    const sub = positionals.shift();
-    if (!sub) throw new UsageError(`branch needs one of: ${BRANCH_SUBS.join(", ")}`, verb);
-    if (!(BRANCH_SUBS as readonly string[]).includes(sub)) {
-      throw new UsageError(`Unknown branch command: ${sub}. Use one of: ${BRANCH_SUBS.join(", ")}`, verb);
-    }
-    parsed.sub = sub;
-  }
+  if (spec.cmds) resolveCommand(parsed, spec, help);
 
-  const group = EXCLUSIVE_GROUPS[verb];
-  if (group && !help) {
+  const cmd = parsed.command;
+  if (cmd?.variants_exclusive && !help) {
+    const group = (cmd.variants ?? []).map((v) => v.when);
     const used = group.filter((n) => flags[n] !== undefined);
     if (used.length > 1) {
       throw new UsageError(`Use only one of: ${group.map((n) => `--${n}`).join(", ")}`, verb);
     }
   }
   return parsed;
+}
+
+const subWords = (cmd: ManifestCommand): string[] => cmd.name.split(" ").slice(1);
+
+/**
+ * Pick the manifest command from the leading words: `branch open ...` is the command "branch open". The longest
+ * match wins; a bare command (`check B`) is used when no sub-command word matches. In help mode nothing is an error.
+ */
+function resolveCommand(parsed: Parsed, spec: VerbSpec, help: boolean): void {
+  const cmds = spec.cmds ?? [];
+  const { verb, positionals } = parsed;
+  let best: ManifestCommand | undefined;
+  for (const c of cmds) {
+    const words = subWords(c);
+    if (words.length > positionals.length || !words.every((w, i) => positionals[i] === w)) continue;
+    if (!best || words.length > subWords(best).length) best = c;
+  }
+  if (!best) {
+    if (help) return;
+    const subs = cmds.map((c) => subWords(c).join(" ")).filter(Boolean);
+    const bare = cmds.find((c) => subWords(c).length === 0);
+    if (bare) best = bare;
+    else if (!positionals.length) throw new UsageError(`${verb} needs one of: ${subs.join(", ")}`, verb);
+    else throw new UsageError(`Unknown ${verb} command: ${positionals[0]}. Use one of: ${subs.join(", ")}`, verb);
+  }
+  const words = subWords(best);
+  positionals.splice(0, words.length);
+  parsed.command = best;
+  if (words.length) parsed.sub = words.join(" ");
 }

@@ -1,27 +1,26 @@
-// The emfirge CLI. Thin by design: sign in, tokenize, send the verb, print the answer.
-// All logic lives on the hosted engine; request building, token expansion and
-// redaction are the same code the MCP tools use (tools-registry handlers).
+// The emfirge CLI. Thin by design: sign in, tokenize, send the command, print the answer.
+// All logic lives on the hosted engine. The list of commands comes from the server (GET /cli/manifest, with a copy
+// bundled in this package), so a command added on the server works here without a new release. Token expansion and
+// redaction are the same code the MCP tools use. Only login, logout, connect, guide and the commands that need local
+// code (overrides.ts) are built in.
 //
 // Exit codes: 0 ok, 1 usage error (also HTTP 400 and 422), 2 not signed in / forbidden, 3 not found,
-// 4 server, network or rate limit (HTTP 429), 5 conflict (HTTP 409).
+// 4 server, network or rate limit (HTTP 429), 5 conflict (HTTP 409), 6 needs a newer emfirge.
 
 import { readFileSync } from "node:fs";
 import { ZodError } from "zod";
-import { tools } from "../tools-registry.js";
 import { setInteractiveLogin } from "../client.js";
 import { redactDeep } from "../tokenize.js";
 import { parseCommand, UsageError, type Parsed } from "./args.js";
-import { VERB_NAMES, verbHelp, topUsage } from "./verbs.js";
+import { buildSpecs, bundledSpecs, LOCAL_VERBS, verbHelp, topUsage, type Specs } from "./verbs.js";
 import { formatOk, formatError, type ErrorInfo } from "./output.js";
-import { planHandback, findShorthand } from "./extra.js";
 import { loadGuide } from "./guide.js";
+import { loadManifest, updateNeededMessage, EXIT_UPDATE_NEEDED, SUPPORTED_PROTOCOL, type LoadedManifest } from "./manifest.js";
+import { OVERRIDES, CLIENT_KEYS } from "./overrides.js";
+import { runManifestCommand } from "./generic.js";
+import { CliError, tool, on, type CliIo } from "./support.js";
 
-export interface CliIo {
-  out: (s: string) => void;
-  err: (s: string) => void;
-  readFile: (path: string) => string;
-  readStdin: () => Promise<string>;
-}
+export type { CliIo } from "./support.js";
 
 const defaultIo: CliIo = {
   out: (s) => { process.stdout.write(s); },
@@ -34,197 +33,7 @@ const defaultIo: CliIo = {
   },
 };
 
-class CliError extends Error {
-  constructor(public readonly info: ErrorInfo) {
-    super(info.message);
-  }
-}
-
-type ToolResult = { content: Array<{ type: "text"; text: string }> };
-
-/** Run an MCP tool handler (same request code, tokenizing and redaction) and return its JSON. */
-async function tool(name: string, args: Record<string, unknown>): Promise<unknown> {
-  const t = tools.find((x) => x.name === name);
-  if (!t) throw new Error(`Unknown tool: ${name}`);
-  const result = (await t.handler(t.zodObject.parse(args))) as ToolResult;
-  return parseToolText(result.content.map((c) => c.text).join("\n"));
-}
-
-function parseToolText(text: string): unknown {
-  try { return JSON.parse(text); } catch { /* fall through */ }
-  const split = text.indexOf("\n\n");
-  if (split > 0) {
-    try {
-      const head = JSON.parse(text.slice(0, split));
-      if (head && typeof head === "object" && !Array.isArray(head)) {
-        return { ...head, note: text.slice(split + 2).trim() };
-      }
-    } catch { /* plain text */ }
-  }
-  return { message: text };
-}
-
-const str = (p: Parsed, name: string): string | undefined => {
-  const v = p.flags[name];
-  return typeof v === "string" ? v : undefined;
-};
-const on = (p: Parsed, name: string): boolean => p.flags[name] === true;
-
-function need(p: Parsed, name: string): string {
-  const v = str(p, name);
-  if (v === undefined) throw new UsageError(`--${name} is required here`, p.verb);
-  return v;
-}
-
-function oneId(p: Parsed, what = "BRANCH"): string {
-  if (p.positionals.length !== 1) throw new UsageError(`Give exactly one ${what} id`, p.verb);
-  return p.positionals[0];
-}
-
-function count(p: Parsed, name: string): number | undefined {
-  const v = str(p, name);
-  if (v === undefined) return undefined;
-  if (!/^\d+$/.test(v)) throw new UsageError(`--${name} must be a whole number`, p.verb);
-  return Number(v);
-}
-
-function dropUndefined(o: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
-}
-
-/** A JSON input: "-" is stdin, text starting with { or [ is inline, anything else is a file path. */
-async function jsonInput(io: CliIo, value: string, verb: string): Promise<unknown> {
-  let text: string;
-  const t = value.trim();
-  if (value === "-") text = await io.readStdin();
-  else if (t.startsWith("{") || t.startsWith("[")) text = value;
-  else {
-    try { text = io.readFile(value); } catch { throw new UsageError(`Cannot read file: ${value}`, verb); }
-  }
-  try { return JSON.parse(text); } catch { throw new UsageError(`Input is not valid JSON: ${value === "-" ? "stdin" : t.slice(0, 40)}`, verb); }
-}
-
-// ---- verbs ----
-
-async function context(p: Parsed): Promise<unknown> {
-  if (on(p, "refresh")) {
-    return tool("emfirge_scan", { role_arn: need(p, "role-arn"), region: need(p, "region") });
-  }
-  if (on(p, "findings")) {
-    return tool("emfirge_get_findings", dropUndefined({ analysis_id: need(p, "analysis"), severity: str(p, "severity") }));
-  }
-  if (on(p, "attack-paths")) return tool("emfirge_attack_paths", { analysis_id: need(p, "analysis") });
-  if (on(p, "compliance")) {
-    return tool("emfirge_check_compliance", dropUndefined({ analysis_id: need(p, "analysis"), framework: str(p, "framework") }));
-  }
-  const simulate = str(p, "simulate");
-  if (simulate !== undefined) return tool("emfirge_simulate_breach", { query: simulate, analysis_id: need(p, "analysis") });
-
-  if (p.positionals.length !== 1) throw new UsageError("Give one question, e.g. `emfirge context inventory`", p.verb);
-  return tool("emfirge_context", dropUndefined({
-    question: p.positionals[0],
-    analysis_id: str(p, "analysis"),
-    branch_id: str(p, "branch"),
-    resource_id: str(p, "resource"),
-  }));
-}
-
-async function branch(p: Parsed): Promise<unknown> {
-  switch (p.sub) {
-    case "open": return tool("emfirge_create_branch", { base_analysis_id: need(p, "analysis"), name: need(p, "name") });
-    case "fork":
-      return tool("emfirge_fork_branch", dropUndefined({ branch_id: oneId(p), name: need(p, "name"), branch_revision: str(p, "revision") }));
-    case "list": return tool("emfirge_list_branches", dropUndefined({ base_analysis_id: str(p, "analysis") }));
-    case "get": return tool("emfirge_get_branch", { branch_id: oneId(p) });
-    case "rollback":
-      return tool("emfirge_rollback_branch", dropUndefined({
-        branch_id: oneId(p), expected_change_count: count(p, "expected-count"), branch_revision: str(p, "revision"),
-      }));
-    case "rollback-to":
-      return tool("emfirge_rollback_branch_to_count", dropUndefined({
-        branch_id: oneId(p), target_change_count: count(p, "count") ?? need(p, "count"), branch_revision: str(p, "revision"),
-      }));
-    case "discard":
-      return tool("emfirge_discard_branch", dropUndefined({
-        branch_id: oneId(p), expected_change_count: count(p, "expected-count"), branch_revision: str(p, "revision"),
-      }));
-    case "compare":
-      if (p.positionals.length < 1) throw new UsageError("Give at least one BRANCH id", p.verb);
-      return tool("emfirge_compare_branches", { branch_ids: p.positionals });
-    default: throw new UsageError("Unknown branch command", p.verb);
-  }
-}
-
-async function tryVerb(p: Parsed, io: CliIo): Promise<unknown> {
-  if (on(p, "verify-fix")) {
-    return tool("emfirge_verify_fix", { rule_id: need(p, "rule"), resource_id: need(p, "resource"), analysis_id: need(p, "analysis") });
-  }
-  const kinds = ["typed", "aws-cli", "aws-api", "terraform", "cloudformation"].filter((k) => p.flags[k] !== undefined);
-  if (kinds.length !== 1) {
-    throw new UsageError("Give exactly one of: --typed, --aws-cli, --aws-api, --terraform, --cloudformation", p.verb);
-  }
-  const branchId = oneId(p);
-  const kind = kinds[0];
-
-  if (kind === "typed") {
-    const change = await jsonInput(io, p.flags.typed as string, p.verb);
-    if (change === null || typeof change !== "object" || Array.isArray(change)) {
-      throw new UsageError("--typed must be a JSON object", p.verb);
-    }
-    return tool("emfirge_apply_change", { ...(change as Record<string, unknown>), branch_id: branchId });
-  }
-
-  let plan: unknown;
-  if (kind === "aws-cli") {
-    const values = p.flags["aws-cli"] as string[];
-    const first = values[0].trim();
-    if (values.length === 1 && (first.startsWith("[") || first.startsWith("{"))) {
-      const parsed = await jsonInput(io, values[0], p.verb);
-      plan = Array.isArray(parsed) ? parsed : (parsed as { commands?: unknown })?.commands;
-      if (!Array.isArray(plan)) throw new UsageError("--aws-cli JSON must be a list of commands or {commands:[...]}", p.verb);
-    } else plan = values;
-    (plan as unknown[]).forEach((command, index) => {
-      const hit = typeof command === "string" ? findShorthand(command) : undefined;
-      if (hit) {
-        throw new UsageError(
-          `Command ${index + 1}: ${hit.option} uses AWS shorthand syntax (${hit.value.slice(0, 40)}), which is not supported. ` +
-          `Emfirge will not guess what it means; pass the value as JSON, for example ${hit.option} '{"Key":"value"}'.`,
-          p.verb);
-      }
-    });
-  } else {
-    plan = await jsonInput(io, p.flags[kind] as string, p.verb);
-    if (plan === null || typeof plan !== "object" || Array.isArray(plan)) {
-      throw new UsageError(`--${kind} must be a JSON object`, p.verb);
-    }
-  }
-  return tool("emfirge_plan_verdict", { branch_id: branchId, format: kind, plan });
-}
-
-async function check(p: Parsed): Promise<unknown> {
-  const branchId = oneId(p);
-  if (on(p, "verdict")) return tool("emfirge_branch_verdict", { branch_id: branchId });
-  if (on(p, "diff")) return tool("emfirge_branch_diff", { branch_id: branchId });
-  if (on(p, "policy")) {
-    return tool("emfirge_policy_checks", dropUndefined({
-      branch_id: branchId, approve: on(p, "approve") ? true : undefined, accept_estimate_id: str(p, "accept-estimate"),
-    }));
-  }
-  if (on(p, "evidence")) {
-    const sources = p.flags.source as string[] | undefined;
-    return tool("emfirge_in_use_evidence", dropUndefined({
-      branch_id: branchId, sources, accept_estimate_id: str(p, "accept-estimate"), role_arn: str(p, "role-arn"),
-    }));
-  }
-  return tool("emfirge_check", { branch_id: branchId });
-}
-
-async function report(p: Parsed): Promise<unknown> {
-  const branchId = oneId(p);
-  const plan = str(p, "plan");
-  if (plan !== undefined) return planHandback(branchId, plan);
-  return tool("emfirge_branch_handback", dropUndefined({ branch_id: branchId, verify: on(p, "verify") ? true : undefined }));
-}
+// ---- built-in commands ----
 
 async function connect(p: Parsed): Promise<unknown> {
   if (on(p, "link")) return tool("emfirge_link_project", {});
@@ -267,6 +76,8 @@ function classify(e: unknown): ErrorInfo {
   return { code: "server_error", message, exit: 4 };
 }
 
+const isLocal = (name: string | undefined): boolean => name !== undefined && Object.hasOwn(LOCAL_VERBS, name);
+
 export async function runCli(argv: string[], partial: Partial<CliIo> = {}): Promise<number> {
   const io: CliIo = { ...defaultIo, ...partial };
   const human = argv.includes("--human");
@@ -280,41 +91,65 @@ export async function runCli(argv: string[], partial: Partial<CliIo> = {}): Prom
   };
 
   const [first] = argv;
-  if (first === undefined) return fail(usageInfo("No command given."), topUsage());
-  if (first === "--help" || first === "-h") { io.out(topUsage()); return 0; }
   if (first === "--version" || first === "-v") {
     const { version } = await import("./version.js");
     io.out(`${version()}\n`);
     return 0;
   }
+
+  // The command list: from the server (short timeout), else the copy bundled in this package. The built-in
+  // commands (login, logout, connect, guide, request) need no list, so they never wait for the network.
+  const builtIn = isLocal(first) || (first === "help" && isLocal(argv[1]));
+  let loaded: LoadedManifest | undefined;
+  let specs: Specs = bundledSpecs();
+  if (!builtIn) {
+    loaded = await (io.loadManifest ?? loadManifest)();
+    if (loaded.tooNew !== undefined) {
+      return fail({
+        code: "update_needed",
+        message: updateNeededMessage(`the server's command list is protocol ${loaded.tooNew}; this emfirge reads up to ${SUPPORTED_PROTOCOL}`),
+        exit: EXIT_UPDATE_NEEDED,
+      });
+    }
+    specs = buildSpecs(loaded.manifest, CLIENT_KEYS);
+  }
+  const offlineNote = loaded?.source === "bundled"
+    ? " (the server's command list could not be read, so this is the list built into this emfirge; a newer command may exist: " +
+      "check your connection, or run npx emfirge@latest)"
+    : "";
+
+  if (first === undefined) return fail(usageInfo("No command given."), topUsage(specs));
+  if (first === "--help" || first === "-h") { io.out(topUsage(specs)); return 0; }
   if (first === "help") {
     const topic = argv[1];
-    if (topic === undefined) { io.out(topUsage()); return 0; }
-    if (!VERB_NAMES.includes(topic)) return fail(usageInfo(`Unknown command: ${topic}`), topUsage());
-    io.out(verbHelp(topic));
+    if (topic === undefined) { io.out(topUsage(specs)); return 0; }
+    if (!Object.hasOwn(specs, topic)) return fail(usageInfo(`Unknown command: ${topic}${offlineNote}`), topUsage(specs));
+    const sub = argv.slice(2).filter((w) => !w.startsWith("-")).join(" ") || undefined;
+    io.out(verbHelp(topic, specs, sub));
     return 0;
   }
 
   let parsed: Parsed;
   try {
-    parsed = parseCommand(argv);
+    parsed = parseCommand(argv, specs);
   } catch (e) {
     if (e instanceof UsageError) {
-      return fail(usageInfo(e.message), e.verb ? verbHelp(e.verb) : topUsage());
+      const unknown = e.message.startsWith("Unknown command:") ? offlineNote : "";
+      return fail(usageInfo(e.message + unknown), e.verb ? verbHelp(e.verb, specs) : topUsage(specs));
     }
     return fail(classify(e));
   }
-  if (parsed.help) { io.out(verbHelp(parsed.verb)); return 0; }
+  if (parsed.help) { io.out(verbHelp(parsed.verb, specs, parsed.sub)); return 0; }
 
   setInteractiveLogin(false);
   try {
     let result: unknown;
+    if (parsed.command && !isLocal(parsed.verb)) {
+      result = await runManifestCommand(parsed.command, parsed, io, OVERRIDES);
+      io.out(formatOk(result, parsed.human, parsed.command.human));
+      return 0;
+    }
     switch (parsed.verb) {
-      case "context": result = await context(parsed); break;
-      case "branch": result = await branch(parsed); break;
-      case "try": result = await tryVerb(parsed, io); break;
-      case "check": result = await check(parsed); break;
-      case "report": result = await report(parsed); break;
       case "request":
         throw new CliError({
           code: "not_built",
@@ -331,6 +166,6 @@ export async function runCli(argv: string[], partial: Partial<CliIo> = {}): Prom
     return 0;
   } catch (e) {
     const info = classify(e);
-    return fail(info, e instanceof UsageError && e.verb ? verbHelp(e.verb) : undefined);
+    return fail(info, e instanceof UsageError && e.verb ? verbHelp(e.verb, specs, parsed.sub) : undefined);
   }
 }

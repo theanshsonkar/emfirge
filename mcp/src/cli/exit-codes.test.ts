@@ -13,6 +13,7 @@ process.env.EMFIRGE_API_KEY = "synthetic-test-api-key";
 process.env.EMFIRGE_BASE_URL = "http://stub.invalid/api";
 
 const { runCli } = await import("./run.js");
+const { bundledManifest } = await import("./manifest.js");
 
 function stub(status: number, body: unknown): { calls: number } {
   const state = { calls: 0 };
@@ -27,6 +28,7 @@ async function run(argv: string[]) {
   let stdout = "";
   let stderr = "";
   const code = await runCli(argv, {
+    loadManifest: async () => ({ manifest: bundledManifest(), source: "bundled" as const }),
     out: (s) => { stdout += s; },
     err: (s) => { stderr += s; },
     readFile: () => { throw new Error("ENOENT"); },

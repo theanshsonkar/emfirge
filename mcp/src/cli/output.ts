@@ -62,9 +62,30 @@ function humanCheck(v: Record<string, unknown>): string | null {
   return lines.join("\n") + "\n";
 }
 
-export function formatOk(value: unknown, human: boolean): string {
+export interface HumanHint { title?: string; sections?: string[] }
+
+/** A command's own --human layout from the manifest: an optional title ({field} is filled from the answer) and the keys to print. */
+function humanHinted(v: Record<string, unknown>, hint: HumanHint): string {
+  const lines: string[] = [];
+  if (hint.title) lines.push(hint.title.replace(/\{([\w-]+)\}/g, (_m, k: string) => scalar(v[k])));
+  const keys = hint.sections ?? Object.keys(v);
+  for (const key of keys) {
+    if (!(key in v)) continue;
+    const item = v[key];
+    if (item !== null && typeof item === "object") {
+      lines.push(`${key}:`);
+      render(item, "  ", 1, lines);
+    } else lines.push(`${key}: ${scalar(item)}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
+export function formatOk(value: unknown, human: boolean, hint?: HumanHint): string {
   if (!human) return JSON.stringify(value, null, 2) + "\n";
   if (typeof value === "string") return value + "\n";
+  if (hint && value !== null && typeof value === "object" && !Array.isArray(value)) {
+    return humanHinted(value as Record<string, unknown>, hint);
+  }
   if (value !== null && typeof value === "object") {
     const special = humanCheck(value as Record<string, unknown>);
     if (special) return special;

@@ -13,6 +13,7 @@ process.env.EMFIRGE_API_KEY = "synthetic-test-api-key";
 process.env.EMFIRGE_BASE_URL = "http://stub.invalid/api";
 
 const { runCli } = await import("./run.js");
+const { bundledManifest } = await import("./manifest.js");
 
 type Call = { method: string; url: string; headers: Record<string, string>; body?: any };
 type Reply = { status?: number; body: unknown } | "network";
@@ -38,6 +39,7 @@ async function run(argv: string[], files: Record<string, string> = {}, stdin = "
   let stdout = "";
   let stderr = "";
   const code = await runCli(argv, {
+    loadManifest: async () => ({ manifest: bundledManifest(), source: "bundled" as const }),
     out: (s) => { stdout += s; },
     err: (s) => { stderr += s; },
     readFile: (p) => { if (p in files) return files[p]; throw new Error(`ENOENT ${p}`); },

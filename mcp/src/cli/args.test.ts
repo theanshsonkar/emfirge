@@ -12,6 +12,8 @@ process.env.USERPROFILE = home;
 const { parseCommand, UsageError } = await import("./args.js");
 const { VERB_NAMES, verbHelp } = await import("./verbs.js");
 const { runCli } = await import("./run.js");
+const { bundledManifest } = await import("./manifest.js");
+const offline = { loadManifest: async () => ({ manifest: bundledManifest(), source: "bundled" as const }) };
 
 function capture() {
   let stdout = "";
@@ -78,7 +80,7 @@ test("unknown option, missing value and unknown verb are usage errors", () => {
 
 test("unknown verb: exit 1, usage on stderr, nothing on stdout", async () => {
   const c = capture();
-  const code = await runCli(["frobnicate"], c.io);
+  const code = await runCli(["frobnicate"], { ...c.io, ...offline });
   assert.equal(code, 1);
   assert.equal(c.stdout, "");
   assert.match(c.stderr, /Usage/i);
@@ -87,7 +89,7 @@ test("unknown verb: exit 1, usage on stderr, nothing on stdout", async () => {
 
 test("unknown option: exit 1 with the verb usage on stderr", async () => {
   const c = capture();
-  const code = await runCli(["check", "b1", "--nope"], c.io);
+  const code = await runCli(["check", "b1", "--nope"], { ...c.io, ...offline });
   assert.equal(code, 1);
   assert.equal(c.stdout, "");
   assert.match(c.stderr, /--nope/);
@@ -96,7 +98,7 @@ test("unknown option: exit 1 with the verb usage on stderr", async () => {
 
 test("no arguments prints usage and exits 1", async () => {
   const c = capture();
-  assert.equal(await runCli([], c.io), 1);
+  assert.equal(await runCli([], { ...c.io, ...offline }), 1);
   assert.match(c.stderr, /Usage/i);
 });
 
@@ -104,7 +106,7 @@ test("--help works for every verb (exit 0, help on stdout)", async () => {
   for (const verb of VERB_NAMES) {
     for (const flag of ["--help", "-h"]) {
       const c = capture();
-      const code = await runCli([verb, flag], c.io);
+      const code = await runCli([verb, flag], { ...c.io, ...offline });
       assert.equal(code, 0, `${verb} ${flag}`);
       assert.match(c.stdout, new RegExp(`emfirge ${verb}`), `${verb} help names the verb`);
       assert.equal(c.stderr, "");
@@ -115,9 +117,9 @@ test("--help works for every verb (exit 0, help on stdout)", async () => {
 
 test("top-level --help and help <verb>", async () => {
   const a = capture();
-  assert.equal(await runCli(["--help"], a.io), 0);
+  assert.equal(await runCli(["--help"], { ...a.io, ...offline }), 0);
   assert.match(a.stdout, /context/);
   const b = capture();
-  assert.equal(await runCli(["help", "check"], b.io), 0);
+  assert.equal(await runCli(["help", "check"], { ...b.io, ...offline }), 0);
   assert.equal(b.stdout, verbHelp("check"));
 });

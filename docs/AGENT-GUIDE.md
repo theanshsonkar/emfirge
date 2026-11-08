@@ -36,6 +36,8 @@ Run it from the shell: `emfirge <verb>`. Output is JSON on stdout.
 | guide | Print this page | `emfirge guide` |
 
 Add `--human` for short readable output. Add `--help` to any verb.
+Commands come from the server. `emfirge --help` and `emfirge <command> --help` always show the current list, so a new command appears without you updating anything. A copy is built in for when the server cannot be reached.
+Run `npx emfirge@latest` only when Emfirge tells you to (exit code 6, "needs a newer emfirge"), never as a habit.
 Inputs for `try` can be a file path, inline JSON, or `-` for stdin.
 `emfirge check` answers come in the order data, exposure, money, availability, control, outside_world, then the baseline.
 `changed_settings` sits outside the six answers: every setting that differs on a resource, by name only (never a value). `judged: true` with `judged_by` means a check reads that setting; `judged: false` means it changed and no check reads it (human form: "Changed, not judged:"). Judged does not mean it produced a fact; read the answers. Not judged is not safe.
@@ -87,6 +89,7 @@ Run them with `--accept-estimate ID` (and `--approve` for policy) only after the
 | 3 | not found (branch, analysis) |
 | 4 | server or network error, or rate limited (HTTP 429, code `rate_limited`). Try again later. |
 | 5 | conflict (HTTP 409, code `conflict`): the branch changed since you read it, or a limit was hit. Read it again, then retry. |
+| 6 | needs a newer emfirge (code `update_needed`): the server's command is newer than this install. Run `npx emfirge@latest`, then retry. |
 
 Errors are JSON on stderr: `{"error":{"code","message","exit"}}`. Stdout is empty on error.
 
