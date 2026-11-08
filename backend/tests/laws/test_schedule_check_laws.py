@@ -30,7 +30,7 @@ from .test_scheduler_schedule_laws import (
     base_with, schedule,
 )
 
-DOCS = "https://docs.aws.amazon.com/scheduler/latest/UserGuide/managing-schedule-enable-disable.html"
+DOCS = "https://docs.aws.amazon.com/scheduler/latest/UserGuide/managing-schedule-state.html"
 TARGET_ID = "dl-worker"
 EXPECTED_FACT = {
     "resource_id": NIGHTLY, "resource_type": "scheduler_schedule", "change": "schedule_enabled",

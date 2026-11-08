@@ -81,7 +81,10 @@ RECOVERY_SOURCE_UNKNOWN = "recovery_source_unknown"
 def _table_recovery(rid: str, before: dict) -> tuple[RecoveryPoint | None, str | None]:
     """DynamoDB table: (recovery point, why unknown).
 
-    * an AVAILABLE on-demand backup restores the table after it is gone (Restore.Tutorial);
+    * an AVAILABLE on-demand backup restores the table after it is gone. Source: the restore tutorial
+      https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Restore.Tutorial.html, which "assumes that the Music
+      table no longer exists before restoring it" from the backup. No AWS page was found that says in so many words
+      that an on-demand backup survives DeleteTable; this rests on that tutorial and on DeleteTable not mentioning backups;
     * with point-in-time recovery on, DeleteTable makes a system backup kept 35 days
       (PointInTimeRecovery_Howitworks, BackupSummary BackupType SYSTEM);
     * ItemCount 0 is "reported empty": AWS refreshes ItemCount about every six hours

@@ -5,10 +5,15 @@ One fact, read off modeled fields of two snapshots (no provider call):
   origin_receives_host_header  a cache behavior that serves an S3 bucket through origin access control
                                now passes the viewer Host header to the bucket
 
-Why it matters: CloudFront sets Host to the origin's own domain name unless a policy forwards the viewer's.
-A viewer Host (for example the distribution's alias) sent to S3 is not the bucket's endpoint, so the bucket
-answers with an error and the path is down. AWS documents that CloudFront cannot cache on the Host header
-for an S3 origin (``SOURCE_URL``).
+What AWS documents (``SOURCE_URL``, the custom-origin behavior page): CloudFront sets Host to the domain name of the
+origin, and you can't cache based on the Host header for Amazon S3 origins. The managed-policies page
+(https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-origin-request-policies.html) says
+API Gateway, Lambda function URL and Lambda web function origins expect Host to be the origin domain name and that
+forwarding the viewer Host to them can prevent them working; it says nothing about S3.
+
+What AWS does not document, and what is only observed: that an S3 bucket answers a forwarded viewer Host with an
+error and the path goes down. That was seen in one incident, not read from an AWS page; the fact therefore cites
+the documented part and the effect on S3 is incident-observed.
 
 A fact only when the header rule of every policy that applies is known. A rule that was not collected, or is
 not one this model reads, makes the answer unknown, never a fact and never a silent "fine".

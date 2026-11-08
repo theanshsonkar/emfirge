@@ -169,10 +169,11 @@ class CheckResult(_Strict):
 
 @dataclass(frozen=True)
 class OutsideEntry:
-    """One cloud service whose actions leave the cloud, with the provider's own documentation."""
+    """What the table says about one action: ``outside`` False for a known read, True for an action that leaves the cloud."""
     service: str
     reason: str
     source_url: str
+    outside: bool = True
 
 
 @dataclass(frozen=True)
@@ -518,13 +519,17 @@ def _control(inputs: CheckInputs) -> _Draft:
 def _outside_world(inputs: CheckInputs, changed_typed: int) -> _Draft:
     draft = _Draft("outside_world")
     classified = 0
+    reads = 0
     for gap in inputs.plan_gaps:
         if gap.kind != "unmodeled" or not gap.action:
             continue
         entry = inputs.classify(gap.action)
         if entry is None:
-            draft.doubt("unclassified_action", f"not classified: {gap.action} is not in the table of services whose actions leave the cloud",
+            draft.doubt("unclassified_action", f"not classified: {gap.action} is not in the table of actions that leave the cloud",
                         gap.address)
+            continue
+        if not entry.outside:
+            reads += 1
             continue
         classified += 1
         draft.facts.append(OutsideFact(action=gap.action, service=entry.service, reason=entry.reason,
@@ -538,10 +543,12 @@ def _outside_world(inputs: CheckInputs, changed_typed: int) -> _Draft:
     for topic, reason, rid in inputs.schedule_doubts:
         draft.doubt(topic, reason, rid)
     draft.check("schedules", f"{inputs.schedules_compared} schedules compared between the base and the branch for a timer that starts running")
-    draft.check("typed_changes", f"{changed_typed} typed changes are changes to resources inside the account; they stay inside the account "
-                                 "and do not leave the cloud")
-    draft.check("plan_actions", f"{classified} unmodeled plan actions matched the table of services whose actions leave the cloud")
-    draft.doubt("service_table", "only services in the table are classified; an action of any other service is reported as unclassified, never skipped silently")
+    draft.check("typed_changes", f"{changed_typed} typed changes were compared; whether they reach a party outside the account is not assessed, "
+                                 "only schedules and the plan actions in the table are")
+    draft.check("plan_actions", f"{classified} unmodeled plan actions matched the table of actions that leave the cloud")
+    if reads:
+        draft.check("read_only_actions", f"{reads} plan actions are reads by name (Get, List or Describe) of a service in the table and are not treated as leaving the cloud")
+    draft.doubt("service_table", "only actions of the services in the table are classified; any other action is reported as unclassified, never skipped silently")
     return draft
 
 

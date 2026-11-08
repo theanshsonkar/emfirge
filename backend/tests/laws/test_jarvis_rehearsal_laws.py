@@ -45,7 +45,7 @@ from .test_check_facts_laws import ID_KEYS, TOKENIZE_TS
 # L74i's keys plus the one L76 added (affected_node_ids); all of them must be masked by the MCP tokenizer.
 REDACTED_ID_KEYS = ID_KEYS | {"affected_node_ids"}
 
-SCHEDULE_DOCS = "https://docs.aws.amazon.com/scheduler/latest/UserGuide/managing-schedule-enable-disable.html"
+SCHEDULE_DOCS = "https://docs.aws.amazon.com/scheduler/latest/UserGuide/managing-schedule-state.html"
 QUOTA_DOCS = "https://docs.aws.amazon.com/servicequotas/latest/userguide/request-quota-increase.html"
 EFFECTS_UNKNOWN = "what the target does outside the cloud is not visible to Emfirge"
 

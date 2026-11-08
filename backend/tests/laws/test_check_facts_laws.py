@@ -728,7 +728,7 @@ def test_L74f_a_mixed_plan_classifies_each_call_on_its_own(plan_client):
     outside = _outside(plan_client, branch)
     assert [f["action"] for f in outside["facts"]] == ["support.CreateCase"]
     assert [u["topic"] for u in outside["unknown"] if u["topic"] == "unclassified_action"] == ["unclassified_action"]
-    assert any("stay inside" in c["detail"] or "inside the account" in c["detail"] for c in outside["checked"])
+    assert any(c["topic"] == "typed_changes" for c in outside["checked"])  # L83e: no claim that typed changes stay inside
 
 
 def test_L74f_terraform_resource_types_are_classified_by_prefix(plan_client):
@@ -758,7 +758,8 @@ def test_L74f_every_table_entry_cites_the_providers_own_documentation():
         for service in entry.services:
             assert service not in seen, service
             seen.add(service)
-            hit = classify_action(f"{service}.SomeOperation")
+            operation = entry.only_actions[0] if entry.only_actions else "SomeOperation"
+            hit = classify_action(f"{service}.{operation}")
             assert hit is not None and hit.service == service and hit.source_url == entry.source_url
         for prefix in entry.terraform_prefixes:
             assert prefix.startswith("aws_") and prefix.endswith("_")

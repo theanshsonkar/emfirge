@@ -321,8 +321,8 @@ def _validate_scheduler_fields(change: Change) -> None:
 def _apply_scheduler_change(result: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     """Add, modify or delete one EventBridge Scheduler schedule.
 
-    Adds use CreateSchedule's documented defaults (State ENABLED, timezone UTC, no action after
-    completion); a required member the change leaves out stays None (unknown), never a guess.
+    Adds use the defaults the Terraform AWS provider documents for aws_scheduler_schedule (State ENABLED, timezone UTC,
+    no action after completion); AWS's own pages call them only the "system default"; a required member the change leaves out stays None (unknown), never a guess.
     A modify sets only the fields given; an UpdateSchedule call replaces everything, and the
     ingest layer states every member of it (see scheduler_schedule.api_fields).
     """

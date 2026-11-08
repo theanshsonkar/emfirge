@@ -524,7 +524,8 @@ def translate_api_calls(
                     if field not in {"Name", "GroupName", "ClientToken"}:
                         unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
                 changes.append(Change(op="delete", resource_type="scheduler_schedule", resource_id=resource_id)); addresses.append(address); continue
-            # UpdateSchedule replaces the whole schedule: State left out means ENABLED. A member
+            # UpdateSchedule replaces the whole schedule; AWS documents an omitted optional member only as set to its
+# "system-default value", and the Terraform provider documents that default State as ENABLED. A member
             # the call needs and lacks is an unknown field, never a default.
             fields, problems = scheduler_api_fields(parameters, replace=operation == "UpdateSchedule")
             for member, reason in problems:

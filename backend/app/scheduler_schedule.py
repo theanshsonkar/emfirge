@@ -21,14 +21,21 @@ from app.field_catalog import Aws, _check, resolve
 
 DEFAULT_GROUP = "default"
 
-# CreateSchedule documents these defaults for omitted members; UpdateSchedule is a
-# full replace, so an omitted member goes back to them (State to ENABLED).
+# Defaults for omitted members. Source: the Terraform AWS provider documentation for aws_scheduler_schedule
+# (https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/scheduler_schedule) states state ENABLED,
+# timezone UTC and action_after_completion NONE; the AWS CreateSchedule page does not state them.
+# UpdateSchedule is a full replace (https://docs.aws.amazon.com/scheduler/latest/APIReference/API_UpdateSchedule.html):
+# AWS documents only that an omitted optional member is set to its "system-default value", so that an omitted State
+# becomes ENABLED is the Terraform default read as the system default, not an AWS-documented sentence.
+# https://docs.aws.amazon.com/scheduler/latest/UserGuide/managing-schedule-state.html shows State being set on update.
 AWS_DEFAULTS = {
     "state": "ENABLED",
     "schedule_expression_timezone": "UTC",
     "action_after_completion": "NONE",
 }
-# AWS always reports a retry policy; the default is the same as leaving it out.
+# AWS always reports a retry policy; the default is the same as leaving it out. 86400 / 185 are the maxima that
+# https://docs.aws.amazon.com/scheduler/latest/APIReference/API_RetryPolicy.html gives; that they are also the defaults
+# is stated by the Terraform provider documentation (retry_policy: "86400 (default)", "185 (default)"), not by AWS.
 DEFAULT_RETRY_POLICY = {"MaximumEventAgeInSeconds": 86400, "MaximumRetryAttempts": 185}
 
 # Branch fields a change may set (the schedule's identity and ARN are never fields).
