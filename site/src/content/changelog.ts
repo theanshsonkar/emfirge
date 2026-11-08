@@ -4,6 +4,24 @@ import type { Page, Entry } from "./types.ts";
 // Law numbers (L..) are the ones named in the commit messages. Nothing here is invented.
 export const entries: Entry[] = [
   {
+    date: "November 8, 2026", iso: "2026-11-08", tag: "Engine",
+    title: "Checks answer inside a time budget, scans read every service, CLI 0.1.2",
+    summary: "Checks answer inside a fixed time budget, a fresh scan reads every service the engine supports, and the CLI explains itself more plainly.",
+    improvements: [
+      "All scanners and both sides of a check now run at the same time under one time budget (12 seconds by default). A scanner still running at the end is reported as not run, with the warning that coverage is not full. A worker that failed is skipped for 60 seconds (law L90).",
+      "`emfirge context --refresh` now runs the same collector as every other scan, so it also reads DynamoDB, EventBridge Scheduler, CloudFront, API Gateway, ElastiCache and SQS, and records what it read and when (law L91).",
+      "`emfirge context --refresh` prints what happened: resources, warnings and the next command. The full report stays under `context --findings`.",
+      "Context answers: IAM and CloudFront are listed as global, live counts only resources with a real last-used time, cost says when prices are for another region, and a denied read says the role may be old and how to update it.",
+      "`--human` never cuts a value and lists up to 25 items. Errors name CLI commands. The CLI is 0.1.2.",
+      "The open-branch limit answers HTTP 409, so the CLI exits 5 (`conflict`), as the agent guide says.",
+    ],
+    fixes: [
+      "`emfirge try` answers `saved: true` with what was applied, rejected and unmodeled even when the verdict call fails; the verdict is then `null` with a short reason, so an agent does not send the same change again.",
+      "An HTML error page from a gateway is never shown as the error detail; it becomes one plain sentence.",
+      "The role template behind the `emfirge connect` link is kept equal to the repository's on every deploy.",
+    ],
+  },
+  {
     date: "November 8, 2026", iso: "2026-11-08", tag: "CLI",
     title: "API keys from the CLI (key create / list / revoke), CLI 0.1.x line and spinner",
     summary: "An agent that cannot open a browser, such as a cloud session or CI, can now use an API key you make once. The CLI also has its own version numbers.",

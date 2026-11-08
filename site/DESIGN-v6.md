@@ -41,8 +41,8 @@ References (study them before building, at
 ## The rail (top to bottom, same as theirs)
 1. Logo: our fork mark (a horizontal stroke + a branch stroke curving off it, in ink + green) and
    "emfirge" (Geist 500, ~22px). The strokes draw in on load (like their `logo-draw`).
-2. **Human | Agent** segmented switch (same style as theirs: small, bordered, white active segment).
-   Agent swaps the main column for the markdown of `/index.md` (see "Agent view").
+2. (Removed later: there is no Human | Agent switch. Every docs page has "Copy page as markdown" and
+   "View .md", and an old `?agent=1` link redirects to the page's `.md`. See "Markdown and /index.md".)
 3. Nav: Home (active, with a small green square dot to its left), How it works, Changelog, Pricing,
    Coverage, Docs ↗, GitHub ↗. Same sizes and spacing as theirs.
 4. **On this page** (their scroll-spy list, revealed from 2nd frame of their recording): a mono label
@@ -144,13 +144,13 @@ References (study them before building, at
     © 2026 emfirge · Privacy · Security, and on the right a green status dot "All systems operational"
     linking to docs, plus "Back to top ↑".
 
-## Agent view and /index.md
+## Markdown and /index.md
 - Add `public/index.md`: the whole page as clean markdown for agents (their `/index.md` idea), plus a
   section "How to use emfirge (for agents)": install, the six verbs, and the rules (never apply a change
   that did not pass; a block is a fact, change your plan and retry; read emfirge.md; emfirge never writes).
 - Also `public/llms.txt` pointing to it.
-- The Agent switch fetches `/index.md` and shows it in a `<pre>` in the main column; Human restores.
-  Mirror `?agent=1` in the URL like theirs.
+- Every page has a `.md` version (home is `/index.md`). Docs pages carry "Copy page as markdown" and "View .md".
+  An old `?agent=1` link redirects to that page's `.md` (`location.replace`).
 
 ## Build rules
 - Rebuild `site/` on the existing stack (Next.js 16, React 19, TS, Tailwind v4, static export).

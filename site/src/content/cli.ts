@@ -120,7 +120,7 @@ export const cli: Page = {
           ["`2`", "`not_signed_in`, `forbidden`", "Not signed in (HTTP 401) or not allowed (HTTP 403). Run `emfirge login`."],
           ["`3`", "`not_found`", "The branch, analysis or resource was not found (HTTP 404)."],
           ["`4`", "`server_error`, `rate_limited`", "A server or network error, or a rate limit (HTTP 429). Try again later."],
-          ["`5`", "`conflict`", "The branch changed since you read it (HTTP 409). Read it again, then retry."],
+          ["`5`", "`conflict`", "The branch changed since you read it, or 10 branches are already open on one base scan (HTTP 409). Read it again, or discard branches you no longer need, then retry."],
           ["`6`", "`update_needed`", "The server's command is newer than this install. Run `npx emfirge@latest`, then retry."],
         ] },
       ],
@@ -181,7 +181,7 @@ export const cli: Page = {
           ["`discard`", "Discard the branch. It deletes the branch and everything stored with it (plans, evidence, policy checks). Nothing in your cloud changes."],
           ["`compare`", "Compare two or more branches."],
         ] },
-        { t: "p", x: "`--revision` is the `branch_revision` you last saw (a SHA-256). `--expected-count` is the change count you last saw. A stale one is rejected with HTTP 409, which is exit code 5. By default at most 10 branches can be open on one base scan; past that the server answers HTTP 429, which is exit code 4." },
+        { t: "p", x: "`--revision` is the `branch_revision` you last saw (a SHA-256). `--expected-count` is the change count you last saw. A stale one is rejected with HTTP 409, which is exit code 5. By default at most 10 branches can be open on one base scan; past that the server answers HTTP 409, which is exit code 5: discard branches you no longer need." },
         { t: "code", title: "Example", x: "emfirge branch open --analysis ANALYSIS_ID --name close-ssh\nemfirge branch fork BRANCH_ID --name close-ssh-v2\nemfirge branch compare BRANCH_ID BRANCH_ID_2" },
         { t: "h3", x: "For agents" },
         { t: "list", items: [
