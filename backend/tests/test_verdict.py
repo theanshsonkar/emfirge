@@ -486,19 +486,22 @@ def test_limit_results_and_serialization_are_repeatedly_deterministic(monkeypatc
 
 
 
-def _mock_cloudsplaining_verdict_scanners(monkeypatch):
+def _cloudsplaining_by_side(base, role):
+    """Base and branch scans run at the same time (L90b), so the fake answers by which snapshot it is given."""
+    finding = {
+        "source": "cloudsplaining",
+        "check_id": "PrivilegeEscalation",
+        "resource": role,
+        "severity": "HIGH",
+        "title": "Cloudsplaining detected PrivilegeEscalation risk",
+    }
+    return lambda infra: {"available": True, "findings": [] if infra is base else [finding]}
+
+
+def _mock_cloudsplaining_verdict_scanners(monkeypatch, base):
     role = "arn:aws:iam::123456789012:role/CloudRole"
     unavailable = Mock(return_value={"available": False, "findings": []})
-    cloudsplaining = Mock(side_effect=[
-        {"available": True, "findings": []},
-        {"available": True, "findings": [{
-            "source": "cloudsplaining",
-            "check_id": "PrivilegeEscalation",
-            "resource": role,
-            "severity": "HIGH",
-            "title": "Cloudsplaining detected PrivilegeEscalation risk",
-        }]},
-    ])
+    cloudsplaining = Mock(side_effect=_cloudsplaining_by_side(base, role))
     monkeypatch.setattr("app.verdict.run_checkov", unavailable)
     monkeypatch.setattr("app.verdict.run_trivy", unavailable)
     monkeypatch.setattr("app.verdict.run_cloudsplaining", cloudsplaining)
@@ -506,10 +509,11 @@ def _mock_cloudsplaining_verdict_scanners(monkeypatch):
 
 
 def test_cloudsplaining_high_finding_on_newly_reachable_role_blocks(monkeypatch, infra):
-    role, checkov_trivy, cloudsplaining = _mock_cloudsplaining_verdict_scanners(monkeypatch)
+    branch = infra.model_copy(deep=True)
+    role, checkov_trivy, cloudsplaining = _mock_cloudsplaining_verdict_scanners(monkeypatch, infra)
     patch_diff(monkeypatch, newly_internet_reachable=[role])
 
-    result = combined_verdict(infra, infra)
+    result = combined_verdict(infra, branch)
 
     assert result.scanner_added == [{
         "source": "cloudsplaining",
@@ -525,22 +529,14 @@ def test_cloudsplaining_high_finding_on_newly_reachable_role_blocks(monkeypatch,
 
 
 def test_cloudsplaining_verdict_serialization_is_deterministic(monkeypatch, infra):
-    role, checkov_trivy, cloudsplaining = _mock_cloudsplaining_verdict_scanners(monkeypatch)
+    branch = infra.model_copy(deep=True)
+    role, checkov_trivy, cloudsplaining = _mock_cloudsplaining_verdict_scanners(monkeypatch, infra)
     patch_diff(monkeypatch, newly_internet_reachable=[role])
-    first = combined_verdict(infra, infra).model_dump()
+    first = combined_verdict(infra, branch).model_dump()
 
     checkov_trivy.reset_mock()
     cloudsplaining.reset_mock()
-    cloudsplaining.side_effect = [
-        {"available": True, "findings": []},
-        {"available": True, "findings": [{
-            "source": "cloudsplaining",
-            "check_id": "PrivilegeEscalation",
-            "resource": role,
-            "severity": "HIGH",
-            "title": "Cloudsplaining detected PrivilegeEscalation risk",
-        }]},
-    ]
-    second = combined_verdict(infra, infra).model_dump()
+    cloudsplaining.side_effect = _cloudsplaining_by_side(infra, role)
+    second = combined_verdict(infra, branch).model_dump()
 
     assert first == second

@@ -21,16 +21,16 @@ import pytest
 
 from app import scanners
 from app import verdict as verdict_mod
-from app.models import AWSInfrastructure, S3Bucket
+from app.models import AWSInfrastructure, S3Bucket, S3Data
 from app.scanners import ScanResult
 
 
 def _infra():
-    return AWSInfrastructure(s3_buckets=[S3Bucket(name="b1")])
+    return AWSInfrastructure(s3=S3Data(buckets=[S3Bucket(name="b1")]))
 
 
 def _branch():
-    return AWSInfrastructure(s3_buckets=[S3Bucket(name="b1", versioning_enabled=True)])
+    return AWSInfrastructure(s3=S3Data(buckets=[S3Bucket(name="b1", versioning_enabled=True)]))
 
 
 def _ok(name):

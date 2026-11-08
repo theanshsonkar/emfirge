@@ -41,6 +41,7 @@ def test_L28b_branch_snapshot_versions_are_written_and_decoded(branch_db):
         row.base_infra_json = json.dumps(stored, sort_keys=True, separators=(",", ":"))
         session.commit()
 
+    branches._clear_branch_caches()  # the row was edited directly; the app never changes a stored base (L92a)
     assert branches.get_branch(branch_id).base.region == "us-east-1"
 
     with branch_db() as session:
@@ -49,6 +50,7 @@ def test_L28b_branch_snapshot_versions_are_written_and_decoded(branch_db):
         future["schema_version"] = GRAPH_SCHEMA_VERSION + 1
         row.base_infra_json = json.dumps(future, sort_keys=True, separators=(",", ":"))
         session.commit()
+    branches._clear_branch_caches()
 
     with pytest.raises(ValueError, match=rf"{GRAPH_SCHEMA_VERSION + 1}.*{GRAPH_SCHEMA_VERSION}"):
         branches.get_branch(branch_id)

@@ -10,11 +10,14 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import threading
 import uuid
+from collections import OrderedDict
 from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
 from sqlalchemy import text
+from sqlalchemy.orm import defer
 from sqlalchemy.exc import OperationalError
 
 from app import cost
@@ -192,21 +195,82 @@ def branch_revision(branch: Branch) -> str:
 
 
 def _load_branch(session, branch_id: str) -> BranchLog:
-    row = session.query(BranchLog).filter(BranchLog.branch_id == branch_id).first()
+    # L92: the base snapshot column loads only when it is read (and not at all on a cache hit).
+    row = (session.query(BranchLog).options(defer(BranchLog.base_infra_json))
+           .filter(BranchLog.branch_id == branch_id).first())
     if row is None:
         raise BranchNotFoundError(f"Branch not found: {branch_id}")
     return row
 
 
-def _decode(row: BranchLog) -> Branch:
-    raw_base = json.loads(row.base_infra_json)
+# L92a: a branch's base snapshot never changes after create/fork, so it is parsed once per process.
+_BASE_CACHE: "OrderedDict[str, AWSInfrastructure]" = OrderedDict()
+_BASE_CACHE_MAX = 16
+_BASE_LOCK = threading.Lock()
+
+
+def _clear_branch_caches() -> None:
+    with _BASE_LOCK:
+        _BASE_CACHE.clear()
+
+
+def _parse_base(raw_json: str) -> AWSInfrastructure:
+    raw_base = json.loads(raw_json)
     snapshot_version = raw_base.get("schema_version", 1)
     if snapshot_version > GRAPH_SCHEMA_VERSION:
         raise ValueError(
             f"Unsupported branch snapshot schema version {snapshot_version}; "
             f"current version is {GRAPH_SCHEMA_VERSION}"
         )
-    base = AWSInfrastructure.model_validate(raw_base)
+    return AWSInfrastructure.model_validate(raw_base)
+
+
+def _base_for(row: BranchLog) -> AWSInfrastructure:
+    """The row's base snapshot: parsed once, then a private deep copy for each caller."""
+    with _BASE_LOCK:
+        cached = _BASE_CACHE.get(row.branch_id)
+        if cached is not None:
+            _BASE_CACHE.move_to_end(row.branch_id)
+    if cached is None:
+        cached = _parse_base(row.base_infra_json)
+        with _BASE_LOCK:
+            _BASE_CACHE[row.branch_id] = cached
+            while len(_BASE_CACHE) > _BASE_CACHE_MAX:
+                _BASE_CACHE.popitem(last=False)
+    return cached.model_copy(deep=True)
+
+
+def get_branch_meta(branch_id: str) -> dict[str, Any]:
+    """Branch metadata without the base snapshot: name, status, base_analysis_id."""
+    session = SessionLocal()
+    try:
+        row = (session.query(BranchLog.branch_id, BranchLog.name, BranchLog.status, BranchLog.base_analysis_id)
+               .filter(BranchLog.branch_id == branch_id).first())
+        if row is None:
+            raise BranchNotFoundError(f"Branch not found: {branch_id}")
+        return {"branch_id": row.branch_id, "name": row.name, "status": row.status,
+                "base_analysis_id": row.base_analysis_id}
+    finally:
+        session.close()
+
+
+def list_branch_summaries(base_analysis_id: Optional[str] = None) -> list[dict[str, Any]]:
+    """L92b: what `branch list` shows, read without any base snapshot."""
+    session = SessionLocal()
+    try:
+        query = session.query(BranchLog.branch_id, BranchLog.name, BranchLog.status, BranchLog.base_analysis_id,
+                              BranchLog.changes_json)
+        if base_analysis_id is not None:
+            query = query.filter(BranchLog.base_analysis_id == base_analysis_id)
+        rows = query.order_by(BranchLog.created_at, BranchLog.branch_id).all()
+        return [{"branch_id": r.branch_id, "name": r.name, "status": r.status, "base_analysis_id": r.base_analysis_id,
+                 "num_changes": len(json.loads(r.changes_json or "[]"))} for r in rows]
+    finally:
+        session.close()
+
+
+def _decode(row: BranchLog) -> Branch:
+    base = _base_for(row)
     raw_changes = json.loads(row.changes_json or "[]")
     changes = [Change.model_validate(change) for change in raw_changes]
     return Branch(
