@@ -72,40 +72,71 @@
   animation: pulse 2s ease-in-out infinite;
 }
 
-/* ---------- guarded switch ---------- */
+/* ---------- guarded switch (v5.1: translucent acrylic cover) ---------- */
 .sw {
   perspective: 420px;
 }
+.sw-hw {
+  position: relative;
+  display: block;
+  height: 40px;
+}
 .sw-cover {
   position: absolute;
-  inset: -3px;
-  background: #e5341d;
-  border: 2px solid #000;
-  border-radius: 6px;
+  inset: -2px -1px;
+  background: rgba(229, 52, 29, 0.55);
+  border: 1.5px solid #9e1f10;
+  border-radius: 4px;
   box-shadow: 2px 2px 0 #000;
   transform-origin: 50% 0;
   transition:
     transform 180ms cubic-bezier(0.3, 1.25, 0.5, 1),
+    background-color 180ms,
     box-shadow 180ms;
   z-index: 2;
+}
+.sw-cover::before {
+  /* the thin white highlight along the top edge of the acrylic */
+  content: "";
+  position: absolute;
+  left: 5px;
+  right: 5px;
+  top: 2px;
+  height: 1.5px;
+  background: rgba(255, 255, 255, 0.85);
 }
 .sw-cover::after {
   /* the lip you lift it by */
   content: "";
   position: absolute;
   left: 50%;
-  bottom: 5px;
-  width: 22px;
-  height: 4px;
-  margin-left: -11px;
+  bottom: 3px;
+  width: 20px;
+  height: 3px;
+  margin-left: -10px;
   border-radius: 2px;
+  background: rgba(0, 0, 0, 0.75);
+}
+.sw-hinge {
+  position: absolute;
+  top: -4px;
+  width: 6px;
+  height: 4px;
   background: #000;
+  z-index: 3;
+}
+.sw-hinge-l {
+  left: 7px;
+}
+.sw-hinge-r {
+  right: 7px;
 }
 .sw:not(:disabled):not([aria-pressed="true"]):hover .sw-cover {
-  transform: rotateX(-16deg);
+  transform: rotateX(-8deg);
 }
 .sw[data-open="true"] .sw-cover {
-  transform: rotateX(-112deg);
+  transform: rotateX(-110deg);
+  background: rgba(150, 28, 14, 0.8); /* the underside, slightly darker */
   box-shadow: 0 0 0 #000;
 }
 .sw:not(:disabled):active:not([data-open="true"]) .sw-cover {
@@ -115,17 +146,20 @@
 .sw-lever {
   position: absolute;
   left: 3px;
-  top: 12px;
-  width: 20px;
-  height: 20px;
+  top: 8px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 0 0 2px #8a8a8a;
-  transform: translateY(10px);
-  transition: transform 150ms cubic-bezier(0.3, 1.7, 0.5, 1);
+  transform: translateY(8px);
+  transition: transform 120ms cubic-bezier(0.3, 1.7, 0.5, 1);
 }
 .sw[data-thrown="true"] .sw-lever {
-  transform: translateY(-10px);
+  transform: translateY(-8px);
+}
+.sw[data-thrown="true"] .sw-lever {
+  transition-delay: 0ms;
 }
 @media (prefers-reduced-motion: reduce) {
   .sw-cover,
@@ -146,6 +180,28 @@
   to {
     transform: rotate(-7deg) scale(1);
     opacity: 1;
+  }
+}
+.stamp-thump-b {
+  animation: thump-b 140ms cubic-bezier(0.2, 0.9, 0.3, 1) both;
+}
+@keyframes thump-b {
+  from {
+    transform: rotate(4deg) scale(1.18);
+    opacity: 0;
+  }
+  to {
+    transform: rotate(4deg) scale(1);
+    opacity: 1;
+  }
+}
+.lab-in {
+  animation: lab-in 320ms cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+@keyframes lab-in {
+  from {
+    transform: translateY(28px);
+    opacity: 0;
   }
 }
 .branch-in {
@@ -171,6 +227,11 @@
     animation: none;
     transform: rotate(-7deg);
   }
+  .stamp-thump-b {
+    animation: none;
+    transform: rotate(4deg);
+  }
+  .lab-in,
   .branch-in,
   .draw-in {
     animation: none;

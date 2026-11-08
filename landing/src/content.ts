@@ -1,4 +1,4 @@
-// All copy and demo data for the v5 landing page. See DESIGN-v5.md.
+// All copy and demo data for the v5 landing page. See DESIGN-v5.md and DESIGN-v5.1.md.
 export const LINKS = {
   docs: "https://emfirge.cloud/docs",
   quickstart: "https://emfirge.cloud/docs/quickstart",
@@ -7,9 +7,11 @@ export const LINKS = {
 };
 
 export const SITE = {
+  url: "https://emfirge.cloud",
   title: "Emfirge: go on, break it",
   description:
     "A demo cloud you try to break. Every switch is something an AI agent might do. Emfirge tries it on a branch, measures the damage, and live never moves.",
+  ogAlt: "Go on. Break it. A red BLOCKED stamp beside the Emfirge crash-test mark.",
 };
 
 export const COMMAND = "npx @emfirge/cli connect";
@@ -93,31 +95,31 @@ export type Layout = {
 export const LAYOUTS: { wide: Layout; narrow: Layout } = {
   wide: {
     w: 764,
-    h: 256,
+    h: 218,
     nodeW: 124,
-    nodeH: 64,
+    nodeH: 58,
     pos: {
-      internet: { x: 6, y: 44 },
-      cdn: { x: 160, y: 44 },
-      "web-alb": { x: 314, y: 44 },
-      api: { x: 468, y: 44 },
-      "orders-db": { x: 622, y: 44 },
-      assets: { x: 160, y: 176 },
-      "deploy-role": { x: 314, y: 176 },
-      "legacy-reports-db": { x: 468, y: 176 },
-      "nightly-sync": { x: 622, y: 176 },
+      internet: { x: 6, y: 40 },
+      cdn: { x: 160, y: 40 },
+      "web-alb": { x: 314, y: 40 },
+      api: { x: 468, y: 40 },
+      "orders-db": { x: 622, y: 40 },
+      assets: { x: 160, y: 140 },
+      "deploy-role": { x: 314, y: 140 },
+      "legacy-reports-db": { x: 468, y: 140 },
+      "nightly-sync": { x: 622, y: 140 },
     },
     edges: {
-      "internet>cdn": "M130 76 H160",
-      "cdn>web-alb": "M284 76 H314",
-      "web-alb>api": "M438 76 H468",
-      "api>orders-db": "M592 76 H622",
-      "cdn>assets": "M222 108 V176",
-      "nightly-sync>orders-db": "M684 176 V108",
+      "internet>cdn": "M130 69 H160",
+      "cdn>web-alb": "M284 69 H314",
+      "web-alb>api": "M438 69 H468",
+      "api>orders-db": "M592 69 H622",
+      "cdn>assets": "M222 98 V140",
+      "nightly-sync>orders-db": "M684 140 V98",
     },
     routes: {
-      api: { d: "M68 44 V16 H530 V44", label: { x: 299, y: 16 } },
-      assets: { d: "M68 108 V142 H222 V176", label: { x: 145, y: 142 } },
+      api: { d: "M68 40 V14 H530 V40", label: { x: 299, y: 14 } },
+      assets: { d: "M68 96 V119 H222 V140", label: { x: 145, y: 119 } },
     },
   },
   narrow: {
@@ -170,6 +172,8 @@ export type Damage = {
   removed?: NodeId[];
   broken?: NodeId[];
   flagged?: NodeId[];
+  /** changed on the branch and checked clean (a retry's corrected plan) */
+  fixed?: NodeId[];
   /** replaces a node's metric line on the branch */
   metrics?: Partial<Record<NodeId, string>>;
   exposure?: { to: NodeId; label: string };
@@ -370,6 +374,8 @@ export const BENCH = {
   branchNote: "a private copy of live. nothing here reached live.",
   tryAgain: "already tried. showing its branch.",
   duration: "0.4s",
+  thrown: (n: number, total: number) => `${n} of ${total} thrown`,
+  startHere: "start here",
 };
 
 /* ---------- what your agent would have run ---------- */
@@ -458,4 +464,141 @@ export const FOOTER = {
   ],
   built: "Built by Ansh Sonkar",
   copy: "© 2026 Emfirge",
+};
+
+
+/* ---------- v5.1: the loop ---------- */
+/** The agent's corrected plan for a blocked switch. Always passes. */
+export type Retry = {
+  switchId: number;
+  /** the plan, as one header line */
+  plan: string;
+  action: string;
+  target: NodeId;
+  rows: Record<QuestionId, Row>;
+  damage: Damage;
+  commands: string[];
+  summary: string;
+};
+
+export const RETRIES: Retry[] = [
+  {
+    switchId: 1,
+    plan: "keep orders-db; delete legacy-reports-db only",
+    action: "delete legacy-reports-db only",
+    target: "legacy-reports-db",
+    rows: {
+      data: ok({ text: "snapshot from today" }),
+      exposure: ok(),
+      money: ok({ text: "−$41.20/mo" }),
+      availability: ok({ text: "no queries in 90 days" }),
+      control: ok(),
+      outside: ok(),
+    },
+    damage: {
+      removed: ["legacy-reports-db"],
+      fixed: ["orders-db"],
+      metrics: { "legacy-reports-db": "deleted · snapshot", "orders-db": "kept · 1,240 q/day" },
+    },
+    commands: ["$ emfirge branch new", "$ emfirge try --delete rds:legacy-reports-db", "$ emfirge check", "  PASSED · all six clear"],
+    summary: "orders-db is kept; only legacy-reports-db is removed",
+  },
+  {
+    switchId: 2,
+    plan: "open :22 to 203.0.113.7/32 only (your office)",
+    action: "open port 22 to 203.0.113.7/32 only",
+    target: "api",
+    rows: {
+      data: ok(),
+      exposure: ok({ text: "reachable from 1 address, not the internet" }),
+      money: ok(),
+      availability: ok(),
+      control: ok(),
+      outside: ok(),
+    },
+    damage: { fixed: ["api"], metrics: { api: "ssh from 1 address" } },
+    commands: ["$ emfirge branch new", "$ emfirge try --open sg:api 22 203.0.113.7/32", "$ emfirge check", "  PASSED · all six clear"],
+    summary: "api accepts ssh from one office address only",
+  },
+  {
+    switchId: 3,
+    plan: "serve assets through cdn with origin access control; bucket stays private",
+    action: "serve assets through cdn, bucket stays private",
+    target: "assets",
+    rows: {
+      data: ok(),
+      exposure: ok({ text: "nothing newly reachable" }),
+      money: ok(),
+      availability: ok({ text: "cdn 98% cache hit unchanged" }),
+      control: ok(),
+      outside: ok(),
+    },
+    damage: {
+      fixed: ["assets", "cdn"],
+      metrics: { assets: "private · cdn only", cdn: "98% cache hit, oac" },
+    },
+    commands: ["$ emfirge branch new", "$ emfirge try --set cloudfront:cdn origin-access-control s3:assets", "$ emfirge check", "  PASSED · all six clear"],
+    summary: "assets stays private and is served through the cdn",
+  },
+  {
+    switchId: 4,
+    plan: "PassRole only on role/app-runtime",
+    action: "PassRole only on role/app-runtime",
+    target: "deploy-role",
+    rows: {
+      data: ok(),
+      exposure: ok(),
+      money: ok(),
+      availability: ok(),
+      control: ok({ text: "no new escalation path", note: "checked against pathfinding.cloud" }),
+      outside: ok(),
+    },
+    damage: { fixed: ["deploy-role"], metrics: { "deploy-role": "PassRole: app-runtime" } },
+    commands: ["$ emfirge branch new", "$ emfirge try --grant iam:deploy-role PassRole role/app-runtime", "$ emfirge check", "  PASSED · all six clear"],
+    summary: "deploy-role can pass only the app-runtime role",
+  },
+];
+
+export const LOOP = {
+  retryButton: "let the agent fix it",
+  retryAbove: "same goal, different plan. the agent read the facts and changed it.",
+  retryOf: "retry of test",
+  planLabel: "plan",
+  fixedNote: "fixed by agent",
+  seeRetry: (n: number) => `see the retry · branch #${n}`,
+  seeOriginal: (n: number) => `see the blocked try · branch #${n}`,
+};
+
+export type OwnerDecision = "approved" | "denied";
+
+export const OWNER = {
+  prompt: ["emfirge is asking ", "you", ". you're the owner here."],
+  approve: {
+    label: "approve",
+    stamp: "APPROVED BY YOU",
+    line: "your agent applies it with its own access. emfirge records who approved it.",
+    note: "demo: live still untouched.",
+  },
+  deny: {
+    label: "deny",
+    stamp: "DENIED BY YOU",
+    line: "your agent drops it and moves on.",
+    note: "",
+  },
+} as const;
+
+/* ---------- v5.1: the lab report ---------- */
+export const LAB = {
+  title: "LAB REPORT",
+  seeLink: "see your lab report",
+  seeLinkShort: "lab report",
+  summaryLine: (n: number) => `${n} disasters tried. live: untouched.`,
+  give: "now give your agent the same bench:",
+  copy: "copy summary",
+  copied: "copied",
+  chips: { blocked: "BLOCKED", ask: "ASK OWNER", passed: "PASSED" },
+  notes: { fixed: "fixed by agent", approved: "approved", denied: "denied" },
+  /** the plain-text summary, for X or Slack */
+  text: (c: { total: number; blocked: number; asked: number; passed: number }) =>
+    `I tried to break a demo cloud on emfirge.cloud:\n${c.total} tests · ${c.blocked} blocked · ${c.asked} asked me · ${c.passed} passed · live untouched`,
 };

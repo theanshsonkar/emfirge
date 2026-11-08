@@ -1,13 +1,14 @@
 import { EDGES, LAYOUTS, NODES, type CloudNode, type Damage, type Layout, type NodeId } from "@/content";
 import { TestMark } from "./TestMark";
 
-type NodeState = "normal" | "removed" | "broken" | "flagged";
+type NodeState = "normal" | "removed" | "broken" | "flagged" | "fixed";
 
 function stateOf(id: NodeId, d: Damage | null): NodeState {
   if (!d) return "normal";
   if (d.removed?.includes(id)) return "removed";
   if (d.broken?.includes(id)) return "broken";
   if (d.flagged?.includes(id)) return "flagged";
+  if (d.fixed?.includes(id)) return "fixed";
   return "normal";
 }
 
@@ -31,7 +32,7 @@ function Node({
   const changed = damage?.metrics?.[node.id];
   const metric = changed ?? node.metric;
   const dim = node.dim && st === "normal";
-  const stroke = st === "removed" ? "#8A8A8A" : st === "broken" ? "#E5341D" : "#000";
+  const stroke = st === "removed" ? "#8A8A8A" : st === "broken" ? "#E5341D" : st === "fixed" ? "#1F9D55" : "#000";
   const fill = st === "removed" ? "none" : st === "broken" ? "url(#hatch-red)" : st === "flagged" ? "url(#hatch-yellow)" : "#fff";
   const halo = st === "broken" || st === "flagged" ? { stroke: "#fff", strokeWidth: 3.5, paintOrder: "stroke" as const } : {};
   const isNet = node.id === "internet";
@@ -76,7 +77,7 @@ function Node({
             y={h * 0.8}
             fontSize="10"
             fontWeight={changed ? 600 : 400}
-            fill={changed && st !== "removed" ? (st === "flagged" ? "#000" : "#B8200E") : "#4A4A4A"}
+            fill={changed && st !== "removed" ? (st === "flagged" ? "#000" : st === "fixed" ? "#157A41" : "#B8200E") : "#4A4A4A"}
             {...halo}
           >
             {metric}

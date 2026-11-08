@@ -2,7 +2,7 @@ import { FAQ } from "@/content";
 
 export function Faq() {
   return (
-    <section id="faq" aria-labelledby="faq-h" className="mx-auto max-w-[1320px] px-4 py-16 sm:px-8 lg:py-24">
+    <section id="faq" aria-labelledby="faq-h" className="mx-auto max-w-[1440px] px-4 py-16 sm:px-8 lg:py-24">
       <h2 id="faq-h" className="display text-[32px] sm:text-[40px]">
         {FAQ.title}
       </h2>

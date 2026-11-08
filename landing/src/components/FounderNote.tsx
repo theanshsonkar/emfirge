@@ -19,7 +19,7 @@ function Signature() {
 
 export function FounderNote() {
   return (
-    <section id="why" aria-labelledby="why-h" className="mx-auto max-w-[1320px] px-4 py-16 sm:px-8 lg:py-24">
+    <section id="why" aria-labelledby="why-h" className="mx-auto max-w-[1440px] px-4 py-16 sm:px-8 lg:py-24">
       <h2 id="why-h" className="display text-[32px] sm:text-[40px]">
         {NOTE.title}
       </h2>

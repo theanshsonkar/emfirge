@@ -1,15 +1,15 @@
 "use client";
 
 import { TRANSCRIPT } from "@/content";
-import { switchOf, useLab } from "./LabProvider";
+import { caseOf, switchOf, useLab } from "./LabProvider";
 
 /** The CLI transcript for the last test the visitor ran (or test 1). */
 export function Transcript() {
   const { state } = useLab();
   const last = state.tests[state.tests.length - 1];
-  const sw = switchOf(last ? last.switchId : 1);
+  const sw = last ? caseOf(last) : switchOf(1);
   return (
-    <section id="how" aria-labelledby="how-h" className="mx-auto max-w-[1320px] px-4 py-16 sm:px-8 lg:py-24">
+    <section id="how" aria-labelledby="how-h" className="mx-auto max-w-[1440px] px-4 py-16 sm:px-8 lg:py-24">
       <h2 id="how-h" className="display text-[32px] sm:text-[40px]">
         {TRANSCRIPT.title}
       </h2>

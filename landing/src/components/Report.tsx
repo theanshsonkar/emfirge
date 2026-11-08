@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { BENCH, QUESTIONS, VERDICT, type Mark } from "@/content";
+import { BENCH, LOOP, OWNER, QUESTIONS, VERDICT, type Mark, type OwnerDecision } from "@/content";
 import { useReduced } from "@/lib/useReduced";
 import { cn } from "@/lib/cn";
-import { switchOf, type Test } from "./LabProvider";
-import { Stamp } from "./Stamp";
+import { caseOf, isRetryable, useLab, type Test } from "./LabProvider";
+import { DecisionStamp, Stamp } from "./Stamp";
 
 const pad = (n: number) => String(n).padStart(3, "0");
 
@@ -30,18 +30,31 @@ function MarkGlyph({ mark }: { mark: Mark | "empty" }) {
   );
 }
 
+type Actions = {
+  onRetry: (n: number) => void;
+  onDecide: (n: number, d: OwnerDecision) => void;
+  onSelect: (n: number) => void;
+  /** the retry already run for this test, if any */
+  retryN?: number;
+};
+
+const btn = "label cursor-pointer rounded-md border-2 border-black px-3.5 py-1 enabled:active:translate-y-px";
+
 /** A printed test sheet. Pure: `shown` is how many rows have printed (6 rows, then the stamp is step 7). */
-export function Sheet({ test, shown, animate }: { test: Test | null; shown: number; animate: boolean }) {
-  const sw = test ? switchOf(test.switchId) : null;
+export function Sheet({ test, shown, animate, actions }: { test: Test | null; shown: number; animate: boolean; actions?: Actions }) {
+  const sw = test ? caseOf(test) : null;
   const done = shown >= 7;
+  const ask = sw?.verdict === "ask";
+  const decision = test?.decision;
+  const hidden = !done && "invisible";
   return (
     <div className="relative rounded-md border-2 border-black bg-white font-mono text-[13px] leading-[1.45]">
-      <div className="border-b-2 border-black px-3.5 py-2.5 text-[12px] font-medium sm:text-[13px]">
+      <div className="border-b-2 border-black px-3.5 py-2 text-[12px] font-medium sm:text-[13px]">
         {sw && test ? (
           <>
             <span className="font-semibold">TEST {pad(test.n)}</span>
             <span className="text-ink-3"> · </span>
-            {sw.action}
+            {test.retryOf !== undefined ? `${LOOP.retryOf} ${pad(test.retryOf)}` : sw.action}
             <span className="text-ink-3"> · </span>
             branch #{test.n}
             <span className="text-ink-3"> · </span>
@@ -55,6 +68,12 @@ export function Sheet({ test, shown, animate }: { test: Test | null; shown: numb
           </>
         )}
       </div>
+      {sw?.plan ? (
+        <p className="border-b border-rule bg-bench/60 px-3.5 py-1.5 text-[12px] leading-[1.4]">
+          <span className="text-ink-3">{LOOP.planLabel}: </span>
+          {sw.plan}
+        </p>
+      ) : null}
       <ol>
         {QUESTIONS.map((q, i) => {
           const row = sw?.rows[q.id];
@@ -62,7 +81,7 @@ export function Sheet({ test, shown, animate }: { test: Test | null; shown: numb
             <li
               key={q.id}
               className={cn(
-                "grid grid-cols-[22px_1fr] gap-x-2.5 gap-y-0.5 border-b border-rule px-3.5 py-2 transition-opacity duration-150 sm:grid-cols-[110px_22px_1fr]",
+                "grid grid-cols-[22px_1fr] gap-x-2.5 gap-y-0.5 border-b border-rule px-3.5 py-[5px] transition-opacity duration-150 sm:grid-cols-[110px_22px_1fr]",
                 row && i >= shown ? "opacity-0" : "opacity-100",
               )}
             >
@@ -77,7 +96,7 @@ export function Sheet({ test, shown, animate }: { test: Test | null; shown: numb
                       <span key={f.text} className="block">
                         <span className={row.mark === "fail" ? "font-medium text-black" : "text-ink-2"}>{f.text}</span>
                         {f.code ? <span className="block break-all text-[11px] text-ink-3 sm:inline sm:pl-2">{f.code}</span> : null}
-                        {f.note ? <span className="block text-[11px] text-ink-3">{f.note}</span> : null}
+                        {f.note ? <span className="block text-[11px] text-ink-3 sm:inline sm:pl-2">{f.note}</span> : null}
                       </span>
                     ))
                   ) : (
@@ -89,12 +108,64 @@ export function Sheet({ test, shown, animate }: { test: Test | null; shown: numb
           );
         })}
       </ol>
-      <div className={cn("flex flex-col-reverse gap-2 px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-6", sw && "min-h-[96px]")}>
-        <p className={cn("max-w-[340px] text-[12px] text-ink-2 transition-opacity duration-150", done ? "opacity-100" : "opacity-0", !sw && "hidden")}>
-          {sw ? VERDICT[sw.verdict].next : ""}
-        </p>
-        {!sw ? <p className="text-[12px] text-ink-3">flip any switch above to run test 001</p> : null}
-        {sw && done ? <Stamp verdict={sw.verdict} animate={animate} className="-mt-3 self-end sm:mt-0" /> : null}
+      <div className={cn("flex flex-col-reverse gap-2 px-3.5 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6", sw && "min-h-[92px]")}>
+        {sw ? (
+          <div className={cn("flex max-w-[350px] flex-col items-start gap-2 text-[12px] text-ink-2 transition-opacity duration-150", done ? "opacity-100" : "opacity-0")}>
+            {ask && decision ? (
+              <p>{OWNER[decision === "approved" ? "approve" : "deny"].line}</p>
+            ) : ask ? (
+              <p>
+                {OWNER.prompt[0]}
+                <strong className="font-semibold text-black">{OWNER.prompt[1]}</strong>
+                {OWNER.prompt[2]}
+              </p>
+            ) : (
+              <p>{VERDICT[sw.verdict].next}</p>
+            )}
+            {actions && test ? (
+              <div className={cn("flex flex-wrap items-center gap-2", hidden)}>
+                {ask && !decision ? (
+                  <>
+                    <button type="button" onClick={() => actions.onDecide(test.n, "approved")} className={cn(btn, "bg-crash text-black hover:bg-[#f0c800]")}>
+                      {OWNER.approve.label}
+                    </button>
+                    <button type="button" onClick={() => actions.onDecide(test.n, "denied")} className={cn(btn, "bg-white text-black hover:bg-rule")}>
+                      {OWNER.deny.label}
+                    </button>
+                  </>
+                ) : null}
+                {isRetryable(test) && actions.retryN === undefined ? (
+                  <button type="button" onClick={() => actions.onRetry(test.n)} className={cn(btn, "bg-black text-white hover:bg-ink-2")}>
+                    {LOOP.retryButton}
+                  </button>
+                ) : null}
+                {isRetryable(test) && actions.retryN !== undefined ? (
+                  <button type="button" onClick={() => actions.onSelect(actions.retryN as number)} className="label underline underline-offset-4 hover:text-black">
+                    {LOOP.seeRetry(actions.retryN)}
+                  </button>
+                ) : null}
+                {test.retryOf !== undefined ? (
+                  <button type="button" onClick={() => actions.onSelect(test.retryOf as number)} className="label underline underline-offset-4 hover:text-black">
+                    {LOOP.seeOriginal(test.retryOf)}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <p className="text-[12px] text-ink-3">flip any switch above to run test 001</p>
+        )}
+        {sw && done ? (
+          <div className="-mt-3 flex flex-col items-end self-end sm:mt-0">
+            <div className="relative">
+              <Stamp verdict={sw.verdict} animate={animate} />
+              {decision ? (
+                <DecisionStamp decision={decision} animate={animate} className="absolute -bottom-7 -left-12 z-10 sm:-left-16" />
+              ) : null}
+            </div>
+            {decision === "approved" ? <p className="mt-9 text-[11px] text-ink-3">{OWNER.approve.note}</p> : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -102,6 +173,7 @@ export function Sheet({ test, shown, animate }: { test: Test | null; shown: numb
 
 function Printing({ test }: { test: Test }) {
   const reduced = useReduced();
+  const { state, dispatch } = useLab();
   const [shown, setShown] = useState(0);
   useEffect(() => {
     if (reduced) {
@@ -116,13 +188,20 @@ function Printing({ test }: { test: Test }) {
     }, 40);
     return () => clearInterval(id);
   }, [reduced]);
-  return <Sheet test={test} shown={shown} animate={!reduced} />;
+  const actions: Actions = {
+    onRetry: (n) => dispatch({ type: "retry", of: n }),
+    onDecide: (n, decision) => dispatch({ type: "decide", n, decision }),
+    onSelect: (n) => dispatch({ type: "select", view: n, reveal: true }),
+    retryN: state.tests.find((t) => t.retryOf === test.n)?.n,
+  };
+  return <Sheet test={test} shown={shown} animate={!reduced} actions={actions} />;
 }
 
 /** The latest test, printing row by row. Remounts per test so the print restarts. */
 export function Report({ test }: { test: Test | null }) {
   return (
     <div aria-live="polite" aria-label="Test report">
+      {test?.retryOf !== undefined ? <p className="mb-2 font-mono text-[12px] text-ink-2">{LOOP.retryAbove}</p> : null}
       {test ? <Printing key={test.n} test={test} /> : <Sheet test={null} shown={0} animate={false} />}
     </div>
   );

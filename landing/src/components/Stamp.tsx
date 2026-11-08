@@ -1,4 +1,4 @@
-import { VERDICT, type Verdict } from "@/content";
+import { OWNER, VERDICT, type OwnerDecision, type Verdict } from "@/content";
 import { cn } from "@/lib/cn";
 
 const INK: Record<Verdict, { ink: string; plate?: string; size: number }> = {
@@ -30,6 +30,37 @@ export function Stamp({ verdict, animate, className }: { verdict: Verdict; anima
           stroke="none"
           fontSize={size}
           textLength="176"
+          lengthAdjust="spacingAndGlyphs"
+          style={{ fontFamily: "var(--font-archivo), system-ui, sans-serif", fontWeight: 800, fontVariationSettings: '"wdth" 125' }}
+        >
+          {word}
+        </text>
+      </g>
+    </svg>
+  );
+}
+
+/** The owner's second stamp: smaller, black ink, tilted the other way. It lands overlapping the verdict stamp. */
+export function DecisionStamp({ decision, animate, className }: { decision: OwnerDecision; animate?: boolean; className?: string }) {
+  const word = OWNER[decision === "approved" ? "approve" : "deny"].stamp;
+  return (
+    <svg
+      viewBox="0 0 224 52"
+      role="img"
+      aria-label={`Stamp: ${word}`}
+      className={cn("block h-auto w-[150px] origin-center mix-blend-multiply sm:w-[164px]", animate ? "stamp-thump-b" : "rotate-[4deg]", className)}
+    >
+      <g filter="url(#ink)" fill="none" stroke="#000">
+        <rect x="4" y="4" width="216" height="44" rx="7" strokeWidth="4" />
+        <rect x="10" y="10" width="204" height="32" rx="4" strokeWidth="1.4" />
+        <text
+          x="112"
+          y="35"
+          textAnchor="middle"
+          fill="#000"
+          stroke="none"
+          fontSize="19"
+          textLength="184"
           lengthAdjust="spacingAndGlyphs"
           style={{ fontFamily: "var(--font-archivo), system-ui, sans-serif", fontWeight: 800, fontVariationSettings: '"wdth" 125' }}
         >

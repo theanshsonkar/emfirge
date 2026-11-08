@@ -4,7 +4,7 @@ import { TestMark } from "./TestMark";
 export function Footer() {
   return (
     <footer className="bg-black text-white">
-      <div className="mx-auto max-w-[1320px] px-4 py-16 sm:px-8 lg:py-24">
+      <div className="mx-auto max-w-[1440px] px-4 py-16 sm:px-8 lg:py-24">
         <div className="flex flex-col gap-8 sm:flex-row sm:items-center sm:gap-12">
           <TestMark ring size={160} className="size-[104px] shrink-0 sm:size-[160px]" />
           <p className="display max-w-[16em] text-[30px] sm:text-[44px]">{FOOTER.line}</p>

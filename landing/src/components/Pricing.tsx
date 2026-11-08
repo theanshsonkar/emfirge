@@ -2,7 +2,7 @@ import { PRICING } from "@/content";
 
 export function Pricing() {
   return (
-    <section id="pricing" aria-labelledby="price-h" className="mx-auto max-w-[1320px] px-4 py-16 sm:px-8 lg:py-24">
+    <section id="pricing" aria-labelledby="price-h" className="mx-auto max-w-[1440px] px-4 py-16 sm:px-8 lg:py-24">
       <div className="grid gap-10 rounded-[10px] border-2 border-black p-6 sm:p-10 md:grid-cols-2 md:gap-14">
         <div className="flex flex-col items-start">
           <h2 id="price-h" className="display text-[32px] sm:text-[40px]">

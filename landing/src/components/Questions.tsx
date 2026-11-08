@@ -2,7 +2,7 @@ import { QUESTIONS, SIX } from "@/content";
 
 export function Questions() {
   return (
-    <section aria-labelledby="six-h" className="mx-auto max-w-[1320px] px-4 py-16 sm:px-8 lg:py-24">
+    <section aria-labelledby="six-h" className="mx-auto max-w-[1440px] px-4 py-16 sm:px-8 lg:py-24">
       <h2 id="six-h" className="display text-[32px] sm:text-[40px]">
         {SIX.title}
       </h2>

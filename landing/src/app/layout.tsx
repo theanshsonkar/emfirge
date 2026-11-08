@@ -18,8 +18,17 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE.url),
   title: SITE.title,
   description: SITE.description,
+  openGraph: {
+    type: "website",
+    url: "/",
+    siteName: "Emfirge",
+    title: SITE.title,
+    description: SITE.description,
+  },
+  twitter: { card: "summary_large_image", title: SITE.title, description: SITE.description },
 };
 
 export const viewport: Viewport = { themeColor: "#000000" };
@@ -30,7 +39,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <noscript>
           {/* Without JS the bench is a finished example: test 001, switches disabled. */}
-          <style>{`[data-js]{display:none!important}[data-sw="1"] .sw-cover{transform:rotateX(-112deg)}[data-sw="1"] .sw-lever{transform:translateY(-10px)}`}</style>
+          <style>{`[data-js]{display:none!important}[data-sw="1"] .sw-cover{transform:rotateX(-110deg)}[data-sw="1"] .sw-lever{transform:translateY(-8px)}`}</style>
         </noscript>
         {children}
       </body>

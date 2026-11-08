@@ -1,11 +1,11 @@
 "use client";
 
-import { LIVE_BAR } from "@/content";
+import { LAB, LIVE_BAR } from "@/content";
 import { useLab } from "./LabProvider";
 
 /** The promise, always visible: whatever you do below, live doesn't move. */
 export function LiveBar() {
-  const { state, caught } = useLab();
+  const { state, caught, complete } = useLab();
   return (
     <div className="sticky top-0 z-50 flex h-10 items-center justify-between gap-3 bg-black px-4 font-mono text-[12px] text-white sm:px-8 sm:text-[13px]">
       <p className="flex min-w-0 items-center gap-2 whitespace-nowrap">
@@ -25,6 +25,12 @@ export function LiveBar() {
           <span className="min-[420px]:hidden">/</span>
           {state.tests.length}
         </span>
+        {complete ? (
+          <a href="#lab-report" className="rounded-sm bg-crash px-1.5 text-black hover:bg-white">
+            <span className="hidden sm:inline">{LAB.seeLink}</span>
+            <span className="sm:hidden">{LAB.seeLinkShort}</span>
+          </a>
+        ) : null}
         <a href={LIVE_BAR.cta.href} className="underline underline-offset-4 hover:text-crash">
           {LIVE_BAR.cta.label}
         </a>
