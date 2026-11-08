@@ -42,6 +42,7 @@ DAMAGE_SOURCES: dict[str, tuple[str, ...]] = {
     "money": ("ebs_volumes",),
     "availability": ("iam_role_last_used", "network_interfaces"),
     "control": (),
+    "outside_world": ("scheduler",),
 }
 ACCOUNT_SETTINGS = ("cloudtrail", "guardduty", "kms", "config")
 
@@ -185,6 +186,35 @@ def _escalation_lines(base: AWSInfrastructure, branch: AWSInfrastructure, types:
             for rid in sorted(introduced_privilege_escalation_ids(base, branch))]
 
 
+# Members that decide when or how an ENABLED schedule runs. For these, None on one side means not collected.
+_RUN_FIELDS = ("schedule_expression", "schedule_expression_timezone", "target_arn", "target_role_arn", "has_input")
+
+
+def _schedule_run_changed(before: Any, after: Any, doubts: set, rid: str) -> bool:
+    """True when a member that decides when or how an ENABLED schedule runs differs between base and branch.
+
+    A member collected on one side only is a doubt, not a change. start_date / end_date are None when not set,
+    so they compare directly. The flexible window is compared as mode plus minutes.
+    """
+    changed = (before.start_date != after.start_date or before.end_date != after.end_date)
+    if before.flexible_time_window_mode is None or after.flexible_time_window_mode is None:
+        if before.flexible_time_window_mode != after.flexible_time_window_mode:
+            doubts.add(("schedule_field_unknown", "a setting of this schedule was collected on only one side, so it cannot be "
+                        "said whether it changed", rid))
+    elif (before.flexible_time_window_mode, before.flexible_time_window_minutes) != (
+            after.flexible_time_window_mode, after.flexible_time_window_minutes):
+        changed = True
+    for name in _RUN_FIELDS:
+        a, b = getattr(before, name), getattr(after, name)
+        if a is None or b is None:
+            if a != b:
+                doubts.add(("schedule_field_unknown", "a setting of this schedule was collected on only one side, so it "
+                            "cannot be said whether it changed", rid))
+        elif a != b:
+            changed = True
+    return changed
+
+
 def _schedule_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, base_graph: Graph, branch_graph: Graph
                      ) -> tuple[list[ScheduleChange], list[tuple[str, str, Optional[str]]], int]:
     """Schedules whose effective state became ENABLED (or whose timing changed while ENABLED) or became DISABLED.
@@ -211,8 +241,7 @@ def _schedule_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, base_gr
                 kind = "schedule_added_enabled"
             elif was == "DISABLED":
                 kind = "schedule_enabled"
-            elif was == "ENABLED" and (before.schedule_expression != after.schedule_expression
-                                       or before.target_arn != after.target_arn):
+            elif was == "ENABLED" and _schedule_run_changed(before, after, doubts, rid):
                 kind = "schedule_changed"
             else:
                 kind = None
@@ -234,6 +263,14 @@ def _schedule_inputs(base: AWSInfrastructure, branch: AWSInfrastructure, base_gr
         elif was == "ENABLED":  # now DISABLED
             changes.append(ScheduleChange(rid, "scheduler_schedule", "schedule_disabled", after.schedule_expression,
                                           targets[rid] or old_targets.get(rid, []), SCHEDULER_ENTRY))
+    for rid in sorted(set(old) - set(new)):
+        was = old[rid].state
+        if was == "ENABLED":
+            changes.append(ScheduleChange(rid, "scheduler_schedule", "schedule_deleted", old[rid].schedule_expression,
+                                          old_targets.get(rid, []), SCHEDULER_ENTRY))
+        elif was is None:
+            doubts.add(("schedule_state_unknown", "the state of this schedule was not collected, so it cannot be said "
+                        "whether deleting it stops something that was running", rid))
     return changes, sorted(doubts, key=lambda d: (d[0], d[1], d[2] or "")), len(set(old) | set(new))
 
 

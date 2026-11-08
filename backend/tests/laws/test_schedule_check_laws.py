@@ -103,9 +103,8 @@ def test_L77a_an_enabled_schedule_whose_expression_changes_is_a_schedule_changed
     branch = apply_change(base, _mod(schedule_expression="rate(1 minute)"))
     assert _schedule_facts(_outside(_check(base, branch))) == [
         {**EXPECTED_FACT, "change": "schedule_changed", "schedule_expression": "rate(1 minute)"}]
-    # nothing about when or what it runs changed: no fact
-    same = apply_change(base, _mod(schedule_expression_timezone="Asia/Kolkata"))
-    assert _schedule_facts(_outside(_check(base, same))) == []
+    # a timezone change moves when it runs (L85a); a state-preserving no-op is no fact
+    assert _schedule_facts(_outside(_check(base, base.model_copy(deep=True)))) == []
 
 
 # ── L77b ──────────────────────────────────────────────────────────

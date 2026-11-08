@@ -82,7 +82,7 @@ class AvailabilityFact(_Strict):
     resource_id: str
     resource_type: str
     change: Literal["dependency_removed", "internal_path_removed", "dependent_of_deleted", "deleted_along_with",
-                    "internet_path_removed", "schedule_disabled"]
+                    "internet_path_removed", "schedule_disabled", "schedule_deleted"]
     path: list[str]
     depth: Optional[int]
     recently_used: Optional[bool]
@@ -209,7 +209,8 @@ class ScheduleChange:
     """A timer whose effective state or timing changed on the branch (an adapter read it off provider fields)."""
     resource_id: str
     resource_type: str
-    change: Literal["schedule_enabled", "schedule_added_enabled", "schedule_changed", "schedule_disabled"]
+    change: Literal["schedule_enabled", "schedule_added_enabled", "schedule_changed", "schedule_disabled",
+                    "schedule_deleted"]
     schedule_expression: Optional[str]
     target_ids: Sequence[str]
     entry: OutsideEntry
@@ -473,10 +474,10 @@ def _availability(verdict: CombinedVerdict, inputs: CheckInputs, types: Mapping[
         if item.change == "permission_removed":
             draft.facts.append(_permission_fact(item))
     for item in inputs.schedule_changes:
-        if item.change == "schedule_disabled":
+        if item.change in ("schedule_disabled", "schedule_deleted"):
             for target in sorted(set(item.target_ids)) or [None]:
                 draft.facts.append(AvailabilityFact(
-                    resource_id=item.resource_id, resource_type=item.resource_type, change="schedule_disabled",
+                    resource_id=item.resource_id, resource_type=item.resource_type, change=item.change,  # type: ignore[arg-type]
                     path=[item.resource_id] + ([target] if target else []), depth=1 if target else 0, recently_used=None))
     draft.facts.extend(inputs.availability_facts)
     for topic, reason, rid in inputs.availability_doubts:
@@ -535,7 +536,7 @@ def _outside_world(inputs: CheckInputs, changed_typed: int) -> _Draft:
         draft.facts.append(OutsideFact(action=gap.action, service=entry.service, reason=entry.reason,
                                        source_url=entry.source_url, resource_id=gap.address))
     for item in inputs.schedule_changes:
-        if item.change != "schedule_disabled":
+        if item.change not in ("schedule_disabled", "schedule_deleted"):
             draft.facts.append(ScheduleFact(
                 resource_id=item.resource_id, resource_type=item.resource_type, change=item.change,  # type: ignore[arg-type]
                 schedule_expression=item.schedule_expression, resource_ids=sorted(set(item.target_ids)), action=None,
@@ -615,7 +616,7 @@ def assemble(verdict: CombinedVerdict, inputs: CheckInputs) -> CheckResult:
     }
     for damage in DAMAGES:
         _coverage(drafts[damage], inputs, with_warnings=damage in DIFF_DAMAGES)
-        if damage in DIFF_DAMAGES:
+        if damage in DIFF_DAMAGES or damage == "outside_world":
             _plan_unknowns(drafts[damage], inputs)
     unchanged = is_unchanged(verdict, inputs.plan_gaps)
     return CheckResult(

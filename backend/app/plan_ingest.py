@@ -344,8 +344,10 @@ def _schedule_changes(item: dict, address: str, actions: list, unknown: list[dic
                         "detail": "the schedule name is unknown at plan time, so its identity cannot be built"}
     group = after.get("group_name")
     if "group_name" in paths or not group:
+        # Never the default group: the schedule may be a different one, so its identity cannot be built.
         unknown.append({"address": address, "field": "group_name", "reason": "unknown Terraform value"})
-        group = DEFAULT_GROUP
+        return result, {"address": address, "type": item.get("type", ""), "actions": actions, "outside_view": False,
+                        "detail": "the schedule group is unknown at plan time, so its identity cannot be built"}
     params = _schedule_params(after)
     fields, problems = scheduler_api_fields(params, replace=actions == ["update"])
     for path in sorted(paths):

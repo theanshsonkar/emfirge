@@ -1789,7 +1789,12 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
             arn_parts = target_arn.split(':')
             same_region = not infrastructure.region or arn_parts[3] == infrastructure.region
             function_name = target_arn.split(':function:', 1)[1].split(':', 1)[0]
-            if same_region and function_name in function_names:
+            target_account = arn_parts[4] if len(arn_parts) > 4 else ''
+            # The schedule lives in the account that owns it: its own arn, else the role it assumes. When neither tells,
+            # the account is unknown and no edge is drawn.
+            local_account = next((p[4] for p in ((schedule.arn or '').split(':'), (schedule.target_role_arn or '').split(':'))
+                                  if len(p) > 4 and p[4]), '')
+            if same_region and function_name in function_names and target_account and target_account == local_account:
                 edges.append({
                     'from': schedule_id,
                     'to': id_plan.id('lambda_function', function_name),
