@@ -220,6 +220,10 @@ def cfn_config_to_api(config: dict[str, Any]) -> dict[str, Any]:
 def cfn_unmodeled(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
     """CloudFormation properties outside the model that differ between the two contexts."""
     names = []
+    # A modeled property the change set removes is reset by CloudFormation to a default the resource page does not
+    # state, so it is named (never dropped): https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-cloudfront-distribution-distributionconfig.html
+    names += [f"DistributionConfig.{key}" for key in sorted(_MODELED_TOP)
+              if key in before and key not in after and _says_something(before.get(key))]
     for key in sorted(set(before) | set(after)):
         if key in _MODELED_TOP or key == "CallerReference":
             continue
@@ -233,6 +237,8 @@ def cfn_unmodeled(before: dict[str, Any], after: dict[str, Any]) -> list[str]:
         old, new = index(before), index(after)
         for ident, item in new.items():
             other = old.get(ident, {})
+            modeled = _MODELED_ORIGIN if label == "Origins" else _MODELED_BEHAVIOR | {"CachedMethods"}
+            names += [f"{label}.{k}" for k in sorted(modeled) if k in other and k not in item and _says_something(other.get(k))]
             names += [f"{label}.{k}" for k in sorted(set(item) | set(other))
                       if k not in _MODELED_BEHAVIOR | _MODELED_ORIGIN | {"CachedMethods"} and item.get(k) != other.get(k)
                       and (_says_something(item.get(k)) or _says_something(other.get(k)))]

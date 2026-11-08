@@ -197,6 +197,14 @@ def _cloudfront_call(resource: dict[str, Any], physical: Any) -> dict[str, Any] 
             "parameters": {"Id": physical, "DistributionConfig": cfn_config_to_api(after)}}
 
 
+def _removed_extra(address: str, resource_type: str, operation: str, prop: str) -> dict[str, Any]:
+    """An unknown for a property the change set removed: CloudFormation resets it to a default Emfirge does not state."""
+    result = _extra(address, resource_type, operation)
+    result["detail"] = f"{prop} was removed; CloudFormation resets it to its default, which is not known here, so the resulting setting is unknown"
+    result["field"] = prop
+    return result
+
+
 def _nacl_entry_call(resource: dict[str, Any], properties: dict[str, Any], operation: str) -> dict[str, Any] | None:
     acl_id = _resolved(properties.get("NetworkAclId")); number = _resolved(properties.get("RuleNumber"))
     protocol = _resolved(properties.get("Protocol", properties.get("IpProtocol")))
@@ -298,11 +306,12 @@ def convert_change_set(doc: Any, nacls: Any = None) -> tuple[dict[str, Any], lis
             if not isinstance(before_props, dict) or not isinstance(after_props, dict):
                 extras.append(_extra(address, typ, "MissingPropertyValues"))
                 continue
-            table_calls, resolved = dynamodb_cfn_calls(action, physical, before_props, after_props)
+            table_calls, resolved, removed_unknown = dynamodb_cfn_calls(action, physical, before_props, after_props)
             if not resolved:
                 extras.append(_extra(address, typ, "MissingPropertyValues"))
                 continue
             calls.extend(table_calls)
+            extras.extend(_removed_extra(address, typ, "UpdateTable", name) for name in removed_unknown)
             # every other property that differs is a change Emfirge does not model
             others = {key for key in set(before_props) | set(after_props)
                       if key not in {"PointInTimeRecoverySpecification", "DeletionProtectionEnabled"} and before_props.get(key) != after_props.get(key)}
@@ -345,6 +354,11 @@ def convert_change_set(doc: Any, nacls: Any = None) -> tuple[dict[str, Any], lis
                 else:
                     bp, ap = _properties(before), _properties(after)
                     params = {"DBInstanceIdentifier": physical}
+                    # A removed property is reset by CloudFormation to a default the resource page does not
+                    # state for these four (https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbinstance.html), so it is unknown.
+                    for key in ("DeletionProtection", "BackupRetentionPeriod", "PubliclyAccessible", "VPCSecurityGroups"):
+                        if key in bp and key not in ap:
+                            extras.append(_removed_extra(address, typ, "ModifyDBInstance", key))
                     for key in ("DeletionProtection", "BackupRetentionPeriod", "PubliclyAccessible", "VPCSecurityGroups"):
                         if bp.get(key) != ap.get(key) and key in ap:
                             if key == "DeletionProtection" and isinstance(ap[key], str):

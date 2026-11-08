@@ -70,28 +70,44 @@ def api_fields(operation: str, parameters: dict[str, Any]) -> tuple[dict[str, An
     return fields, unsupported, valid
 
 
-def cfn_calls(action: str, physical: Any, before: dict[str, Any], after: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
-    """AWS::DynamoDB::Table Modify as the API calls it stands for; (calls, resolved).
+def cfn_calls(action: str, physical: Any, before: dict[str, Any], after: dict[str, Any]) -> tuple[list[dict[str, Any]], bool, list[str]]:
+    """AWS::DynamoDB::Table Modify as the API calls it stands for; (calls, resolved, unknown_removed).
 
     ``resolved`` is False when a property the model reads changed to a value that is not a literal.
+    ``unknown_removed`` names modeled properties the change set removes whose reset value is not
+    certain: CloudFormation resets a removed property to its default, and only the defaults the
+    resource documentation states are applied here.
     """
     name = after.get("TableName", before.get("TableName", physical))
     if not isinstance(name, str) or not name:
-        return [], False
+        return [], False, []
+    unknown_removed: list[str] = []
     calls: list[dict[str, Any]] = []
     old_spec, new_spec = before.get("PointInTimeRecoverySpecification"), after.get("PointInTimeRecoverySpecification")
     if "PointInTimeRecoverySpecification" in after and new_spec != old_spec:
         enabled = boolean(new_spec.get("PointInTimeRecoveryEnabled")) if isinstance(new_spec, dict) else None
         if enabled is None:
-            return [], False
+            return [], False, []
         calls.append({"service": "dynamodb", "operation": "UpdateContinuousBackups", "parameters": {
             "TableName": name, "PointInTimeRecoverySpecification": {"PointInTimeRecoveryEnabled": enabled}}})
     if "DeletionProtectionEnabled" in after and after["DeletionProtectionEnabled"] != before.get("DeletionProtectionEnabled"):
         protected = boolean(after["DeletionProtectionEnabled"])
         if protected is None:
-            return [], False
+            return [], False, []
         calls.append({"service": "dynamodb", "operation": "UpdateTable", "parameters": {"TableName": name, "DeletionProtectionEnabled": protected}})
-    return calls, True
+    if "PointInTimeRecoverySpecification" in before and "PointInTimeRecoverySpecification" not in after:
+        # The CloudFormation page for AWS::DynamoDB::Table states no default for this property, so what
+        # removing it does to point-in-time recovery is not claimed.
+        # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-dynamodb-table.html
+        unknown_removed.append("PointInTimeRecoverySpecification")
+    if "DeletionProtectionEnabled" in before and "DeletionProtectionEnabled" not in after:
+        # "This setting is disabled by default." (same page): removing the property resets it to false.
+        was = boolean(before["DeletionProtectionEnabled"])
+        if was is None:
+            unknown_removed.append("DeletionProtectionEnabled")
+        elif was:
+            calls.append({"service": "dynamodb", "operation": "UpdateTable", "parameters": {"TableName": name, "DeletionProtectionEnabled": False}})
+    return calls, True, unknown_removed
 
 
 def plan_fields(before: dict[str, Any], after: dict[str, Any], unknown: set[str]) -> tuple[dict[str, Any], list[str]]:
