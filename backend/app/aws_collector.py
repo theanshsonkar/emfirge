@@ -8,6 +8,8 @@ from botocore.config import Config
 from app.cidr import is_internet_cidr, rule_opens_port_to_internet
 from app.tags import tag_map
 from app.log_safe import safe_exc, safe_choice
+from app.scheduler_schedule import aws_schedule_fields
+from app.cloudfront_distribution import collect_cloudfront
 from app.s3_public import acl_grants_are_public, effective_is_public, policy_is_public
 from app.models import (
     AWSCredentials, AWSInfrastructure,
@@ -18,7 +20,7 @@ from app.models import (
     APIGatewayData, APIGatewayInstance,
     ElastiCacheData, ElastiCacheCluster,
     SQSData, SQSQueue,
-    DynamoDBData, DynamoDBTable,
+    DynamoDBData, DynamoDBTable, SchedulerData, SchedulerSchedule, CloudFrontData,
     EBSVolume, EBSSnapshot, ElasticIP, Route, RouteTable, NACLEntry, NetworkACL, NetworkInterface,
     VPCPeeringConnection, TransitGatewayAttachment, VPNGateway, InterfaceEndpoint, BlockDevice,
     RDSSnapshot, PolicyDocumentRecord, merge_policy_statements, AccessStatement
@@ -117,6 +119,8 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         'elasticache':     collect_elasticache,
         'sqs':             collect_sqs,
         'dynamodb':        collect_dynamodb,
+        'scheduler':       collect_scheduler,
+        'cloudfront':      collect_cloudfront,
     }
 
     results = {}
@@ -128,7 +132,7 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         ['s3', 'guardduty', 'sns', 'sqs'],
         ['iam', 'cost', 'cloudwatch', 'config'],
         ['lambda', 'vpc', 'ecs', 'waf'],
-        ['secrets_manager', 'api_gateway', 'elasticache', 'dynamodb'],
+        ['secrets_manager', 'api_gateway', 'elasticache', 'dynamodb', 'scheduler', 'cloudfront'],
     ]
 
     with ThreadPoolExecutor(max_workers=16) as executor:
@@ -177,6 +181,8 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
                     'elasticache':     ElastiCacheData(),
                     'sqs':             SQSData(),
                     'dynamodb':        DynamoDBData(),
+                    'scheduler':       SchedulerData(),
+                    'cloudfront':      CloudFrontData(),
                 }
                 results[name] = defaults[name]
             except Exception as e:
@@ -202,6 +208,8 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
                     'elasticache':     ElastiCacheData(),
                     'sqs':             SQSData(),
                     'dynamodb':        DynamoDBData(),
+                    'scheduler':       SchedulerData(),
+                    'cloudfront':      CloudFrontData(),
                 }
                 results[name] = defaults[name]
 
@@ -226,6 +234,10 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
 
     lambda_data.functions_with_admin_role = functions_with_admin
 
+    # A collector that timed out or crashed never reported: say so rather than leave the status unrecorded.
+    collection_status.setdefault('dynamodb', 'error')
+    collection_status.setdefault('scheduler', 'error')
+    collection_status.setdefault('cloudfront', 'error')
     return AWSInfrastructure(
         ec2=results['ec2'],
         s3=results['s3'],
@@ -247,6 +259,8 @@ def collect_infrastructure(credentials: AWSCredentials, assumed_credentials: dic
         elasticache=results['elasticache'],
         sqs=results['sqs'],
         dynamodb=results['dynamodb'],
+        scheduler=results['scheduler'],
+        cloudfront=results['cloudfront'],
         network_interfaces=results['ec2'].network_interfaces,
         collection={**collection_status, 'network_interfaces': results['ec2'].network_interfaces_status},
         region=region,
@@ -3032,12 +3046,38 @@ def collect_sqs(key, secret, token, region, warnings) -> SQSData:
 
 
 # ── DYNAMODB COLLECTOR ────────────────────────────────────────────
+def _dynamodb_available_backup(ddb, table_name):
+    """Whether an AVAILABLE on-demand backup of the table exists (every ListBackups page is read).
+
+    A backup that is still CREATING or already DELETED restores nothing. ListBackups lists the
+    backups the table's owner made (BackupType defaults to USER); backups made through the
+    AWS Backup service are not listed by it and are not read here.
+    """
+    start = None
+    while True:
+        params = {'TableName': table_name, 'Limit': 100}
+        if start:
+            params['ExclusiveStartBackupArn'] = start
+        page = ddb.list_backups(**params)
+        if any(item.get('BackupStatus') == 'AVAILABLE' for item in page.get('BackupSummaries', [])):
+            return True
+        start = page.get('LastEvaluatedBackupArn')
+        if not start:
+            return False
+
+
 def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
+    """Tables with item count, PITR, an on-demand backup and deletion protection (read only).
+
+    Status dynamodb = ok | denied | error. A refused or failed read of one fact leaves that fact
+    None (unknown) and marks the status; it is never recorded as "no PITR", "no backup" or "empty".
+    """
     total_tables = 0
     tables_without_pitr = []
     tables_without_encryption = []
     tables_without_backup = []
     tables = []
+    status = 'error'
 
     try:
         ddb = boto3.client('dynamodb', aws_access_key_id=key,
@@ -3053,14 +3093,16 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                 table_names.extend(page.get('TableNames', []))
         except ClientError as e:
             code = get_error_code(e)
-            if code in ['AccessDenied', 'UnauthorizedOperation']:
+            if code in _DENIED_CODES:
                 msg = 'DynamoDB scan skipped: insufficient permissions'
                 print('DynamoDB scan skipped: insufficient permissions')
                 warnings.append(msg)
-                return DynamoDBData()
+                return DynamoDBData(collection_status={'dynamodb': 'denied'})
             raise
 
         total_tables = len(table_names)
+        denied = False
+        failed = False
 
         # Describe each table
         for table_name in table_names:
@@ -3069,8 +3111,9 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                 table = desc.get('Table', {})
 
                 table_arn = table.get('TableArn', '')
-                item_count = table.get('ItemCount', 0)
+                item_count = table.get('ItemCount')  # approximate (about every six hours); absent -> unknown
                 billing_mode = table.get('BillingModeSummary', {}).get('BillingMode', 'PROVISIONED')
+                deletion_protection = table.get('DeletionProtectionEnabled')
 
                 # Encryption — check SSEDescription
                 sse = table.get('SSEDescription', {})
@@ -3081,7 +3124,7 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                     encryption_type = 'DEFAULT'  # AWS-owned key (default)
 
                 # PITR check
-                pitr_enabled = False
+                pitr_enabled = None
                 try:
                     pitr_resp = ddb.describe_continuous_backups(TableName=table_name)
                     pitr_desc = pitr_resp.get('ContinuousBackupsDescription', {})
@@ -3089,28 +3132,33 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                     pitr_enabled = pitr_status == 'ENABLED'
                 except ClientError as e:
                     code = get_error_code(e)
-                    if code not in ['AccessDenied', 'UnauthorizedOperation']:
+                    if code in _DENIED_CODES:
+                        denied = True
+                    else:
+                        failed = True
                         print(f'DynamoDB PITR check skipped for 1 table: {code}')
                 except Exception:
-                    pass
+                    failed = True
 
-                # Backup check — see if any on-demand backups exist
-                has_backup = False
+                # Backup check — is there an on-demand backup that can be restored from
+                has_backup = None
                 try:
-                    backups = ddb.list_backups(TableName=table_name, Limit=1)
-                    has_backup = len(backups.get('BackupSummaries', [])) > 0
+                    has_backup = _dynamodb_available_backup(ddb, table_name)
                 except ClientError as e:
                     code = get_error_code(e)
-                    if code not in ['AccessDenied', 'UnauthorizedOperation']:
+                    if code in _DENIED_CODES:
+                        denied = True
+                    else:
+                        failed = True
                         print(f'DynamoDB backup check skipped for 1 table: {code}')
                 except Exception:
-                    pass
+                    failed = True
 
-                if not pitr_enabled:
+                if pitr_enabled is not True:
                     tables_without_pitr.append(table_name)
                 if encryption_type == 'DEFAULT':
                     tables_without_encryption.append(table_name)
-                if not has_backup:
+                if has_backup is not True:
                     tables_without_backup.append(table_name)
 
                 tables.append(DynamoDBTable(
@@ -3121,17 +3169,31 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
                     has_backup=has_backup,
                     billing_mode=billing_mode,
                     item_count=item_count,
+                    item_count_reported=item_count is not None,
+                    deletion_protection_enabled=deletion_protection,
                 ))
 
             except ClientError as e:
                 code = get_error_code(e)
                 print(f'DynamoDB describe skipped for 1 table: {code}')
+                if code in _DENIED_CODES:
+                    denied = True
+                else:
+                    failed = True
             except Exception as e:
+                failed = True
                 print(f'DynamoDB describe skipped for 1 table: {safe_exc(e)}')
+
+        if denied:
+            warnings.append('DynamoDB table details skipped: insufficient permissions')
+        if failed:
+            warnings.append('DynamoDB table details skipped: read error')
+        status = 'denied' if denied else 'error' if failed else 'ok'
 
     except ClientError as e:
         code = get_error_code(e)
-        if code in ['AccessDenied', 'UnauthorizedOperation']:
+        if code in _DENIED_CODES:
+            status = 'denied'
             msg = 'DynamoDB scan skipped: insufficient permissions'
             print('DynamoDB scan skipped: insufficient permissions')
             warnings.append(msg)
@@ -3150,7 +3212,68 @@ def collect_dynamodb(key, secret, token, region, warnings) -> DynamoDBData:
         tables_without_encryption=tables_without_encryption,
         tables_without_backup=tables_without_backup,
         tables=tables,
+        collection_status={'dynamodb': status},
     )
+
+
+# ── EVENTBRIDGE SCHEDULER COLLECTOR ───────────────────────────────
+_DENIED_CODES = ['AccessDenied', 'AccessDeniedException', 'UnauthorizedOperation']
+
+
+def collect_scheduler(key, secret, token, region, warnings) -> SchedulerData:
+    """Schedules with state, expression and target (read-only: ListSchedules + GetSchedule).
+
+    The Target.Input payload may hold secrets and is never stored, only whether one is set.
+    EventBridge Scheduler schedules cannot be tagged (only schedule groups can).
+    Status: ok, denied (a read was refused; what the list gave is kept), or error.
+    """
+    schedules = []
+    status = 'error'
+    try:
+        client = boto3.client('scheduler', aws_access_key_id=key,
+                              aws_secret_access_key=secret,
+                              aws_session_token=token,
+                              region_name=region, config=BOTO_CONFIG)
+        summaries = []
+        for page in client.get_paginator('list_schedules').paginate():
+            summaries.extend(page.get('Schedules', []))
+        denied = False
+        failed = False
+        for summary in summaries:
+            detail = None
+            try:
+                detail = client.get_schedule(Name=summary['Name'], GroupName=summary['GroupName'])
+            except ClientError as e:
+                if get_error_code(e) in _DENIED_CODES:
+                    denied = True
+                else:
+                    failed = True
+            except Exception as e:
+                failed = True
+                print(f'Scheduler get skipped for 1 schedule: {safe_exc(e)}')
+            # The summary has no expression, window or input; without GetSchedule those stay unknown.
+            schedules.append(SchedulerSchedule(**aws_schedule_fields(detail if detail is not None else summary)))
+        if denied:
+            warnings.append('Scheduler schedule details skipped: insufficient permissions')
+            print('Scheduler schedule details skipped: insufficient permissions')
+        if failed:
+            warnings.append('Scheduler schedule details skipped: read error')
+            print('Scheduler schedule details skipped: read error')
+        status = 'denied' if denied else 'error' if failed else 'ok'
+    except ClientError as e:
+        code = get_error_code(e)
+        if code in _DENIED_CODES:
+            status = 'denied'
+            warnings.append('Scheduler scan skipped: insufficient permissions')
+            print('Scheduler scan skipped: insufficient permissions')
+        else:
+            warnings.append(f'Scheduler scan skipped: {code}')
+            print(f'Scheduler scan skipped: {code}')
+    except Exception as e:
+        warnings.append(f'Scheduler scan skipped: unexpected error — {safe_exc(e)}')
+        print(f'Scheduler scan skipped: unexpected error — {safe_exc(e)}')
+
+    return SchedulerData(schedules=schedules, collection_status={'scheduler': status})
 
 
 ROLE_SESSION_NAME = 'EmfirgeSecurityScan'

@@ -10,10 +10,11 @@ import fnmatch
 import ipaddress
 import json
 import re
+from collections import deque
 from collections.abc import Mapping as MappingABC
 from enum import Enum
 from types import MappingProxyType
-from typing import ClassVar, Dict, List, Any, Optional, Set, Mapping
+from typing import ClassVar, Dict, Iterable, List, Any, NamedTuple, Optional, Set, Mapping
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -24,7 +25,7 @@ from app.iam_escalation import matching_paths
 from app.rds_ports import ports_cover, rds_port
 
 
-GRAPH_SCHEMA_VERSION = 1
+GRAPH_SCHEMA_VERSION = 4
 INTERNAL_REACH_EDGE_BUDGET = 50_000
 
 
@@ -72,6 +73,7 @@ class RelationshipType(str, Enum):
     uses_security_group = "uses_security_group"
     in_subnet = "in_subnet"
     uses_iam_role = "uses_iam_role"
+    invokes = "invokes"
     attached_to_instance = "attached_to_instance"
     REACHES = "REACHES"
     REACHES_VIA_SG = "REACHES_VIA_SG"
@@ -116,6 +118,8 @@ TRAVERSABLE_RELATIONSHIPS = frozenset({
 DEPENDENCY_EDGES: dict[str, str | None] = {
     "uses_security_group": "source_depends_on_target", "in_subnet": "source_depends_on_target",
     "uses_iam_role": "source_depends_on_target", "attached_to_instance": "target_depends_on_source",
+    # a schedule depends on the target it invokes: deleting the target breaks the schedule
+    "invokes": "source_depends_on_target",
     "REACHES": "target_depends_on_source", "REACHES_VIA_SG": "target_depends_on_source",
     "targets_instance": "source_depends_on_target", "serves_from_bucket": "source_depends_on_target",
     "in_vpc": "source_depends_on_target", "REFERENCES_SECRET": "source_depends_on_target",
@@ -145,6 +149,7 @@ _RESOURCE_CATEGORIES = {
     "vpc_peering_connection": NodeCategory.NETWORK,
     "cloudfront_distribution": NodeCategory.EDGE,
     "iam_role": NodeCategory.IDENTITY,
+    "scheduler_schedule": NodeCategory.OTHER,  # a trigger, not compute
 }
 
 
@@ -1536,6 +1541,9 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
             })
     
     # ── S3 NODES ──────────────────────────────────────────────────
+    # Buckets a collected distribution serves from get that distribution's node, not a synthetic one.
+    cloudfront_buckets = {origin.s3_bucket for dist in infrastructure.cloudfront.distributions
+                          for origin in dist.origins if origin.s3_bucket}
     for bucket in infrastructure.s3.buckets:
         # Handle both dict and Pydantic model formats
         if isinstance(bucket, dict):
@@ -1564,7 +1572,7 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
         })
         
         # Edge: S3 Bucket -> CloudFront (if has_cloudfront is True)
-        if has_cloudfront:
+        if has_cloudfront and bucket_name not in cloudfront_buckets:
             # Create a virtual CloudFront node for this bucket
             cf_id = f"cloudfront-{bucket_name}"
             nodes.append({
@@ -1581,6 +1589,44 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
                 'relationship': 'serves_from_bucket'
             })
     
+    # ── CLOUDFRONT NODES ──────────────────────────────────────────
+    bucket_node_ids = {(b['name'] if isinstance(b, dict) else b.name): id_plan.id('s3_bucket', b['name'] if isinstance(b, dict) else b.name)
+                       for b in infrastructure.s3.buckets}
+    for dist in infrastructure.cloudfront.distributions:
+        behaviors = ([dist.default_cache_behavior] if dist.default_cache_behavior else []) + list(dist.cache_behaviors)
+        metadata = {
+            'domain_name': dist.domain_name,
+            'aliases': list(dist.aliases),
+            'enabled': dist.enabled,
+            'status': dist.status,
+            'price_class': dist.price_class,
+            'web_acl_id': dist.web_acl_id,
+            'origins': [{'id': o.id, 'domain_name': o.domain_name, 'origin_type': o.origin_type,
+                         'origin_access_control_id': o.origin_access_control_id, 's3_bucket': o.s3_bucket} for o in dist.origins],
+            'behaviors': [{'path_pattern': b.path_pattern, 'target_origin_id': b.target_origin_id,
+                           'cache_policy_id': b.cache_policy_id, 'origin_request_policy_id': b.origin_request_policy_id,
+                           'viewer_protocol_policy': b.viewer_protocol_policy,
+                           'uses_legacy_forwarded_values': b.uses_legacy_forwarded_values,
+                           'forwards_host': infrastructure.cloudfront.behavior_forwards_host(b)} for b in behaviors],
+            'unmodeled_settings': dist.unmodeled_names(),
+        }
+        if dist.arn is not None:
+            metadata['arn'] = dist.arn
+        nodes.append({'id': dist.id, 'type': 'cloudfront_distribution', 'label': f"CloudFront: {dist.id}", 'metadata': metadata})
+        # Edge: distribution -> the S3 bucket a behavior serves from (the distribution depends on the bucket)
+        origins = {o.id: o for o in dist.origins}
+        for behavior in behaviors:
+            origin = origins.get(behavior.target_origin_id)
+            if origin is None or origin.origin_type != 's3' or origin.s3_bucket not in bucket_node_ids:
+                continue
+            edges.append({
+                'from': dist.id,
+                'to': bucket_node_ids[origin.s3_bucket],
+                'relationship': 'serves_from_bucket',
+                'attrs': {'path_pattern': behavior.path_pattern, 'oac': bool(origin.origin_access_control_id),
+                          'forwards_host': infrastructure.cloudfront.behavior_forwards_host(behavior)},
+            })
+
     # ── RDS NODES ─────────────────────────────────────────────────
     for rds in infrastructure.rds.rds_instances:
         # Handle both dict and Pydantic model formats
@@ -1709,6 +1755,67 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
                 'relationship': 'REFERENCES_SECRET'
             })
     
+    # ── SCHEDULER NODES ───────────────────────────────────────────
+    function_names = {fn['name'] if isinstance(fn, dict) else fn.name for fn in infrastructure.lambda_data.functions}
+    for schedule in infrastructure.scheduler.schedules:
+        schedule_id = f"{schedule.group_name}/{schedule.name}"
+        metadata = {
+            'name': schedule.name,
+            'group_name': schedule.group_name,
+            'state': schedule.state,
+            'schedule_expression': schedule.schedule_expression,
+            'target_arn': schedule.target_arn,
+            'target_role_arn': schedule.target_role_arn,
+            'flexible_time_window_mode': schedule.flexible_time_window_mode,
+            'flexible_time_window_minutes': schedule.flexible_time_window_minutes,
+            'schedule_expression_timezone': schedule.schedule_expression_timezone,
+            'start_date': schedule.start_date,
+            'end_date': schedule.end_date,
+            'action_after_completion': schedule.action_after_completion,
+            'has_input': schedule.has_input,
+            'unmodeled_settings': list(schedule.unmodeled_settings),
+        }
+        if schedule.arn is not None:
+            metadata['arn'] = schedule.arn
+        nodes.append({
+            'id': schedule_id,
+            'type': 'scheduler_schedule',
+            'label': f"Schedule: {schedule_id}",
+            'metadata': metadata,
+        })
+        # Edge: Schedule -> Lambda it invokes. Any other target stays a plain arn on the node.
+        target_arn = schedule.target_arn or ''
+        if ':lambda:' in target_arn and ':function:' in target_arn:
+            arn_parts = target_arn.split(':')
+            same_region = not infrastructure.region or arn_parts[3] == infrastructure.region
+            function_name = target_arn.split(':function:', 1)[1].split(':', 1)[0]
+            target_account = arn_parts[4] if len(arn_parts) > 4 else ''
+            # The schedule lives in the account that owns it: its own arn, else the role it assumes. When neither tells,
+            # the account is unknown and no edge is drawn.
+            local_account = next((p[4] for p in ((schedule.arn or '').split(':'), (schedule.target_role_arn or '').split(':'))
+                                  if len(p) > 4 and p[4]), '')
+            if same_region and function_name in function_names and target_account and target_account == local_account:
+                edges.append({
+                    'from': schedule_id,
+                    'to': id_plan.id('lambda_function', function_name),
+                    'relationship': 'invokes'
+                })
+        # Edge: Schedule -> the role EventBridge Scheduler assumes to invoke the target
+        if schedule.target_role_arn:
+            role_id = f"iam-role-{schedule.target_role_arn.split('/')[-1]}"
+            if not any(n['id'] == role_id for n in nodes):
+                nodes.append({
+                    'id': role_id,
+                    'type': 'iam_role',
+                    'label': "IAM Role",
+                    'metadata': {'arn': schedule.target_role_arn}
+                })
+            edges.append({
+                'from': schedule_id,
+                'to': role_id,
+                'relationship': 'uses_iam_role'
+            })
+
     # ── ECS NODES ─────────────────────────────────────────────────
     if infrastructure.ecs.task_role_arns:
         nodes.append({
@@ -2144,12 +2251,14 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
             encryption_type = table.get('encryption_type', 'DEFAULT')
             pitr_enabled = table.get('pitr_enabled', False)
             billing_mode = table.get('billing_mode', 'PROVISIONED')
+            protected = table.get('deletion_protection_enabled')
         else:
             table_name = table.name
             table_arn = table.arn
             encryption_type = table.encryption_type
             pitr_enabled = table.pitr_enabled
             billing_mode = table.billing_mode
+            protected = table.deletion_protection_enabled
 
         nodes.append({
             'id': id_plan.id('dynamodb_table', table_name),
@@ -2160,6 +2269,7 @@ def build_graph(infrastructure: AWSInfrastructure, id_plan: NodeIdPlan | None = 
                 'encryption_type': encryption_type,
                 'pitr_enabled': pitr_enabled,
                 'billing_mode': billing_mode,
+                'deletion_protection_enabled': protected,
             }
         })
 
@@ -2711,6 +2821,60 @@ def get_internet_reachable_set(graph: Graph) -> set:
     return visited
 
 
+class DependencyStep(NamedTuple):
+    """One node reached by ``dependency_closure``."""
+    node_id: str
+    depth: int
+    relationship: str
+    via: str
+
+
+def dependency_closure(
+    graph: Graph,
+    roots: Iterable[str],
+    *,
+    direction: str = "dependents",
+    max_depth: int = 10,
+    allowed: Optional[Set[str]] = None,
+) -> List[DependencyStep]:
+    """Breadth-first walk over ``DEPENDENCY_EDGES`` from ``roots`` (not included in the result).
+
+    ``direction="dependents"`` follows what depends on the roots (what a delete
+    of the roots would impact); ``"depends_on"`` follows what the roots depend
+    on. ``allowed`` limits which nodes may be reached. This is the one dependency
+    walk: the deletion lens and the context query both use it.
+    """
+    if direction not in {"dependents", "depends_on"}:
+        raise ValueError(f"unknown direction: {direction}")
+    adjacency: Dict[str, List[tuple[str, str]]] = {}
+    for edge in graph.edges:
+        relationship = edge.relationship.value
+        rule = DEPENDENCY_EDGES.get(relationship)
+        if rule == "source_depends_on_target":
+            dependent, dependency = edge.src, edge.dst
+        elif rule == "target_depends_on_source":
+            dependent, dependency = edge.dst, edge.src
+        else:
+            continue
+        origin, reached = (dependency, dependent) if direction == "dependents" else (dependent, dependency)
+        adjacency.setdefault(origin, []).append((reached, relationship))
+    ordered_roots = list(roots)
+    seen = set(ordered_roots)
+    queue = deque((root, 0) for root in ordered_roots)
+    steps: List[DependencyStep] = []
+    while queue:
+        source, depth = queue.popleft()
+        if depth >= max_depth:
+            continue
+        for reached, relationship in adjacency.get(source, ()):
+            if reached in seen or (allowed is not None and reached not in allowed):
+                continue
+            seen.add(reached)
+            steps.append(DependencyStep(reached, depth + 1, relationship, source))
+            queue.append((reached, depth + 1))
+    return steps
+
+
 def get_attack_path_to(graph: Graph, target_id: str) -> Optional[List[str]]:
     """
     BFS from INTERNET to target — returns shortest path as list of node IDs.
@@ -3014,7 +3178,11 @@ def find_orphaned_resources(graph: Graph) -> List[Dict[str, Any]]:
         node_type = node['type']
         if node_type == 'ebs_volume' and node.get('metadata', {}).get('state') != 'available':
             continue
-        
+        # A collected distribution serves the internet from origins that are not always modeled nodes;
+        # having no edge says nothing about it, and its price is usage based (never a guessed number).
+        if node_type == 'cloudfront_distribution' and 'origins' in node.get('metadata', {}):
+            continue
+
         # Get inbound and outbound connections
         inbound = graph.get_inbound(node_id)
         outbound = graph.get_outbound(node_id)

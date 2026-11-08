@@ -260,7 +260,7 @@ def test_L71g_c_safe_choice_only_passes_known_labels():
 PLANTED = [
     "plantedbucket-zq7", "planted-user-zq7", "planted-role-zq7", "planted-table-zq7",
     "planted-queue-zq7", "planted-topic-zq7", "planted-fn-zq7", "planted-key-zq7",
-    "123456789012",
+    "planted-sched-zq7", "planted-cf-zq7", "123456789012",
 ]
 SNEAKY = "plantedbucket-zq7 arn:aws:iam::123456789012:user/planted-user-zq7"
 
@@ -286,6 +286,17 @@ def _plant(region="us-east-1"):
     boto3.client("kms", **kw).create_key(Description="planted-key-zq7")
     ec2 = boto3.client("ec2", **kw)
     ec2.create_vpc(CidrBlock="10.77.0.0/16")
+    boto3.client("scheduler", **kw).create_schedule(
+        Name="planted-sched-zq7", ScheduleExpression="rate(1 day)", FlexibleTimeWindow={"Mode": "OFF"},
+        Target={"Arn": "arn:aws:lambda:us-east-1:123456789012:function:planted-fn-zq7",
+                "RoleArn": "arn:aws:iam::123456789012:role/planted-role-zq7"})
+    boto3.client("cloudfront", **kw).create_distribution(DistributionConfig={
+        "CallerReference": "planted-cf-zq7", "Comment": "planted-cf-zq7", "Enabled": True,
+        "Aliases": {"Quantity": 1, "Items": ["planted-cf-zq7.example.com"]},
+        "Origins": {"Quantity": 1, "Items": [{"Id": "planted-cf-zq7", "DomainName": "plantedbucket-zq7.s3.amazonaws.com",
+                                              "S3OriginConfig": {"OriginAccessIdentity": ""}}]},
+        "DefaultCacheBehavior": {"TargetOriginId": "planted-cf-zq7", "ViewerProtocolPolicy": "allow-all",
+                                 "CachePolicyId": "658327ea-f89d-4fab-a63d-7e88639e58f6"}})
 
 
 # Per-resource operations to break (all collectors use these through botocore).
@@ -298,6 +309,8 @@ FAIL_OPS = {
     "GetQueueAttributes", "DescribeTable", "DescribeContinuousBackups", "ListTagsOfResource",
     "GetTopicAttributes", "DescribeFlowLogs", "GetKeyRotationStatus", "DescribeKey", "ListResourceTags",
     "DescribeTaskDefinition", "DescribeNetworkInterfaces", "DescribeLoadBalancers",
+    "ListSchedules", "GetSchedule", "ListBackups",
+    "ListDistributions", "GetDistributionConfig", "ListCachePolicies", "ListOriginRequestPolicies", "ListOriginAccessControls",
 }
 
 

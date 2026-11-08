@@ -35,6 +35,15 @@ from app.models import (
     IAMUser,
     NATGateway,
     RolePolicy,
+    SchedulerSchedule,
+    CloudFrontDistribution,
+    DynamoDBTable,
+)
+from app.cloudfront_distribution import apply_fields as _apply_cloudfront_fields
+from app.dynamodb_table import SETTABLE_FIELDS as _DYNAMODB_FIELDS
+from app.scheduler_schedule import (
+    AWS_DEFAULTS as _SCHEDULER_DEFAULTS, SETTABLE_FIELDS as _SCHEDULER_FIELDS,
+    identity as _scheduler_identity, normalize_timestamp, split_identity as _split_schedule_id,
 )
 
 
@@ -195,6 +204,20 @@ def _strict_validate_field(resource_type: str, field: str, value: Any, annotatio
 def _validate_change_fields(change: Change) -> None:
     if change.op not in {"add", "modify"}:
         return
+    if change.resource_type == "scheduler_schedule":
+        _validate_scheduler_fields(change)
+        return
+    if change.resource_type == "dynamodb_table":
+        unknown = set(change.fields) - set(_DYNAMODB_FIELDS)
+        if unknown:
+            raise ValueError(f"dynamodb_table fields: only {', '.join(_DYNAMODB_FIELDS)} can be changed")
+        if not change.fields:
+            raise ValueError("modify needs at least one field")
+        for field, value in change.fields.items():
+            _strict_validate_field("dynamodb_table", field, value, bool)
+        return
+    if change.resource_type == "cloudfront_distribution":
+        return  # validated against botocore's DistributionConfig by app.cloudfront_distribution when applied
     if change.resource_type == "nat_gateway" and change.op == "add":
         unknown = set(change.fields) - {"subnet_id", "connectivity_type", "allocation_id", "tags"}
         if unknown:
@@ -268,6 +291,90 @@ def _validate_change_fields(change: Change) -> None:
             _strict_validate_field(change.resource_type, field, value, annotations[field])
 
 
+def _validate_scheduler_fields(change: Change) -> None:
+    """Branch fields of a schedule: AWS's own limits via the catalog, plus what the resource id carries."""
+    for field in change.fields:
+        if field in {"name", "group_name", "arn"}:
+            raise ValueError(f"scheduler_schedule.{field}: cannot be set; the schedule is identified by resource_id <group>/<name> and AWS assigns the ARN")
+    unknown = set(change.fields) - set(_SCHEDULER_FIELDS)
+    if unknown:
+        raise ValueError(f"scheduler_schedule fields: unknown schema field (allowed: {', '.join(sorted(_SCHEDULER_FIELDS))})")
+    _split_schedule_id(change.resource_id)
+    annotations = {field: info.annotation for field, info in SchedulerSchedule.model_fields.items()}
+    for field, value in change.fields.items():
+        if field in {"start_date", "end_date"}:
+            if value is not None:
+                _strict_validate_field("scheduler_schedule", field, value, str)
+                try:
+                    normalize_timestamp(value)
+                except ValueError as exc:
+                    raise ValueError(f"scheduler_schedule.{field}: expected an ISO 8601 timestamp") from exc
+        elif field in {"target_arn", "target_role_arn"} and isinstance(value, str) and not value.startswith("arn:"):
+            raise ValueError(f"scheduler_schedule.{field}: expected an ARN")
+        elif field == "unmodeled_settings":
+            if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+                raise ValueError("scheduler_schedule.unmodeled_settings: expected a list of member names")
+        else:
+            _strict_validate_field("scheduler_schedule", field, value, annotations[field])
+
+
+def _apply_scheduler_change(result: AWSInfrastructure, change: Change) -> AWSInfrastructure:
+    """Add, modify or delete one EventBridge Scheduler schedule.
+
+    Adds use the defaults the Terraform AWS provider documents for aws_scheduler_schedule (State ENABLED, timezone UTC,
+    no action after completion); AWS's own pages call them only the "system default"; a required member the change leaves out stays None (unknown), never a guess.
+    A modify sets only the fields given; an UpdateSchedule call replaces everything, and the
+    ingest layer states every member of it (see scheduler_schedule.api_fields).
+    """
+    group, name = _split_schedule_id(change.resource_id)
+    identity = _scheduler_identity(group, name)
+    if change.op == "delete":
+        _delete(result, "scheduler_schedule", identity, change.fields)
+        _sync_counts(result)
+        return recompute_derived_state(result)
+    schedules = result.scheduler.schedules
+    index = next((i for i, item in enumerate(schedules) if _scheduler_identity(item.group_name, item.name) == identity), None)
+    fields = {key: (normalize_timestamp(value) if key in {"start_date", "end_date"} and value is not None else value)
+              for key, value in change.fields.items()}
+    if change.op == "add":
+        if index is not None:
+            raise ValueError("Target already exists: scheduler_schedule")
+        data = {"name": name, "group_name": group, "has_input": False, **_SCHEDULER_DEFAULTS, **fields}
+        schedule = SchedulerSchedule.model_validate(data)
+        schedules.append(schedule)
+    else:
+        if index is None:
+            raise TargetNotFound("scheduler_schedule", identity)
+        if not fields:
+            raise ValueError("modify needs at least one field")
+        schedule = SchedulerSchedule.model_validate({**schedules[index].model_dump(), **fields})
+        schedules[index] = schedule
+    if schedule.flexible_time_window_minutes is not None and schedule.flexible_time_window_mode != "FLEXIBLE":
+        raise ValueError("scheduler_schedule.flexible_time_window_minutes: only valid when flexible_time_window_mode is FLEXIBLE")
+    return recompute_derived_state(result)
+
+
+def _apply_dynamodb_change(result: AWSInfrastructure, change: Change) -> AWSInfrastructure:
+    """Set point-in-time recovery and / or deletion protection on one collected table."""
+    tables = result.dynamodb.tables
+    index = next((i for i, item in enumerate(tables) if item.name == change.resource_id), None)
+    if index is None:
+        raise TargetNotFound("dynamodb_table", change.resource_id)
+    tables[index] = DynamoDBTable.model_validate({**tables[index].model_dump(), **change.fields})
+    _sync_dynamodb(result)
+    return recompute_derived_state(result)
+
+
+def _apply_cloudfront_change(result: AWSInfrastructure, change: Change) -> AWSInfrastructure:
+    """Modify one collected CloudFront distribution (cache behaviors, origins, aliases, enabled, ...)."""
+    distributions = result.cloudfront.distributions
+    index = next((i for i, item in enumerate(distributions) if item.id == change.resource_id), None)
+    if index is None:
+        raise TargetNotFound("cloudfront_distribution", change.resource_id)
+    distributions[index] = _apply_cloudfront_fields(distributions[index], change.fields)
+    return recompute_derived_state(result)
+
+
 _CRUD_OPERATIONS = frozenset({"add", "modify", "delete"})
 _IAM_USER_FIELDS = frozenset({"has_console_access", "access_statements", "policy_documents", "has_access_keys"})
 # CreateVolume size range per volume type (AWS EBS volume types docs).
@@ -326,6 +433,31 @@ _MUTATION_CAPABILITIES = {
     },
     "iam_instance_profile": {"model": None, "operations": frozenset({"add"}), "constraints": ()},
     "nat_gateway": {"model": NATGateway, "operations": frozenset({"add"}), "constraints": ()},
+    "scheduler_schedule": {"model": SchedulerSchedule, "operations": _CRUD_OPERATIONS, "constraints": ()},
+    # DeleteTable, UpdateContinuousBackups (PITR) and UpdateTable (deletion protection). Adding a table is not modeled.
+    "dynamodb_table": {
+        "model": DynamoDBTable,
+        "operations": frozenset({"modify", "delete"}),
+        "constraints": ({
+            "operations": ["modify"], "kind": "partial_field_replacement",
+            "fields": [], "required_fields": [],
+            "allowed_fields": list(_DYNAMODB_FIELDS),
+            "message": "Change an existing collected table: point-in-time recovery or deletion protection (booleans). "
+                       "Adding a table and every other table setting is not modeled",
+        },),
+    },
+    "cloudfront_distribution": {
+        "model": CloudFrontDistribution,
+        "operations": frozenset({"modify"}),
+        "constraints": ({
+            "operations": ["modify"], "kind": "partial_field_replacement",
+            "fields": [], "required_fields": [],
+            "allowed_fields": ["enabled", "aliases", "price_class", "web_acl_id", "default_cache_behavior", "cache_behaviors", "origins"],
+            "message": "Change an existing collected distribution: enabled, or the cache policy / origin request policy of a behavior "
+                       "(cache_behaviors keyed by path_pattern, or default_cache_behavior). Adding or deleting a distribution is not modeled; "
+                       "settings other than origins, behaviors, aliases, price class, web ACL and enabled are carried unchanged and not interpreted",
+        },),
+    },
     "iam_role_policy": {
         "model": None,
         "operations": frozenset({"modify"}),
@@ -504,16 +636,24 @@ def _collection(infra: AWSInfrastructure, resource_type: str) -> list:
         return infra.vpc.nat_gateway_details
     if resource_type == "route_table":
         return infra.vpc.route_tables
+    if resource_type == "scheduler_schedule":
+        return infra.scheduler.schedules
+    if resource_type == "dynamodb_table":
+        return infra.dynamodb.tables
+    if resource_type == "cloudfront_distribution":
+        return infra.cloudfront.distributions
     return infra.lambda_data.functions
 
 
 def _identity(resource_type: str, resource: BaseModel) -> str:
-    if resource_type in {"s3_bucket", "lambda_function"}:
+    if resource_type in {"s3_bucket", "lambda_function", "dynamodb_table"}:
         return resource.name
     if resource_type in {"iam_role", "iam_role_policy"}:
         return resource.role_arn
     if resource_type == "iam_user":
         return resource.username
+    if resource_type == "scheduler_schedule":
+        return _scheduler_identity(resource.group_name, resource.name)
     return resource.id
 
 
@@ -552,6 +692,15 @@ def _sync_counts(infra: AWSInfrastructure) -> None:
     infra.rds.instances = sorted(instance.id for instance in infra.rds.rds_instances)
     infra.s3.total_buckets = len(infra.s3.buckets)
     infra.lambda_data.function_count = len(infra.lambda_data.functions)
+
+
+def _sync_dynamodb(infra: AWSInfrastructure) -> None:
+    """Keep the collector's table summaries aligned with the table models (unknown counts as not-known-good)."""
+    tables = infra.dynamodb.tables
+    infra.dynamodb.total_tables = len(tables)
+    infra.dynamodb.tables_without_pitr = [t.name for t in tables if t.pitr_enabled is not True]
+    infra.dynamodb.tables_without_backup = [t.name for t in tables if t.has_backup is not True]
+    infra.dynamodb.tables_without_encryption = [t.name for t in tables if t.encryption_type == "DEFAULT"]
 
 
 def _sync_s3_public_buckets(infra: AWSInfrastructure) -> None:
@@ -725,6 +874,9 @@ def _delete(
             raise ValueError("Security group is still in use; model detaching or replacing it before deletion")
         if resource_type == "ebs_volume" and target.attached_to is not None and not implicit:
             raise ValueError("ebs_volume.attached_to: volume is in use")
+    if resource_type == "dynamodb_table" and target.deletion_protection_enabled is True:
+        # AWS refuses DeleteTable while protection is on; the branch must turn it off first.
+        raise ValueError("dynamodb_table.deletion_protection_enabled: deletion is protected")
     if resource_type == "rds_instance":
         if target.deletion_protection is True:
             raise ValueError("rds_instance.deletion_protection: deletion is protected")
@@ -1207,6 +1359,12 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
         profiles[arn] = dict(mapping)
         if role_arn: profiles.setdefault(arn.rsplit('/', 1)[-1], dict(mapping))
         return result
+    if resource_type == "scheduler_schedule":
+        return _apply_scheduler_change(result, change)
+    if resource_type == "dynamodb_table" and change.op == "modify":
+        return _apply_dynamodb_change(result, change)
+    if resource_type == "cloudfront_distribution":
+        return _apply_cloudfront_change(result, change)
     if resource_type == "nat_gateway" and change.op == "add":
         return _add_nat_gateway(result, change)
     if resource_type == "ebs_volume" and change.op == "add":
@@ -1222,6 +1380,8 @@ def apply_change(infra: AWSInfrastructure, change: Change) -> AWSInfrastructure:
     if change.op == "delete":
         _delete(result, resource_type, change.resource_id, change.fields)
         _sync_counts(result)
+        if resource_type == "dynamodb_table":
+            _sync_dynamodb(result)
         return recompute_derived_state(result)
     if resource_type == "network_acl":
         if change.op == "add":

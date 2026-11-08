@@ -4,6 +4,8 @@ import json
 from typing import Any
 
 from app.aws_api_ingest import _unmodeled
+from app.cloudfront_distribution import cfn_config_to_api, cfn_unmodeled
+from app.dynamodb_table import cfn_calls as dynamodb_cfn_calls
 
 
 _MAX_CHANGES = 2000
@@ -69,7 +71,7 @@ def _properties(doc: dict[str, Any] | None) -> dict[str, Any] | None:
     return properties if isinstance(properties, dict) else None
 
 
-def _normalize_rule(rule: dict[str, Any]) -> dict[str, Any]:
+def _normalize_rule(rule: dict[str, Any], egress: bool = False) -> dict[str, Any]:
     result: dict[str, Any] = {}
     protocol = rule.get("IpProtocol", rule.get("Protocol"))
     if protocol is not None:
@@ -84,32 +86,68 @@ def _normalize_rule(rule: dict[str, Any]) -> dict[str, Any]:
         result["IpRanges"] = [{"CidrIp": rule["CidrIp"]}]
     elif "CidrIpv6" in rule:
         result["Ipv6Ranges"] = [{"CidrIpv6": rule["CidrIpv6"]}]
+    elif egress and "DestinationSecurityGroupId" in rule:
+        result["UserIdGroupPairs"] = [{"GroupId": rule["DestinationSecurityGroupId"]}]
+    elif egress and "DestinationPrefixListId" in rule:
+        result["PrefixListIds"] = [{"PrefixListId": rule["DestinationPrefixListId"]}]
     elif "SourceSecurityGroupId" in rule:
         result["UserIdGroupPairs"] = [{"GroupId": rule["SourceSecurityGroupId"]}]
     return result
 
 
-def _sg_calls(resource: dict[str, Any], before: dict[str, Any] | None, after: dict[str, Any] | None, address: str) -> list[dict[str, Any]]:
-    old = (_properties(before) or {}).get("SecurityGroupIngress")
-    new = (_properties(after) or {}).get("SecurityGroupIngress")
-    if not isinstance(old, list) or not isinstance(new, list):
-        raise _invalid()
-    old_rules = {_rule_key(rule): rule for rule in old if isinstance(rule, dict)}
-    new_rules = {_rule_key(rule): rule for rule in new if isinstance(rule, dict)}
+_SG_RULE_PROPERTIES = {"SecurityGroupIngress": ("Ingress", False), "SecurityGroupEgress": ("Egress", True)}
+
+
+def _sg_rule_calls(resource: dict[str, Any], old: list, new: list, kind: str, egress: bool) -> list[dict[str, Any]]:
+    old_rules = {_rule_key(rule, egress): rule for rule in old if isinstance(rule, dict)}
+    new_rules = {_rule_key(rule, egress): rule for rule in new if isinstance(rule, dict)}
     calls = []
     for key, rule in new_rules.items():
         if key not in old_rules:
-            calls.append({"service": "ec2", "operation": "AuthorizeSecurityGroupIngress",
-                          "parameters": {"GroupId": resource.get("PhysicalResourceId"), "IpPermissions": [_normalize_rule(rule)]}})
+            calls.append({"service": "ec2", "operation": f"AuthorizeSecurityGroup{kind}",
+                          "parameters": {"GroupId": resource.get("PhysicalResourceId"), "IpPermissions": [_normalize_rule(rule, egress)]}})
     for key, rule in old_rules.items():
         if key not in new_rules:
-            calls.append({"service": "ec2", "operation": "RevokeSecurityGroupIngress",
-                          "parameters": {"GroupId": resource.get("PhysicalResourceId"), "IpPermissions": [_normalize_rule(rule)]}})
+            calls.append({"service": "ec2", "operation": f"RevokeSecurityGroup{kind}",
+                          "parameters": {"GroupId": resource.get("PhysicalResourceId"), "IpPermissions": [_normalize_rule(rule, egress)]}})
     return calls
 
 
-def _rule_key(rule: dict[str, Any]) -> str:
-    return json.dumps(_normalize_rule(rule), sort_keys=True, separators=(",", ":"))
+def _sg_calls(resource: dict[str, Any], before: dict[str, Any] | None, after: dict[str, Any] | None, address: str
+              ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(calls, unknowns) for a modified security group: ingress and egress rules are diffed; every other changed property is a named unknown.
+
+    A group with no SecurityGroupEgress property keeps a default egress rule the change set does not state, so adding or
+    removing the whole property is unknown, never an empty or allow-all list.
+    """
+    old_props, new_props = _properties(before) or {}, _properties(after) or {}
+    calls: list[dict[str, Any]] = []
+    extras: list[dict[str, Any]] = []
+    for prop, (kind, egress) in _SG_RULE_PROPERTIES.items():
+        old, new = old_props.get(prop), new_props.get(prop)
+        if prop not in old_props and prop not in new_props:
+            continue
+        if isinstance(old, list) and isinstance(new, list):
+            calls.extend(_sg_rule_calls(resource, old, new, kind, egress))
+        elif egress and (old is None) != (new is None) and isinstance(old if new is None else new, list):
+            result = _extra(address, "AWS::EC2::SecurityGroup", "UpdateSecurityGroup")
+            result["field"] = prop
+            result["detail"] = (f"{prop} was {'removed' if new is None else 'added'}; without it the group keeps a default egress rule "
+                                "that the change set does not state, so the resulting egress is unknown")
+            extras.append(result)
+        else:
+            raise _invalid()
+    for prop in sorted((set(old_props) | set(new_props)) - set(_SG_RULE_PROPERTIES)):
+        if old_props.get(prop) != new_props.get(prop):
+            result = _extra(address, "AWS::EC2::SecurityGroup", "UpdateSecurityGroup")
+            result["field"] = prop
+            result["detail"] = f"{prop} changed; Emfirge does not model this security group property, so its effect is unknown"
+            extras.append(result)
+    return calls, extras
+
+
+def _rule_key(rule: dict[str, Any], egress: bool = False) -> str:
+    return json.dumps(_normalize_rule(rule, egress), sort_keys=True, separators=(",", ":"))
 
 
 def _removal(resource: dict[str, Any], address: str, policy_action: str | None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -139,7 +177,8 @@ def _removal(resource: dict[str, Any], address: str, policy_action: str | None) 
                   ("ec2", "SecurityGroup"): ("ec2", "DeleteSecurityGroup", "GroupId", False),
                   ("s3", "Bucket"): ("s3", "DeleteBucket", "Bucket", False),
                   ("lambda", "Function"): ("lambda", "DeleteFunction", "FunctionName", False),
-                  ("iam", "Role"): ("iam", "DeleteRole", "RoleName", False)}
+                  ("iam", "Role"): ("iam", "DeleteRole", "RoleName", False),
+                  ("dynamodb", "Table"): ("dynamodb", "DeleteTable", "TableName", False)}
     mapped = operations.get((service, suffix))
     if mapped and isinstance(physical, str) and physical:
         svc, operation, key, many = mapped
@@ -152,6 +191,54 @@ def _resolved(value: Any) -> Any:
     if isinstance(value, (str, int, bool)) or value is None:
         return value
     return None
+
+
+_SCHEDULER_OPERATIONS = {"Add": "CreateSchedule", "Modify": "UpdateSchedule", "Remove": "DeleteSchedule"}
+
+
+def _scheduler_call(resource: dict[str, Any], action: str, physical: Any) -> dict[str, Any] | None:
+    """AWS::Scheduler::Schedule add / update / remove as the API call it stands for (properties are the API's members)."""
+    before = _properties(_context(resource, "BeforeContext")) or {}
+    after = _properties(_context(resource, "AfterContext")) or {}
+    source = before if action == "Remove" else after
+    name = source.get("Name", physical if action != "Add" else None)
+    group = source.get("GroupName")
+    if not isinstance(name, str) or not name or (group is not None and not isinstance(group, str)):
+        return None
+    params: dict[str, Any] = {"Name": name}
+    if group:
+        params["GroupName"] = group
+    if action == "Remove":
+        return {"service": "scheduler", "operation": "DeleteSchedule", "parameters": params}
+    params.update({key: value for key, value in after.items() if key not in {"Name", "GroupName"}})
+    window, target = params.get("FlexibleTimeWindow"), params.get("Target")
+    if (not isinstance(params.get("ScheduleExpression"), str) or not isinstance(window, dict) or not isinstance(window.get("Mode"), str)
+            or not isinstance(target, dict) or not isinstance(target.get("Arn"), str) or not isinstance(target.get("RoleArn"), str)
+            or not all(isinstance(params.get(key), str) for key in ("State", "StartDate", "EndDate", "ScheduleExpressionTimezone", "ActionAfterCompletion") if key in params)):
+        return None
+    minutes = window.get("MaximumWindowInMinutes")
+    if isinstance(minutes, str) and minutes.isdigit():
+        params["FlexibleTimeWindow"] = {**window, "MaximumWindowInMinutes": int(minutes)}
+    return {"service": "scheduler", "operation": _SCHEDULER_OPERATIONS[action], "parameters": params}
+
+
+def _cloudfront_call(resource: dict[str, Any], physical: Any) -> dict[str, Any] | None:
+    """AWS::CloudFront::Distribution update as a partial UpdateDistribution call (only the modeled members, converted to the API's shape)."""
+    before = (_properties(_context(resource, "BeforeContext")) or {}).get("DistributionConfig")
+    after = (_properties(_context(resource, "AfterContext")) or {}).get("DistributionConfig")
+    if not isinstance(physical, str) or not physical or not isinstance(after, dict) or not isinstance(before, dict):
+        return None
+    return {"service": "cloudfront", "operation": "UpdateDistribution", "partial": True,
+            "unmodeled": cfn_unmodeled(before, after),
+            "parameters": {"Id": physical, "DistributionConfig": cfn_config_to_api(after)}}
+
+
+def _removed_extra(address: str, resource_type: str, operation: str, prop: str) -> dict[str, Any]:
+    """An unknown for a property the change set removed: CloudFormation resets it to a default Emfirge does not state."""
+    result = _extra(address, resource_type, operation)
+    result["detail"] = f"{prop} was removed; CloudFormation resets it to its default, which is not known here, so the resulting setting is unknown"
+    result["field"] = prop
+    return result
 
 
 def _nacl_entry_call(resource: dict[str, Any], properties: dict[str, Any], operation: str) -> dict[str, Any] | None:
@@ -241,6 +328,40 @@ def convert_change_set(doc: Any, nacls: Any = None) -> tuple[dict[str, Any], lis
                 else: extras.append(_extra(address, typ, "ReplaceNetworkAclAssociation"))
             else: extras.append(_extra(address, typ, "ReplaceNetworkAclAssociation"))
             continue
+        if (typ == "AWS::Scheduler::Schedule" and action in _SCHEDULER_OPERATIONS and policy not in {"Retain", "ReplaceAndRetain"}
+                and not (action == "Modify" and resource.get("Replacement") in {"True", "Conditional"})):
+            call = _scheduler_call(resource, action, physical)
+            if call is None:
+                extras.append(_extra(address, typ, "MissingPropertyValues"))
+            else:
+                calls.append(call)
+            continue
+        if (typ == "AWS::DynamoDB::Table" and action == "Modify" and policy not in {"Retain", "ReplaceAndRetain"}
+                and resource.get("Replacement") not in {"True", "Conditional"}):
+            before_props, after_props = _properties(_context(resource, "BeforeContext")), _properties(_context(resource, "AfterContext"))
+            if not isinstance(before_props, dict) or not isinstance(after_props, dict):
+                extras.append(_extra(address, typ, "MissingPropertyValues"))
+                continue
+            table_calls, resolved, removed_unknown = dynamodb_cfn_calls(action, physical, before_props, after_props)
+            if not resolved:
+                extras.append(_extra(address, typ, "MissingPropertyValues"))
+                continue
+            calls.extend(table_calls)
+            extras.extend(_removed_extra(address, typ, "UpdateTable", name) for name in removed_unknown)
+            # every other property that differs is a change Emfirge does not model
+            others = {key for key in set(before_props) | set(after_props)
+                      if key not in {"PointInTimeRecoverySpecification", "DeletionProtectionEnabled"} and before_props.get(key) != after_props.get(key)}
+            if others:
+                extras.append(_extra(address, typ, "UpdateTable"))
+            continue
+        if (typ == "AWS::CloudFront::Distribution" and action == "Modify" and policy not in {"Retain", "ReplaceAndRetain"}
+                and resource.get("Replacement") not in {"True", "Conditional"}):
+            call = _cloudfront_call(resource, physical)
+            if call is None:
+                extras.append(_extra(address, typ, "MissingPropertyValues"))
+            else:
+                calls.append(call)
+            continue
         if action == "Remove":
             removal_calls, removal_extras = _removal(resource, address, policy)
             calls.extend(removal_calls)
@@ -262,13 +383,20 @@ def convert_change_set(doc: Any, nacls: Any = None) -> tuple[dict[str, Any], lis
                 if before is None or after is None:
                     extras.append(_extra(address, typ, "MissingPropertyValues"))
                 else:
-                    calls.extend(_sg_calls(resource, before, after, address))
+                    sg_calls, sg_extras = _sg_calls(resource, before, after, address)
+                    calls.extend(sg_calls)
+                    extras.extend(sg_extras)
             elif typ == "AWS::RDS::DBInstance":
                 if before is None or after is None or _properties(before) is None or _properties(after) is None:
                     extras.append(_extra(address, typ, "MissingPropertyValues"))
                 else:
                     bp, ap = _properties(before), _properties(after)
                     params = {"DBInstanceIdentifier": physical}
+                    # A removed property is reset by CloudFormation to a default the resource page does not
+                    # state for these four (https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-rds-dbinstance.html), so it is unknown.
+                    for key in ("DeletionProtection", "BackupRetentionPeriod", "PubliclyAccessible", "VPCSecurityGroups"):
+                        if key in bp and key not in ap:
+                            extras.append(_removed_extra(address, typ, "ModifyDBInstance", key))
                     for key in ("DeletionProtection", "BackupRetentionPeriod", "PubliclyAccessible", "VPCSecurityGroups"):
                         if bp.get(key) != ap.get(key) and key in ap:
                             if key == "DeletionProtection" and isinstance(ap[key], str):

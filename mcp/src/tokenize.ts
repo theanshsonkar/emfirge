@@ -66,6 +66,10 @@ function canonicalize(real: string): string {
   if (match) return match[1].split("/")[0];
   match = real.match(/^arn:aws:lambda:[\w-]+:\d+:function:([^:]+)/);
   if (match) return match[1];
+  match = real.match(/^arn:aws:dynamodb:[\w-]+:\d+:table\/([^/]+)/);
+  if (match) return match[1];
+  match = real.match(/^arn:aws:(?:sqs|sns):[\w-]+:\d+:([^:]+)$/);
+  if (match) return match[1];
   match = real.match(/^arn:aws:ec2:[\w-]+:\d+:(?:instance|security-group|subnet|vpc)\/(.+)$/);
   if (match) return match[1];
   return real;
@@ -103,6 +107,12 @@ const PATTERNS: Array<[RegExp, string, boolean]> = [
   [/^arn:aws:rds:[\w-]+:\d+:db:.+$/, "RDS", true],
   [/^arn:aws:s3:::.+$/, "S3", true],
   [/^arn:aws:kms:[\w-]+:\d+:key\/.+$/, "KMS", true],
+  [/^arn:aws:dynamodb:[\w-]+:\d+:table\/.+$/, "DYNAMODB", true],
+  [/^arn:aws:sqs:[\w-]+:\d+:.+$/, "SQS", true],
+  [/^arn:aws:sns:[\w-]+:\d+:.+$/, "SNS", true],
+  [/^arn:aws:scheduler:[\w-]+:\d+:schedule(?:-group)?\/.+$/, "SCHEDULER", true],
+  [/^arn:aws:cloudfront::\d+:.+$/, "CLOUDFRONT", true],
+  [/^arn:aws:wafv2:[\w-]+:\d+:.+$/, "WAFV2", true],
 
   [/^sg-[a-f0-9]+$/i, "SG", true],
   [/^i-[a-f0-9]+$/i, "EC2", true],
@@ -256,6 +266,12 @@ const EMBEDDED_PATTERNS: Array<[RegExp, string, boolean]> = [
   // bucket ARNs leak when they appeared inside narrative captions rather than
   // as a standalone field value.
   [/arn:aws:s3:::[\w.\-/]+/g, "S3", true],
+  [/arn:aws:dynamodb:[\w-]+:\d+:table\/[\w+=,.@\-/]+/g, "DYNAMODB", true],
+  [/arn:aws:sqs:[\w-]+:\d+:[\w+=,.@\-]+/g, "SQS", true],
+  [/arn:aws:sns:[\w-]+:\d+:[\w+=,.@\-]+/g, "SNS", true],
+  [/arn:aws:scheduler:[\w-]+:\d+:schedule(?:-group)?\/[\w+=,.@\-/]+/g, "SCHEDULER", true],
+  [/arn:aws:cloudfront::\d+:[\w+=,.@\-/]+/g, "CLOUDFRONT", true],
+  [/arn:aws:wafv2:[\w-]+:\d+:[\w+=,.@\-/]+/g, "WAFV2", true],
 
   // Resource IDs: word boundary on both sides + the AWS prefix is enough
   [/\bsg-[a-f0-9]{8,}\b/gi, "SG", true],
@@ -269,6 +285,12 @@ const EMBEDDED_PATTERNS: Array<[RegExp, string, boolean]> = [
   [/\bigw-[a-f0-9]{8,}\b/gi, "IGW", false],
   [/\bnat-[a-f0-9]{8,}\b/gi, "NAT", false],
   [/\bacl-[a-f0-9]{8,}\b/gi, "ACL", false],
+
+  // A bare 12-digit AWS account id standing alone. Not part of a longer digit
+  // run (timestamps, epoch ms), not glued to a word/hyphen/dot (versions, sg-...),
+  // and not a decimal fraction. A trailing sentence period is fine. Runs last so
+  // account ids inside ARNs are already consumed by the ARN patterns above.
+  [/(?<![\w.-])\d{12}(?![\w-]|\.\d)/g, "ACCOUNT", true],
 ];
 
 // Scan a free-text string for AWS IDs anywhere inside it and replace
@@ -294,6 +316,9 @@ function redactEmbedded(s: string): string {
   const knownNames = Object.keys(store.realToToken)
     .filter((name) => {
       if (name.length < 2 || isNeverSensitive(name)) return false;
+      // Short tag values ("web", "dev") would garble ordinary words in prose;
+      // the tag field itself is masked regardless.
+      if (name.length < 4 && store.realToToken[name]?.startsWith("TAG_")) return false;
       // Skip values that are themselves AWS-pattern matches; those are
       // already handled by EMBEDDED_PATTERNS above.
       for (const [re] of PATTERNS) {
@@ -339,7 +364,10 @@ const NEVER_SENSITIVE_PATTERNS = [
   /^(?:ec2|s3|iam|rds|lambda|vpc|sg|sqs|sns|kms|cloudtrail|cloudwatch|guardduty|waf|ecs|elb|alb|api-gateway|secretsmanager|config)$/i,
   /^(?:instance|security[-_ ]?group|subnet|vpc|bucket|role|user|policy|function|database|volume|network[-_ ]?interface|route[-_ ]?table)$/i,
   /^(?:\d{1,5})$/,
+  /^\*$/, // the default CloudFront behavior's path pattern
   /^(?:\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/,
+  // IPv6 CIDR ("::/0"): a range, like the IPv4 one above, not a host identifier
+  /^(?=[0-9a-f:]*:)[0-9a-f:]+\/\d{1,3}$/i,
 ];
 
 function isNeverSensitive(value: string, key = ""): boolean {
@@ -370,6 +398,18 @@ const SENSITIVE_KEYS = new Set([
   "public_ip",
   "private_ip",
   "ip_address",
+  // CloudFront / Scheduler fields (also the field names under a branch diff's values)
+  "aliases",
+  "domain_name",
+  "web_acl_id",
+  "target_arn",
+  "target_role_arn",
+  "origin_access_control_id",
+  "cache_policy_id",
+  "origin_request_policy_id",
+  "target_origin_id",
+  "path_pattern",
+  "s3_bucket",
 ]);
 
 // keys whose values are graph identifiers — often friendly / label-style node
@@ -386,6 +426,7 @@ const IDENTIFIER_KEYS = new Set([
   "attack_path",
   "path",
   "resource_ids",
+  "recovery_resource_ids",
   "from",
   "to",
   "resources",
@@ -473,11 +514,88 @@ function collectNames(obj: unknown, parentKey = ""): void {
   }
 
   if (typeof obj === "object") {
+    if (tagPairValueKey(obj as Record<string, unknown>, false) !== undefined) {
+      collectTagValues(obj); // bare AWS {Key, Value} tag item
+      return;
+    }
     for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-      const childKey = k === "tags" || k === "Tags" ? "name" : k;
-      collectNames(v, childKey);
+      if (isTagKey(k)) {
+        collectTagValues(v);
+        continue;
+      }
+      collectNames(v, k);
     }
   }
+}
+
+
+// ---------------------------------------------------------------------------
+// Resource tags. Tag KEYS stay readable (owner, env, Name, aws:...); every tag
+// VALUE is replaced by a token in strict and balanced mode, whatever it looks
+// like -- owners, teams, cost centres and project names are the point of tags.
+// Shapes handled: {k: v} maps, AWS [{Key, Value}] / [{key, value}] lists, and
+// "k=v" strings, under any tag-ish key; plus bare AWS {Key, Value} pairs.
+// The same value always gets the same token, and the token round-trips through
+// expandTokens, so an agent can send it back in a tag-setting branch change.
+// ---------------------------------------------------------------------------
+const TAG_CONTAINER_KEYS = new Set(["tags", "tag", "tagset", "taglist", "resourcetags", "usertags"]);
+
+function isTagKey(key: string): boolean {
+  return TAG_CONTAINER_KEYS.has(key.toLowerCase().replace(/[-_]/g, ""));
+}
+
+function tagValueToken(real: string): string {
+  if (real === "") return real;
+  if (TOKEN_PATTERN.test(real) && store.tokenToReal[real] !== undefined) return real; // already issued
+  const whole = tokenizeWholeId(real); // typed token when it is an id, so it matches the rest of the output
+  if (whole !== null && whole !== real) return whole;
+  return tokenize(real, "TAG");
+}
+
+const TAG_PAIR_EXTRAS = new Set(["propagate_at_launch", "PropagateAtLaunch", "ResourceId", "ResourceType"]);
+
+// An AWS tag item: Key + Value (any one casing) and nothing but ASG extras.
+function tagPairValueKey(o: Record<string, unknown>, allowLower: boolean): string | undefined {
+  const upper = "Key" in o && "Value" in o;
+  const lower = allowLower && "key" in o && "value" in o;
+  if (!upper && !lower) return undefined;
+  const keyName = upper ? "Key" : "key";
+  const valueName = upper ? "Value" : "value";
+  if (!Object.keys(o).every((k) => k === keyName || k === valueName || TAG_PAIR_EXTRAS.has(k))) return undefined;
+  return valueName;
+}
+
+function maskTagLeaf(v: unknown): unknown {
+  if (v == null) return v;
+  if (typeof v === "string") return tagValueToken(v);
+  if (typeof v === "number" || typeof v === "boolean") return tagValueToken(String(v));
+  return maskTagValues(v);
+}
+
+// `v` is the content of a tags container (or a nested piece of one).
+function maskTagValues(v: unknown): unknown {
+  if (v == null) return v;
+  if (typeof v === "string") {
+    const eq = v.indexOf("=");
+    return eq > 0 ? `${v.slice(0, eq + 1)}${tagValueToken(v.slice(eq + 1))}` : tagValueToken(v);
+  }
+  if (Array.isArray(v)) return v.map(maskTagValues);
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    const valueKey = tagPairValueKey(o, true);
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(o)) {
+      out[k] = valueKey !== undefined ? (k === valueKey ? maskTagLeaf(val) : val) : maskTagLeaf(val);
+    }
+    return out;
+  }
+  return maskTagLeaf(v);
+}
+
+// Seed tag values into the dictionary so prose elsewhere in the same response
+// ("owned by acme-payroll") is scrubbed too. Done by masking and discarding.
+function collectTagValues(v: unknown): void {
+  maskTagValues(v);
 }
 
 // Query parameters of a SigV4 presigned URL that carry credential material.
@@ -519,6 +637,31 @@ export function scrubPresignedUrls(value: string): string {
   });
 }
 
+// A branch diff's `values`: { "base.<field>": { before, after } }. The wrapper
+// keys (before/after) say nothing about the value, so the FIELD name decides how
+// it is masked (aliases, web_acl_id, target_arn, ...). Nested objects (origins,
+// behaviors) are then walked with their own keys as usual.
+function isDiffValues(v: unknown): v is Record<string, Record<string, unknown>> {
+  if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
+  const entries = Object.values(v as Record<string, unknown>);
+  return entries.length > 0 && entries.every(
+    (e) => e !== null && typeof e === "object" && !Array.isArray(e) && "before" in e && "after" in e,
+  );
+}
+
+function redactDiffValues(v: Record<string, Record<string, unknown>>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, change] of Object.entries(v)) {
+    const field = key.slice(key.lastIndexOf(".") + 1);
+    const masked: Record<string, unknown> = {};
+    for (const [side, value] of Object.entries(change)) {
+      masked[side] = redactDeepInner(value, side === "before" || side === "after" ? field : side);
+    }
+    out[key] = masked;
+  }
+  return out;
+}
+
 function redactDeepInner(obj: unknown, parentKey = ""): unknown {
   if (MODE === "off") return obj;
   if (obj == null) return obj;
@@ -558,10 +701,15 @@ function redactDeepInner(obj: unknown, parentKey = ""): unknown {
   }
 
   if (typeof obj === "object") {
+    if (tagPairValueKey(obj as Record<string, unknown>, false) !== undefined) {
+      return maskTagValues(obj); // bare AWS {Key, Value} tag item
+    }
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
-      if (k === "tags" || k === "Tags") {
-        out[k] = redactDeepInner(v, "name");
+      if (isTagKey(k)) {
+        out[k] = maskTagValues(v);
+      } else if (k === "values" && isDiffValues(v)) {
+        out[k] = redactDiffValues(v);
       } else {
         out[k] = redactDeepInner(v, k);
       }

@@ -6,6 +6,12 @@
     "apis_without_waf": [],
     "total_apis": 0
   },
+  "cloudfront": {
+    "cache_policies": [],
+    "distributions": [],
+    "origin_access_controls": [],
+    "origin_request_policies": []
+  },
   "cloudtrail": {
     "has_log_file_validation": false,
     "is_enabled": false,
@@ -250,6 +256,9 @@
     "public_buckets": [],
     "total_buckets": 1,
     "unencrypted_buckets": []
+  },
+  "scheduler": {
+    "schedules": []
   },
   "secrets_manager": {
     "secrets_without_rotation": [],

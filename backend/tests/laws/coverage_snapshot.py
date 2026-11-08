@@ -7,7 +7,8 @@ from app.models import (
     NetworkACL, NACLEntry, VPCPeeringConnection, TransitGatewayAttachment,
     VPNGateway, InterfaceEndpoint, ECSData, APIGatewayData,
     APIGatewayInstance, ElastiCacheData, ElastiCacheCluster, SQSData,
-    SQSQueue, DynamoDBData, DynamoDBTable,
+    SQSQueue, DynamoDBData, DynamoDBTable, SchedulerData, SchedulerSchedule,
+    CloudFrontData, CloudFrontDistribution, CloudFrontCacheBehavior, CloudFrontOrigin, CloudFrontPolicy,
 )
 
 
@@ -33,7 +34,7 @@ def build_coverage_infrastructure() -> AWSInfrastructure:
             ebs_volumes=[EBSVolume(id="vol-0cov0001", size_gb=8, volume_type="gp3", availability_zone="us-east-1a", attached_to=INSTANCE_ID)],
             elastic_ips=[ElasticIP(allocation_id="eipalloc-0cov0001", public_ip="198.51.100.1", is_attached=True)],
         ),
-        s3=S3Data(buckets=[S3Bucket(name=BUCKET, has_cloudfront=True, policy="allow")]),
+        s3=S3Data(buckets=[S3Bucket(name=BUCKET, has_cloudfront=True, policy="allow"), S3Bucket(name="coverage-cdn-bucket")]),
         rds=RDSData(rds_instances=[RDSInstance(id="db-0cov0001", sg_ids=[SG_ID], subnet_id=SUBNET_ID, encrypted=True)]),
         lambda_data=LambdaData(functions=[LambdaFunction(name="coverage-lambda", role_arn=ROLE_ARN, vpc_id=VPC_ID, subnet_ids=[SUBNET_ID], sg_ids=[SG_ID], secret_refs=["secret-0cov0001"])]),
         secrets_manager=SecretsManagerData(),
@@ -58,5 +59,14 @@ def build_coverage_infrastructure() -> AWSInfrastructure:
         api_gateway=APIGatewayData(apis=[APIGatewayInstance(id="api-0cov0001", name="coverage", api_type="REST", endpoint_type="REGIONAL", auth_type="IAM")]),
         elasticache=ElastiCacheData(clusters=[ElastiCacheCluster(id="cache-0cov0001", engine="redis", node_type="cache.t3.micro", vpc_id=VPC_ID, sg_ids=[SG_ID])]),
         sqs=SQSData(queues=[SQSQueue(url="https://sqs.us-east-1.amazonaws.com/000000000000/coverage-queue", arn="arn:aws:sqs:us-east-1:000000000000:coverage-queue", name="coverage-queue")]),
+        scheduler=SchedulerData(schedules=[SchedulerSchedule(
+            name="coverage-schedule", state="ENABLED", schedule_expression="rate(1 day)", flexible_time_window_mode="OFF",
+            target_arn=f"arn:aws:lambda:{REGION}:{ACCOUNT}:function:coverage-lambda", target_role_arn=ROLE_ARN, has_input=False)]),
         dynamodb=DynamoDBData(tables=[DynamoDBTable(name="coverage", arn="arn:aws:dynamodb:us-east-1:000000000000:table/coverage", pitr_enabled=True)]),
+        cloudfront=CloudFrontData(
+            distributions=[CloudFrontDistribution(
+                id="ECOVERAGE0001", enabled=True,
+                default_cache_behavior=CloudFrontCacheBehavior(path_pattern="*", target_origin_id="cdn", cache_policy_id="cov-cache-policy"),
+                origins=[CloudFrontOrigin(id="cdn", domain_name="coverage-cdn-bucket.s3.amazonaws.com", origin_type="s3", origin_access_control_id="EOAC0001", s3_bucket="coverage-cdn-bucket")])],
+            cache_policies=[CloudFrontPolicy(id="cov-cache-policy", type="custom", headers_behavior="none", forwards_host=False)]),
     )

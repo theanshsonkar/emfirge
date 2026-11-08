@@ -64,3 +64,6 @@ mcp/*.tgz
 backend/accuracy_report.json
 .local/
 /.scratch/
+# CLI package build
+cli/dist/
+cli/node_modules/

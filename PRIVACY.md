@@ -1,6 +1,6 @@
 # Privacy & Data Handling
 
-> Last updated: 2026-11-07
+> Last updated: 2026-11-08
 
 This page says what Emfirge stores, who sees your data, and how to delete it.
 It only says what the code does today. Where we have not built something yet,
@@ -41,6 +41,29 @@ keeps **names only**:
   never keeps the values.
 - EC2 user data: it keeps one yes/no flag, "looks like it has secrets". It
   never keeps the user data text.
+- CloudFront: for each distribution it keeps the ID, ARN, domain name,
+  aliases, status, price class, WAF web ACL ID, tags, ETag, and each origin
+  (ID, domain name, origin access control ID) and cache behavior (path
+  pattern, target origin, cache and origin request policy IDs, methods). It
+  also keeps the cache policies, origin request policies (names and header
+  rules) and origin access controls. **Origin custom header values are
+  withheld**: they are never stored, only the fact that custom headers exist
+  (`Origins.CustomHeaders`). Other distribution settings that Emfirge does not
+  model are kept as AWS reports them, so they can be handed back exactly.
+- EventBridge Scheduler: for each schedule it keeps the name, group, ARN,
+  state, schedule expression and time zone, flexible window, target ARN, target
+  role ARN, start and end dates, and the after-completion action. **The
+  target `Input` payload is withheld**: it is never stored, only a yes/no flag
+  "has input". Other members it does not model (Description, retry policy and
+  so on) are stored as names only.
+- DynamoDB: it keeps each table's name, ARN, encryption type, billing mode,
+  point-in-time recovery and backup flags, deletion protection flag and the
+  approximate item count AWS reports. It never reads or keeps table items.
+
+This metadata is saved like the rest of a scan (the `analysis_logs` report,
+the S3 report and the base snapshot of a branch, see the table below), with
+real names, ARNs and AWS account IDs. The MCP hides them from your AI host
+(see "Privacy modes in the MCP").
 
 ---
 
@@ -179,9 +202,17 @@ What is on your disk:         SG_001  -> sg-0a1b2c3d4e5f6789
 
 | Mode | What is replaced with tokens |
 |---|---|
-| `strict` (default) | Everything the MCP recognises as an identifier: ARNs, instance, security group, EIP, volume, subnet, VPC, network interface, route table, gateway and ACL IDs, IPs, account IDs, and bucket, role, user, function and secret names |
+| `strict` (default) | Everything the MCP recognises as an identifier: ARNs (including DynamoDB, SQS, SNS, Scheduler, CloudFront and WAF), instance, security group, EIP, volume, subnet, VPC, network interface, route table, gateway and ACL IDs, IPs, account IDs (also when one stands alone in text), and bucket, role, user, function and secret names. CloudFront aliases, origin domain names, path patterns and policy and access control IDs, and Scheduler target ARNs, are masked too, including the before and after values in a branch diff |
 | `balanced` | The same, except generic network topology IDs (volume, subnet, VPC, network interface, route table, internet gateway, NAT gateway and ACL IDs) stay as they are |
 | `off` | Nothing. Your own resource names pass through. Presigned download links still have their credentials removed |
+
+Resource tag values are hidden in `strict` and `balanced` mode, in every tool.
+Tag keys such as `owner`, `env` and `Name` stay readable, and every tag value
+(including values of `aws:` tags) becomes a `TAG_` token, so
+`{"owner": "acme-payroll"}` reaches your AI as `{"owner": "TAG_001"}`. The same
+value always gets the same token. If you set tags through a branch change and
+pass a token back, the MCP swaps the real value in locally. In `off` mode tag
+values pass through like your other resource names.
 
 The token map is the file `~/.emfirge/tokens.json` on your machine. The MCP
 never uploads it. When you ask about `SG_001`, the MCP swaps the real ID back

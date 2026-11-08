@@ -6,7 +6,11 @@ import json
 from app.mutations import Change
 from app.aws_collector import build_security_group_rule
 from app.tags import tag_map
+from app.scheduler_schedule import DEFAULT_GROUP, api_fields as scheduler_api_fields, split_identity as scheduler_split_identity, unsupported_members as scheduler_unsupported
+from app.cloudfront_distribution import config_to_fields as cloudfront_fields
+from app.dynamodb_table import api_fields as dynamodb_api_fields, table_name as dynamodb_table_name
 import copy
+import functools
 import re
 
 
@@ -16,6 +20,30 @@ _RISKY_PUT = re.compile(r"^Put[A-Za-z0-9]*(Policy|Acl)$")
 _READ_ONLY_PREFIXES = ("Describe", "List", "Get", "Head")
 _INVALID_MESSAGE = "Invalid AWS API calls document"
 _GLOBAL_SERVICES = frozenset({"iam", "route53", "cloudfront", "s3"})
+
+
+@functools.lru_cache(maxsize=1)
+def _service_aliases() -> dict[str, str]:
+    """Endpoint prefix -> botocore service name, from botocore's own service models.
+
+    Only unambiguous prefixes are kept, and a name that already is a botocore
+    service name always means itself.
+    """
+    import botocore.session
+    session = botocore.session.get_session()
+    names = set(session.get_available_services())
+    seen: dict[str, set[str]] = {}
+    for name in names:
+        prefix = session.get_service_model(name).endpoint_prefix
+        if prefix and prefix not in names:
+            seen.setdefault(prefix.lower(), set()).add(name)
+    return {prefix: next(iter(owners)) for prefix, owners in seen.items() if len(owners) == 1}
+
+
+def canonical_service(service: str) -> str:
+    """The botocore service name for a service written as its name or its endpoint prefix (else unchanged)."""
+    lowered = service.lower()
+    return _service_aliases().get(lowered, lowered)
 
 
 def validate_change_regions(
@@ -275,7 +303,7 @@ def translate_api_calls(
         address = f"calls[{index}] {service}.{operation}"
         if parameters.get("DryRun") is True or operation.startswith(_READ_ONLY_PREFIXES):
             continue
-        lower_service = service.lower()
+        lower_service = canonical_service(service)
         if _sharing_unseen(lower_service, operation, parameters):
             item = _unmodeled(address, lower_service, operation)
             item["unseen"] = True
@@ -481,6 +509,67 @@ def translate_api_calls(
             if fields:
                 changes.append(Change(op="modify", resource_type="rds_instance", resource_id=parameters["DBInstanceIdentifier"], fields=fields))
                 addresses.append(address)
+            continue
+        if lower_service == "scheduler" and operation in {"CreateSchedule", "UpdateSchedule", "DeleteSchedule"}:
+            name, group = parameters.get("Name"), parameters.get("GroupName", DEFAULT_GROUP)
+            try:
+                if not _valid_string(name) or not _valid_string(group):
+                    raise ValueError
+                scheduler_split_identity(f"{group}/{name}")
+            except ValueError:
+                unmodeled.append(_unmodeled(address, lower_service, operation, "missing or invalid Name or GroupName")); continue
+            resource_id = f"{group}/{name}"
+            if operation == "DeleteSchedule":
+                for field in parameters:
+                    if field not in {"Name", "GroupName", "ClientToken"}:
+                        unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+                changes.append(Change(op="delete", resource_type="scheduler_schedule", resource_id=resource_id)); addresses.append(address); continue
+            # UpdateSchedule replaces the whole schedule; AWS documents an omitted optional member only as set to its
+# "system-default value", and the Terraform provider documents that default State as ENABLED. A member
+            # the call needs and lacks is an unknown field, never a default.
+            fields, problems = scheduler_api_fields(parameters, replace=operation == "UpdateSchedule")
+            for member, reason in problems:
+                unknown_fields.append({"address": address, "field": member, "reason": reason})
+            for member in scheduler_unsupported(parameters):
+                unknown_fields.append({"address": address, "field": member, "reason": "unsupported_attribute"})
+            changes.append(Change(op="add" if operation == "CreateSchedule" else "modify", resource_type="scheduler_schedule",
+                                  resource_id=resource_id, fields=fields))
+            addresses.append(address)
+            continue
+        if lower_service == "cloudfront" and operation == "UpdateDistribution":
+            distribution_id, config = parameters.get("Id"), parameters.get("DistributionConfig")
+            if not _valid_string(distribution_id) or not isinstance(config, dict):
+                unmodeled.append(_unmodeled(address, lower_service, operation, "missing Id or DistributionConfig")); continue
+            # UpdateDistribution replaces the whole distribution. A partial call (a CloudFormation change) states only
+            # the members it changed and names the ones it could not convert.
+            partial = call.get("partial") is True
+            fields, problems = cloudfront_fields(config, replace=not partial)
+            for member, reason in problems:
+                unknown_fields.append({"address": address, "field": member, "reason": reason})
+            for name in call.get("unmodeled") or []:
+                unknown_fields.append({"address": address, "field": str(name), "reason": "unsupported_attribute"})
+            for field in parameters:
+                if field not in {"Id", "DistributionConfig", "IfMatch"}:
+                    unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+            changes.append(Change(op="modify", resource_type="cloudfront_distribution", resource_id=distribution_id, fields=fields))
+            addresses.append(address)
+            continue
+        if lower_service == "dynamodb" and operation in {"DeleteTable", "UpdateTable", "UpdateContinuousBackups"}:
+            name = dynamodb_table_name(parameters.get("TableName"))
+            if name is None:
+                raise _invalid()
+            if operation == "DeleteTable":
+                for field in parameters:
+                    if field != "TableName":
+                        unknown_fields.append({"address": address, "field": field, "reason": "unsupported_attribute"})
+                changes.append(Change(op="delete", resource_type="dynamodb_table", resource_id=name)); addresses.append(address); continue
+            fields, unsupported, valid = dynamodb_api_fields(operation, parameters)
+            if not valid:
+                raise _invalid()
+            for member in unsupported:
+                unknown_fields.append({"address": address, "field": member, "reason": "unsupported_attribute"})
+            if fields:
+                changes.append(Change(op="modify", resource_type="dynamodb_table", resource_id=name, fields=fields)); addresses.append(address)
             continue
         if lower_service == "ec2" and operation == "CreateNatGateway":
             if not _valid_string(parameters.get("SubnetId")):

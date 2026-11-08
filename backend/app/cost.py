@@ -192,6 +192,18 @@ def estimate_monthly_cost(infra: AWSInfrastructure) -> CostEstimate:
             function.name, "lambda_function", None, "usage-based-unknown",
         ))
 
+    for schedule in infra.scheduler.schedules:
+        # EventBridge Scheduler is priced per invocation, which a snapshot cannot know.
+        resources.append(_record(
+            f"{schedule.group_name}/{schedule.name}", "scheduler_schedule", None, "usage-based-unknown",
+        ))
+
+    for distribution in infra.cloudfront.distributions:
+        # CloudFront is priced by requests and data transfer, which a snapshot cannot know.
+        resources.append(_record(
+            distribution.id, "cloudfront_distribution", None, "usage-based-unknown",
+        ))
+
     for instance in infra.rds.rds_instances:
         # RDSInstance intentionally has no instance class, engine, or storage fields.
         resources.append(_record(
@@ -245,7 +257,7 @@ def estimate_monthly_cost(infra: AWSInfrastructure) -> CostEstimate:
     )
 
 
-def _unknown_reason(resource: ResourceCost) -> str:
+def unknown_reason(resource: ResourceCost) -> str:
     if resource.basis == "usage-based-unknown":
         return "usage-based pricing is not embedded"
     if resource.resource_type == "ec2_instance":

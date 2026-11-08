@@ -62,7 +62,7 @@ def test_L45_changed_unknown_and_delete_remain_blocked(plan_client):
 def test_L45_real_blocking_change_still_blocks_with_lb_replace(plan_client):
     resources = [
         _item("aws_lb", ["delete", "create"], {"internal": True}, {"internal": True}),
-        _item("aws_dynamodb_table", ["delete"], {"name": "data"}, None),
+        _item("aws_sqs_queue", ["delete"], {"name": "data"}, None),
     ]
     branch, _body, response = _post(plan_client, {"format_version": "1.0", "resource_changes": resources})
     assert response.status_code == 200, response.text
