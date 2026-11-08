@@ -55,7 +55,7 @@ list it in DESIGN.md's aspirational list.
 ## Agents
 - Every page also served as markdown: `public/<page>.md` (and `public/index.md` for home), generated at build
   from the same content (a small script or a route that writes them), plus `public/llms.txt` listing all pages.
-- The Human/Agent switch on every page loads that page's `.md` (relative URL).
+- Every page has a `.md` version at a relative URL; an old `?agent=1` link redirects to it. (There is no Human/Agent switch.)
 - A "Copy page as markdown" button at the top of each docs page (like modern docs).
 
 ## Build rules
@@ -68,4 +68,4 @@ list it in DESIGN.md's aspirational list.
 ## Process
 Build; serve; screenshot every page at 1440 (fold + full) and 390; compare inner pages with
 `sm/product0.png` / `sm/pricing0.png` at the same scale; fix mismatches (up to 3 rounds); check links
-(no 404s between pages), no console errors, 360px no horizontal scroll, Agent switch works on each page.
+(no 404s between pages), no console errors, 360px no horizontal scroll, "Copy page as markdown" and "View .md" work on each docs page, and `?agent=1` lands on the `.md`.

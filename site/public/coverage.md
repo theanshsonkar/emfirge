@@ -98,7 +98,7 @@ Counts from the repository:
 | AWS API models and Price List | The field catalog, and provisioned cost |
 | [Checkov](https://github.com/bridgecrewio/checkov) | An advisory configuration scanner on each verdict. It warns; it does not block on its own. Trivy is off. |
 
-The numbers in the chart are counted from the repository, not estimated. Every behavior is pinned by a numbered law, a property test that must always hold; there are 88, L1 to L88. [Read the laws](https://github.com/theanshsonkar/emfirge/tree/main/backend/tests/laws).
+The numbers in the chart are counted from the repository, not estimated. Every behavior is pinned by a numbered law, a property test that must always hold; there are 88, numbered L1 to L91 (L37 to L39 are not used). [Read the laws](https://github.com/theanshsonkar/emfirge/tree/main/backend/tests/laws).
 
 ---
 

@@ -18,7 +18,7 @@
   --green: #0a7a4b;
   --tint: rgba(10, 122, 75, 0.07);
   --red: #c4574a;
-  --rail-w: max(240px, calc(50vw - 220px));
+  --rail-w: clamp(260px, 20vw, 320px);
   --shadow: 0 1px 2px rgba(11, 16, 21, 0.05), 0 12px 32px -12px rgba(11, 16, 21, 0.18),
     0 32px 64px -24px rgba(11, 16, 21, 0.16);
 }
@@ -60,27 +60,35 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 @media (min-width: 1024px) {
   .rail, .edge { display: block; }
   .topbar { display: none !important; }
-  .main { margin-left: calc(var(--rail-w) + 1px); padding: 0 40px 0 50px; }
-  .col { margin: 0; }
+  .main { margin-left: calc(var(--rail-w) + 1px); padding: 0 64px 0 72px; position: relative; z-index: 1; }
+  .col { margin: 0; max-width: 720px; }
+  /* the delta backdrop shows through the rail; the rail keeps only its right border */
+  .rail { background: transparent; transform: translateZ(0); will-change: transform; }
+  .rail-in { left: 40px; right: auto; width: 232px; }
 }
+.bgdelta { display: none; }
+@media (min-width: 1024px) {
+  .bgdelta { display: block; position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; background: no-repeat 0 0 / 100% 100%;
+    /* own compositor layer: Safari otherwise repaints this full-screen image on every scroll frame */
+    transform: translateZ(0); will-change: transform; backface-visibility: hidden; contain: strict; }
+}
+@media print { .bgdelta { display: none !important; } }
 .topbar {
   position: sticky; top: 0; z-index: 30; background: rgba(255,255,255,.94); backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--rail-line); display: flex; align-items: center; justify-content: space-between;
   height: 56px; padding: 0 20px;
 }
 .menu-btn { font-family: var(--font-geist-mono), monospace; font-size: 12px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; border: 1px solid var(--line); padding: 6px 10px; }
-.drawer { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; background: #fff; z-index: 29; padding: 24px 20px; overflow: auto; }
+.drawer { position: fixed; top: 56px; left: 0; right: 0; bottom: 0; background: #fff; z-index: 29; padding: 24px 20px calc(40px + env(safe-area-inset-bottom)); overflow: auto; overscroll-behavior: contain; }
+html.lock { overflow: hidden; }
+.drawer .nav { margin-top: 0; }
+@media (min-width: 1024px) { .drawer, .sbar, .sbsheet, .sbsheet-bd { display: none !important; } }
 
 /* logo */
 .logo { display: flex; align-items: center; gap: 8px; font-size: 22px; font-weight: 500; letter-spacing: -0.6px; line-height: 1; }
 .logo svg path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: logo-draw .9s .1s cubic-bezier(.4,0,.2,1) forwards; }
 .logo svg path:nth-child(2) { animation-delay: .35s; }
 @keyframes logo-draw { to { stroke-dashoffset: 0; } }
-
-/* Human | Agent */
-.seg { display: inline-flex; margin-top: 24px; padding: 3px; border: 1px solid var(--line); background: var(--surface); }
-.seg button { font-size: 11px; font-weight: 500; padding: 6px 11px; color: var(--ink-2); line-height: 1.2; }
-.seg button[aria-pressed="true"] { background: #fff; color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
 
 /* nav */
 .nav { margin-top: 35px; display: flex; flex-direction: column; }
@@ -92,12 +100,48 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 .nav a.on::before { content: ""; position: absolute; left: -16px; top: 50%; width: 5px; height: 5px; margin-top: -2.5px; background: var(--green); border-radius: 0; }
 .stagger { opacity: 0; transform: translateY(6px); animation: rise .6s cubic-bezier(.2,.7,.2,1) forwards; }
 @keyframes rise { to { opacity: 1; transform: none; } }
-.otp { margin-top: 38px; }
-.otp ul { list-style: none; margin: 12px 0 0; padding: 0; }
-.otp li a { display: flex; align-items: center; gap: 8px; font-size: 13px; line-height: 19.5px; padding: 3.5px 0; color: var(--ink-3); }
-.otp li a::before { content: ""; width: 0; height: 1px; background: var(--green); transition: width .3s; flex: none; }
-.otp li a.on { color: var(--ink); }
-.otp li a.on::before { width: 12px; }
+
+/* desktop rail: the nav is a branch tree. Trunk and nodes are an aria-hidden SVG (Shell.tsx, RailTree) measured from the links;
+   without JS the links and the nested "On this page" list still show, just without the lines. */
+.rail .nav a, .rail .nav-gl { padding-left: 24px; }
+.rail .nav a.on::before { display: none; }
+.rail .nav .tb { list-style: none; margin: 2px 0 6px; padding: 0; }
+.rail .nav .tb a { font-size: 13px; line-height: 19.5px; min-height: 0; padding: 3.5px 0 3.5px 42px; color: var(--ink-3); }
+.rail .nav .tb a:hover, .rail .nav .tb a.on { color: var(--ink); }
+.rail-tree { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; opacity: 0; animation: tree-in .5s .5s ease forwards; }
+@keyframes tree-in { to { opacity: 1; } }
+
+/* ---- below 1024px (phones, and tablets, which keep the phone layout) ----
+   Menu drawer: the same branch tree as the rail, in touch sizes. The lines are an aria-hidden SVG (Shell.tsx, TreeSvg) measured from the links;
+   without JS the links and the nested "On this page" list still render, just without the lines. Text sits 8px past where a tick ends, as on the rail. */
+.drawer-in, .sbsheet-in { position: relative; }
+.m-tree { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.drawer .nav a, .drawer .nav-gl { padding-left: 26px; }
+.drawer .nav a { display: flex; align-items: center; min-height: 44px; padding-top: 0; padding-bottom: 0; font-size: 17px; }
+.drawer .nav a.on::before { display: none; }
+.drawer .nav-gl { margin-top: 4px; }
+.drawer .nav .tb, .sbsheet .tb { list-style: none; margin: 0 0 6px; padding: 0; }
+.drawer .nav .tb a, .sbsheet .tb a { display: flex; align-items: center; min-height: 40px; padding: 0 0 0 46px; font-size: 15px; line-height: 22px; color: var(--ink-3); }
+.drawer .nav .tb a.on, .sbsheet .tb a.on { color: var(--ink); }
+
+/* section bar: sticky under the topbar on every page but Home; the whole bar is one button that opens the sheet */
+.sbar { position: sticky; top: 56px; z-index: 28; height: 44px; background: rgba(255,255,255,.94); backdrop-filter: blur(8px); border-bottom: 1px solid var(--rail-line); }
+.sbar-t { display: flex; align-items: center; gap: 10px; width: 100%; height: calc(100% + 1px); padding: 0 20px; text-align: left; font-size: 14px; line-height: 20px; color: var(--ink); }
+.sbar-t svg { flex: none; }
+.sbar .pg { flex: 0 1 auto; min-width: 0; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-right: -4px; }
+.sbar .cur { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sbar .chev { flex: none; margin-left: auto; color: var(--ink-2); border: 1px solid var(--line); padding: 4px 8px; letter-spacing: .06em; }
+.sbar .prog { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--green); transform: scaleX(0); transform-origin: left; will-change: transform; pointer-events: none; }
+.sbsheet-bd { position: fixed; top: 100px; left: 0; right: 0; bottom: 0; z-index: 26; cursor: pointer; }
+.sbsheet { position: fixed; top: 100px; left: 0; right: 0; z-index: 27; background: #fff; border-bottom: 1px solid var(--line); box-shadow: 0 20px 40px -20px rgba(11,16,21,.25);
+  padding: 8px 20px 14px; max-height: 70vh; max-height: 70dvh; overflow: auto; overscroll-behavior: contain; }
+.sbsheet .tb a { padding-left: 26px; }
+.sbsheet-h { color: var(--ink-3); padding: 6px 0 4px 26px; }
+/* anchor jumps land below the topbar (56) and, on pages that have it, the section bar (44) */
+@media (max-width: 1023.98px) {
+  .main [id] { scroll-margin-top: 72px !important; }
+  body:has(.sbar) .main [id] { scroll-margin-top: 112px !important; }
+}
 
 /* reveal */
 [data-reveal] { opacity: 0; transform: translateY(8px); transition: opacity .6s cubic-bezier(.2,.7,.2,1), transform .6s cubic-bezier(.2,.7,.2,1); }
@@ -255,8 +299,6 @@ footer.ft { margin-top: 110px; border-top: 1px solid var(--line); padding: 40px 
 .ft-bot .l, .ft-bot .r { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
 .sdot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #12b76a; margin-right: 8px; }
 
-.agent { margin-top: 65px; font-family: var(--font-geist-mono), monospace; font-size: 12.5px; line-height: 20px; white-space: pre-wrap; word-break: break-word; color: var(--ink); }
-
 @media (max-width: 700px) {
   h1.h1 { font-size: 32px; letter-spacing: -.9px; }
   .grid { grid-template-columns: 1fr; }
@@ -274,6 +316,7 @@ footer.ft { margin-top: 110px; border-top: 1px solid var(--line); padding: 40px 
   [data-reveal] { opacity: 1; transform: none; transition: none; }
   .stagger { animation: none; opacity: 1; transform: none; }
   .logo svg path { animation: none; stroke-dashoffset: 0; }
+  .rail-tree { animation: none; opacity: 1; }
   .pill .dot { animation: none; }
   html { scroll-behavior: auto; }
   .bar { transition: none; }
@@ -493,11 +536,8 @@ mark.todo { white-space: normal; }
 /* tap targets: every control is at least 32px tall (padding, not bigger type) */
 .logo { min-height: 32px; }
 .menu-btn { min-height: 36px; display: inline-flex; align-items: center; }
-.seg { padding: 2px; }
-.seg button { min-height: 32px; padding: 0 14px; }
 .pill a { min-height: 32px; }
 .pill > span { min-height: 32px; }
-.otp li a { min-height: 32px; padding: 6px 0; }
 .works a { display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; }
 .codeb-h { padding: 4px 12px; }
 .codeb-h button { min-height: 32px; padding: 0 12px; }
@@ -509,8 +549,13 @@ mark.todo { white-space: normal; }
 .ft-cols ul { margin-top: 6px; }
 .ft-bot a { display: inline-flex; align-items: center; min-height: 32px; }
 
-/* code: the whole text is readable without scrolling; short inline commands never break inside */
+/* code: wraps on wide screens (phones scroll sideways, below); short inline commands never break inside */
 .codeb pre { white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; overflow-x: visible; }
+/* phones: terminal and code lines stay whole and the block scrolls sideways (the Copy button sits in the header, so it stays put) */
+@media (max-width: 700px) {
+  .codeb { min-width: 0; max-width: 100%; }
+  .codeb pre { white-space: pre; overflow-wrap: normal; overflow-x: auto; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
+}
 .ic-code { font-size: max(11px, .82em); overflow-wrap: break-word; word-break: keep-all; hyphens: none; }
 .ic-code.nw { white-space: nowrap; }
 
@@ -616,3 +661,23 @@ mark.todo { white-space: normal; }
 }
 .role-t .fl { animation-name: flowy; }
 @keyframes flowy { 0% { transform: translateY(0); opacity: 0; } 12% { opacity: 1; } 80% { opacity: 1; } 100% { transform: translateY(170px); opacity: 0; } }
+
+/* ---- touch screens: every small link and button gets a 44px hit area ----
+   Boxes that must keep their look (pills, bordered buttons, icons) keep their size and grow an invisible ::after overlay;
+   rows of plain text links (footer) simply get 44px rows. Inline links inside sentences stay as they are. */
+@media (pointer: coarse) {
+  .logo, .menu-btn, .cpm, .codeb-h button, .works a, .pill a, .arrow, .links a, .ext, .copybar button,
+  .dp-ul li > a.uline:first-child { position: relative; }
+  .logo::after, .pill a::after, .arrow::after, .links a::after, .ext::after, .copybar button::after
+    { content: ""; position: absolute; inset: -6px 0; }
+  /* the same for boxes with a 1px border (an offset is measured from inside the border) */
+  .cpm::after, .codeb-h button::after, .works a::after { content: ""; position: absolute; inset: -7px -1px; }
+  .menu-btn::after { content: ""; position: absolute; inset: -5px -1px; }
+  .dp-ul li > a.uline:first-child::after { content: ""; position: absolute; inset: -12px 0; }
+  /* the footnote marker is 12px of ink: taller, not wider, so it never covers the words beside it; same footprint as before */
+  .fn { height: 44px; margin-top: -17px; margin-bottom: -17px; }
+  .works { row-gap: 12px; }
+  .ft-cols li a, .ft-cols li > span, .ft-bot a { min-height: 44px; }
+  .dp-det > summary { min-height: 44px; }
+  .menu a { display: flex; align-items: center; min-height: 44px; padding-top: 0; padding-bottom: 0; }
+}

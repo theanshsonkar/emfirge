@@ -486,8 +486,11 @@ def test_limit_results_and_serialization_are_repeatedly_deterministic(monkeypatc
 
 
 
-def _cloudsplaining_by_side(base, role):
-    """Base and branch scans run at the same time (L90b), so the fake answers by which snapshot it is given."""
+def _mock_cloudsplaining_verdict_scanners(monkeypatch, branch_infra):
+    # Base and branch are scanned at the same time (L90b), so the call order is not fixed:
+    # answer by which side is asking, not by call order.
+    role = "arn:aws:iam::123456789012:role/CloudRole"
+    unavailable = Mock(return_value={"available": False, "findings": []})
     finding = {
         "source": "cloudsplaining",
         "check_id": "PrivilegeEscalation",
@@ -495,13 +498,10 @@ def _cloudsplaining_by_side(base, role):
         "severity": "HIGH",
         "title": "Cloudsplaining detected PrivilegeEscalation risk",
     }
-    return lambda infra: {"available": True, "findings": [] if infra is base else [finding]}
-
-
-def _mock_cloudsplaining_verdict_scanners(monkeypatch, base):
-    role = "arn:aws:iam::123456789012:role/CloudRole"
-    unavailable = Mock(return_value={"available": False, "findings": []})
-    cloudsplaining = Mock(side_effect=_cloudsplaining_by_side(base, role))
+    cloudsplaining = Mock(side_effect=lambda scanned: {
+        "available": True,
+        "findings": [dict(finding)] if scanned is branch_infra else [],
+    })
     monkeypatch.setattr("app.verdict.run_checkov", unavailable)
     monkeypatch.setattr("app.verdict.run_trivy", unavailable)
     monkeypatch.setattr("app.verdict.run_cloudsplaining", cloudsplaining)
@@ -510,7 +510,7 @@ def _mock_cloudsplaining_verdict_scanners(monkeypatch, base):
 
 def test_cloudsplaining_high_finding_on_newly_reachable_role_blocks(monkeypatch, infra):
     branch = infra.model_copy(deep=True)
-    role, checkov_trivy, cloudsplaining = _mock_cloudsplaining_verdict_scanners(monkeypatch, infra)
+    role, checkov_trivy, cloudsplaining = _mock_cloudsplaining_verdict_scanners(monkeypatch, branch)
     patch_diff(monkeypatch, newly_internet_reachable=[role])
 
     result = combined_verdict(infra, branch)
@@ -530,13 +530,12 @@ def test_cloudsplaining_high_finding_on_newly_reachable_role_blocks(monkeypatch,
 
 def test_cloudsplaining_verdict_serialization_is_deterministic(monkeypatch, infra):
     branch = infra.model_copy(deep=True)
-    role, checkov_trivy, cloudsplaining = _mock_cloudsplaining_verdict_scanners(monkeypatch, infra)
+    role, checkov_trivy, cloudsplaining = _mock_cloudsplaining_verdict_scanners(monkeypatch, branch)
     patch_diff(monkeypatch, newly_internet_reachable=[role])
     first = combined_verdict(infra, branch).model_dump()
 
     checkov_trivy.reset_mock()
     cloudsplaining.reset_mock()
-    cloudsplaining.side_effect = _cloudsplaining_by_side(infra, role)
     second = combined_verdict(infra, branch).model_dump()
 
     assert first == second

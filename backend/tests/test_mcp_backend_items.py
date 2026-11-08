@@ -69,7 +69,7 @@ def test_branch_cap_and_discarded_status(client, monkeypatch):
     monkeypatch.setattr(branches, "MAX_OPEN_BRANCHES_PER_BASE", 2)
     first, second = branch(client, "a"), branch(client, "b")
     third = client.post("/branches", json={"base_analysis_id":"synthetic","name":"c"})
-    assert third.status_code == 409  # a hit limit is a conflict (agent guide), not a rate limit
+    assert third.status_code == 409  # the open-branch limit is a conflict (409), not a rate limit
     assert "Discard branches" in third.json()["detail"]
     assert client.post(f"/branches/{first}/discard").status_code == 200
     for endpoint in ("verdict", "diff"):
