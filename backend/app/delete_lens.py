@@ -87,9 +87,9 @@ def _table_recovery(rid: str, before: dict) -> tuple[RecoveryPoint | None, str |
       that an on-demand backup survives DeleteTable; this rests on that tutorial and on DeleteTable not mentioning backups;
     * with point-in-time recovery on, DeleteTable makes a system backup kept 35 days
       (PointInTimeRecovery_Howitworks, BackupSummary BackupType SYSTEM);
-    * ItemCount 0 is "reported empty": AWS refreshes ItemCount about every six hours
-      (TableDescription), so the data answer carries that as a caveat.
-    Nothing known to recover and a count that is None (not reported) is unknown, not empty;
+    * ItemCount 0 is NOT a recovery point and not proof of no data loss: AWS updates ItemCount only about every six
+      hours and "recent changes might not be reflected" (TableDescription), so 0 is unknown emptiness.
+    Nothing known to recover and a count that is None (not reported) or 0 is unknown, not empty;
     items but an unreadable PITR / backup source is unknown, not lost.
     """
     if before.get("has_backup") is True:
@@ -97,10 +97,8 @@ def _table_recovery(rid: str, before: dict) -> tuple[RecoveryPoint | None, str |
     if before.get("pitr_enabled") is True:
         return RecoveryPoint(resource_id=rid, kind="dynamodb_system_backup", source_id=rid), None
     count = before.get("item_count")
-    if count == 0 and before.get("item_count_reported") is True:
-        return RecoveryPoint(resource_id=rid, kind="reported_empty_table", source_id=rid), None
     if count is None or count == 0:
-        # None: not reported. 0 without the marker: an older scan stored a missing count as 0.
+        # None: not reported. 0: possibly stale (refreshed about every six hours), or an older scan stored a missing count as 0.
         return None, HOLDS_DATA_UNKNOWN
     if before.get("has_backup") is None or before.get("pitr_enabled") is None:
         return None, RECOVERY_SOURCE_UNKNOWN

@@ -327,7 +327,7 @@ def _type_map(verdict: CombinedVerdict, inputs: CheckInputs) -> dict[str, str]:
 # ── the six answers ───────────────────────────────────────────────
 
 _RECOVERY_UNKNOWN = {
-    True: "the item count of this table was not reliably recorded (not reported, or stored by an older scan that wrote a missing count as 0), so whether it held data is unknown, and no on-demand backup or point-in-time recovery is known either; rescan to know",
+    True: "the item count of this table is not a reliable emptiness proof (not reported, 0, or stored by an older scan that wrote a missing count as 0; AWS updates ItemCount only about every six hours, so recent items may not be counted: " + DYNAMODB_ITEM_COUNT_URL + "), so whether it held data is unknown, and no on-demand backup or point-in-time recovery is known either; rescan to know",
     False: "the backup or point-in-time recovery settings of this table could not be read, so whether a recovery point exists is unknown",
 }
 
@@ -346,10 +346,6 @@ def _data(verdict: CombinedVerdict, inputs: CheckInputs, types: Mapping[str, str
         draft.facts.append(DataFact(resource_id=unknown.resource_id, resource_type=unknown.resource_type, change="deleted",
                                     has_recovery_point=None, recovery_resource_ids=[]))
         draft.doubt("recovery_unknown", _RECOVERY_UNKNOWN[unknown.why == HOLDS_DATA_UNKNOWN], unknown.resource_id)
-    for point in verdict.deletion.recovery_points:
-        if point.kind == "reported_empty_table":
-            draft.doubt("item_count_approximate", "the table was reported empty by DescribeTable, but AWS refreshes the item count only about "
-                                                  f"every six hours, so recent items may not be counted: {DYNAMODB_ITEM_COUNT_URL}", point.resource_id)
     if any(point.kind == "dynamodb_system_backup" for point in verdict.deletion.recovery_points):
         draft.check("table_system_backup", "deleting a table with point-in-time recovery on makes AWS keep a system backup for 35 days "
                                            f"that the table can be restored from: {DYNAMODB_SYSTEM_BACKUP_URL}")

@@ -410,21 +410,17 @@ def test_L80d_the_unknown_notes_name_aws_backup_as_not_read():
 
 # ── L80e reported empty ────────────────────────────────────────────────────────
 
-def test_L80e_a_table_reported_empty_is_not_lost_and_carries_the_approximation_note():
+def test_L80e_a_table_reported_empty_is_unknown_emptiness_never_a_recovery_point():
+    """Superseded in L86a: ItemCount 0 can be stale, so it is unknown, not a recovery point."""
     base = base_with(table(item_count=0))
     branch = apply_change(base, delete())
     lens = analyze_deletions(base, branch)
-    assert lens.data_lost == [] and [(p.resource_id, p.kind) for p in lens.recovery_points] == [(ORDERS, "reported_empty_table")]
+    assert lens.data_lost == [] and lens.recovery_points == []
+    assert [x.resource_id for x in lens.recovery_unknown] == [ORDERS]
     body = _dump(_check(base, branch))
-    assert data_facts(body)[0]["has_recovery_point"] is True
-    reason = data_unknown(body)[("item_count_approximate", ORDERS)]
+    assert data_facts(body)[0]["has_recovery_point"] is None
+    reason = data_unknown(body)[("recovery_unknown", ORDERS)]
     assert ITEM_COUNT_URL in reason and "six hours" in reason
-
-
-def test_L80e_the_note_is_only_for_tables_reported_empty():
-    base = base_with(table(item_count=7, has_backup=True))
-    body = _dump(_check(base, apply_change(base, delete())))
-    assert ("item_count_approximate", ORDERS) not in data_unknown(body)
 
 
 # ── L80f recovery removed ──────────────────────────────────────────────────────
@@ -884,13 +880,13 @@ def test_L80m_an_old_snapshots_zero_item_count_is_unknown_never_a_pass():
     assert line["has_recovery_point"] is None
 
 
-def test_L80m_a_real_zero_from_the_new_collector_is_reported_empty(fake_aws):
+def test_L80m_a_real_zero_from_the_new_collector_is_still_unknown_emptiness(fake_aws):
     _make(fake_aws)
     data, _ = _collect()
     assert data.tables[0].item_count == 0 and data.tables[0].item_count_reported is True
     base = base_with().model_copy(update={"dynamodb": data})
     lens = analyze_deletions(base, apply_change(base, delete()))
-    assert [p.kind for p in lens.recovery_points] == ["reported_empty_table"] and lens.recovery_unknown == []
+    assert lens.recovery_points == [] and [x.resource_id for x in lens.recovery_unknown] == [ORDERS]
 
 
 def test_L80m_the_marker_survives_branch_changes_and_a_missing_count_is_not_reported(fake_aws, monkeypatch):
