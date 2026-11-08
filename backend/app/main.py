@@ -392,6 +392,12 @@ def health():
         db_ok = False
     return {'status': 'healthy' if db_ok else 'degraded', 'db': 'ok' if db_ok else 'unreachable'}
 
+@app.get('/cli/manifest')
+def cli_manifest_endpoint():
+    """The commands the emfirge CLI offers. Public (help works before sign-in) and static: no customer data."""
+    from app.cli_manifest import build_manifest
+    return build_manifest()
+
 @app.get('/logs')
 def logs(account_id: str = None, caller: Caller = Depends(get_caller), db=Depends(get_db)):
     if caller.mode != 'hosted':

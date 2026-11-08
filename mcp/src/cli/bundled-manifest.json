@@ -1,0 +1,651 @@
+{
+  "protocol": 1,
+  "groups": {
+    "branch": "Open and manage a branch: a safe copy of the cloud model. Never touches the cloud."
+  },
+  "commands": [
+    {
+      "name": "context",
+      "summary": "Ask what is true about the cloud. Facts only, with what was checked and what is unknown.",
+      "usage": [
+        "emfirge context <question> [--analysis ID | --branch ID] [--resource ID]",
+        "emfirge context --refresh --role-arn ARN --region REGION",
+        "emfirge context --findings|--attack-paths|--compliance --analysis ID",
+        "emfirge context --simulate \"what if ...\" --analysis ID"
+      ],
+      "examples": [
+        "emfirge context inventory",
+        "emfirge context reachable --branch BRANCH_ID",
+        "emfirge context resource --resource S3_001"
+      ],
+      "args": [
+        {
+          "name": "question",
+          "kind": "positional",
+          "type": "string",
+          "help": "What to ask: inventory, resource, depends_on, dependents, reachable, access, data, cost, live, marks, baseline.",
+          "choices": [
+            "inventory",
+            "resource",
+            "depends_on",
+            "dependents",
+            "reachable",
+            "access",
+            "data",
+            "cost",
+            "live",
+            "marks",
+            "baseline"
+          ]
+        },
+        {
+          "name": "analysis",
+          "kind": "flag",
+          "type": "string",
+          "help": "Analysis id from a scan (default: your latest)."
+        },
+        {
+          "name": "branch",
+          "kind": "flag",
+          "type": "string",
+          "help": "Ask about a branch instead of a scan.",
+          "id": true
+        },
+        {
+          "name": "resource",
+          "kind": "flag",
+          "type": "string",
+          "help": "Resource id or token (S3_001); needed for resource, depends_on, dependents.",
+          "id": true
+        },
+        {
+          "name": "refresh",
+          "kind": "flag",
+          "type": "bool",
+          "help": "Run a fresh scan (needs --role-arn and --region)."
+        },
+        {
+          "name": "role-arn",
+          "kind": "flag",
+          "type": "string",
+          "help": "IAM role ARN to scan with."
+        },
+        {
+          "name": "region",
+          "kind": "flag",
+          "type": "string",
+          "help": "AWS region to scan."
+        },
+        {
+          "name": "findings",
+          "kind": "flag",
+          "type": "bool",
+          "help": "List scan findings (use --severity to filter)."
+        },
+        {
+          "name": "severity",
+          "kind": "flag",
+          "type": "string",
+          "help": "Critical, Moderate or Low.",
+          "choices": [
+            "Critical",
+            "Moderate",
+            "Low"
+          ]
+        },
+        {
+          "name": "attack-paths",
+          "kind": "flag",
+          "type": "bool",
+          "help": "Paths from the internet to inside resources."
+        },
+        {
+          "name": "compliance",
+          "kind": "flag",
+          "type": "bool",
+          "help": "CIS AWS 1.5 / SOC 2 status (use --framework to filter)."
+        },
+        {
+          "name": "framework",
+          "kind": "flag",
+          "type": "string",
+          "help": "cis-aws-1.5 or soc2.",
+          "choices": [
+            "cis-aws-1.5",
+            "soc2"
+          ]
+        },
+        {
+          "name": "simulate",
+          "kind": "flag",
+          "type": "string",
+          "help": "Walk a what-if kill chain; the value is the question.",
+          "id": true
+        }
+      ],
+      "require": [
+        "question"
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/context",
+        "null_unset": true,
+        "body": {
+          "question": "question",
+          "analysis_id": "analysis",
+          "branch_id": "branch",
+          "resource_id": "resource"
+        }
+      },
+      "variants": [
+        {
+          "when": "refresh",
+          "client": "context.refresh",
+          "require": [
+            "role-arn",
+            "region"
+          ]
+        },
+        {
+          "when": "findings",
+          "client": "context.findings",
+          "require": [
+            "analysis"
+          ]
+        },
+        {
+          "when": "attack-paths",
+          "client": "context.attack-paths",
+          "require": [
+            "analysis"
+          ]
+        },
+        {
+          "when": "compliance",
+          "client": "context.compliance",
+          "require": [
+            "analysis"
+          ]
+        },
+        {
+          "when": "simulate",
+          "client": "context.simulate",
+          "require": [
+            "analysis"
+          ]
+        }
+      ],
+      "variants_exclusive": true
+    },
+    {
+      "name": "branch open",
+      "summary": "Open a branch: a safe copy of a scan. Never touches the cloud.",
+      "examples": [
+        "emfirge branch open --analysis ANALYSIS_ID --name close-ssh"
+      ],
+      "args": [
+        {
+          "name": "analysis",
+          "kind": "flag",
+          "type": "string",
+          "help": "Base analysis id.",
+          "required": true
+        },
+        {
+          "name": "name",
+          "kind": "flag",
+          "type": "string",
+          "help": "Branch name.",
+          "required": true
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/branches",
+        "body": {
+          "base_analysis_id": "analysis",
+          "name": "name"
+        }
+      }
+    },
+    {
+      "name": "branch fork",
+      "summary": "Copy a branch, with its changes, under a new name.",
+      "args": [
+        {
+          "name": "branch",
+          "kind": "positional",
+          "type": "string",
+          "help": "Branch id.",
+          "required": true,
+          "id": true
+        },
+        {
+          "name": "name",
+          "kind": "flag",
+          "type": "string",
+          "help": "Name of the copy.",
+          "required": true
+        },
+        {
+          "name": "revision",
+          "kind": "flag",
+          "type": "string",
+          "help": "branch_revision you last saw; a stale one is rejected.",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/branches/{branch}/fork",
+        "body": {
+          "name": "name",
+          "branch_revision": "revision"
+        }
+      }
+    },
+    {
+      "name": "branch list",
+      "summary": "List your branches.",
+      "examples": [
+        "emfirge branch list"
+      ],
+      "args": [
+        {
+          "name": "analysis",
+          "kind": "flag",
+          "type": "string",
+          "help": "Only branches of this base analysis."
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/branches",
+        "query": {
+          "base_analysis_id": "analysis"
+        }
+      },
+      "response": {
+        "list_key": "branches"
+      }
+    },
+    {
+      "name": "branch get",
+      "summary": "Read one branch and its ordered changes.",
+      "args": [
+        {
+          "name": "branch",
+          "kind": "positional",
+          "type": "string",
+          "help": "Branch id.",
+          "required": true,
+          "id": true
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/branches/{branch}"
+      }
+    },
+    {
+      "name": "branch rollback",
+      "summary": "Clear the changes on a branch.",
+      "args": [
+        {
+          "name": "branch",
+          "kind": "positional",
+          "type": "string",
+          "help": "Branch id.",
+          "required": true,
+          "id": true
+        },
+        {
+          "name": "revision",
+          "kind": "flag",
+          "type": "string",
+          "help": "branch_revision you last saw; a stale one is rejected.",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "name": "expected-count",
+          "kind": "flag",
+          "type": "integer",
+          "help": "Change count you last saw; a stale one is rejected.",
+          "min": 0
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/branches/{branch}/rollback",
+        "body": {
+          "expected_change_count": "expected-count",
+          "branch_revision": "revision"
+        }
+      }
+    },
+    {
+      "name": "branch rollback-to",
+      "summary": "Keep the first N changes on a branch and drop the rest.",
+      "args": [
+        {
+          "name": "branch",
+          "kind": "positional",
+          "type": "string",
+          "help": "Branch id.",
+          "required": true,
+          "id": true
+        },
+        {
+          "name": "count",
+          "kind": "flag",
+          "type": "integer",
+          "help": "Number of leading changes to keep.",
+          "required": true,
+          "min": 0
+        },
+        {
+          "name": "revision",
+          "kind": "flag",
+          "type": "string",
+          "help": "branch_revision you last saw; a stale one is rejected.",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/branches/{branch}/rollback-to-count",
+        "body": {
+          "target_change_count": "count",
+          "branch_revision": "revision"
+        }
+      }
+    },
+    {
+      "name": "branch discard",
+      "summary": "Discard a branch.",
+      "args": [
+        {
+          "name": "branch",
+          "kind": "positional",
+          "type": "string",
+          "help": "Branch id.",
+          "required": true,
+          "id": true
+        },
+        {
+          "name": "revision",
+          "kind": "flag",
+          "type": "string",
+          "help": "branch_revision you last saw; a stale one is rejected.",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        {
+          "name": "expected-count",
+          "kind": "flag",
+          "type": "integer",
+          "help": "Change count you last saw; a stale one is rejected.",
+          "min": 0
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/branches/{branch}/discard",
+        "body": {
+          "expected_change_count": "expected-count",
+          "branch_revision": "revision"
+        }
+      }
+    },
+    {
+      "name": "branch compare",
+      "summary": "Compare two or more branches.",
+      "args": [
+        {
+          "name": "branches",
+          "kind": "positional",
+          "type": "string",
+          "help": "Branch ids to compare.",
+          "required": true,
+          "multiple": true,
+          "id": true
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "path": "/branches/compare",
+        "body": {
+          "branch_ids": "branches"
+        }
+      }
+    },
+    {
+      "name": "try",
+      "summary": "Put a change on a branch. Emfirge models it; it never runs it.",
+      "usage": [
+        "emfirge try BRANCH --typed JSON",
+        "emfirge try BRANCH --aws-cli \"aws ec2 ...\" [--aws-cli \"...\"]",
+        "emfirge try BRANCH --aws-api FILE|JSON|-",
+        "emfirge try BRANCH --terraform FILE|JSON|-",
+        "emfirge try BRANCH --cloudformation FILE|JSON|-",
+        "emfirge try --verify-fix --rule RULE --resource ID --analysis ID"
+      ],
+      "examples": [
+        "emfirge try BRANCH_ID --aws-cli \"aws ec2 revoke-security-group-ingress --group-id SG_001 --protocol tcp --port 22 --cidr 0.0.0.0/0\"",
+        "emfirge try BRANCH_ID --terraform plan.json"
+      ],
+      "client": "try",
+      "args": [
+        {
+          "name": "branch",
+          "kind": "positional",
+          "type": "string",
+          "help": "Branch id.",
+          "id": true
+        },
+        {
+          "name": "typed",
+          "kind": "flag",
+          "type": "string",
+          "help": "One typed change as JSON: {op, resource_type, resource_id, fields}."
+        },
+        {
+          "name": "aws-cli",
+          "kind": "flag",
+          "type": "string",
+          "help": "An AWS CLI command (repeat for several), or a JSON list.",
+          "multiple": true
+        },
+        {
+          "name": "aws-api",
+          "kind": "flag",
+          "type": "string",
+          "help": "AWS API calls JSON: {format:\"aws-api-calls/1\", calls:[...]}."
+        },
+        {
+          "name": "terraform",
+          "kind": "flag",
+          "type": "string",
+          "help": "Output of `terraform show -json PLAN`."
+        },
+        {
+          "name": "cloudformation",
+          "kind": "flag",
+          "type": "string",
+          "help": "Output of `aws cloudformation describe-change-set`."
+        },
+        {
+          "name": "verify-fix",
+          "kind": "flag",
+          "type": "bool",
+          "help": "Model the fix for one finding on a copy of a scan (no branch)."
+        },
+        {
+          "name": "rule",
+          "kind": "flag",
+          "type": "string",
+          "help": "Rule id such as EC2-002 (verify-fix)."
+        },
+        {
+          "name": "resource",
+          "kind": "flag",
+          "type": "string",
+          "help": "Resource id or token (verify-fix).",
+          "id": true
+        },
+        {
+          "name": "analysis",
+          "kind": "flag",
+          "type": "string",
+          "help": "Analysis id (verify-fix)."
+        }
+      ]
+    },
+    {
+      "name": "check",
+      "summary": "Check a branch: what changed, six damage answers, evidence, and unknowns.",
+      "usage": [
+        "emfirge check BRANCH",
+        "emfirge check BRANCH --verdict | --diff",
+        "emfirge check BRANCH --policy [--approve --accept-estimate ID]",
+        "emfirge check BRANCH --evidence [--source S] [--accept-estimate ID --role-arn ARN]"
+      ],
+      "examples": [
+        "emfirge check BRANCH_ID",
+        "emfirge check BRANCH_ID --human"
+      ],
+      "args": [
+        {
+          "name": "branch",
+          "kind": "positional",
+          "type": "string",
+          "help": "Branch id.",
+          "required": true,
+          "id": true
+        },
+        {
+          "name": "verdict",
+          "kind": "flag",
+          "type": "bool",
+          "help": "Old pass / warn / block verdict."
+        },
+        {
+          "name": "diff",
+          "kind": "flag",
+          "type": "bool",
+          "help": "Diff against the base scan."
+        },
+        {
+          "name": "policy",
+          "kind": "flag",
+          "type": "bool",
+          "help": "Ask IAM Access Analyzer about changed policies (costs money; shows an estimate first)."
+        },
+        {
+          "name": "evidence",
+          "kind": "flag",
+          "type": "bool",
+          "help": "Read CloudTrail / CloudWatch use of deleted resources (shows an estimate first)."
+        },
+        {
+          "name": "approve",
+          "kind": "flag",
+          "type": "bool",
+          "help": "With --policy: the owner agreed to the estimate."
+        },
+        {
+          "name": "accept-estimate",
+          "kind": "flag",
+          "type": "string",
+          "help": "Estimate id the owner agreed to."
+        },
+        {
+          "name": "source",
+          "kind": "flag",
+          "type": "string",
+          "help": "With --evidence: cloudtrail_events or cloudwatch_metrics (repeatable).",
+          "multiple": true
+        },
+        {
+          "name": "role-arn",
+          "kind": "flag",
+          "type": "string",
+          "help": "Same role ARN used for the scan (needed when accepting an estimate)."
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/branches/{branch}/check"
+      },
+      "variants": [
+        {
+          "when": "verdict",
+          "request": {
+            "method": "GET",
+            "path": "/branches/{branch}/verdict"
+          }
+        },
+        {
+          "when": "diff",
+          "request": {
+            "method": "GET",
+            "path": "/branches/{branch}/diff"
+          }
+        },
+        {
+          "when": "policy",
+          "client": "check.policy"
+        },
+        {
+          "when": "evidence",
+          "client": "check.evidence"
+        }
+      ]
+    },
+    {
+      "name": "report",
+      "summary": "Say what you applied. For now: returns the hand-back for the branch or plan.",
+      "examples": [
+        "emfirge report BRANCH_ID --verify"
+      ],
+      "args": [
+        {
+          "name": "branch",
+          "kind": "positional",
+          "type": "string",
+          "help": "Branch id.",
+          "required": true,
+          "id": true
+        },
+        {
+          "name": "plan",
+          "kind": "flag",
+          "type": "string",
+          "help": "Hand-back for one plan from `emfirge try`."
+        },
+        {
+          "name": "verify",
+          "kind": "flag",
+          "type": "bool",
+          "help": "Verify the hand-back with the server."
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/branches/{branch}/handback"
+      },
+      "variants": [
+        {
+          "when": "plan",
+          "request": {
+            "method": "GET",
+            "path": "/branches/{branch}/plans/{plan}/handback"
+          }
+        },
+        {
+          "when": "verify",
+          "client": "report.verify"
+        }
+      ]
+    }
+  ]
+}
