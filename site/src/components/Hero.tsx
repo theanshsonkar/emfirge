@@ -1,4 +1,5 @@
 "use client";
+import { AGENT_LOGOS } from "@/content/agent-logos";
 import { useEffect, useRef, useState } from "react";
 import { HERO, LINKS, SETUP_PROMPT } from "@/content/site";
 import { Mark } from "@/graphics/Mark";
@@ -62,7 +63,12 @@ export function Hero() {
       <CopyBar />
       <div className="works">
         <span className="label">Works with</span>
-        {HERO.worksWith.map((w) => <a key={w} href={LINKS.cli}>{w}</a>)}
+        {HERO.worksWith.map((w) => (
+          <span className="wk" key={w}>
+            {AGENT_LOGOS[w] && <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d={AGENT_LOGOS[w]} fill="currentColor" /></svg>}
+            {w}
+          </span>
+        ))}
       </div>
       <div className="media" aria-hidden="true"><Delta opts={HERO_DELTA} /></div>
     </section>
