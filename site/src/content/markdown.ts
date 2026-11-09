@@ -129,9 +129,10 @@ Numbers, counted from the repository:
 
 | What | Count | How it was counted |
 |---|---|---|
+| Agents deleting prod (benchmark) | ${m.bench.value} / ${m.bench.total} ${m.bench.unit} | ${m.bench.text} |
 | Engine tests (backend) | ${f(m.tests.rows[0].value)} | \`pytest --collect-only\` in backend/ |
 | MCP + CLI tests | ${f(m.tests.rows[1].value)} | \`npm test\` in mcp/ |
-| Laws | ${m.laws.value} | distinct law ids in the tests, numbered L1 to L91 (L37 to L39 not used) |
+| Laws | ${m.laws.value} | distinct law ids in the tests, numbered L1 to L92 (L37 to L39 not used) |
 | Modeled resource types | ${m.types.value} | \`SUPPORTED_RESOURCE_TYPES\` in backend/app/mutations.py |
 | pathfinding.cloud escalation paths | 92 | backend/app/data/pathfinding_paths.json |
 | Scanner check reads | 55 | backend/app/data/scanner_check_reads.json |

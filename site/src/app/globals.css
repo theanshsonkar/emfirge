@@ -218,7 +218,7 @@ h2.h2 { font-size: 24px; line-height: 1.25; font-weight: 400; letter-spacing: -.
 .statement b { color: var(--ink); font-weight: 500; }
 
 /* cards */
-.grid { display: grid; grid-template-columns: 272px 1fr; gap: 13px; margin-top: 36px; }
+.grid { display: grid; grid-template-columns: 272px 1fr; gap: 13px; margin-top: 13px; }
 .stack { display: grid; gap: 13px; align-content: start; }
 .card { border: 1px solid var(--line); padding: 20px; background: #fff; }
 .card h4 { margin: 0; font-size: 15px; font-weight: 500; line-height: 20px; }
@@ -233,6 +233,12 @@ h2.h2 { font-size: 24px; line-height: 1.25; font-weight: 400; letter-spacing: -.
 .heat { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; margin-top: 14px; }
 .heat i { aspect-ratio: 1; background: #eeeff1; display: block; border-radius: 0; transition: background-color .25s; }
 .in .heat i, .heat.in i { background: var(--green); transition-delay: calc(var(--i) * 22ms); }
+.bench { display: grid; grid-template-columns: 272px 1fr; gap: 28px; margin-top: 36px; }
+.benchsub { font-size: 13px; line-height: 19.5px; color: var(--ink-2); margin: 6px 0 0; }
+.benchtxt { font-size: 14px; line-height: 21px; color: var(--ink-2); margin: 0; max-width: 62ch; }
+.benchtxt code { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; }
+.bheat { grid-template-columns: repeat(25, 1fr); max-width: 420px; margin-top: 18px; }
+@media (max-width: 900px) { .bench { grid-template-columns: 1fr; gap: 16px; } .bheat { grid-template-columns: repeat(25, 1fr); max-width: 420px; } }
 .heat i:nth-child(7n+3) { opacity: .75; }
 .tall .sec { padding: 0; }
 .tall .div { border-top: 1px solid var(--line); margin: 20px 0; }

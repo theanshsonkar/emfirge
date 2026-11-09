@@ -12,7 +12,7 @@ export const entries: Entry[] = [
       "`emfirge context --refresh` now runs the same collector as every other scan, so it also reads DynamoDB, EventBridge Scheduler, CloudFront, API Gateway, ElastiCache and SQS, and records what it read and when (law L91).",
       "`emfirge context --refresh` prints what happened: resources, warnings and the next command. The full report stays under `context --findings`.",
       "Context answers: IAM and CloudFront are listed as global, live counts only resources with a real last-used time, cost says when prices are for another region, and a denied read says the role may be old and how to update it.",
-      "`--human` never cuts a value and lists up to 25 items. Errors name CLI commands. The CLI is 0.1.2.",
+      "`--human` never cuts a value and lists up to 25 items. Errors name CLI commands. CLI 0.1.2 is in the repo and arrives on npm next (npm is 0.1.1 today).",
       "The open-branch limit answers HTTP 409, so the CLI exits 5 (`conflict`), as the agent guide says.",
     ],
     fixes: [

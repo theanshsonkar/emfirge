@@ -94,7 +94,7 @@ export const coverage: Page = {
       id: "sources",
       title: "Where the checks come from",
       blocks: [
-        { t: "lede", x: "Public data, with the source kept next to every fact. Not hand-written lists." },
+        { t: "lede", x: "Public data where a source exists, kept next to every fact. The few facts with no public source are written by hand, cite the AWS docs, and are tested." },
         { t: "sources" },
         { t: "table", head: ["Source", "Used for"], rows: [
           ["[pathfinding.cloud](https://pathfinding.cloud)", "IAM privilege-escalation paths (92)"],
@@ -103,7 +103,7 @@ export const coverage: Page = {
           ["AWS API models and Price List", "The field catalog, and provisioned cost"],
           ["[Checkov](https://github.com/bridgecrewio/checkov)", "An advisory configuration scanner on each verdict. It warns; it does not block on its own. Trivy is off."],
         ] },
-        { t: "p", x: "The numbers in the chart are counted from the repository, not estimated. Every behavior is pinned by a numbered law, a property test that must always hold; there are 88, numbered L1 to L91 (L37 to L39 are not used). [Read the laws](https://github.com/theanshsonkar/emfirge/tree/main/backend/tests/laws)." },
+        { t: "p", x: "The numbers in the chart are counted from the repository, not estimated. Every behavior is pinned by a numbered law, a property test that must always hold; there are 89, numbered L1 to L92 (L37 to L39 are not used). [Read the laws](https://github.com/theanshsonkar/emfirge/tree/main/backend/tests/laws)." },
       ],
     },
   ],

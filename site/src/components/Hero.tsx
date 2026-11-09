@@ -62,7 +62,7 @@ export function Hero() {
       <CopyBar />
       <div className="works">
         <span className="label">Works with</span>
-        {HERO.worksWith.map((w) => <a key={w} href={w === "MCP" ? `${LINKS.cli}#mcp-adapter` : LINKS.cli}>{w}</a>)}
+        {HERO.worksWith.map((w) => <a key={w} href={LINKS.cli}>{w}</a>)}
       </div>
       <div className="media" aria-hidden="true"><Delta opts={HERO_DELTA} /></div>
     </section>
