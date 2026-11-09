@@ -27,7 +27,6 @@ For you (the person):
 - Coverage: https://emfirge.cloud/coverage.md
 - Security & privacy: https://emfirge.cloud/security.md
 - Pricing: https://emfirge.cloud/pricing.md
-- Changelog: https://emfirge.cloud/changelog.md
 - FAQ: https://emfirge.cloud/faq.md
 
 For your agent:

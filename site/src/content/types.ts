@@ -17,7 +17,7 @@ export type Block =
   | { t: "list"; items: string[] }
   | { t: "card"; parts: { label: string; lines: Line[] }[] }
   | { t: "note"; x: string }
-  | { t: "fig"; id: "steps" | "loop" | "branch" | "ways" | "verbmap" | "coverage" | "role" | "token"; caption: string }
+  | { t: "fig"; id: "steps" | "loop" | "branch" | "ways" | "checks" | "record" | "verbmap" | "coverage" | "role" | "token"; caption: string }
   | { t: "link"; label: string; href: string }
   | { t: "faq"; items: [string, string][] }
   | { t: "sources" }

@@ -8,6 +8,8 @@ const FIGS = {
   loop: dynamic(() => import("@/graphics/Figure1").then((m) => m.Figure1)),
   branch: dynamic(() => import("@/graphics/BranchFig")),
   ways: dynamic(() => import("@/graphics/WaysFig")),
+  checks: dynamic(() => import("@/graphics/ChecksFig")),
+  record: dynamic(() => import("@/graphics/RecordFig")),
   verbmap: dynamic(() => import("@/graphics/VerbMap")),
   coverage: dynamic(() => import("@/graphics/CoverageFig")),
   role: dynamic(() => import("@/graphics/RoleFig")),

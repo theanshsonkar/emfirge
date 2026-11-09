@@ -642,6 +642,14 @@ mark.todo { white-space: normal; }
   .fig-frame > svg.f1-t { display: block; }
 }
 
+/* Figures for the six checks and the record: wide drawing, tall drawing on phones */
+.fig-frame > svg.cf-w, .fig-frame > svg.rf-w { min-width: 560px; }
+.fig-frame > svg.cf-t, .fig-frame > svg.rf-t { display: none; min-width: 0; max-width: 360px; margin: 0 auto; }
+@media (max-width: 700px) {
+  .fig-frame > svg.cf-w, .fig-frame > svg.rf-w { display: none; }
+  .fig-frame > svg.cf-t, .fig-frame > svg.rf-t { display: block; }
+}
+
 /* CLI verb figure: ring on wide screens, vertical loop on phones */
 .fig-frame > svg.vm-w { min-width: 560px; }
 .fig-frame > svg.vm-t { display: none; min-width: 0; max-width: 360px; margin: 0 auto; }
