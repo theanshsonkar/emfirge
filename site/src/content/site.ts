@@ -21,7 +21,6 @@ export const LINKS = {
   coverage: "/coverage/",
   security: "/security/",
   pricing: "/pricing/",
-  changelog: "/changelog/",
   faq: "/faq/",
   github: "https://github.com/theanshsonkar/emfirge",
   ansh: "https://github.com/theanshsonkar",
@@ -63,7 +62,6 @@ export const RAIL_GROUPS: { label: string; items: NavItem[] }[] = [
       { label: "Coverage", href: "/coverage/" },
       { label: "Security & privacy", href: "/security/" },
       { label: "Pricing", href: "/pricing/" },
-      { label: "Changelog", href: "/changelog/" },
       { label: "FAQ", href: "/faq/" },
     ],
   },
@@ -234,13 +232,13 @@ export const WRITING = {
 export const FOOTER = {
   tagline: "The harness for AI agents that work on your cloud.",
   cols: [
-    { h: "Product", links: [["Set up", "/quickstart/"], ["How it works", "/how-it-works/"], ["Agent reference", "/cli/"], ["Coverage", "/coverage/"], ["Pricing", "/pricing/"], ["Changelog", "/changelog/"], ["FAQ", "/faq/"]] },
+    { h: "Product", links: [["Set up", "/quickstart/"], ["How it works", "/how-it-works/"], ["Agent reference", "/cli/"], ["Coverage", "/coverage/"], ["Pricing", "/pricing/"], ["FAQ", "/faq/"]] },
     { h: "Company", links: [["Security & privacy", "/security/"], ["GitHub ↗", LINKS.github], ["Contact", LINKS.mail]] },
     { h: "Connect", links: [["X", ""], ["GitHub", LINKS.ansh], ["ansh@emfirge.cloud", LINKS.mail]] },
   ],
   legal: "© 2026 emfirge",
   status: "Public beta",
-  statusHref: "/changelog/",
+  statusHref: LINKS.github,
 };
 
 // Open unknowns, written for Ansh. The one place they are kept. They are never in the public HTML or in the .md files:

@@ -41,6 +41,9 @@ const OLD_DOCS: Record<string, string> = {
   // other old URLs: the old connect page, and links the repo's code printed (mcp/src/tools/setup.ts)
   "/connect": "/quickstart/",
   "/security.html": "/security/",
+  // the Changelog page was removed (2026-11-09); release history lives in the GitHub repo
+  "/changelog": "https://github.com/theanshsonkar/emfirge/commits/main",
+  "/changelog.md": "https://github.com/theanshsonkar/emfirge/commits/main",
   "/guide": "/cli/", // docs.emfirge.cloud/guide appears in an MCP test fixture; `emfirge guide` is a CLI command, documented there
 };
 

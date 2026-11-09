@@ -89,7 +89,6 @@ For you (the person):
 - Coverage: ${ORIGIN}/coverage.md
 - Security & privacy: ${ORIGIN}/security.md
 - Pricing: ${ORIGIN}/pricing.md
-- Changelog: ${ORIGIN}/changelog.md
 - FAQ: ${ORIGIN}/faq.md
 
 For your agent:
