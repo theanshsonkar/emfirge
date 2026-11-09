@@ -88,6 +88,8 @@ Shorthand the engine cannot read is refused with a clear error, not guessed. Any
 
 Emfirge compares the branch with its base and asks the same six questions every time, in the same order. It does not keep a rule per AWS action (policy_sentry's IAM data alone lists more than 20,000); questions about the result do not grow.
 
+*Figure 4. Six questions about one change, always all six, always in this order: data, exposure, money, availability, control and outside world. Each answers with facts and with unknowns, never with pass. In this example, opening SSH to the internet on a security group nothing uses yet gives exposure a fact (latent exposure, so warn; on a live server it would block), while every check still lists what it did not look at. The verdict is separate: it takes the worst reason, and only data, exposure and availability have reason codes. A change emfirge cannot model never passes.*
+
 | Check | The question | What it looks at | Example fact |
 |---|---|---|---|
 | Data | Did something that holds data disappear with no recovery point? | Deleted buckets, databases, volumes and DynamoDB tables against surviving snapshots and backups; versioning, backups or point-in-time recovery turned off | `deleted` with `has_recovery_point: false` |
@@ -169,6 +171,8 @@ Any action of a service that is not in the table is reported as an unclassified 
 ## The record
 
 **After your agent applies a change, `report` hands back exactly what was judged. This is what you read.**
+
+*Figure 5. The record. After a pass, emfirge hands back the exact calls, bound by hash to the verdict. Your agent applies them with its own access; emfirge only reads and never writes. The agent then runs report --verify, which answers ok, or rejects the hand-back with a reason code such as input_hash_mismatch when these are not the calls that were judged.*
 
 Your agent applies with its own credentials; emfirge never does. `report` returns the hand-back: for a typed branch, the exact AWS API calls its changes stand for; for a plan, its hash. Each is bound to the verdict it was judged with: the input hash, the base scan, the branch revision and a verdict ID. Emfirge keeps no plan text, only a SHA-256, so your agent applies its own original plan.
 

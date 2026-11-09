@@ -276,6 +276,7 @@ export const cli: Page = {
       title: "MCP adapter",
       blocks: [
         { t: "lede", x: "The same engine, for agents that speak MCP." },
+        { t: "p", x: "**Note:** the npm adapter (`@emfirge/mcp` 0.2.3) is behind the repo (0.2.9) and an update is coming. The CLI is the supported path today." },
         { t: "p", x: "`@emfirge/mcp` exposes 27 tools over stdio, so a client that cannot run a shell can still use emfirge. The CLI is built on the same handlers, so both paths share one engine and one privacy layer. The tool names are unchanged. It also carries the local commands the CLI does not have." },
         { t: "table", head: ["Command", "What it does"], mono: [0], rows: [
           ["`npx @emfirge/mcp install`", "Wire emfirge into the MCP clients it detects."],

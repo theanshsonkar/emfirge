@@ -164,7 +164,7 @@ const dotted = { stroke: "rgba(11,16,21,.38)", strokeWidth: 1, strokeDasharray: 
 const MUTED = "rgba(11,16,21,.68)", FAINT = "rgba(11,16,21,.68)", EDGE = "rgba(11,16,21,.22)";
 const icons = [
   <g key="cli" fill="none" stroke={INK} strokeWidth="1.5" strokeLinecap="square" opacity=".8"><path d="M-7 -5L-1 0L-7 5" /><path d="M2 6H8" /></g>,
-  <g key="tf" fill="none" stroke={INK} strokeWidth="1.4" opacity=".8"><path d="M-8 -7L-2 -4V3L-8 0Z" /><path d="M0 -3L6 -6V1L0 4Z" /><path d="M-2 5L4 2V8L-2 11Z" transform="translate(0 -2)" /></g>,
+  <g key="tf" fill="none" stroke={INK} strokeWidth="1.3" strokeLinejoin="miter" opacity=".8"><path d="M-8.5 -9.5L-3.5 -7V-1L-8.5 -3.5Z" /><path d="M-1.5 -6L3.5 -3.5V2.5L-1.5 0Z" /><path d="M-1.5 3L3.5 5.5V11.5L-1.5 9Z" transform="translate(0 -1.5)" /><path d="M10.5 -9.5L5.5 -7V-1L10.5 -3.5Z" transform="translate(0 3.5)" /></g>,
   <g key="cfn" fill="none" stroke={INK} strokeWidth="1.5" strokeLinecap="square" opacity=".8"><path d="M-3 -7C-7 -7 -6 -1 -9 0C-6 1 -7 7 -3 7" /><path d="M3 -7C7 -7 6 -1 9 0C6 1 7 7 3 7" /></g>,
 ];
 const srcNames = ["AWS CLI", "TERRAFORM", "CLOUDFORMATION"];
@@ -190,6 +190,7 @@ function Wide() {
   return (
     <svg ref={root} className="f1 f1-w" viewBox="0 0 640 360" role="img" aria-label={ARIA}>
       <text x="40" y="44" {...lab} fill={MUTED}>CHANGES</text>
+      <text x="68" y="334" textAnchor="middle" {...lab} letterSpacing={0.3} fill={FAINT}>+ AWS API, TYPED</text>
       {/* edges */}
       <path d="M96 88H124V264M96 176H124M96 264H124M124 176H176" {...dotted} />
       <path d="M152 176H124" {...dotted} />
@@ -234,11 +235,7 @@ function Wide() {
         <rect x="-9" y="-6" width="18" height="14" /><path d="M0 -6V-11" /><path d="M-4 0V2M4 0V2" strokeLinecap="square" /><path d="M-13 0V3M13 0V3" />
       </g>
       <text x="536" y="222" textAnchor="middle" {...lab} letterSpacing={0.3} fill={MUTED}>YOUR AGENT&apos;S CONTEXT</text>
-      <text x="536" y="241" textAnchor="middle" {...lab} fill={FAINT}>OR</text>
-      <g {...lab} fill={MUTED}>
-        <rect x="502.5" y="250.5" width="38" height="22" fill="#fff" stroke={EDGE} /><text x="521.5" y="265" textAnchor="middle">MCP</text>
-        <rect x="546.5" y="250.5" width="50" height="22" fill="#fff" stroke={EDGE} /><text x="571.5" y="265" textAnchor="middle">HOOKS</text>
-      </g>
+      <text x="536" y="241" textAnchor="middle" {...lab} fill={FAINT}>MCP: UPDATE COMING</text>
       <Comets />
     </svg>
   );
@@ -251,6 +248,7 @@ function Tall() {
   return (
     <svg ref={root} className="f1 f1-t" viewBox="0 0 320 572" role="img" aria-label={ARIA}>
       <text x="20" y="24" {...lab} fill={MUTED}>CHANGES</text>
+      <text x="300" y="24" textAnchor="end" {...lab} letterSpacing={0.3} fill={FAINT}>+ AWS API, TYPED</text>
       {/* edges */}
       {TALL_X.map((x) => <path key={x} d={`M${x} 118V134H100`} {...dotted} />)}
       <path d="M100 134V226M100 290V344M100 408V472" {...dotted} />
@@ -259,7 +257,7 @@ function Tall() {
         <g key={i}>
           <rect data-k={"src" + i} x={x - 27.5 + 0.5} y="36.5" width="55" height="55" fill="#fff" stroke={EDGE} />
           <g transform={`translate(${x} 64)`}>{icons[i]}</g>
-          <text data-k={"srclab" + i} x={x} y="109" textAnchor="middle" {...lab} letterSpacing={0.2} fill={MUTED}>{srcNames[i]}</text>
+          <text data-k={"srclab" + i} x={x} y="109" textAnchor="middle" {...lab} fontSize={i === 2 ? 9.5 : 11} letterSpacing={0} fill={MUTED}>{srcNames[i]}</text>
         </g>
       ))}
       {/* group */}
@@ -297,11 +295,7 @@ function Tall() {
       </g>
       <text x="148" y="497" {...lab} letterSpacing={0.3} fill={MUTED}>YOUR AGENT&apos;S</text>
       <text x="148" y="512" {...lab} letterSpacing={0.3} fill={MUTED}>CONTEXT</text>
-      <text x="148" y="532" {...lab} fill={FAINT}>OR</text>
-      <g {...lab} fill={MUTED}>
-        <rect x="148.5" y="540.5" width="38" height="22" fill="#fff" stroke={EDGE} /><text x="167.5" y="555" textAnchor="middle">MCP</text>
-        <rect x="194.5" y="540.5" width="50" height="22" fill="#fff" stroke={EDGE} /><text x="219.5" y="555" textAnchor="middle">HOOKS</text>
-      </g>
+      <text x="148" y="532" {...lab} fill={FAINT}>MCP: UPDATE COMING</text>
       <Comets />
     </svg>
   );

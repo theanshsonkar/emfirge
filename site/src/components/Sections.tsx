@@ -86,19 +86,21 @@ export function Production() {
       <p className="statement" data-reveal>
         Our <b>promise</b> is a world your agent can <b>trust</b>: true facts, unknowns marked honestly, and nothing that ever writes to your cloud.
       </p>
+      <div className="card bench" data-reveal>
+        <div>
+          <h4>{m.bench.title}</h4><div className="label">{m.bench.sub}</div>
+          <div className="num" style={{ marginTop: 14 }}>{m.bench.value} / {m.bench.total}</div>
+          <p className="benchsub">{m.bench.unit}</p>
+        </div>
+        <div>
+          <p className="benchtxt">{m.bench.text.split("`").map((t, i) => (i % 2 ? <code key={i}>{t}</code> : t))}</p>
+          <div className="heat bheat" aria-label={`${m.bench.value} of ${m.bench.total} incident tests pass`}>
+            {Array.from({ length: m.bench.value }, (_, i) => <i key={i} style={{ ["--i" as string]: i }} />)}
+          </div>
+        </div>
+      </div>
       <div className="grid">
         <div className="stack">
-          <div className="card" data-reveal>
-            <h4>{m.tests.title}</h4><div className="label">{m.tests.sub}</div>
-            <table className="tbl">
-              <thead><tr><th /><th>{m.tests.cols[0]}</th></tr></thead>
-              <tbody>
-                {m.tests.rows.map((r) => (
-                  <tr key={r.name}><td className="k">{r.name}</td><td className="v"><span className="num" style={{ fontSize: 28, lineHeight: "32px" }}>{fmt(r.value)}</span></td></tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
           <div className="card" data-reveal>
             <h4>{m.laws.title}</h4><div className="label">{m.laws.sub}</div>
             <div className="num" style={{ marginTop: 14 }}>{m.laws.value}</div>
@@ -109,6 +111,17 @@ export function Production() {
           <div className="card" data-reveal>
             <h4>{m.types.title}</h4><div className="label">{m.types.sub}</div>
             <div className="num" style={{ marginTop: 14 }}>{m.types.value}</div>
+          </div>
+          <div className="card" data-reveal>
+            <h4>{m.tests.title}</h4><div className="label">{m.tests.sub}</div>
+            <table className="tbl">
+              <thead><tr><th /><th>{m.tests.cols[0]}</th></tr></thead>
+              <tbody>
+                {m.tests.rows.map((r) => (
+                  <tr key={r.name}><td className="k">{r.name}</td><td className="v"><span className="num" style={{ fontSize: 28, lineHeight: "32px" }}>{fmt(r.value)}</span></td></tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
         <SourcesCard />
@@ -212,7 +225,7 @@ export function Footer() {
       </div>
       <div className="ft-bot">
         <div className="l"><span>{FOOTER.legal}</span><a href={LINKS.privacy}>Privacy</a><a href={LINKS.security}>Security</a></div>
-        <div className="r"><span><i className="sdot" />{FOOTER.status}</span><a href="#top">Back to top ↑</a></div>
+        <div className="r"><a href={FOOTER.statusHref}><i className="sdot" />{FOOTER.status}</a><a href="#top">Back to top ↑</a></div>
       </div>
     </footer>
   );

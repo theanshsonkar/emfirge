@@ -78,7 +78,7 @@ The Compliance lens (CIS 1.5 and SOC 2, from Prowler) feeds `emfirge context --c
 
 ## Where the checks come from
 
-**Public data, with the source kept next to every fact. Not hand-written lists.**
+**Public data where a source exists, kept next to every fact. The few facts with no public source are written by hand, cite the AWS docs, and are tested.**
 
 Counts from the repository:
 
@@ -98,7 +98,7 @@ Counts from the repository:
 | AWS API models and Price List | The field catalog, and provisioned cost |
 | [Checkov](https://github.com/bridgecrewio/checkov) | An advisory configuration scanner on each verdict. It warns; it does not block on its own. Trivy is off. |
 
-The numbers in the chart are counted from the repository, not estimated. Every behavior is pinned by a numbered law, a property test that must always hold; there are 88, numbered L1 to L91 (L37 to L39 are not used). [Read the laws](https://github.com/theanshsonkar/emfirge/tree/main/backend/tests/laws).
+The numbers in the chart are counted from the repository, not estimated. Every behavior is pinned by a numbered law, a property test that must always hold; there are 89, numbered L1 to L92 (L37 to L39 are not used). [Read the laws](https://github.com/theanshsonkar/emfirge/tree/main/backend/tests/laws).
 
 ---
 

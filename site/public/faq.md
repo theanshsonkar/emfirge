@@ -22,7 +22,7 @@ With the CLI, on a computer where you are signed in: `emfirge key create --name 
 No. It is read-only. Your agent applies with its own credentials; emfirge records and verifies.
 
 **Which agents work?**
-Any agent that can run a shell command: Claude Code, Codex, Cursor, Gemini CLI and others. An MCP adapter covers clients that cannot.
+Any agent that can run a shell command: Claude Code, Codex, Cursor, Gemini CLI and others. An MCP adapter exists for clients that cannot, but the npm version (0.2.3) is behind the repo and an update is coming; the CLI is the supported path today.
 
 **Which clouds?**
 AWS today. The core is built to be cloud-neutral, with one adapter per cloud, but only AWS exists.

@@ -20,7 +20,7 @@ export const pricing: Page = {
           blurb: "For anyone letting an agent change AWS.",
           includes: [
             "The verbs that are built: context, branch, try, check and report (`request` is not built yet)",
-            "The CLI and the MCP adapter",
+            "The CLI (the supported path today), and an MCP adapter whose npm release is being updated",
             "The hosted engine, with the six checks on every branch",
             "The read-only role, revocable by deleting one stack",
             "Support by email: ansh@emfirge.cloud",

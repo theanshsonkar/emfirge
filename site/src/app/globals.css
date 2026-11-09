@@ -177,8 +177,8 @@ h1.h1 { font-size: 40px; line-height: 1.125; font-weight: 400; letter-spacing: -
 .menu a:hover { background: var(--surface); }
 .works { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; margin-top: 21px; min-height: 30px; }
 .works .label { color: var(--ink-3); letter-spacing: .2em; margin-right: 6px; }
-.works a { font-family: var(--font-geist-mono), monospace; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--line); padding: 4px 7px; line-height: 1.2; }
-.works a:hover { color: var(--ink); border-color: var(--ink-3); }
+.works .wk { display: inline-flex; align-items: center; gap: 7px; font-family: var(--font-geist-mono), monospace; font-size: 11px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); border: 1px solid var(--line); padding: 4px 7px; line-height: 1.2; }
+.works .wk svg { flex: none; opacity: .85; }
 .media { margin-top: 58px; width: 100%; aspect-ratio: 640 / 266; box-shadow: var(--shadow); position: relative; background: #0b3b2a; overflow: hidden; }
 .media canvas, .cv { display: block; width: 100%; height: 100%; }
 
@@ -218,7 +218,7 @@ h2.h2 { font-size: 24px; line-height: 1.25; font-weight: 400; letter-spacing: -.
 .statement b { color: var(--ink); font-weight: 500; }
 
 /* cards */
-.grid { display: grid; grid-template-columns: 272px 1fr; gap: 13px; margin-top: 36px; }
+.grid { display: grid; grid-template-columns: 272px 1fr; gap: 13px; margin-top: 13px; }
 .stack { display: grid; gap: 13px; align-content: start; }
 .card { border: 1px solid var(--line); padding: 20px; background: #fff; }
 .card h4 { margin: 0; font-size: 15px; font-weight: 500; line-height: 20px; }
@@ -233,6 +233,12 @@ h2.h2 { font-size: 24px; line-height: 1.25; font-weight: 400; letter-spacing: -.
 .heat { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; margin-top: 14px; }
 .heat i { aspect-ratio: 1; background: #eeeff1; display: block; border-radius: 0; transition: background-color .25s; }
 .in .heat i, .heat.in i { background: var(--green); transition-delay: calc(var(--i) * 22ms); }
+.bench { display: grid; grid-template-columns: 272px 1fr; gap: 28px; margin-top: 36px; }
+.benchsub { font-size: 13px; line-height: 19.5px; color: var(--ink-2); margin: 6px 0 0; }
+.benchtxt { font-size: 14px; line-height: 21px; color: var(--ink-2); margin: 0; max-width: 62ch; }
+.benchtxt code { font-family: var(--mono, ui-monospace, monospace); font-size: 12.5px; }
+.bheat { grid-template-columns: repeat(25, 1fr); max-width: 420px; margin-top: 18px; }
+@media (max-width: 900px) { .bench { grid-template-columns: 1fr; gap: 16px; } .bheat { grid-template-columns: repeat(25, 1fr); max-width: 420px; } }
 .heat i:nth-child(7n+3) { opacity: .75; }
 .tall .sec { padding: 0; }
 .tall .div { border-top: 1px solid var(--line); margin: 20px 0; }
@@ -538,7 +544,7 @@ mark.todo { white-space: normal; }
 .menu-btn { min-height: 36px; display: inline-flex; align-items: center; }
 .pill a { min-height: 32px; }
 .pill > span { min-height: 32px; }
-.works a { display: inline-flex; align-items: center; min-height: 32px; padding: 0 10px; }
+.works .wk { min-height: 32px; padding: 0 10px; }
 .codeb-h { padding: 4px 12px; }
 .codeb-h button { min-height: 32px; padding: 0 12px; }
 .arrow { min-height: 32px; margin-top: 31px; }
@@ -586,9 +592,9 @@ mark.todo { white-space: normal; }
   .btn-s { justify-content: center; border-color: rgba(10,122,75,.4); }
   .btn-s::before, .btn-s::after { display: none; }
   /* works with (11) */
-  .works { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; align-items: stretch; margin-top: 24px; }
+  .works { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-items: stretch; margin-top: 24px; }
   .works .label { grid-column: 1 / -1; margin: 0; }
-  .works a { justify-content: center; padding: 0 6px; letter-spacing: .06em; }
+  .works .wk { justify-content: center; padding: 0 6px; letter-spacing: .06em; white-space: nowrap; }
   /* footnote: the note opens inline under its paragraph, always inside the screen */
   .prose p { position: relative; }
   .pw { position: static; }
@@ -636,6 +642,14 @@ mark.todo { white-space: normal; }
   .fig-frame > svg.f1-t { display: block; }
 }
 
+/* Figures for the six checks and the record: wide drawing, tall drawing on phones */
+.fig-frame > svg.cf-w, .fig-frame > svg.rf-w { min-width: 560px; }
+.fig-frame > svg.cf-t, .fig-frame > svg.rf-t { display: none; min-width: 0; max-width: 360px; margin: 0 auto; }
+@media (max-width: 700px) {
+  .fig-frame > svg.cf-w, .fig-frame > svg.rf-w { display: none; }
+  .fig-frame > svg.cf-t, .fig-frame > svg.rf-t { display: block; }
+}
+
 /* CLI verb figure: ring on wide screens, vertical loop on phones */
 .fig-frame > svg.vm-w { min-width: 560px; }
 .fig-frame > svg.vm-t { display: none; min-width: 0; max-width: 360px; margin: 0 auto; }
@@ -666,7 +680,7 @@ mark.todo { white-space: normal; }
    Boxes that must keep their look (pills, bordered buttons, icons) keep their size and grow an invisible ::after overlay;
    rows of plain text links (footer) simply get 44px rows. Inline links inside sentences stay as they are. */
 @media (pointer: coarse) {
-  .logo, .menu-btn, .cpm, .codeb-h button, .works a, .pill a, .arrow, .links a, .ext, .copybar button,
+  .logo, .menu-btn, .cpm, .codeb-h button, .pill a, .arrow, .links a, .ext, .copybar button,
   .dp-ul li > a.uline:first-child { position: relative; }
   .logo::after, .pill a::after, .arrow::after, .links a::after, .ext::after, .copybar button::after
     { content: ""; position: absolute; inset: -6px 0; }

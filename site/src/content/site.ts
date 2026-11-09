@@ -1,10 +1,10 @@
 // Home-page copy and numbers (v6 look, v7 links). Inner pages live in the other files of this folder. See DESIGN-v7.md.
 //
-// REAL NUMBERS (counted from the repo on 2026-11-08, never estimated; sources in site/FACTS.md, section 4.1):
-//  - Engine tests 3,247: `cd backend && python3 -m pytest --collect-only -q` ("3247 tests collected"; parametrized cases
-//    included). A full run on 2026-11-08: 3243 passed, 3 skipped, 1 xfailed.
-//  - MCP + CLI tests 206: `cd mcp && npm test` -> "# tests 206, pass 206".
-//  - Laws 88: distinct ids L1..L91 in backend/tests plus mcp/src/tokenize-leaks.test.ts (L81); L37-L39 do not exist. README still says 48.
+// REAL NUMBERS (counted from the repo on 2026-11-09 (HEAD fdef186), never estimated; sources in site/FACTS.md, section 4.1):
+//  - Engine tests 3,274: `cd backend && python3 -m pytest --collect-only -q` ("3274 tests collected"; parametrized cases
+//    included).
+//  - MCP + CLI tests 222: `cd mcp && npm test` -> "# tests 222, pass 222".
+//  - Laws 89: distinct ids L1..L92 in backend/tests plus mcp/src/tokenize-leaks.test.ts (L81); L37-L39 do not exist (L92 = test_L92_branch_read_cost_laws.py). README still says 48.
 //  - Resource types 18: len(app.mutations.SUPPORTED_RESOURCE_TYPES).
 //  - Escalation paths 92: len(app/data/pathfinding_paths.json["paths"]).
 //  - Scanner check reads 55: len(app/data/scanner_check_reads.json).
@@ -21,7 +21,6 @@ export const LINKS = {
   coverage: "/coverage/",
   security: "/security/",
   pricing: "/pricing/",
-  changelog: "/changelog/",
   faq: "/faq/",
   github: "https://github.com/theanshsonkar/emfirge",
   ansh: "https://github.com/theanshsonkar",
@@ -63,7 +62,6 @@ export const RAIL_GROUPS: { label: string; items: NavItem[] }[] = [
       { label: "Coverage", href: "/coverage/" },
       { label: "Security & privacy", href: "/security/" },
       { label: "Pricing", href: "/pricing/" },
-      { label: "Changelog", href: "/changelog/" },
       { label: "FAQ", href: "/faq/" },
     ],
   },
@@ -91,12 +89,12 @@ export const HERO = {
   pill: "Your agent runs it",
   pillLink: "Agent reference",
   h1: "emfirge is building the harness for AI agents that work on your cloud.",
-  sub: "You set it up once. Your agent does the rest, in its own shell or over MCP.",
+  sub: "You set it up once. Your agent does the rest, in its own shell.",
   primary: "Give emfirge to your agent",
   primaryDone: "Copied. Paste it into your agent",
   secondary: "Set up, step by step",
   copy: "Copy setup prompt",
-  worksWith: ["Claude Code", "Codex", "Cursor", "Gemini CLI", "MCP"],
+  worksWith: ["Claude Code", "Codex", "Cursor", "Gemini CLI"],
 };
 
 export const NOTES = {
@@ -128,7 +126,7 @@ export const WHAT = {
       text: "Data, exposure, money, availability, control, outside world. Deterministic, and what it cannot check is listed as unknown, never as safe.",
     },
   ],
-  note: "Every check comes from public data: AWS's own API models and Price List, pathfinding.cloud, Prowler and policy_sentry. Not hand-written lists.",
+  note: "Where a public source exists, the checks use it: AWS's own API models and Price List, pathfinding.cloud, Prowler and policy_sentry. The few facts with no public source are written by hand, cite the AWS docs, and are tested.",
   more: "Read more about the engine",
 };
 
@@ -137,21 +135,29 @@ export const PRODUCTION = {
 };
 
 export const METRICS = {
+  bench: {
+    title: "Agents deleting prod",
+    sub: "Incident tests",
+    value: 49,
+    total: 49,
+    unit: "incident tests pass",
+    text: "Locked answers (block / warn / pass) set before scoring and sha256-pinned: 17 cases drawn from real incidents (a database deleted with its only snapshot, `terraform destroy` on a prod VPC) plus locked scenarios. Run through the real engine on synthetic accounts, not a live AWS account.",
+  },
   tests: {
     title: "Tests",
     sub: "Backend pytest, MCP + CLI node",
     cols: ["Test cases"],
-    // 3,247 from pytest --collect-only; 206 from `npm test` in mcp/.
+    // 3,274 from pytest --collect-only; 222 from `npm test` in mcp/.
     rows: [
-      { name: "Engine (backend)", value: 3247 },
-      { name: "MCP + CLI", value: 206 },
+      { name: "Engine (backend)", value: 3274 },
+      { name: "MCP + CLI", value: 222 },
     ],
   },
-  laws: { title: "Laws", sub: "Properties that must always hold", value: 88 },
+  laws: { title: "Laws", sub: "Properties that must always hold", value: 89 },
   types: { title: "Resource types", sub: "AWS types a branch can add, modify or delete", value: 18 },
   sources: {
     title: "Where the checks come from",
-    sub: "Counts from the repo, not hand-written lists",
+    sub: "Counts from the repo",
     headline: 92,
     headlineLabel: "privilege-escalation paths, from pathfinding.cloud",
     bars: [
@@ -209,7 +215,7 @@ export const TRUST = {
 
 export const CTA = {
   title: "Letting agents touch production?",
-  text: "If your agents already change your cloud, they should try every change on a branch first. Give emfirge to your agent once; it does the rest, through the CLI or MCP.",
+  text: "If your agents already change your cloud, they should try every change on a branch first. Give emfirge to your agent once; it does the rest, through the CLI.",
   button: "Give emfirge to your agent",
 };
 
@@ -226,12 +232,13 @@ export const WRITING = {
 export const FOOTER = {
   tagline: "The harness for AI agents that work on your cloud.",
   cols: [
-    { h: "Product", links: [["Set up", "/quickstart/"], ["How it works", "/how-it-works/"], ["Agent reference", "/cli/"], ["Coverage", "/coverage/"], ["Pricing", "/pricing/"], ["Changelog", "/changelog/"], ["FAQ", "/faq/"]] },
+    { h: "Product", links: [["Set up", "/quickstart/"], ["How it works", "/how-it-works/"], ["Agent reference", "/cli/"], ["Coverage", "/coverage/"], ["Pricing", "/pricing/"], ["FAQ", "/faq/"]] },
     { h: "Company", links: [["Security & privacy", "/security/"], ["GitHub ↗", LINKS.github], ["Contact", LINKS.mail]] },
     { h: "Connect", links: [["X", ""], ["GitHub", LINKS.ansh], ["ansh@emfirge.cloud", LINKS.mail]] },
   ],
   legal: "© 2026 emfirge",
-  status: "All systems operational",
+  status: "Public beta",
+  statusHref: LINKS.github,
 };
 
 // Open unknowns, written for Ansh. The one place they are kept. They are never in the public HTML or in the .md files:

@@ -2,7 +2,7 @@
 
 emfirge is building the harness for AI agents that work on your cloud.
 
-You set it up once. Your agent does the rest, in its own shell or over MCP.
+You set it up once. Your agent does the rest, in its own shell.
 
 ## Give emfirge to your agent
 
@@ -27,7 +27,6 @@ For you (the person):
 - Coverage: https://emfirge.cloud/coverage.md
 - Security & privacy: https://emfirge.cloud/security.md
 - Pricing: https://emfirge.cloud/pricing.md
-- Changelog: https://emfirge.cloud/changelog.md
 - FAQ: https://emfirge.cloud/faq.md
 
 For your agent:
@@ -37,7 +36,7 @@ For your agent:
 - Source: https://github.com/theanshsonkar/emfirge
 - Contact: ansh@emfirge.cloud
 
-Works with: Claude Code, Codex, Cursor, Gemini CLI, MCP.
+Works with: Claude Code, Codex, Cursor, Gemini CLI.
 
 ## Mission
 
@@ -59,7 +58,7 @@ Figure 1. A change enters emfirge in any format and runs on a branch of your liv
 - **A branch for every change.** Your agent tries AWS CLI commands, Terraform plans and CloudFormation change sets on a copy of live, never on production.
 - **Six checks, no AI inside.** Data, exposure, money, availability, control, outside world. Deterministic, and what it cannot check is listed as unknown, never as safe.
 
-Every check comes from public data: AWS's own API models and Price List, pathfinding.cloud, Prowler and policy_sentry. Not hand-written lists.
+Where a public source exists, the checks use it: AWS's own API models and Price List, pathfinding.cloud, Prowler and policy_sentry. The few facts with no public source are written by hand, cite the AWS docs, and are tested.
 
 ## In production
 
@@ -69,9 +68,10 @@ Numbers, counted from the repository:
 
 | What | Count | How it was counted |
 |---|---|---|
-| Engine tests (backend) | 3,247 | `pytest --collect-only` in backend/ |
-| MCP + CLI tests | 206 | `npm test` in mcp/ |
-| Laws | 88 | distinct law ids in the tests, numbered L1 to L91 (L37 to L39 not used) |
+| Agents deleting prod (benchmark) | 49 / 49 incident tests pass | Locked answers (block / warn / pass) set before scoring and sha256-pinned: 17 cases drawn from real incidents (a database deleted with its only snapshot, `terraform destroy` on a prod VPC) plus locked scenarios. Run through the real engine on synthetic accounts, not a live AWS account. |
+| Engine tests (backend) | 3,274 | `pytest --collect-only` in backend/ |
+| MCP + CLI tests | 222 | `npm test` in mcp/ |
+| Laws | 89 | distinct law ids in the tests, numbered L1 to L92 (L37 to L39 not used) |
 | Modeled resource types | 18 | `SUPPORTED_RESOURCE_TYPES` in backend/app/mutations.py |
 | pathfinding.cloud escalation paths | 92 | backend/app/data/pathfinding_paths.json |
 | Scanner check reads | 55 | backend/app/data/scanner_check_reads.json |
