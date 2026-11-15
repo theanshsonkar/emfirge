@@ -11,6 +11,7 @@ from emfirge.aws.catalog import AwsCatalog
 from emfirge.aws.codec import AwsCodec
 from emfirge.aws.curated import Where, curated
 from emfirge.aws.errors import UnknownType
+from emfirge.aws.generic_copy import Copied
 from emfirge.aws.layered import LayeredCatalog, LayeredCopier, copier_order, runs_code_actions
 from emfirge.core.model import Kind, ResourceRef, WireRequest, WireResponse
 from emfirge.core.ports import CannotTell
@@ -110,7 +111,7 @@ class Fake:
             place.engine.send(CODEC.encode('sqs', 'CreateQueue', {'QueueName': 'q'}).wire)
         if self.raises:
             raise self.raises(f'{self.name} says no')
-        return f'copied by {self.name}'
+        return Copied(True, notes=(f'copied by {self.name}',), faithful=frozenset())
 
 
 class Place:
@@ -135,7 +136,7 @@ def stack(first, second, order=None):
 
 def test_the_next_copier_tries_only_when_the_first_does_not_know_the_type():
     a, b = Fake('generic', UnknownType), Fake('curated')
-    assert stack(a, b).copy(ResourceRef('x:y', 'z'), Place()) == 'copied by curated'
+    assert stack(a, b).copy(ResourceRef('x:y', 'z'), Place()).notes == ('copied by curated',)
     a, b = Fake('generic', CannotTell), Fake('curated')
     with pytest.raises(CannotTell, match='generic says no'):
         stack(a, b).copy(ResourceRef('x:y', 'z'), Place())

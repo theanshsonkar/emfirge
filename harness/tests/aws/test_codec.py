@@ -6,6 +6,7 @@ import json
 import zlib
 
 import botocore.parsers
+import botocore.serialize
 import botocore.session
 import pytest
 
@@ -25,6 +26,12 @@ ROUND_TRIPS = [   # (service, operation, params): one or more per protocol
     ('s3', 'GetBucketPolicy', {'Bucket': 'media'}),                                            # rest-xml
     ('s3', 'HeadObject', {'Bucket': 'media', 'Key': 'ep/1.mp3'}),
     ('route53', 'ListResourceRecordSets', {'HostedZoneId': 'Z123'}),
+    ('s3', 'PutBucketVersioning', {'Bucket': 'media', 'VersioningConfiguration': {'Status': 'Suspended'}}),   # rest-xml body
+    ('s3', 'PutBucketEncryption', {'Bucket': 'media', 'ServerSideEncryptionConfiguration': {
+        'Rules': [{'ApplyServerSideEncryptionByDefault': {'SSEAlgorithm': 'aws:kms'}}]}}),
+    ('s3', 'PutBucketPolicy', {'Bucket': 'media', 'Policy': '{"Version": "2012-10-17"}'}),                    # text payload
+    ('route53', 'ChangeResourceRecordSets', {'HostedZoneId': 'Z1', 'ChangeBatch': {'Changes': [{'Action': 'UPSERT',
+        'ResourceRecordSet': {'Name': 'a.example', 'Type': 'A', 'TTL': 60, 'ResourceRecords': [{'Value': '1.2.3.4'}]}}]}}),
     ('iam', 'GetRole', {'RoleName': 'app-role'}),                                              # query
     ('iam', 'ListRoles', {}),
     ('sns', 'GetTopicAttributes', {'TopicArn': 'arn:aws:sns:us-west-2:000000000000:alerts'}),
@@ -38,7 +45,23 @@ def test_encode_then_decode_gives_the_same_call(service, op, params):
     call = CODEC.encode(service, op, params)
     again = CODEC.decode(call.wire)
     assert (again.service, again.operation) == (service, op)
-    assert json.loads(json.dumps(again.params)) == params
+    got = json.loads(json.dumps(again.params))
+    assert {k: got.get(k) for k in params} == params   # the SDK may add its own (EncodingType, ChecksumAlgorithm)
+
+
+def test_the_branch_reads_are_built_as_the_sdk_sends_them():
+    assert CODEC.encode('s3', 'ListObjectsV2', {'Bucket': 'b'}).params == {'Bucket': 'b', 'EncodingType': 'url'}
+    copy = CODEC.encode('s3', 'CopyObject', {'Bucket': 'n', 'Key': 'k', 'CopySource': {'Bucket': 'm', 'Key': 'f'}})
+    assert copy.params['CopySource'] == 'm/f'
+    assert CODEC.encode('sso-oidc', 'CreateToken', {'clientId': 'a', 'clientSecret': 'b', 'grantType': 'c'}).operation \
+        == 'CreateToken'   # unsigned: built by the bare serializer
+
+
+def test_an_id_with_an_encoded_slash_stays_one_path_segment():
+    arn = 'arn:aws:scheduler:us-west-2:000000000000:schedule-group/default'
+    call = CODEC.encode('scheduler', 'ListTagsForResource', {'ResourceArn': arn})
+    assert '%2F' in call.wire.path
+    assert (call.operation, call.params) == ('ListTagsForResource', {'ResourceArn': arn})
 
 
 def test_header_members_are_decoded():
@@ -48,10 +71,21 @@ def test_header_members_are_decoded():
 
 def test_requests_it_cannot_read_are_none():
     assert CODEC.decode(WireRequest('GET', '/', '', {}, b'')) is None   # not signed: not an AWS call
-    cbor = WireRequest('POST', '/service/GraniteServiceVersion20100801/operation/GetMetricData', '',
-                       {'Authorization': 'AWS4-HMAC-SHA256 Credential=a/20260101/us-west-2/monitoring/aws4_request',
-                        'Smithy-Protocol': 'rpc-v2-cbor'}, b'\xa0')
-    assert CODEC.decode(cbor) is None
+
+
+def test_rpc_v2_cbor_requests_are_decoded_and_refused_in_cbor():
+    model = SESSION.get_service_model('cloudwatch')
+    opm = model.operation_model('DescribeAlarms')
+    r = botocore.serialize.create_serializer('smithy-rpc-v2-cbor').serialize_to_request({'AlarmNames': ['a1']}, opm)
+    wire = WireRequest(r['method'], r['url_path'], '', dict(r['headers'], Authorization=
+                       'AWS4-HMAC-SHA256 Credential=a/20260101/us-west-2/monitoring/aws4_request'), r['body'])
+    call = CODEC.decode(wire)
+    assert (call.service, call.operation, call.params) == ('cloudwatch', 'DescribeAlarms', {'AlarmNames': ['a1']})
+    refusal = CODEC.refusal(call, wire, 'Emfirge cannot tell: x.')
+    parsed = botocore.parsers.create_parser('smithy-rpc-v2-cbor').parse(
+        {'status_code': refusal.status, 'headers': refusal.headers, 'body': refusal.body}, opm.output_shape)
+    assert parsed['Error'] == {'Code': ERROR_CODE, 'Message': 'Emfirge cannot tell: x.'}
+    assert CODEC.body(call, WireResponse(200, {}, b'\xa0')) == b'\xa0'   # answers stay bytes: never laid over
 
 
 def test_a_presigned_download_is_read_as_an_object_read():
@@ -84,6 +118,11 @@ def test_json_answers_and_render_keep_length_and_checksum_true():
     out = CODEC.render(call, r, {'Table': {'TableName': 't'}})
     assert out.headers['x-amz-crc32'] == str(zlib.crc32(out.body)) and out.headers['Content-Length'] == str(len(out.body))
     assert CODEC.body(call, out) == {'Table': {'TableName': 't'}}
+
+
+def test_object_bytes_are_not_decoded_into_params():
+    params = CODEC.decode(CODEC.encode('s3', 'PutObject', {'Bucket': 'b', 'Key': 'k', 'Body': b'<x/>'}).wire).params
+    assert 'Body' not in params and (params['Bucket'], params['Key']) == ('b', 'k')
 
 
 def test_object_payloads_stay_bytes():

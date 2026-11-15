@@ -1,6 +1,7 @@
-"""The local endpoint an agent's own AWS tools talk to. Every request goes to Branch.handle; admin routes under
-/__emfirge/ show the branch's state, diff, log (the journal), states (of copied and born resources), unknowns and
-counters, and seal it."""
+"""The local endpoint an agent's own AWS tools talk to. Every request goes to a handler's `handle` (a branch, or any
+other Endpoint: a read-only door for outside tools). When the handler is a branch (it has the Reporting methods),
+admin routes under /__emfirge/ show its state, diff, log (the journal), states (of copied and born resources),
+unknowns and counters, and seal it."""
 from __future__ import annotations
 
 import dataclasses
@@ -9,9 +10,8 @@ import threading
 import urllib.parse
 from enum import Enum
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Callable
+from typing import Any, Callable, Protocol, runtime_checkable
 
-from emfirge.branch import Branch
 from emfirge.branch.lifecycle import IllegalMove
 from emfirge.core.model import WireRequest, WireResponse
 
@@ -22,7 +22,28 @@ Admin = Callable[[str, str, bytes], Any]
 """(method, path, body) -> a JSON-able answer, or None when the path is not one of its routes."""
 
 
-def admin_routes(branch: Branch) -> Admin:
+class Endpoint(Protocol):
+    """What the server needs: something that answers wire requests."""
+
+    def handle(self, request: WireRequest) -> WireResponse: ...
+
+
+@runtime_checkable
+class Reporting(Protocol):
+    """What the admin routes need of a branch."""
+    life: Any
+
+    def handle(self, request: WireRequest) -> WireResponse: ...
+    def seal(self) -> None: ...
+    def changes(self) -> list: ...
+    def drift(self) -> list: ...
+    def log(self) -> tuple: ...
+    def states_after(self) -> dict: ...
+    def unknowns(self) -> tuple: ...
+    def stats(self) -> dict: ...
+
+
+def admin_routes(branch: Reporting) -> Admin:
     def route(method: str, path: str, body: bytes) -> Any:
         name = path[len(ADMIN):]
         if method == 'POST' and name == 'seal':
@@ -64,7 +85,7 @@ def to_json(o: Any) -> Any:
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     disable_nagle_algorithm = True   # headers and body go out as separate writes: delayed ACKs would add ~40 ms
-    branch: Branch
+    endpoint: Endpoint
     admins: tuple[tuple[str, Admin], ...]
 
     def log_message(self, *args: Any) -> None:
@@ -99,7 +120,7 @@ class _Handler(BaseHTTPRequestHandler):
         for prefix, admin in self.admins:
             if url.path.startswith(prefix):
                 return self._admin(admin, url.path, body)
-        self._send(self.branch.handle(WireRequest(self.command, url.path, url.query, dict(self.headers), body)))
+        self._send(self.endpoint.handle(WireRequest(self.command, url.path, url.query, dict(self.headers), body)))
 
     def _admin(self, admin: Admin, path: str, body: bytes) -> None:
         try:
@@ -115,10 +136,15 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 class BranchServer:
-    """A threading HTTP server for one branch, on 127.0.0.1."""
+    """A threading HTTP server for one endpoint, on 127.0.0.1. `admin` replaces the /__emfirge/ routes; by default
+    they are served when the endpoint is a branch (Reporting), and not at all otherwise."""
 
-    def __init__(self, branch: Branch, port: int, extra_admin: tuple[tuple[str, Admin], ...] = ()) -> None:
-        handler = type('Handler', (_Handler,), {'branch': branch, 'admins': ((ADMIN, admin_routes(branch)), *extra_admin)})
+    def __init__(self, endpoint: Endpoint, port: int, extra_admin: tuple[tuple[str, Admin], ...] = (),
+                 admin: Admin | None = None) -> None:
+        if admin is None and isinstance(endpoint, Reporting):
+            admin = admin_routes(endpoint)
+        admins = (((ADMIN, admin),) if admin is not None else ()) + tuple(extra_admin)
+        handler = type('Handler', (_Handler,), {'endpoint': endpoint, 'admins': admins})
         self._httpd = ThreadingHTTPServer(('127.0.0.1', port), handler)
         self._httpd.daemon_threads = True
         self._thread: threading.Thread | None = None

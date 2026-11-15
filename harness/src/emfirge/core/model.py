@@ -104,9 +104,11 @@ class ChangeType(str, Enum):
 
 @dataclass(frozen=True)
 class FieldChange:
-    path: str            # where in the resource's state, e.g. 'Environment.Variables.DRY_RUN'
+    path: str            # where in the resource's state: '<read>.<field>...', e.g. 'GetFunctionConfiguration.Timeout'
     before: Any = None
     after: Any = None
+    derived: bool = False   # the field changed but no journaled call set it (a clock, a hash, a count the service
+                            # computes): kept, marked, and left to each consumer to weigh
 
 
 @dataclass(frozen=True)

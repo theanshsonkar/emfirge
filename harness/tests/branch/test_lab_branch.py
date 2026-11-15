@@ -177,3 +177,20 @@ def test_two_branches_in_one_process_are_isolated(lab, tmp_path):
         if server:
             server.stop()
         second_engine.stop()
+
+
+def test_the_diff_marks_what_the_service_computed_and_the_journal_keeps_the_call(lab):
+    bc, _, branch = lab
+    bc('lambda').update_function_configuration(FunctionName='fn', Timeout=42)
+    bc('s3').put_bucket_versioning(Bucket='gap-media', VersioningConfiguration={'Status': 'Enabled'})
+    by = {c.ref.id: c for c in branch.changes()}
+    fn = {f.path: f for f in by['fn'].fields}
+    timeout = next(f for p, f in fn.items() if p.endswith('.Timeout'))
+    assert (timeout.after, timeout.derived) == (42, False)
+    assert all(f.derived for p, f in fn.items() if p.endswith(('.LastModified', '.RevisionId')))
+    versioning = next(f for f in by['gap-media'].fields if f.path.endswith('.Status'))
+    assert (versioning.after, versioning.derived) == ('Enabled', False)
+    entry = next(e for e in branch.journal.entries() if e.operation == 'PutBucketVersioning')
+    assert entry.params['VersioningConfiguration'] == {'Status': 'Enabled'} and entry.status == 200
+    entry = next(e for e in branch.journal.entries() if e.operation == 'UpdateFunctionConfiguration')
+    assert entry.answer['Timeout'] == 42

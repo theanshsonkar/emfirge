@@ -25,16 +25,19 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
+import botocore.exceptions
+from botocore import xform_name
 from botocore.model import OperationModel
 
-from emfirge.core.model import Call, Refs, ResourceRef
+from emfirge.core.model import Call, Kind, Refs, ResourceRef
 from emfirge.core.ports import CannotTell, Placement
 
 from ..catalog import ResourceTypeInfo
 from ..catalog.names import related, split
 from ..codec import AwsCodec
 from ..resource_words import binds, canonical, formats, list_word, names_type, noun_of, type_word, verb_of
-from . import compare, plan
+from ..outcomes_generic import list_ops
+from . import compare, contents, locate, plan
 from .fill import Fetch, Filled, empty, fill, unwrap
 from ..errors import UnknownType
 from .sdk import Answer, Clients, fetch
@@ -48,6 +51,7 @@ class Catalog(Protocol):
     def refs(self, call: Call) -> Refs: ...
     def reads_of(self, ref: ResourceRef) -> list[tuple[str, str, dict[str, Any]]]: ...
     def resource_type(self, type_: str) -> ResourceTypeInfo | None: ...
+    def kind(self, service: str, operation: str) -> Kind: ...
     def parse_arn(self, value: str) -> ResourceRef | None: ...
     def types_of(self, prefix: str) -> tuple[str, ...]: ...
 
@@ -56,6 +60,10 @@ class Catalog(Protocol):
 class Copied:
     found: bool
     also: tuple[ResourceRef, ...] = field(default=())
+    notes: tuple[str, ...] = field(default=())     # what the copy lacks, in plain words (core.ports.CopyResult)
+    faithful: frozenset[str] = field(default=frozenset())
+    """Read operations that answer on the engine's copy as on the real account (checked after the copy). When its
+    contents were copied and checked whole, also the reads the catalog leaves out (GetItem, HeadObject)."""
 
 
 class GenericCopier:
@@ -69,10 +77,22 @@ class GenericCopier:
     def copy(self, ref: ResourceRef, place: Placement) -> Copied:
         lost: list[str] = []
         try:
-            return _Copy(self._catalog, self._codec, self._clients, self._sleep, ref, place, lost).run()
+            job = _Copy(self._catalog, self._codec, self._clients, self._sleep, ref, place, lost)
+            result = job.run()
+            return Copied(result.found, result.also, tuple(lost), frozenset(job.faithful) if result.found else frozenset())
         finally:
             if lost:
                 self.notes[ref] = lost
+
+    def verify(self, ref: ResourceRef, place: Placement) -> tuple[frozenset[str], tuple[str, ...]]:
+        """(faithful reads, notes) of a copy another copier made: the same reads and checks, nothing written."""
+        lost: list[str] = []
+        job = _Copy(self._catalog, self._codec, self._clients, self._sleep, ref, place, lost)
+        try:
+            job.verify()
+        except CannotTell as e:
+            lost.append(f'not checked: {e}')
+        return frozenset(job.faithful), tuple(lost)
 
 
 class _Copy:
@@ -84,10 +104,34 @@ class _Copy:
         self.ref, self.place, self.lost = ref, place, lost
         self.info = catalog.resource_type(ref.type)
         self.delegated = set()
+        self.faithful: set[str] = set()
+        self.given = frozenset()
 
     # ------------------------------------------------------------------ 1-2: read, plan
     def run(self) -> Copied:
+        if not self._read():
+            return Copied(False)
+        create, filled = self._plan()
+        self._create(create, filled)
+        paired = self._settings(create)
+        self._replay_contents(paired)
+        self._listed_with_it()
+        self._settle()          # settings may have started an update (a function's LastUpdateStatus)
+        self._compare(strict=True)
+        return Copied(True)
+
+    def verify(self) -> None:
+        """Steps 1 and 6 only, for a copy another copier made."""
+        if self._read():
+            self._compare(strict=False)
+
+    def _read(self) -> bool:
+        """Step 1: the reads (and the contents reads) on the real account. False: the resource is not there."""
         reads = [r for r in self.catalog.reads_of(self.ref) if r[2]]
+        if not reads and self.info is not None:
+            listed, reads = self._reads_by_list()
+            if listed and not reads:
+                return False                  # its own list does not have it
         if not reads or self.info is None:
             raise UnknownType("AWS's lists give no read that shows this kind of resource, so Emfirge cannot copy it yet")
         self.service = reads[0][0]
@@ -95,19 +139,16 @@ class _Copy:
         answers = [self.clients.read(self.place.real, s, op, p) for s, op, p in reads if s == self.service]
         first = answers[0]
         if first.absent or (first.body is not None and _nothing(first.body) and _about_type(first, self.ref.type)):
-            return Copied(False)
+            return False
         if first.body is None:
             raise CannotTell(f'the read {first.operation} failed on the real account ({first.error})')
         self.answers = [a for a in answers if a.body is not None]
         self.ids = self._ids(reads)
         self.answers += self._detail_reads()
-        create, filled = self._plan()
-        self._create(create, filled)
-        self._settings(create)
-        self._listed_with_it()
-        self._settle()          # settings may have started an update (a function's LastUpdateStatus)
-        self._compare()
-        return Copied(True)
+        self.known = {op for _, op, _ in reads}
+        self.contents = self._contents(set(self.known))
+        self.answers += self.contents
+        return True
 
     def _ids(self, reads: list[tuple[str, str, dict[str, Any]]]) -> dict[str, Any]:
         """The members that name the resource itself, as the reads name it (the first read's form wins)."""
@@ -116,6 +157,58 @@ class _Copy:
             for k, v in params.items():
                 out.setdefault(k, v)
         return out
+
+    def _reads_by_list(self) -> tuple[bool, list[tuple[str, str, dict[str, Any]]]]:
+        """(listed, reads) for a type the catalog builds no read for: its ARN from its own list (locate.py)."""
+        service = self.ref.type.split(':', 1)[0]
+        try:
+            self.codec.model(service)
+        except botocore.exceptions.UnknownServiceError:
+            return False, []      # the IAM prefix is not an SDK service name
+        client = self.clients.client(self.place.real, service)
+        for op in list_ops(self.codec, service, self.ref.type):
+            name = xform_name(op)
+            try:
+                pages = client.get_paginator(name).paginate() if client.can_paginate(name) else iter([getattr(client, name)()])
+                arn = locate.arn_of(iter(pages), self.ref, self.catalog.parse_arn)
+            except Exception:     # a list this account cannot answer: try the next one
+                continue
+            model = self.codec.model(service)
+            return True, [(service, op2, p) for op2, p in locate.reads_by_arn(model, self.ref.type, arn)] if arn else []
+        return False, []
+
+    def _contents(self, known: set[str]) -> list[Answer]:
+        """The data the resource holds, as its contents reads answer it (contents.py). More than one page of it is
+        not copied: the copy is refused."""
+        if not self.info.holds_data:
+            return []
+        known |= {a.operation for a in self.answers}
+        out = []
+        for op, params in contents.contents_reads(self.model, self.service, self.ref, self.ids, known,
+                                                  self.catalog.kind, self._refs_of):
+            a = self.clients.read(self.place.real, self.service, op, params)
+            if a.body is None or not contents.lists(a.body):
+                continue
+            if contents.more_pages(a.body) or any(len(v) > MAX_ITEMS for _, v in contents.lists(a.body)):
+                raise CannotTell(f'it holds more data than Emfirge copies ({op} has more than one page)')
+            out.append(a)
+        return out
+
+    def _refs_of(self, service: str, op: str, params: dict[str, Any]) -> Refs | None:
+        try:
+            return self.catalog.refs(self.codec.encode(service, op, params))
+        except Exception:
+            return None
+
+    def _replay_contents(self, paired: set[str]) -> None:
+        """Contents no setting replayed are written back item by item (a later delete or scan must see them)."""
+        for a in self.contents:
+            if a.operation in paired:
+                continue
+            for key, _ in contents.lists(a.body):
+                write = contents.item_write(self.model, a.operation, key)
+                if write is not None:       # without one, the compare step decides (fewer items refuses the copy)
+                    self._each(a, write, self._items(a, write, key) or [])
 
     def _detail_reads(self) -> list[Answer]:
         """Reads about the type that the catalog's reads do not cover, filled from what they answered (an IAM
@@ -285,9 +378,12 @@ class _Copy:
                 self.place.same(real_id, engine_id)
 
     # ------------------------------------------------------------------ 5: settings and lists
-    def _settings(self, create: str) -> None:
+    def _settings(self, create: str) -> set[str]:
+        """Replays each setting; returns the reads whose settings were paired with a write."""
         by_op = {a.operation: a for a in self.answers}
+        paired = set()
         for s in plan.settings(self.model, list(by_op), create):
+            paired.add(s.read)
             answer = by_op[s.read]
             if _nothing(answer.body):
                 continue
@@ -296,6 +392,7 @@ class _Copy:
                 self._setting(answer, s.write)
             else:
                 self._each(answer, s.write, items)
+        return paired
 
     def _items(self, answer: Answer, write: str, item: str = '') -> list[dict[str, Any]] | None:
         """The answer's list, item by item, when the write takes one item of it (not the whole list). `item`: the
@@ -305,14 +402,14 @@ class _Copy:
         members = {m.lower() for m in shape.members} if shape else set()
         lists = [(k, v) for k, v in body.items() if isinstance(v, list) and v]
         if item:
-            lists = [(k, v) for k, v in lists if any(related(w, item) for w in list_word(k))]
+            lists = [(k, v) for k, v in lists if k == item or any(related(w, item) for w in list_word(k))]
         if len(lists) != 1 or lists[0][0].lower() in members:
             return [] if item else None
         key, values = lists[0]
         if len(values) > MAX_ITEMS:
             self.lost.append(f'{answer.operation}: more than {MAX_ITEMS} items, not copied')
             return []
-        return [v if isinstance(v, dict) else {_singular(key): v} for v in values]
+        return [{**v, _singular(key): v} if isinstance(v, dict) else {_singular(key): v} for v in values]
 
     def _setting(self, answer: Answer, write: str) -> None:
         """Replayed only when the engine's answer differs in what the write sets (not in what only the service
@@ -422,10 +519,11 @@ class _Copy:
         return None
 
     # ------------------------------------------------------------------ 6: what the copy lacks
-    def _compare(self) -> None:
-        """What the copy lacks, in notes. A list the engine shows fewer items of (records of a zone, resources of an
-        API, subscriptions) means parts of the resource were not copied: a change to it could be answered wrong, so
-        the copy is refused."""
+    def _compare(self, strict: bool) -> None:
+        """What the copy lacks, in notes, and which reads answer alike on both sides (`faithful`). `strict` (a copy
+        this copier made): a list the engine shows fewer items of (records of a zone, resources of an API,
+        subscriptions) means parts of the resource were not copied, and a change to it could be answered wrong, so
+        the copy is refused; so is a number the engine made up for it."""
         for a in self.answers:
             mine = self._engine_read(a)
             if mine.body is not None:
@@ -438,11 +536,26 @@ class _Copy:
             diff = compare.differences(real, engine, self.place.engine_value)
             if diff:
                 self.lost.append(f'{a.operation}: differs in {", ".join(diff[:6])}')
+            invented = compare.invented_numbers(real, engine, self.given) if a is self.answers[0] else []
+            if invented and strict:
+                raise CannotTell(f'the engine made up values for its copy that Emfirge cannot show as the real ones '
+                                 f'({", ".join(invented[:3])})')
             short = [s for s in compare.fewer_items(real, engine) + compare.fewer_items(a.body, mine.body)
                      if (a.operation, s.split(':', 1)[0]) not in self.delegated]
-            if short:
+            if short and strict:
                 raise CannotTell(f'the copy lacks parts of it that Emfirge cannot rebuild yet ({a.operation}: '
                                  f'{", ".join(short[:3])})')
+            if not diff and not short and not invented:
+                self.faithful.add(a.operation)
+        self._data_reads_faithful()
+
+    def _data_reads_faithful(self) -> None:
+        """The contents were copied and every contents read answers alike: the reads of its data that the catalog
+        leaves out (a table's GetItem, a bucket's HeadObject) answer alike too."""
+        if not self.info.holds_data or not self.contents or any(a.operation not in self.faithful for a in self.contents):
+            return
+        self.faithful |= set(contents.data_reads(self.model, self.service, self.ref, self.ids, self.known,
+                                                 self.catalog.kind, self._refs_of))
 
 
 # ---------------------------------------------------------------------- helpers

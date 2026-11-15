@@ -28,12 +28,14 @@ class ReadOnly:
         self.name = f'{account.name} (read only)'
         self.passed = 0
         self.blocked = 0
+        self.stopped: list[str] = []    # the calls it stopped, by name, in order
 
     def send(self, request: WireRequest) -> WireResponse:
         call = self._codec.decode(request)
         if call is None or not self._kinds.kind(call.service, call.operation).reads_only:
             self.blocked += 1
             what = call.name if call else f'{request.method} {request.path}'
+            self.stopped.append(what)
             raise NotARead(f'{what} is not a read; the real account is only read')
         self.passed += 1
         return self._account.send(request)

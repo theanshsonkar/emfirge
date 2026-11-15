@@ -7,6 +7,9 @@ the branch's change.
 """
 from __future__ import annotations
 
+import time
+from typing import Callable
+
 from emfirge.core.model import ResourceRef
 from emfirge.core.ports import Account, CannotTell, Catalog, Copier
 
@@ -17,10 +20,16 @@ from .overlay import Overlay, State
 from .sides import Sides
 
 
+STILL_GAP = 0.2    # seconds between two rounds of reads of a fresh copy
+STILL_MAX = 8.0    # the longest a copy may take to hold still; then its last answers are the baseline
+
+
 class CopyOnTouch:
     def __init__(self, copier: Copier, catalog: Catalog, overlay: Overlay, baselines: Baselines, sides: Sides,
-                 ids: IdMap, real: Account, engine: Account) -> None:
+                 ids: IdMap, real: Account, engine: Account,
+                 note: Callable[[ResourceRef, str], None] = lambda ref, what: None) -> None:
         self._copier, self._catalog, self._overlay, self._baselines = copier, catalog, overlay, baselines
+        self._note = note
         self._sides, self._ids = sides, ids
         self.real, self.engine = real, engine
         self._busy: set[ResourceRef] = set()
@@ -74,6 +83,8 @@ class CopyOnTouch:
         if not result.found:
             self._overlay.move(ref, State.ABSENT)
             return
+        for what in getattr(result, 'notes', ()):
+            self._note(ref, what)
         for r in (ref, *result.also):
             if self._overlay.state(r) is State.LIVE:
                 self._overlay.move(r, State.COPIED)
@@ -89,17 +100,36 @@ class CopyOnTouch:
             self._baselines.fold(ref, before, self._engine_answers(ref))
 
     def _take(self, ref: ResourceRef) -> list[Baseline]:
-        out = []
+        reads = []
         for service, operation, params in self._catalog.reads_of(ref):
             call = self._sides.codec.encode(service, operation, params)
             try:
-                r0 = self._sides.real_answer(call)
+                reads.append((call, self._sides.real_answer(call)))
             except NotARead:
                 continue
-            e0, again = self._sides.engine_answer(call), self._sides.engine_answer(call)
-            noise = noise_between(self._sides.about(ref, call, e0.body), self._sides.about(ref, call, again.body))
-            out.append(Baseline(ref, call, e0, r0, noise))
-        return out
+        e0, noise = self._still([c for c, _ in reads], ref)
+        return [Baseline(ref, c, a, r0, n) for (c, r0), a, n in zip(reads, e0, noise)]
+
+    def _still(self, calls: list, ref: ResourceRef) -> tuple[list[Answer], list[frozenset[str]]]:
+        """The engine's answers once the copy holds still. A copy can still be settling (a function 'Creating')
+        when the copier returns. Read every read again, STILL_GAP seconds apart, until two pairs of rounds in a row
+        differ in the same places (what always differs, a request id or a clock, is noise; what changed once, a
+        state, has settled), or STILL_MAX seconds pass. Returns the last answers and the noise of each read."""
+        prev = [self._sides.engine_answer(c) for c in calls]
+        last_diff: list[frozenset[str]] | None = None
+        deadline = time.monotonic() + STILL_MAX
+        while True:
+            time.sleep(STILL_GAP)
+            cur = [self._sides.engine_answer(c) for c in calls]
+            d = [self._differ(ref, c, a, b) for c, a, b in zip(calls, prev, cur)]
+            if d == last_diff or time.monotonic() > deadline:
+                return cur, d
+            prev, last_diff = cur, d
+
+    def _differ(self, ref: ResourceRef, call, a: Answer, b: Answer) -> frozenset[str]:
+        if a.status != b.status:
+            return frozenset({'(status)'})
+        return noise_between(self._sides.about(ref, call, a.body), self._sides.about(ref, call, b.body))
 
     def _engine_answers(self, ref: ResourceRef) -> list[Answer]:
         return [self._sides.engine_answer(b.call) for b in self._baselines.of(ref)]

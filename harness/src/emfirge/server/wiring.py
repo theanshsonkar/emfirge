@@ -76,7 +76,7 @@ def parts(codec: AwsCodec, where: Where, catalog: CatalogChoice = 'layered',
     copiers: dict[str, Copier] = {'generic': generic, 'curated': cur_copier}
     if copier != 'layered':
         copiers = {copier: copiers[copier]}
-    return layered, GenericOutcomes(codec, layered), LayeredCopier(copiers, copier_order(), codec, layered)
+    return layered, GenericOutcomes(codec, layered), LayeredCopier(copiers, copier_order(), codec, layered, generic.verify)
 
 
 def build(real: Account, engine: Account, region: str = 'us-west-2', codec: AwsCodec | None = None, *,

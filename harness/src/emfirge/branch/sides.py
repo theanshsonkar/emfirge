@@ -2,11 +2,13 @@
 engine's ids). Kept in one place so every call to either side is translated and decoded the same way."""
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 from emfirge.core.model import Call, ResourceRef, WireResponse
 from emfirge.core.ports import Account, CannotTell, Codec, Outcomes
 
+from . import lists
 from .baseline import Answer
 from .guard import ReadOnly
 from .ids import IdMap
@@ -57,3 +59,19 @@ class Sides:
             if ref in s.refs:
                 return s.items[s.refs.index(ref)]
         return body
+
+    def membership(self, ref: ResourceRef, call: Call, body: Any) -> Any:
+        """Like `about`, but a list of other resources (a group's list of its schedules) is reduced to which
+        resources it holds. Why: such a list repeats each child's state, and a child's change is the child's, not a
+        change of the container; a child joining or leaving is."""
+        out = self.about(ref, call, body)
+        if out is not body or self._outcomes is None or not isinstance(body, (dict, list)):
+            return out
+        try:
+            slots = self._outcomes.listed(call, body)
+        except CannotTell:
+            return body
+        for s in slots:
+            if s.refs and None not in s.refs:
+                out = lists.set_at(copy.deepcopy(out) if out is body else out, s.path, sorted(str(r) for r in s.refs))
+        return out

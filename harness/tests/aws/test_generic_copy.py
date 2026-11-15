@@ -90,3 +90,53 @@ def test_the_value_an_engine_refuses_is_found_in_its_message():
     assert refused_value('The Revision Id provided does not match', {'RevisionId': 'x', 'FunctionName': 'f'},
                          frozenset({'FunctionName'})) == ('RevisionId',)
     assert refused_value('something else', params, frozenset({'QueueName'})) is None
+
+
+# ------------------------------------------------------------------ contents, located reads, made-up values
+from emfirge.aws.catalog import AwsCatalog                      # noqa: E402
+from emfirge.aws.generic_copy import contents, locate           # noqa: E402
+from emfirge.aws.layered import LayeredCatalog                  # noqa: E402
+from emfirge.core.model import ResourceRef                      # noqa: E402
+
+CATALOG = LayeredCatalog(AwsCatalog(account='000000000000', region='us-west-2'), CODEC)
+
+
+def _refs(service, op, params):
+    return CATALOG.refs(CODEC.encode(service, op, params))
+
+
+def test_the_contents_of_a_bucket_and_a_table_are_the_reads_the_catalog_leaves_out():
+    bucket = ResourceRef('s3:bucket', 'b1')
+    known = {op for _, op, _ in CATALOG.reads_of(bucket)}
+    found = [op for op, _ in contents.contents_reads(CODEC.model('s3'), 's3', bucket, {'Bucket': 'b1'}, known,
+                                                     CATALOG.kind, _refs)]
+    assert 'ListObjectsV2' in found
+    table = ResourceRef('dynamodb:table', 't')
+    known = {op for _, op, _ in CATALOG.reads_of(table)}
+    found = [op for op, _ in contents.contents_reads(CODEC.model('dynamodb'), 'dynamodb', table, {'TableName': 't'},
+                                                     known, CATALOG.kind, _refs)]
+    assert 'Scan' in found
+    assert 'GetItem' in contents.data_reads(CODEC.model('dynamodb'), 'dynamodb', table, {'TableName': 't'}, known,
+                                            CATALOG.kind, _refs)
+
+
+def test_contents_are_written_back_by_the_write_named_after_the_read_or_its_items():
+    assert contents.item_write(CODEC.model('s3'), 'ListObjectsV2', 'Contents') == 'PutObject'
+    assert contents.item_write(CODEC.model('dynamodb'), 'Scan', 'Items') == 'PutItem'
+    assert contents.more_pages({'Items': [1], 'LastEvaluatedKey': {'pk': 'x'}})
+    assert not contents.more_pages({'Contents': [1], 'IsTruncated': False})
+
+
+def test_a_policy_is_read_by_the_arn_its_list_gives():
+    ref = ResourceRef('iam:policy', 'p')
+    pages = iter([{'Policies': [{'PolicyName': 'p', 'Arn': 'arn:aws:iam::000000000000:policy/team/p'}]}])
+    arn = locate.arn_of(pages, ref, CATALOG.parse_arn)
+    assert arn == 'arn:aws:iam::000000000000:policy/team/p'
+    assert ('GetPolicy', {'PolicyArn': arn}) in locate.reads_by_arn(CODEC.model('iam'), 'iam:policy', arn)
+
+
+def test_a_number_the_engine_made_up_is_found_but_a_count_at_the_top_is_not():
+    real = {'Endpoint': {'Address': 'a', 'Port': 5432}, 'AttachmentCount': 1}
+    engine = {'Endpoint': {'Address': 'b', 'Port': 41234}, 'AttachmentCount': 0}
+    assert compare.invented_numbers(real, engine, frozenset()) == ['Endpoint.Port']
+    assert compare.invented_numbers(real, engine, frozenset({'Endpoint'})) == []

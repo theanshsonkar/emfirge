@@ -64,6 +64,27 @@ def generated(real: Any, engine: Any, given: frozenset[str]) -> list[tuple[str, 
     return out
 
 
+def invented_numbers(real: Any, engine: Any, given: frozenset[str]) -> list[str]:
+    """Numbers inside a structure of the resource's own record (not at its top, where counts of other things sit:
+    a policy's AttachmentCount), outside lists and outside what the create set, that differ: the engine made them up
+    (a database endpoint's port). Ids are mapped back as text; a number cannot be."""
+    if not isinstance(real, dict) or not isinstance(engine, dict):
+        return []
+    mine = dict(leaves(engine))
+    out = []
+    for path, value in leaves(real):
+        other = mine.get(path)
+        if len(path) < 2 or path[0] in given or any(p.isdigit() for p in path) or NOISE_KEY.search(path[-1]):
+            continue
+        if _number(value) and _number(other) and value != other:
+            out.append('.'.join(path))
+    return out
+
+
+def _number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def fewer_items(real: Any, engine: Any) -> list[str]:
     """Top-level lists of which the engine has fewer items than the real account."""
     if not isinstance(real, dict) or not isinstance(engine, dict):

@@ -30,7 +30,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from emfirge.core.model import Call, Kind, Refs, ResourceRef, WireRequest, WireResponse
 from emfirge.core.ports import Account, CannotTell, Catalog, Copier, CopyResult, Placement
@@ -39,6 +39,7 @@ from .catalog import AwsCatalog, ResourceTypeInfo
 from .catalog.store import DATA
 from .codec import AwsCodec
 from .errors import UnknownType
+from .generic_copy import Copied
 from .outcomes_generic import list_ops
 from .catalog.names import split
 from .resource_words import formats, names_type, noun_of, type_word, verb_of
@@ -178,10 +179,17 @@ def copier_order(path: Path | None = None) -> dict[str, tuple[str, ...]]:
     return {t: tuple(names) for t, names in raw['order'].items()}
 
 
+Verify = Callable[[ResourceRef, Placement], tuple[frozenset[str], tuple[str, ...]]]
+
+
 class LayeredCopier:
+    """`verify` (the generic copier's check, nothing written) is run after a copier that does not say itself which
+    reads its copy answers faithfully (the curated ones), so every copy reports the same way."""
+
     def __init__(self, copiers: Mapping[str, Copier], order: Mapping[str, Sequence[str]], codec: AwsCodec,
-                 kinds: Catalog) -> None:
+                 kinds: Catalog, verify: Verify | None = None) -> None:
         self._copiers, self._order, self._codec, self._kinds = dict(copiers), dict(order), codec, kinds
+        self._verify = verify
         self.used: Counter[str] = Counter()
 
     def order_of(self, type_: str) -> tuple[str, ...]:
@@ -200,8 +208,15 @@ class LayeredCopier:
                 refusals.append(f'{name}: {e}')
                 continue
             self.used[f'{ref.type} by {name}'] += 1
-            return result
+            return self._checked(ref, place, result)
         raise CannotTell('; '.join(refusals) or f'no copier for {ref.type}')
+
+
+    def _checked(self, ref: ResourceRef, place: Placement, result: CopyResult) -> CopyResult:
+        if not result.found or self._verify is None or hasattr(result, 'faithful'):
+            return result
+        faithful, notes = self._verify(ref, place)
+        return Copied(True, tuple(result.also), tuple(getattr(result, 'notes', ())) + notes, faithful)
 
 
 class _Counting:

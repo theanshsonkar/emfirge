@@ -3,8 +3,9 @@
 Five protocols: json, rest-json, rest-xml, query, ec2. A request is placed by its signing scope (or its JSON target)
 and then matched against the operations of that service. Answers are decoded without shapes into plain data (JSON as
 is; XML as nested dicts keyed by tag, repeated tags as lists) so that a branch can diff and lay answers over each
-other and render them back in the same format. smithy-rpc-v2-cbor (CloudWatch's newest SDKs) is not decoded yet:
-such a request is refused, in a shape the client can read.
+other and render them back in the same format. smithy-rpc-v2-cbor (CloudWatch from some newer SDKs; botocore and
+the AWS CLI still send JSON) is decoded on the way in and refused in CBOR; its answers stay bytes, so a branch never
+lays a change over them or merges them (it answers live or refuses).
 """
 from __future__ import annotations
 
@@ -17,11 +18,16 @@ from dataclasses import dataclass
 from typing import Any, Iterator
 from xml.sax.saxutils import escape
 
+import botocore
+import botocore.config
+import botocore.parsers
 import botocore.serialize
 import botocore.session
 from botocore.model import OperationModel, ServiceModel, Shape
 
 from emfirge.core.model import Call, Kind, WireRequest, WireResponse
+
+from .accounts import own_session
 
 ERROR_CODE = 'EmfirgeCannotTell'
 CRC32 = 'x-amz-crc32'
@@ -49,6 +55,7 @@ class AwsCodec:
         self._routes: dict[str, list[tuple]] = {}
         self._by_scope: dict[str, list[str]] | None = None
         self._services = frozenset(self._session.get_available_services())
+        self._sdk: dict[str, Any] = {}
 
     # ------------------------------------------------------------------ models
     def model(self, service: str) -> ServiceModel:
@@ -100,6 +107,8 @@ class AwsCodec:
     def _decode_as(self, service: str, request: WireRequest, headers: dict[str, str]) -> tuple[str, dict] | None:
         model = self.model(service)
         protocols = self._protocols(service)
+        if headers.get('smithy-protocol') == 'rpc-v2-cbor':
+            return _cbor_call(model, protocols, request)
         target = headers.get('x-amz-target', '')
         if target:
             prefix, _, op = target.rpartition('.')
@@ -124,7 +133,7 @@ class AwsCodec:
 
     def _decode_rest(self, service: str, request: WireRequest, headers: dict[str, str]) -> tuple[str, dict] | None:
         have = dict(urllib.parse.parse_qsl(request.query, keep_blank_values=True))
-        path = urllib.parse.unquote(request.path)
+        path = request.path   # matched as sent: an id may hold an encoded '/' (an ARN in /tags/{ResourceArn})
         for method, rx, name, need, need_headers in self._rest_routes(service):
             m = rx.match(path) if method == request.method else None
             if not m or not all(k in have and (v == '' or have[k] == v) for k, v in need.items()) or \
@@ -135,7 +144,7 @@ class AwsCodec:
             for member, shape in (opm.input_shape.members.items() if opm.input_shape else ()):
                 loc, wire = shape.serialization.get('location'), shape.serialization.get('name', member)
                 if loc == 'uri' and m.groupdict().get(_group(wire)) is not None:
-                    params[member] = m.group(_group(wire))
+                    params[member] = urllib.parse.unquote(m.group(_group(wire)))
                 elif loc == 'querystring' and wire in have:
                     params[member] = have[wire]
                 elif loc == 'header' and wire.lower() in headers:
@@ -145,12 +154,19 @@ class AwsCodec:
                     params.update(json.loads(request.body))
                 except ValueError:
                     pass
+            elif request.body and 'rest-xml' in self._protocols(service) and opm.input_shape is not None:
+                params.update(_xml_body(opm.input_shape, request.body))
             return name, params
         return None
 
     def _rest_routes(self, service: str) -> list[tuple]:
-        """(method, path regex, operation, required query keys, required headers), most specific first. Two
-        operations on one path (PutObject, CopyObject) are told apart by the headers each one requires."""
+        """(method, path regex, operation, required query keys, required headers), most specific first.
+
+        Operations on one method and path (DeleteObject and AbortMultipartUpload, GetObject and ListParts, PutObject
+        and CopyObject) are told apart by what each one requires: literal query keys of its URI, required members
+        sent in the query string, required members sent as headers. The one that requires more is tried first, so
+        the one with no extra requirement is the default. Twins that look the same on the wire (a deprecated
+        operation and its successor) go deprecated last, then by name, so the choice is always the same."""
         if service not in self._routes:
             out = []
             model = self.model(service)
@@ -162,17 +178,63 @@ class AwsCodec:
                 rx = re.sub(r'\{([\w-]+)\}', lambda m: f'(?P<{_group(m.group(1))}>[^/]+)', rx)
                 need = dict(urllib.parse.parse_qsl(q, keep_blank_values=True))
                 shape = opm.input_shape
-                heads = tuple(shape.members[m].serialization.get('name', m).lower() for m in shape.required_members
-                              if shape.members[m].serialization.get('location') == 'header') if shape else ()
+                required = [shape.members[m] for m in shape.required_members] if shape else []
+                need.update({m.serialization.get('name'): '' for m in required
+                             if m.serialization.get('location') == 'querystring' and m.serialization.get('name') not in need})
+                heads = tuple(m.serialization.get('name', '').lower() for m in required
+                              if m.serialization.get('location') == 'header')
                 out.append((opm.http.get('method', 'POST'), re.compile('^' + rx + '/?$'), name, need, heads,
-                            uri.count('{'), len(uri)))
-            out.sort(key=lambda r: (r[5], -len(r[3]), -len(r[4]), -r[6]))
+                            (uri.count('{'), -len(need) - len(heads), -len(uri), bool(opm.deprecated), name)))
+            out.sort(key=lambda r: r[5])
             self._routes[service] = [r[:5] for r in out]
         return self._routes[service]
 
     # ------------------------------------------------------------------ encode
     def encode(self, service: str, operation: str, params: dict[str, Any]) -> Call:
-        """A call as the SDK would send it (botocore's own serializer), decoded back so params look like a client's."""
+        """A call exactly as the SDK sends it, decoded back so params look like a client's. Why the SDK's whole
+        pipeline and not only its serializer: the SDK adds parameters of its own (S3 list calls get
+        EncodingType=url, checksums) and converts some (a CopySource given as a mapping), and a branch matches its
+        own reads against the client's by parameters. Falls back to the bare serializer when the SDK will not build
+        the call or builds one this codec cannot read back (an unsigned call; S3 Express's own signing scope)."""
+        for build in (self._sdk_wire, self._serialized):
+            wire = build(service, operation, params)
+            decoded = self.decode(wire) if wire is not None else None
+            if decoded is not None and decoded.operation == operation:
+                return decoded
+        return Call(service, operation, params, Kind.UNKNOWN, wire)
+
+    def _sdk_wire(self, service: str, operation: str, params: dict[str, Any]) -> WireRequest | None:
+        if service not in self._sdk:
+            client = own_session().client(service, endpoint_url='https://emfirge.invalid', region_name=self.region,
+                                          aws_access_key_id='emfirge', aws_secret_access_key='emfirge',
+                                          config=botocore.config.Config(parameter_validation=False,
+                                                                        retries={'max_attempts': 1},
+                                                                        s3={'addressing_style': 'path'}))
+            client.meta.events.register('before-send', _capture)
+            self._sdk[service] = client
+        try:
+            getattr(self._sdk[service], botocore.xform_name(operation))(**params)
+        except _Built as built:
+            r = built.request
+        except Exception:   # noqa: BLE001 - the SDK's own checks refused these params: use the bare serializer
+            return None
+        else:
+            return None
+        url = urllib.parse.urlsplit(r.url)
+        body = r.body.read() if hasattr(r.body, 'read') else r.body
+        body = body.encode() if isinstance(body, str) else (body or b'')
+        headers = {k: (v.decode() if isinstance(v, bytes) else v) for k, v in r.headers.items()}
+        if 'Authorization' in headers:   # not signed: the account that sends it signs it (or the lab does not care)
+            headers['Authorization'] = self._unsigned(service, headers['Authorization'])
+        return WireRequest(r.method, url.path or '/', url.query, headers, body)
+
+    def _unsigned(self, service: str, signed: str) -> str:
+        scope = _SCOPE.search(signed)
+        name = scope.group(1) if scope else (self.model(service).metadata.get('signingName')
+                                             or self.model(service).metadata['endpointPrefix'])
+        return f'AWS4-HMAC-SHA256 Credential=emfirge/20260101/{self.region}/{name}/aws4_request, SignedHeaders=host, Signature=0'
+
+    def _serialized(self, service: str, operation: str, params: dict[str, Any]) -> WireRequest:
         model = self.model(service)
         opm = model.operation_model(operation)
         proto = self._protocols(service)
@@ -184,10 +246,8 @@ class AwsCodec:
         scope = model.metadata.get('signingName') or model.metadata['endpointPrefix']
         headers = dict(r['headers'], Authorization=f'AWS4-HMAC-SHA256 Credential=emfirge/20260101/{self.region}/{scope}'
                                                    f'/aws4_request, SignedHeaders=host, Signature=0')
-        wire = WireRequest(r['method'], path, '&'.join(x for x in (q, qs) if x), headers,
+        return WireRequest(r['method'], path, '&'.join(x for x in (q, qs) if x), headers,
                            body.encode() if isinstance(body, str) else body)
-        decoded = self.decode(wire)
-        return decoded if decoded else Call(service, operation, params, Kind.UNKNOWN, wire)
 
     # ------------------------------------------------------------------ answers
     def body(self, call: Call, response: WireResponse) -> Any:
@@ -221,6 +281,10 @@ class AwsCodec:
         proto, service = self._refusal_protocol(call, request)
         text = escape(message)
         head = {REFUSAL_HEADER: 'true'}
+        if proto == 'smithy-rpc-v2-cbor':
+            body = b'\xa2' + _cbor_text('__type') + _cbor_text(ERROR_CODE) + _cbor_text('message') + _cbor_text(message)
+            return WireResponse(400, dict(head, **{'Content-Type': 'application/cbor', 'smithy-protocol': 'rpc-v2-cbor'}),
+                                body)
         if proto in ('json', 'rest-json'):
             version = self.model(service).metadata.get('jsonVersion', '1.1') if service else '1.1'
             ctype = f'application/x-amz-json-{version}' if proto == 'json' else 'application/json'
@@ -296,6 +360,18 @@ class AwsCodec:
 
 
 # ---------------------------------------------------------------------- helpers
+class _Built(Exception):
+    """Raised from the SDK's 'before-send' hook: the request is built, and is not to be sent."""
+
+    def __init__(self, request: Any) -> None:
+        super().__init__('built')
+        self.request = request
+
+
+def _capture(request: Any, **_: Any) -> None:
+    raise _Built(request)
+
+
 def _scope(headers: dict[str, str], query: str) -> str | None:
     m = _SCOPE.search(headers.get('authorization', '')) or _QUERY_SCOPE.search(query)
     return m.group(1) if m else None
@@ -314,6 +390,55 @@ def _sniff(request: WireRequest) -> str:
 
 def _group(name: str) -> str:
     return re.sub(r'\W', '_', name)
+
+
+_CBOR_PATH = re.compile(r'/service/[^/]+/operation/([^/?]+)$')
+
+
+def _cbor_call(model: ServiceModel, protocols: list[str], request: WireRequest) -> tuple[str, dict] | None:
+    """An RPC v2 CBOR request: the operation is in the path, the params are one CBOR map (botocore's reader)."""
+    m = _CBOR_PATH.search(request.path)
+    if 'smithy-rpc-v2-cbor' not in protocols or not m or m.group(1) not in model.operation_names:
+        return None
+    if not request.body:
+        return m.group(1), {}
+    reader = botocore.parsers.BaseCBORParser()
+    try:
+        params = reader.parse_data_item(reader.get_peekable_stream_from_bytes(request.body))
+    except Exception:   # noqa: BLE001 - any malformed body means: not a call this codec can read
+        return None
+    return (m.group(1), params) if isinstance(params, dict) else None
+
+
+def _cbor_text(text: str) -> bytes:
+    """One CBOR text string (major type 3)."""
+    data = text.encode()
+    n = len(data)
+    head = bytes([0x60 + n]) if n < 24 else bytes([0x78, n]) if n < 256 else b'\x79' + n.to_bytes(2, 'big') \
+        if n < 65536 else b'\x7a' + n.to_bytes(4, 'big')
+    return head + data
+
+
+def _xml_body(shape: Shape, body: bytes) -> dict[str, Any]:
+    """A rest-xml request body as params, read with the operation's own input shape (botocore's XML parser, the one
+    it uses for answers: the body of a request is laid out the same way). The payload member when there is one (a
+    structure, or a document such as a bucket policy sent as text); else the members that travel in the body. A raw
+    payload (an object's bytes) stays out: it is the customer's data."""
+    payload = shape.serialization.get('payload')
+    member = shape.members.get(payload) if payload else None
+    if member is not None and member.type_name in ('string', 'blob'):
+        return {payload: body.decode(errors='replace')} if member.type_name == 'string' else {}
+    if body.lstrip()[:1] != b'<':
+        return {}
+    parser = botocore.parsers.RestXMLParser()
+    try:
+        root = parser._parse_xml_string_to_dom(body)
+        if member is not None:
+            return {payload: parser._parse_shape(member, root)}
+        parsed = parser._parse_shape(shape, root)
+    except (ValueError, ET.ParseError, botocore.parsers.ResponseParserError):
+        return {}
+    return {k: v for k, v in parsed.items() if shape.members[k].serialization.get('location') is None}
 
 
 def _wire_name(shape: Shape, name: str, proto: str) -> str:

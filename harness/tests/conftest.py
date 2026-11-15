@@ -25,3 +25,10 @@ def _no_aws_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv('NO_PROXY', '127.0.0.1,localhost')
     monkeypatch.setenv('no_proxy', '127.0.0.1,localhost')
     monkeypatch.setenv('AWS_DEFAULT_REGION', 'us-west-2')
+
+
+@pytest.fixture(autouse=True)
+def _fast_still(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Outside the lab, a copy holds still at once: no need to wait between rounds of reads."""
+    if 'lab' not in request.keywords:
+        monkeypatch.setattr('emfirge.branch.touch.STILL_GAP', 0.0)

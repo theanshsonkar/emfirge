@@ -57,3 +57,18 @@ def test_seal_then_every_call_is_refused_and_a_second_seal_conflicts(served):
     assert call(srv.url + '/__emfirge/seal', b'', 'POST')[0] == 409
     assert call(srv.url + '/__emfirge/nothing')[0] == 404
     assert len(json.loads(call(srv.url + '/__emfirge/unknowns')[1])) == 1
+
+
+def test_any_endpoint_can_be_served_and_gets_no_branch_routes():
+    from emfirge.core.model import WireResponse
+
+    class Echo:
+        def handle(self, request):
+            return WireResponse(200, {'content-type': 'text/plain'}, request.path.encode())
+
+    srv = BranchServer(Echo(), 0).start()
+    try:
+        assert call(srv.url + '/hello')[1] == b'/hello'
+        assert call(srv.url + '/__emfirge/state')[1] == b'/__emfirge/state'   # not an admin route: no branch here
+    finally:
+        srv.stop()

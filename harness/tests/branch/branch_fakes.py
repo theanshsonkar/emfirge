@@ -10,7 +10,7 @@ from emfirge.core.model import Call, Kind, Listed, Refs, ResourceRef, WireReques
 from emfirge.core.ports import CannotTell, Placement
 
 THING = 'cloud:thing'
-KINDS = {'get': Kind.READ, 'list': Kind.LIST, 'put': Kind.WRITE, 'delete': Kind.WRITE, 'create': Kind.WRITE,
+KINDS = {'get': Kind.READ, 'peek': Kind.READ, 'list': Kind.LIST, 'put': Kind.WRITE, 'delete': Kind.WRITE, 'create': Kind.WRITE,
          'grant': Kind.PERMISSION}
 
 
@@ -90,7 +90,7 @@ class FakeAccount:
         d = json.loads(r.body)
         op, p = d['op'], d['params']
         self.sent.append(op)
-        if op == 'get':
+        if op in ('get', 'peek'):   # peek: a read no baseline is taken for
             t = self.things.get(p['name'])
             return ok({'name': p['name'], **t}) if t is not None else ok({'error': 'NotFound'}, 404)
         if op == 'list':
@@ -113,10 +113,12 @@ class FakeAccount:
 class Copied:
     found: bool
     also: tuple[ResourceRef, ...] = ()
+    notes: tuple[str, ...] = ()
 
 
 class FakeCopier:
-    """Copies a thing as it is. A thing whose name starts with 'cursed' cannot be copied."""
+    """Copies a thing as it is. A thing whose name starts with 'cursed' cannot be copied; one whose name starts with
+    'lossy' is copied without its colour, and says so in a note."""
 
     def __init__(self) -> None:
         self.copied: list[str] = []
@@ -128,9 +130,11 @@ class FakeCopier:
         if got.status == 404:
             return Copied(False)
         body = json.loads(got.body)
-        place.engine.send(request('put', name=ref.id, set={k: v for k, v in body.items() if k != 'name'}))
+        lossy = ref.id.startswith('lossy')
+        place.engine.send(request('put', name=ref.id, set={k: v for k, v in body.items()
+                                                           if k != 'name' and not (lossy and k == 'colour')}))
         self.copied.append(ref.id)
-        return Copied(True)
+        return Copied(True, notes=('its colour',) if lossy else ())
 
 
 def make(real_things: dict[str, dict[str, Any]] | None = None):

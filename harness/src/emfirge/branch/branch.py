@@ -44,9 +44,9 @@ class Branch:
         self.journal = Journal()
         self.baselines = Baselines()
         self._sides = Sides(codec, self.real, engine, self.ids, outcomes)
-        self._touch = CopyOnTouch(copier, catalog, self.overlay, self.baselines, self._sides, self.ids,
-                                  self.real, engine)
         self._unknowns: list[Unknown] = []
+        self._touch = CopyOnTouch(copier, catalog, self.overlay, self.baselines, self._sides, self.ids,
+                                  self.real, engine, self._note)
         self._counts: dict[str, int] = {}
         self._refusals: dict[str, int] = {}
         self._lock = threading.RLock()
@@ -105,21 +105,41 @@ class Branch:
     # ------------------------------------------------------------------ reads
     def _transplant(self, call: Call, ref: ResourceRef) -> WireResponse:
         """The real account's live answer with the branch's change (E0 -> E1) laid over it."""
-        e1 = self._sides.engine(call)
         base = self.baselines.find(ref, call)
         if base is None:
-            self._count('transplant_miss')
-            return e1
+            return self._unbased(call, ref)
+        e1 = self._sides.engine(call)
         r = self._sides.real(call)
         e0, a1, ar = base.e0, self._sides.answer(call, e1), self._sides.answer(call, r)
         if not e0.ok and a1.status == e0.status:
             self._count('transplanted')   # refused before and after: nothing changed on the branch
             return r
-        if not (e0.ok and a1.ok and ar.ok and transplant.structured(e0.body, a1.body, ar.body)):
-            self._count('transplant_skipped')
+        if e0.ok and a1.ok and ar.ok and not transplant.structured(e0.body, a1.body, ar.body):
+            return self._unbased(call, ref)    # answers it cannot read as data: nothing to lay the change over
+        if not (e0.ok and a1.ok and ar.ok):
+            self._count('transplant_skipped')  # the branch's change made the read fail (or the real one fails)
             return e1
         self._count('transplanted')
         return self._codec.render(call, e1, transplant.lay(e0.body, a1.body, ar.body))
+
+    def _unbased(self, call: Call, ref: ResourceRef) -> WireResponse:
+        """A read of a copied resource that has no copy-time answer (E0) to lay the branch's change over. The copy
+        may lack what this read shows, so the engine's answer alone is not trusted. Unchanged on the branch: the
+        real account's live answer is the branch's answer. Changed: when the real account says the thing read is
+        not there (HTTP 404) and the engine has it, the branch made it (a policy it put on a copied role), so the
+        engine's answer holds nothing copied; otherwise it cannot be told."""
+        if not self.journal.changed(ref):
+            self._count('unbased_real')
+            return self._sides.real(call)
+        real = self._sides.real(call)
+        if real.status == 404:
+            engine = self._sides.engine(call)
+            if engine.status < 300:
+                self._count('unbased_branch_made')
+                return engine
+        self._count('unbased_refused')
+        raise CannotTell(f'{ref} was changed on the branch, and this read has no answer from the time it was copied '
+                         f'to lay the change over (the copy may lack what this read shows)')
 
     def _merged_list(self, call: Call) -> WireResponse:
         r = self._sides.real(call)
@@ -128,7 +148,7 @@ class Branch:
             return r
         body = self._codec.body(call, r)
         if not isinstance(body, (dict, list)):
-            return r
+            raise CannotTell('the branch holds changes, and it cannot read this list answer to merge them in')
         if self._outcomes is None:
             raise CannotTell('the branch holds changes, and this plug-in cannot say which list items are its own')
         real_slots = lists.relevant(self._outcomes.listed(call, body), held)
@@ -166,8 +186,9 @@ class Branch:
             if not refs.all and not born:
                 self._unknowns.append(Unknown(f'{call.name} changed something on the branch that it cannot name',
                                               'branch'))
-        self.journal.add(call.service, call.operation, dict(call.params), raw.status, refs.all, born)
         answer = self._sides.to_client(call, raw)
+        self.journal.add(call.service, call.operation, dict(call.params), raw.status, refs.all, born, refs.primary,
+                         self._codec.body(call, answer))
         if raw.status < 300 and refs.primary and self.overlay.state(refs.primary[0]) is State.COPIED:
             return self._transplant_answer(call, refs.primary[0], answer)
         return answer
@@ -234,6 +255,10 @@ class Branch:
         self._count('refused')
         return self._codec.refusal(call, request, f'Emfirge cannot tell: {what}. {ADVICE}')
 
+    def _note(self, ref: ResourceRef, what: str) -> None:
+        """What a copy lacks, as its copier said: an unknown about that resource."""
+        self._unknowns.append(Unknown(f'the copy of {ref} lacks: {what}', 'branch', ref))
+
     def _count(self, what: str) -> None:
         self._counts[what] = self._counts.get(what, 0) + 1
 
@@ -267,7 +292,7 @@ class Branch:
         with self._lock:
             self._intact()
             return diff.changes(self.overlay.held(), self.overlay.from_real(), self.baselines.all(),
-                                self._now(self._sides.engine_answer), self._about, self.journal, self._born_settings)
+                                self._now(self._sides.engine_answer), self._members, self.journal, self._born_settings)
 
     def states_after(self) -> dict[ResourceRef, dict[str, Any]]:
         """The state of every copied or born resource as the branch now answers it: {read name: plain data}.
@@ -313,13 +338,16 @@ class Branch:
         """What changed in the real account under the branch since each copy."""
         with self._lock:
             self._intact()
-            return diff.drift(self.baselines.all(), self._now(self._sides.real_answer), self._about)
+            return diff.drift(self.baselines.all(), self._now(self._sides.real_answer), self._members)
 
     def _now(self, read) -> diff.Now:
         return lambda b: read(b.call)
 
     def _about(self, b: Baseline, body: Any) -> Any:
         return self._sides.about(b.ref, b.call, body)
+
+    def _members(self, b: Baseline, body: Any) -> Any:
+        return self._sides.membership(b.ref, b.call, body)
 
     def log(self) -> tuple[Entry, ...]:
         return self.journal.entries()
@@ -330,6 +358,7 @@ class Branch:
     def stats(self) -> dict[str, Any]:
         return {'routes': dict(self._counts), 'copies': dict(self._touch.copies), 'refusals': dict(self._refusals),
                 'real_reads': self.real.passed, 'real_blocked': self.real.blocked,
+                'real_blocked_calls': list(self.real.stopped),
                 'held': {s.value: sum(1 for x in self.overlay.held().values() if x is s) for s in State}}
 
     def copy(self, ref: ResourceRef) -> State:

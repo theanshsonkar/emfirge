@@ -100,11 +100,14 @@ def _call(op, **p):
 def test_journal_and_state_level_diff():
     a, b, c, d = (ResourceRef(T, x) for x in 'abcd')
     j = Journal()
-    j.add('cloud', 'put', {'name': 'a'}, 200, (a,))
-    j.add('cloud', 'put', {'name': 'a'}, 400, (a,))
-    j.add('cloud', 'poke', {'name': 'd'}, 200, (d,))
+    j.add('cloud', 'put', {'name': 'a', 'set': {'size': 2}}, 200, (a,), primary=(a,))
+    j.add('cloud', 'put', {'name': 'a'}, 400, (a,), primary=(a,))
+    j.add('cloud', 'poke', {'name': 'd'}, 200, (d,), primary=(d,))
+    j.add('cloud', 'grant', {'name': 'd', 'uses': 'c'}, 200, (d, c), primary=(d,))   # names c, acts on d
     j.add('cloud', 'create', {}, 200, (), (b,))
-    assert j.calls_on(a) == ('cloud.put',) and [e.n for e in j.entries()] == [1, 2, 3, 4]
+    assert j.calls_on(a) == ('cloud.put',) and [e.n for e in j.entries()] == [1, 2, 3, 4, 5]
+    assert j.calls_on(c) == () and j.changed(d) and not j.changed(c)
+    assert j.members_sent(a) == {'name', 'set', 'size'}
     get_a, get_d = _call('get', name='a'), _call('get', name='d')
     bases = Baselines()
     bases.set(a, [Baseline(a, get_a, Answer(200, {'size': 1, 'RequestId': 'r1'}), Answer(200, {'size': 1}),
@@ -118,6 +121,21 @@ def test_journal_and_state_level_diff():
     assert by['a'].type is ChangeType.MODIFIED and [(f.path, f.before, f.after) for f in by['a'].fields] == [('get.size', 1, 2)]
     assert by['b'].type is ChangeType.CREATED and [(f.path, f.before, f.after) for f in by['b'].fields] == [('get.size', None, 0)]
     assert by['c'].type is ChangeType.DELETED and by['c'].fields == ()   # no baseline was kept for it
-    assert by['d'].type is ChangeType.ACTION and by['d'].calls == ('cloud.poke',)
+    assert by['d'].type is ChangeType.ACTION and by['d'].calls == ('cloud.poke', 'cloud.grant')
+    assert not by['a'].fields[0].derived
     drift = diff.drift(bases.all(), lambda base: Answer(200, {'size': 5}), lambda base, body: body)
     assert {ch.ref.id for ch in drift} == {'a', 'd'}
+
+
+def test_a_setting_filled_into_an_empty_element_is_named_leaf_by_leaf():
+    a = ResourceRef(T, 'a')
+    get_a = _call('get', name='a')
+    bases = Baselines()
+    bases.set(a, [Baseline(a, get_a, Answer(200, {'Root': ''}), Answer(200, {'Root': ''}))])
+    j = Journal()
+    j.add('cloud', 'put', {'name': 'a', 'Config': {'Status': 'on'}}, 200, (a,), primary=(a,))
+    [change] = diff.changes({a: State.COPIED}, frozenset({a}), bases.all(),
+                            lambda b: Answer(200, {'Root': {'Status': 'on', 'Stamp': 't1'}}), lambda b, body: body, j,
+                            lambda ref: [])
+    assert {(f.path, f.before, f.after, f.derived) for f in change.fields} == {
+        ('get.Root.Status', None, 'on', False), ('get.Root.Stamp', None, 't1', True)}

@@ -10,12 +10,14 @@ while the read-only door of the real account stays in the path.
 """
 from __future__ import annotations
 
-from typing import Any, Iterator
 import urllib.parse
+from typing import Any, Iterator
 
 import boto3
+import boto3.session
 import botocore.awsrequest
 import botocore.config
+import botocore.session
 import urllib3
 
 from emfirge.core.model import WireRequest, WireResponse
@@ -66,11 +68,22 @@ class _Raw:
         self._at = len(self._data)
 
 
+_UNSHARED = {name: (None, None, None, None) for name in ('profile', 'config_file', 'credentials_file')}
+"""Session variables read from nowhere: no AWS_PROFILE, no ~/.aws/config, no ~/.aws/credentials."""
+
+
+def own_session() -> boto3.session.Session:
+    """A session of Emfirge's own, apart from the owner's: their AWS_PROFILE (even one that does not exist), config
+    and credentials files are not read. The account a request reaches is decided by the Account, never by a profile."""
+    core = botocore.session.Session(session_vars=_UNSHARED)
+    return boto3.session.Session(botocore_session=core)
+
+
 def sdk_client(account: Account, service: str, region: str) -> Any:
     """A boto3 client for `service` whose requests go through `account.send` (and nowhere else)."""
     cfg = botocore.config.Config(retries={'max_attempts': 1}, s3={'addressing_style': 'path'})
-    client = boto3.client(service, endpoint_url='https://emfirge.invalid', region_name=region,
-                          aws_access_key_id='emfirge', aws_secret_access_key='emfirge', config=cfg)
+    client = own_session().client(service, endpoint_url='https://emfirge.invalid', region_name=region,
+                                  aws_access_key_id='emfirge', aws_secret_access_key='emfirge', config=cfg)
 
     def send(request: Any, **_: Any) -> botocore.awsrequest.AWSResponse:
         url = urllib.parse.urlsplit(request.url)
