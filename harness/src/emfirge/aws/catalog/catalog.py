@@ -18,6 +18,7 @@ from typing import Any, Iterable, Iterator
 
 from emfirge.core.model import Call, Kind, Refs, ResourceRef
 
+from . import kinds
 from .arns import ARN_IN_TEXT, ArnFormat, Parsed, canonical_value, split_arn
 from .store import Overrides, ResourceTypeInfo, Store
 
@@ -41,12 +42,18 @@ class AwsCatalog:
 
     # ---------------------------------------------------------------- the port
     def kind(self, service: str, operation: str) -> Kind:
+        """AWS's published kind, with the two-key read rule (kinds.py): a read must also be named like one."""
         entry = self._entry(service, operation)
-        return Kind(entry['k']) if entry else Kind.UNKNOWN
+        return kinds.two_key(Kind(entry['k']), operation) if entry else Kind.UNKNOWN
+
+    def why_kind(self, service: str, operation: str) -> str:
+        """Plain words on why kind() says what it says; for the branch's refusal message."""
+        entry = self._entry(service, operation)
+        return kinds.why(Kind(entry['k']) if entry else None, operation, (entry or {}).get('a', ''))
 
     def refs(self, call: Call) -> Refs:
         entry = self._entry(call.service, call.operation) or {'k': 'unknown'}
-        kind = Kind(entry['k'])
+        kind = self.kind(call.service, call.operation)
         primary, secondary = self._bound(entry, call.params)
         primary = _unique(primary)
         mentioned = [r for r in _unique(secondary + self._containers(primary) + list(self._mentions(call.params)))
@@ -61,7 +68,7 @@ class AwsCatalog:
         for service, op, template in row.get('r', []):
             values = self._values_from_id(ref, _template_vars(template))
             params = _fill(template, {**self._ambient, **values}) if values is not None else None
-            if params is not None:
+            if params is not None and self.kind(service, op).reads_only:
                 out.append((service, op, params))
         return out
 

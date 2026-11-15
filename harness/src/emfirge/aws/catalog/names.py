@@ -90,7 +90,8 @@ def score(var: str, resource: str, member: Member) -> int:
     3  the member's words are some of the variable's, in order, and name the resource
                                       DbClusterInstanceName <-> DBClusterIdentifier (resource 'cluster')
     2  the member is a bare designator (Name, Id) and the variable is named after the resource  RuleName <-> Name
-    1  a required path member whose documentation names the resource              ObjectName <-> Key ('Object key ...')
+    1  a required path member whose documentation's first sentence names the resource
+                                      ObjectName <-> Key ('Key name of the object to delete')
     Arn members are not bound to variables: they carry a whole ARN (see arn_member)."""
     v, m, r = split(var), split(member.name), split(resource)
     if m.designator == 'arn' or not compatible(v.designator, m.designator):
@@ -119,7 +120,7 @@ def _doc_names(doc: str, var: Words, resource: Words) -> bool:
     first = doc.split('. ')[0]
     words = set(singular(w) for w in re.findall(r'[a-z0-9]+', first))
     want = var.words or resource.words
-    return bool(want) and set(want) <= words and first.startswith(want[0])
+    return bool(want) and set(want) <= words
 
 
 def bind_vars(variables: list[str], resource: str, members: list[Member]) -> dict[str, Member]:

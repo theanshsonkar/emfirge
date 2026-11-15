@@ -12,6 +12,7 @@ import json
 import re
 import urllib.parse
 import xml.etree.ElementTree as ET
+import zlib
 from dataclasses import dataclass
 from typing import Any, Iterator
 from xml.sax.saxutils import escape
@@ -23,6 +24,7 @@ from botocore.model import OperationModel, ServiceModel, Shape
 from emfirge.core.model import Call, Kind, WireRequest, WireResponse
 
 ERROR_CODE = 'EmfirgeCannotTell'
+CRC32 = 'x-amz-crc32'
 REFUSAL_HEADER = 'x-emfirge-cannot-tell'
 _SCOPE = re.compile(r'Credential=[^/]+/\d+/[^/]+/([^/]+)/aws4_request')
 _QUERY_SCOPE = re.compile(r'X-Amz-Credential=[^&/]+(?:/|%2F)\d+(?:/|%2F)[^&/%]+(?:/|%2F)([^&/%]+)(?:/|%2F)aws4_request', re.I)
@@ -188,10 +190,19 @@ class AwsCodec:
         return decode_body(response.body)
 
     def render(self, call: Call, response: WireResponse, body: Any) -> WireResponse:
+        """`body` in the answer's wire format (bytes pass as they are), with the length and checksum headers made
+        true again: an SDK that checks a stale checksum (DynamoDB's x-amz-crc32) retries the call."""
         data = encode_body(body) if isinstance(body, (dict, list)) else body
-        headers = {k: v for k, v in response.headers.items() if k.lower() != 'content-length'}
+        headers = {k: v for k, v in response.headers.items() if k.lower() not in ('content-length', CRC32)}
         headers['Content-Length'] = str(len(data))
+        if any(k.lower() == CRC32 for k in response.headers):
+            headers[CRC32] = str(zlib.crc32(data) & 0xFFFFFFFF)
         return WireResponse(response.status, headers, data)
+
+    def shape(self, call: Call) -> str | None:
+        """The name of the answer's structure: two operations with the same name answer alike."""
+        out = self.operation(call).output_shape
+        return out.name if out is not None else None
 
     def blob_payload(self, call: Call, which: str) -> bool:
         """The request's (input_shape) or answer's (output_shape) payload is raw bytes: customer data."""

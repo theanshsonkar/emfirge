@@ -347,3 +347,55 @@ def test_describe_calls_aws_cannot_scope_still_name_their_resources(cat):
     """EC2's Describe* actions list no resource type; a read of a branched group must still be routable."""
     assert primary(cat, 'ec2', 'DescribeSecurityGroups', GroupIds=['sg-0a']) == ['ec2:security-group/sg-0a']
     assert primary(cat, 'ec2', 'DescribeInstances', InstanceIds=['i-0a']) == ['ec2:instance/i-0a']
+
+
+# ------------------------------------------------------------------ the two-key read rule
+@pytest.mark.parametrize('service, op', [
+    ('sqs', 'ReceiveMessage'), ('logs', 'StartQuery'), ('iam', 'GenerateCredentialReport'),
+    ('iam', 'SimulatePrincipalPolicy'), ('bedrock-runtime', 'InvokeModel'),
+])
+def test_a_read_named_like_an_action_is_not_a_read(cat, service, op):
+    assert not cat.kind(service, op).reads_only
+    assert cat.kind(service, op) is Kind.UNKNOWN
+    assert 'may change something' in cat.why_kind(service, op) or 'does not say' in cat.why_kind(service, op)
+
+
+@pytest.mark.parametrize('service, op', [
+    ('s3', 'GetObject'), ('ec2', 'DescribeInstances'), ('s3', 'ListBuckets'), ('dynamodb', 'Query'),
+    ('dynamodb', 'Scan'), ('dynamodb', 'BatchGetItem'), ('s3', 'HeadObject'), ('cloudtrail', 'LookupEvents'),
+])
+def test_plain_reads_stay_reads(cat, service, op):
+    assert cat.kind(service, op).reads_only
+    assert cat.why_kind(service, op).startswith("AWS's list calls this a")
+
+
+def test_why_kind_names_the_verb(cat):
+    assert '(Receive...)' in cat.why_kind('sqs', 'ReceiveMessage')
+    assert 'does not say' in cat.why_kind('lambda', 'NoSuchOperation')
+
+
+def test_a_read_that_is_not_a_read_is_refused_when_unplaced(cat):
+    assert cat.refs(call(cat, 'logs', 'StartQuery', queryString='x', startTime=1, endTime=2)).complete is False
+
+
+def test_reads_of_offers_only_two_key_reads(cat):
+    ops = {op for _, op, _ in cat.reads_of(ResourceRef('ec2:instance', 'i-0a'))}
+    assert 'DescribeInstances' in ops
+    assert all(cat.kind('ec2', op).reads_only for op in ops)
+
+
+# ------------------------------------------------------------------ deletes per type
+@pytest.mark.parametrize('type_, op', [
+    ('lambda:function', 'lambda.DeleteFunction'), ('s3:bucket', 's3.DeleteBucket'), ('iam:role', 'iam.DeleteRole'),
+    ('ec2:instance', 'ec2.TerminateInstances'), ('dynamodb:table', 'dynamodb.DeleteTable'),
+    ('kms:key', 'kms.ScheduleKeyDeletion'), ('rds:db', 'rds.DeleteDBInstance'),
+])
+def test_delete_operations_of_a_type(cat, type_, op):
+    assert op in cat.resource_type(type_).delete_operations
+
+
+def test_deleting_a_part_is_not_deleting_the_whole(cat):
+    role = cat.resource_type('iam:role').delete_operations
+    assert 'iam.DeleteRolePolicy' not in role and 'iam.DetachRolePolicy' not in role
+    assert cat.resource_type('logs:log-group').delete_operations == ('logs.DeleteLogGroup',)
+    assert cat.resource_type('s3:bucket').delete_operations == ('s3.DeleteBucket',)

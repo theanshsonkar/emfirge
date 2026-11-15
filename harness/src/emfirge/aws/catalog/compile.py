@@ -40,6 +40,8 @@ from .arns import ArnFormat, compile_format, parent_of
 from .names import Member, arn_member, bind_vars, split
 
 KIND_ORDER = ('read', 'list', 'tagging', 'write', 'permission')   # how much a call changes, least first
+DELETE_VERB = re.compile(r'^(Delete|Remove|Terminate|Deregister)(?![a-z])')
+DELETE_WORDS = {'delete', 'deletion', 'remove', 'terminate', 'deregister'}
 READ_VERBS = ('Get', 'Describe', 'List')
 
 
@@ -251,6 +253,10 @@ class CloudFormation:
             return False
         return action in self._perms(s, 'create') and action not in self._perms(s, 'update') | self._perms(s, 'delete')
 
+    def delete_actions(self, tid: str) -> set[str]:
+        s = self.by_type.get(tid)
+        return self._perms(s, 'delete') if s else set()
+
     def read_actions(self, tid: str) -> set[str]:
         s = self.by_type.get(tid)
         return self._perms(s, 'read') if s else set()
@@ -345,6 +351,52 @@ def compile_op(ref: Reference, cfn: CloudFormation, op: str, op_model: Any, act:
     return entry
 
 
+# ------------------------------------------------------------------ deletes per type
+def deletes(ref: Reference, cfn: CloudFormation, op: str, act: MainAction, entry: dict[str, Any]) -> list[str]:
+    """The types this operation deletes. It must change something, carry a delete word (Delete, Remove, Terminate,
+    Deregister, ...Deletion), act on the type (bound by name as its target, or by a whole ARN), and its other words
+    must name exactly the type (see names_type). Either it starts with a delete verb, or CloudFormation's delete
+    handler for the type uses the action (ScheduleKeyDeletion -> key).
+    DeleteRolePolicy and DetachRolePolicy are not deletes of the role: their other words are 'role policy'."""
+    if entry.get('k') in ('read', 'list', 'tagging', 'unknown'):
+        return []
+    words = split(op).words
+    if not set(words) & DELETE_WORDS:
+        return []
+    rest = [w for w in words if w not in DELETE_WORDS]
+    if words[0] not in DELETE_WORDS:
+        rest = rest[1:]           # a leading verb of its own: Schedule Key Deletion
+    action = f'{act.prefix}:{act.name}'
+    targets = [b['t'] for b in entry.get('b', []) if b['g'] and 'via' not in b]
+    if 'arn' in entry:
+        targets += ref.resources_of(act.prefix, act.action)
+    return [t for t in dict.fromkeys(targets) if names_type(ref, t, tuple(rest))
+            and (DELETE_VERB.match(op) or action in cfn.delete_actions(t))]
+
+
+def names_type(ref: Reference, tid: str, words: tuple[str, ...]) -> bool:
+    """The words are the type's name or its ARN variable's words (TerminateInstances -> instance, DeleteDBInstance ->
+    ${DbInstanceName}, DeleteRule -> ${RuleName}), or some of the variable's words, in order, that hold the type's
+    name (DeleteDBCluster -> ${DbClusterInstanceName}, type 'cluster'); the same rule as binding a member."""
+    info = ref.types[tid]
+    name = split(info.name)
+    joined = ''.join(words)
+    if not words or joined == name.joined:
+        return bool(words)
+    for f in info.formats:
+        if not f.variables:
+            continue
+        var = split(f.variables[-1]).words
+        if words == var or (_in_order(words, var) and name.joined and name.joined in joined):
+            return True
+    return False
+
+
+def _in_order(short: tuple[str, ...], long: tuple[str, ...]) -> bool:
+    it = iter(long)
+    return len(short) < len(long) and all(w in it for w in short)
+
+
 # ------------------------------------------------------------------ reads per type
 @dataclass
 class ReadCandidate:
@@ -426,6 +478,7 @@ def compile_all(svcref: str, cfn_dir: str) -> dict[str, Any]:
     session = botocore.session.get_session()
     services: dict[str, dict[str, Any]] = {}
     candidates: dict[str, list[ReadCandidate]] = collections.defaultdict(list)
+    deleted_by: dict[str, list[str]] = collections.defaultdict(list)
     for service in session.get_available_services():
         model = session.get_service_model(service)
         ops = {}
@@ -434,6 +487,8 @@ def compile_all(svcref: str, cfn_dir: str) -> dict[str, Any]:
             act = main_action(ref, service, op, model.metadata)
             entry = compile_op(ref, cfn, op, om, act)
             ops[op] = entry
+            for tid in (deletes(ref, cfn, op, act, entry) if act else []):
+                deleted_by[tid].append(f'{service}.{op}')
             if act and entry['k'] in ('read', 'list') and not act.props.get('IsDataPlane'):
                 candidates[act.prefix].append(ReadCandidate(service, op, f'{act.prefix}:{act.name}',
                                                             ref.resources_of(act.prefix, act.action), members_of(om)))
@@ -453,6 +508,9 @@ def compile_all(svcref: str, cfn_dir: str) -> dict[str, Any]:
         row.update(cfn.flags(tid))
         if tid in reads:
             row['r'] = reads[tid]
+        if tid in deleted_by:
+            own = [o for o in deleted_by[tid] if o.split('.')[0] == info.prefix]
+            row['x'] = own or deleted_by[tid]    # s3.DeleteBucket, not s3control's (Outposts) one
         types[info.prefix][info.name] = row
         for f in info.formats:
             arn_services[f.service].add(info.prefix)

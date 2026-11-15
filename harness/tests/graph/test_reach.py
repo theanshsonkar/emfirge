@@ -86,6 +86,13 @@ def test_dropped_link_is_no_longer_named():
     assert found[JOB_GRANT].relation is Relation.NO_LONGER_NAMED and found[JOB_GRANT].strength is Strength.STRONG
 
 
+def test_dropped_bare_name_stays_visible_beside_a_firm_finding():
+    after = {JOB: {'grant': urn('grant', 'publisher-grant'), 'env': {}}}       # the env setting naming the store is gone
+    c = _run([Change(JOB, MODIFIED)], after=after).changes[0]
+    assert {i.relation for i in c.affected if i.ref == STORE} == {Relation.REACHED}           # still reached through the grant
+    assert {i.relation for i in c.maybe if i.ref == STORE} == {Relation.NO_LONGER_NAMED}      # and the lost name is shown
+
+
 def test_created_store_with_a_policy_now_names_the_edge_and_only_that():
     new = ref('store', 'media-feed')
     after = {new: {'policy': policy({'allow': 'read', 'who': urn('edge', 'edg-0a1b2c3d4e')})}}

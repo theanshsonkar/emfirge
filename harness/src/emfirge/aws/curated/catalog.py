@@ -111,3 +111,6 @@ class CuratedOutcomes:
 
     def opaque(self, call: Call) -> bool:
         return self._codec.blob_payload(call, 'input_shape') or self._codec.blob_payload(call, 'output_shape')
+
+    def shape(self, call: Call) -> str | None:
+        return self._codec.shape(call)

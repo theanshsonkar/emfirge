@@ -15,7 +15,7 @@ from emfirge.core.model import Call, Change, Refs, ResourceRef, Unknown, WireReq
 from emfirge.core.ports import Account, CannotTell, Catalog, Codec, Copier, Outcomes
 
 from . import diff, lists, transplant
-from .baseline import Answer, Baseline, Baselines
+from .baseline import Baseline, Baselines
 from .guard import ReadOnly
 from .ids import IdMap, alias_of
 from .journal import Entry, Journal
@@ -142,10 +142,16 @@ class Branch:
         return self._codec.render(call, r, merged)
 
     def _item_baseline(self, call: Call, ref: ResourceRef, path: tuple[str, ...]) -> Any:
-        base = self.baselines.find(ref, call)
-        if base is None or not base.e0.ok or self._outcomes is None:
+        """The resource's item in a baseline of the same list operation. Its parameters may differ (a filter, a
+        prefix): an item is the same item in any list that shows it."""
+        if self._outcomes is None:
             return None
-        return lists.item_of(self._outcomes.listed(base.call, base.e0.body), ref, path)
+        for base in self.baselines.of(ref):
+            if base.call.name == call.name and base.e0.ok:
+                item = lists.item_of(self._outcomes.listed(base.call, base.e0.body), ref, path)
+                if item is not None:
+                    return item
+        return None
 
     # ------------------------------------------------------------------ changes
     def _change(self, call: Call, refs: Refs) -> WireResponse:
@@ -158,7 +164,24 @@ class Branch:
                 self._unknowns.append(Unknown(f'{call.name} changed something on the branch that it cannot name',
                                               'branch'))
         self.journal.add(call.name, dict(call.params), raw.status, refs.all, born)
-        return self._sides.to_client(call, raw)
+        answer = self._sides.to_client(call, raw)
+        if raw.status < 300 and refs.primary and self.overlay.state(refs.primary[0]) is State.COPIED:
+            return self._transplant_answer(call, refs.primary[0], answer)
+        return answer
+
+    def _transplant_answer(self, call: Call, ref: ResourceRef, answer: WireResponse) -> WireResponse:
+        """A change that answers with its resource's new state (the same structure as one of its baseline reads):
+        the real state with the branch's change laid over it, as for that read."""
+        shape = self._outcomes.shape(call) if self._outcomes else None
+        base = next((b for b in self.baselines.of(ref) if shape and self._outcomes.shape(b.call) == shape), None)
+        if base is None:
+            return answer
+        r = self._sides.real_answer(base.call)
+        a1 = self._sides.answer(call, answer)
+        if not (base.e0.ok and r.ok and transplant.structured(base.e0.body, a1.body, r.body)):
+            return answer
+        self._count('change_answer_transplanted')
+        return self._codec.render(call, answer, transplant.lay(base.e0.body, a1.body, r.body))
 
     def _settle(self, call: Call, refs: Refs) -> None:
         """After a change: which named resources now exist on the branch, and which do not."""

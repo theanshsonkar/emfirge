@@ -6,14 +6,14 @@ one function (kinds.kind_of), to be dropped when the generic catalog gives kinds
 from __future__ import annotations
 
 from ..codec import AwsCodec
-from . import config, dynamodb, ec2, events, iam, lambda_, messaging, s3
+from . import dynamodb, ec2, events, iam, kms, lambda_, logs, s3, scheduler, secretsmanager, sns, sqs, ssm
 from .catalog import CuratedCatalog, CuratedOutcomes
 from .copier import CuratedCopier
 from .naming import Naming
 from .spec import TypeSpec, Where
 
-SPECS: tuple[TypeSpec, ...] = (*lambda_.TYPES, *iam.TYPES, *s3.TYPES, *dynamodb.TYPES, *events.TYPES, *messaging.TYPES,
-                               *config.TYPES, *ec2.TYPES)
+SPECS: tuple[TypeSpec, ...] = tuple(t for m in (lambda_, iam, s3, dynamodb, scheduler, events, sqs, sns, logs, ssm,
+                                                 secretsmanager, kms, ec2) for t in m.TYPES)
 
 
 def curated(codec: AwsCodec, where: Where) -> tuple[CuratedCatalog, CuratedOutcomes, CuratedCopier]:

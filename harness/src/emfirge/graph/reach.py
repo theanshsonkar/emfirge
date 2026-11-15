@@ -284,12 +284,17 @@ def _rank(i: Impact) -> tuple[int, int, int]:
 
 
 def _keep_best(found: list[Impact]) -> list[Impact]:
-    """One impact per resource: a firm finding beats a loose one; then the most telling relation, the strongest
-    chain, the shortest."""
+    """At most one firm and one loose impact per resource. The firm one is the most telling relation, then the
+    strongest, then the shortest chain. A loose one is kept beside it only when it says something more telling (the
+    function still reaches the table through its role, AND its settings no longer name the table)."""
     by_ref: dict[ResourceRef, list[Impact]] = {}
     for i in found:
         by_ref.setdefault(i.ref, []).append(i)
-    kept = [min([i for i in items if i.firm] or items, key=_rank) for items in by_ref.values()]
+    kept = []
+    for items in by_ref.values():
+        firm = min((i for i in items if i.firm), key=_rank, default=None)
+        loose = min((i for i in items if not i.firm), key=_rank, default=None)
+        kept += [i for i in (firm, loose) if i is not None and (i is firm or firm is None or _rank(i)[0] < _rank(firm)[0])]
     return sorted(kept, key=lambda i: (_rank(i), str(i.ref)))
 
 

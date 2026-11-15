@@ -28,7 +28,10 @@ class Sides:
         return self._engine.send(self.ids.request_to_engine(call.wire, self.opaque(call)))
 
     def to_client(self, call: Call, response: WireResponse) -> WireResponse:
-        return self.ids.response_to_client(response, self.opaque(call))
+        """The engine's answer in client ids; re-rendered by the codec when that changed its body, so the answer's
+        own length and checksum stay true."""
+        out = self.ids.response_to_client(response, self.opaque(call))
+        return self.codec.render(call, out, out.body) if out.body != response.body else out
 
     def engine(self, call: Call) -> WireResponse:
         return self.to_client(call, self.engine_raw(call))

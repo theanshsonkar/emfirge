@@ -112,6 +112,10 @@ class Outcomes(Protocol):
     def opaque(self, call: Call) -> bool:
         """The call's request or answer payload is the customer's data (an object, a blob): never rewrite it."""
 
+    def shape(self, call: Call) -> str | None:
+        """A name for the structure of the call's answer: calls with the same name answer alike (a change that
+        answers with the resource's new state can then be laid over the real state, like a read)."""
+
 
 class Reversibility(Protocol):
     """Says whether a change can be put back, from what the provider publishes about the resource type

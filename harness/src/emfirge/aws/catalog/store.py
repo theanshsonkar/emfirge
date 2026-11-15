@@ -26,6 +26,7 @@ class ResourceTypeInfo:
     holds_data: bool                        # it, or a type inside it, has data-plane actions
     id_given_by_service: bool | None        # None: no CloudFormation schema says
     write_only_settings: tuple[str, ...]    # settings that can be written but never read back
+    delete_operations: tuple[str, ...]      # 'service.Operation' calls that delete one (so a created one can go again)
 
 
 @dataclass(frozen=True)
@@ -112,4 +113,5 @@ class Store:
         if row is None:
             return None
         return ResourceTypeInfo(type_, tuple(row.get('f', [])), row.get('p'), row.get('cfn'), tuple(row.get('cfn_id', [])),
-                                bool(row.get('d')), row.get('id_given_by_service'), tuple(row.get('write_only_settings', [])))
+                                bool(row.get('d')), row.get('id_given_by_service'), tuple(row.get('write_only_settings', [])),
+                                tuple(row.get('x', [])))
