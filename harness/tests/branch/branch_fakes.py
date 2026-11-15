@@ -37,7 +37,8 @@ class FakeCodec:
         return json.loads(response.body) if response.body else b''
 
     def render(self, call: Call, response: WireResponse, body: Any) -> WireResponse:
-        return WireResponse(response.status, response.headers, json.dumps(body).encode())
+        data = body if isinstance(body, bytes) else json.dumps(body).encode()
+        return WireResponse(response.status, response.headers, data)
 
     def refusal(self, call: Call | None, request: WireRequest, message: str) -> WireResponse:
         return WireResponse(400, {'x-refused': 'true'}, json.dumps({'code': 'CannotTell', 'message': message}).encode())
