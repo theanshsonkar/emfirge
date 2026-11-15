@@ -85,6 +85,13 @@ def changed_paths(a: Any, b: Any) -> list[tuple[str, Any, Any]]:
     return out
 
 
+def leaves(body: Any, path: Path = ()) -> list[tuple[str, Any]]:
+    """(dotted path, value) for each leaf of nested data; lists are whole values, as in diff."""
+    if isinstance(body, dict) and body:
+        return [leaf for k, v in body.items() for leaf in leaves(v, path + (k,))]
+    return [('.'.join(map(str, path)), body)] if path else []
+
+
 def without(paths: frozenset[str], changes: list[tuple[str, Any, Any]]) -> list[tuple[str, Any, Any]]:
     """Drop changes at (or under) any of `paths`."""
     return [c for c in changes if not any(c[0] == p or c[0].startswith(p + '.') for p in paths)]

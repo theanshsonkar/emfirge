@@ -27,6 +27,10 @@ def test_lists_are_whole_values_and_missing_room_takes_the_engine_subtree():
     assert transplant.lay(1, 2, 3) == 2
 
 
+def test_leaves():
+    assert transplant.leaves({'a': {'b': 1, 'c': [1]}, 'd': {}}) == [('a.b', 1), ('a.c', [1]), ('d', {})]
+
+
 def test_diff_paths_and_noise():
     assert transplant.changed_paths({'a': {'b': 1}, 'c': 1}, {'a': {'b': 2}}) == [('c', 1, None), ('a.b', 1, 2)]
     assert transplant.without(frozenset({'a'}), [('a.b', 1, 2), ('ab', 1, 2)]) == [('ab', 1, 2)]
@@ -96,10 +100,10 @@ def _call(op, **p):
 def test_journal_and_state_level_diff():
     a, b, c, d = (ResourceRef(T, x) for x in 'abcd')
     j = Journal()
-    j.add('cloud.put', {'name': 'a'}, 200, (a,))
-    j.add('cloud.put', {'name': 'a'}, 400, (a,))
-    j.add('cloud.poke', {'name': 'd'}, 200, (d,))
-    j.add('cloud.create', {}, 200, (), (b,))
+    j.add('cloud', 'put', {'name': 'a'}, 200, (a,))
+    j.add('cloud', 'put', {'name': 'a'}, 400, (a,))
+    j.add('cloud', 'poke', {'name': 'd'}, 200, (d,))
+    j.add('cloud', 'create', {}, 200, (), (b,))
     assert j.calls_on(a) == ('cloud.put',) and [e.n for e in j.entries()] == [1, 2, 3, 4]
     get_a, get_d = _call('get', name='a'), _call('get', name='d')
     bases = Baselines()
@@ -108,10 +112,12 @@ def test_journal_and_state_level_diff():
     bases.set(d, [Baseline(d, get_d, Answer(200, {'size': 1}), Answer(200, {'size': 1}))])
     now = {key_of(get_a): Answer(200, {'size': 2, 'RequestId': 'r2'}), key_of(get_d): Answer(200, {'size': 1})}
     held = {a: State.COPIED, b: State.BORN, c: State.DELETED, d: State.COPIED}
-    changes = diff.changes(held, frozenset({a, c, d}), bases.all(), lambda base: now[base.key], lambda base, body: body, j)
+    changes = diff.changes(held, frozenset({a, c, d}), bases.all(), lambda base: now[base.key], lambda base, body: body, j,
+                           lambda ref: [('get.size', 0)])
     by = {ch.ref.id: ch for ch in changes}
-    assert by['a'].type is ChangeType.MODIFIED and [(f.path, f.before, f.after) for f in by['a'].fields] == [('size', 1, 2)]
-    assert by['b'].type is ChangeType.CREATED and by['c'].type is ChangeType.DELETED
+    assert by['a'].type is ChangeType.MODIFIED and [(f.path, f.before, f.after) for f in by['a'].fields] == [('get.size', 1, 2)]
+    assert by['b'].type is ChangeType.CREATED and [(f.path, f.before, f.after) for f in by['b'].fields] == [('get.size', None, 0)]
+    assert by['c'].type is ChangeType.DELETED and by['c'].fields == ()   # no baseline was kept for it
     assert by['d'].type is ChangeType.ACTION and by['d'].calls == ('cloud.poke',)
     drift = diff.drift(bases.all(), lambda base: Answer(200, {'size': 5}), lambda base, body: body)
     assert {ch.ref.id for ch in drift} == {'a', 'd'}

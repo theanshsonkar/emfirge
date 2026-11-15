@@ -1,8 +1,10 @@
 """The branch's change at state level, as core.model.Change objects. Pure: the caller reads the answers.
 
-Created, deleted and modified come from the overlay and from E0 -> now of each baseline read; a changing call that
-left no trace in any read (an invoke, a send) is an action. The same comparison against the real account (R0 -> now)
-says what changed in the real account under the branch since the copy.
+Every FieldChange path starts with the read it came from ('<Read>.<field>.<field>'), because a bare field name says
+nothing to a lens. Created resources carry their settings (before None), deleted ones their state at copy time
+(after None), modified ones E0 -> now of each baseline read. A resource created and then deleted on the branch is no
+change. A changing call that left no trace in any read (an invoke, a send) is an action. The same comparison
+against the real account (R0 -> now) says what changed in the real account under the branch since the copy.
 """
 from __future__ import annotations
 
@@ -19,17 +21,20 @@ Now = Callable[[Baseline], Answer]
 """The same read as a baseline, answered now (by the engine, or by the real account)."""
 Focus = Callable[[Baseline, Any], Any]
 """The part of an answer that is about the baseline's resource (its item, for a list read)."""
+Settings = Callable[[ResourceRef], list[tuple[str, Any]]]
+"""(path, value) of each setting of a resource born on the branch, path starting with the read's name."""
 
 
 def changes(held: dict[ResourceRef, State], from_real: frozenset[ResourceRef], baselines: dict[ResourceRef, list[Baseline]],
-            engine_now: Now, focus: Focus, journal: Journal) -> list[Change]:
+            engine_now: Now, focus: Focus, journal: Journal, born_settings: Settings) -> list[Change]:
     out = []
     for ref, state in sorted(held.items(), key=lambda x: str(x[0])):
         calls = journal.calls_on(ref)
         if state is State.BORN:
-            out.append(Change(ref, ChangeType.CREATED, calls=calls))
+            fields = tuple(FieldChange(p, None, v) for p, v in born_settings(ref))
+            out.append(Change(ref, ChangeType.CREATED, fields, calls))
         elif state is State.DELETED and ref in from_real:
-            out.append(Change(ref, ChangeType.DELETED, calls=calls))
+            out.append(Change(ref, ChangeType.DELETED, _last_state(baselines.get(ref, []), focus), calls))
         elif state is State.COPIED:
             fields = _fields(baselines.get(ref, []), lambda b: b.e0, engine_now, focus)
             if fields:
@@ -49,18 +54,34 @@ def drift(baselines: dict[ResourceRef, list[Baseline]], real_now: Now, focus: Fo
     return out
 
 
+def named(read: str, path: str) -> str:
+    return f'{read}.{path}' if path else read
+
+
+def _last_state(baselines: list[Baseline], focus: Focus) -> tuple[FieldChange, ...]:
+    """The real state when the resource was copied, each setting going away."""
+    seen: dict[str, FieldChange] = {}
+    for b in baselines:
+        if b.r0.ok:
+            for path, value in transplant.leaves(focus(b, b.r0.body)):
+                if not any(path == p or path.startswith(p + '.') for p in b.noise):
+                    seen.setdefault(named(b.call.operation, path), FieldChange(named(b.call.operation, path), value, None))
+    return tuple(seen.values())
+
+
 def _fields(baselines: list[Baseline], then: Callable[[Baseline], Answer], now: Now, focus: Focus) -> tuple[FieldChange, ...]:
     seen: dict[tuple[str, str, str], FieldChange] = {}
     for b in baselines:
         a, n = then(b), now(b)
+        read = b.call.operation
         if a.status != n.status:
-            f = FieldChange(f'({b.call.operation})', a.status, n.status)
+            f = FieldChange(read, a.status, n.status)
             seen.setdefault((f.path, repr(f.before), repr(f.after)), f)
             continue
         x, y = focus(b, a.body), focus(b, n.body)
         if not a.ok or not transplant.structured(x, y):
             continue
         for path, before, after in transplant.without(b.noise, transplant.changed_paths(x, y)):
-            f = FieldChange(path, before, after)
-            seen.setdefault((path, repr(before), repr(after)), f)
+            f = FieldChange(named(read, path), before, after)
+            seen.setdefault((f.path, repr(before), repr(after)), f)
     return tuple(seen.values())

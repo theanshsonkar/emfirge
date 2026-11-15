@@ -30,7 +30,7 @@ def test_later_reads_lay_the_branch_change_over_the_live_real_answer():
     assert answer(b.handle(request('get', name='a'))) == {'name': 'a', 'size': 2, 'colour': 'blue'}
     assert b.stats()['routes']['transplanted'] == 1
     drift = b.drift()
-    assert [(f.path, f.before, f.after) for f in drift[0].fields] == [('colour', 'red', 'blue')]
+    assert [(f.path, f.before, f.after) for f in drift[0].fields] == [('get.colour', 'red', 'blue'), ('list.colour', 'red', 'blue')]
 
 
 def test_lists_merge_the_real_account_and_the_branch():
@@ -104,8 +104,48 @@ def test_the_report_holds_state_level_changes():
     b.handle(request('put', name='c', set={}))
     by = {c.ref.id: c for c in b.changes()}
     assert by['a'].type is ChangeType.MODIFIED and by['a'].calls == ('cloud.put',)
-    assert [(f.path, f.before, f.after) for f in by['a'].fields] == [('size', 1, 2)]
+    assert [(f.path, f.before, f.after) for f in by['a'].fields] == [('get.size', 1, 2), ('list.size', 1, 2)]
     assert by['b'].type is ChangeType.DELETED and by['c'].type is ChangeType.CREATED
+
+
+def test_created_resources_carry_their_settings_and_deleted_ones_their_last_state():
+    b, _, _, _ = make({'old': {'size': 4, 'colour': 'red'}})
+    b.handle(request('put', name='new', set={'size': 1, 'colour': 'green'}))
+    b.handle(request('delete', name='old'))
+    by = {c.ref.id: c for c in b.changes()}
+    new = {(f.path, f.before, f.after) for f in by['new'].fields}
+    old = {(f.path, f.before, f.after) for f in by['old'].fields}
+    for read in ('get', 'list'):   # each read the resource shows in reports, named by the read
+        assert {(f'{read}.name', None, 'new'), (f'{read}.size', None, 1), (f'{read}.colour', None, 'green')} <= new
+        assert {(f'{read}.name', 'old', None), (f'{read}.size', 4, None), (f'{read}.colour', 'red', None)} <= old
+    assert len(new) == len(old) == 6
+
+
+def test_a_resource_created_and_deleted_on_the_branch_is_no_change():
+    b, _, _, _ = make()
+    b.handle(request('put', name='tmp', set={'size': 1}))
+    b.handle(request('delete', name='tmp'))
+    assert b.changes() == []
+    assert [e.operation for e in b.journal.entries()] == ['put', 'delete']
+
+
+def test_states_after_hold_every_copied_and_born_resource_as_the_branch_answers_it():
+    b, real, _, _ = make({'a': {'size': 1, 'colour': 'red'}})
+    b.handle(request('put', name='a', set={'size': 2}))
+    b.handle(request('put', name='n', set={'size': 7}))
+    real.things['a']['colour'] = 'blue'
+    states = b.states_after()
+    assert states[ResourceRef(THING, 'a')]['get'] == {'name': 'a', 'size': 2, 'colour': 'blue'}
+    assert states[ResourceRef(THING, 'a')]['list'] == {'name': 'a', 'size': 2, 'colour': 'blue'}
+    assert states[ResourceRef(THING, 'n')]['get'] == {'name': 'n', 'size': 7}
+
+
+def test_the_journal_keeps_what_an_undo_needs():
+    b, _, _, _ = make({'a': {'size': 1}})
+    b.handle(request('put', name='a', uses='a', set={'size': 2}))
+    [e] = b.journal.entries()
+    assert (e.service, e.operation, e.params, e.status, e.refs) == \
+        ('cloud', 'put', {'name': 'a', 'uses': 'a', 'set': {'size': 2}}, 200, (ResourceRef(THING, 'a'),))
 
 
 def test_two_branches_in_one_process_are_isolated():

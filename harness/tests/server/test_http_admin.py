@@ -41,7 +41,10 @@ def test_calls_reach_the_branch_and_admin_routes_report(served):
     assert json.loads(call(srv.url + '/__emfirge/state')[1])['stage'] == 'open'
     diff = json.loads(call(srv.url + '/__emfirge/diff')[1])
     assert diff['changes'][0]['ref'] == {'type': 'cloud:thing', 'id': 'a'} and diff['changes'][0]['type'] == 'modified'
-    assert json.loads(call(srv.url + '/__emfirge/log')[1])[0]['call'] == 'cloud.put'
+    entry = json.loads(call(srv.url + '/__emfirge/log')[1])[0]
+    assert (entry['service'], entry['operation'], entry['status']) == ('cloud', 'put', 200)
+    assert entry['params'] == {'name': 'a', 'set': {'size': 2}} and entry['refs'] == [{'type': 'cloud:thing', 'id': 'a'}]
+    assert json.loads(call(srv.url + '/__emfirge/states')[1])['cloud:thing/a']['get'] == {'name': 'a', 'size': 2}
     assert json.loads(call(srv.url + '/__emfirge/stats')[1])['held']['copied'] == 1
     assert json.loads(call(srv.url + '/__emfirge/unknowns')[1]) == []
 

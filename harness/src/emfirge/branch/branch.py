@@ -6,6 +6,7 @@ Outcomes), copies through the Copier.
 """
 from __future__ import annotations
 
+import json
 import logging
 import threading
 from dataclasses import replace
@@ -15,7 +16,7 @@ from emfirge.core.model import Call, Change, Refs, ResourceRef, Unknown, WireReq
 from emfirge.core.ports import Account, CannotTell, Catalog, Codec, Copier, Outcomes
 
 from . import diff, lists, transplant
-from .baseline import Baseline, Baselines
+from .baseline import Baseline, Baselines, noise_between
 from .guard import ReadOnly
 from .ids import IdMap, alias_of
 from .journal import Entry, Journal
@@ -163,7 +164,7 @@ class Branch:
             if not refs.all and not born:
                 self._unknowns.append(Unknown(f'{call.name} changed something on the branch that it cannot name',
                                               'branch'))
-        self.journal.add(call.name, dict(call.params), raw.status, refs.all, born)
+        self.journal.add(call.service, call.operation, dict(call.params), raw.status, refs.all, born)
         answer = self._sides.to_client(call, raw)
         if raw.status < 300 and refs.primary and self.overlay.state(refs.primary[0]) is State.COPIED:
             return self._transplant_answer(call, refs.primary[0], answer)
@@ -246,7 +247,46 @@ class Branch:
     def changes(self) -> list[Change]:
         with self._lock:
             return diff.changes(self.overlay.held(), self.overlay.from_real(), self.baselines.all(),
-                                self._now(self._sides.engine_answer), self._about, self.journal)
+                                self._now(self._sides.engine_answer), self._about, self.journal, self._born_settings)
+
+    def states_after(self) -> dict[ResourceRef, dict[str, Any]]:
+        """The state of every copied or born resource as the branch now answers it: {read name: plain data}.
+        A copied resource is the real account's live answer with the branch's change laid over it; a born one is
+        the engine's answer."""
+        with self._lock:
+            out = {}
+            for ref, state in self.overlay.held().items():
+                if state in (State.COPIED, State.BORN):
+                    reads = self._copied_reads(ref) if state is State.COPIED else self._born_reads(ref)
+                    out[ref] = {name: body for name, body, _ in reads}
+            return out
+
+    def _copied_reads(self, ref: ResourceRef) -> list[tuple[str, Any, frozenset[str]]]:
+        out = []
+        for b in self.baselines.of(ref):
+            now, real = self._sides.engine_answer(b.call), self._sides.real_answer(b.call)
+            e0, e1, r = (self._about(b, a.body) for a in (b.e0, now, real))
+            if b.e0.ok and now.ok and real.ok and transplant.structured(e0, e1, r):
+                out.append((_read_name(out, b.call), transplant.lay(e0, e1, r), b.noise))
+            elif now.ok:
+                out.append((_read_name(out, b.call), e1, b.noise))
+        return out
+
+    def _born_reads(self, ref: ResourceRef) -> list[tuple[str, Any, frozenset[str]]]:
+        """The engine's answers to the resource's reads; fields that differ between two reads in a row are noise."""
+        out = []
+        for service, operation, params in self._catalog.reads_of(ref):
+            call = self._codec.encode(service, operation, params)
+            first, again = self._sides.engine_answer(call), self._sides.engine_answer(call)
+            if first.ok:
+                body = self._sides.about(ref, call, first.body)
+                out.append((_read_name(out, call), body, noise_between(body, self._sides.about(ref, call, again.body))))
+        return out
+
+    def _born_settings(self, ref: ResourceRef) -> list[tuple[str, Any]]:
+        return [(diff.named(name, path), value) for name, body, noise in self._born_reads(ref)
+                for path, value in transplant.leaves(body)
+                if not any(path == p or path.startswith(p + '.') for p in noise)]
 
     def drift(self) -> list[Change]:
         """What changed in the real account under the branch since each copy."""
@@ -275,3 +315,9 @@ class Branch:
         with self._lock:
             self._touch.ensure(ref)
             return self.overlay.state(ref)
+
+
+def _read_name(taken: list[tuple[str, Any, Any]], call: Call) -> str:
+    """A read's name in a state: its operation, with its parameters when the same operation is read twice."""
+    names = {n for n, _, _ in taken}
+    return call.operation if call.operation not in names else f'{call.operation}{json.dumps(dict(call.params), sort_keys=True, default=str)}'

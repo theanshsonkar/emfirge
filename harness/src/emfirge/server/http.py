@@ -1,5 +1,6 @@
 """The local endpoint an agent's own AWS tools talk to. Every request goes to Branch.handle; admin routes under
-/__emfirge/ show the branch's state, diff, log, unknowns and counters, and seal it."""
+/__emfirge/ show the branch's state, diff, log (the journal), states (of copied and born resources), unknowns and
+counters, and seal it."""
 from __future__ import annotations
 
 import dataclasses
@@ -35,6 +36,8 @@ def admin_routes(branch: Branch) -> Admin:
             return {'changes': branch.changes(), 'real_changed_since_copy': branch.drift()}
         if name == 'log':
             return list(branch.log())
+        if name == 'states':
+            return branch.states_after()
         if name == 'unknowns':
             return list(branch.unknowns())
         if name == 'stats':

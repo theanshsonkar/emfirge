@@ -62,7 +62,7 @@ def legacy_routes(branch: Branch) -> Admin:
             s = branch.stats()
             return dict(s, refusals=s['refusals'], hydrations=s['copies'])
         if name == 'log':
-            return [{'n': e.n, 'service': e.call.split('.')[0], 'operation': e.call.split('.', 1)[1], 'params': e.params,
+            return [{'n': e.n, 'service': e.service, 'operation': e.operation, 'params': e.params,
                      'status': e.status, 'born': [':'.join(old_key(r)) for r in e.born]} for e in branch.log()]
         if name == 'diff':
             return _diff(branch)
