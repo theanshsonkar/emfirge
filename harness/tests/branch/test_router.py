@@ -12,8 +12,8 @@ def states(**s):
     return lambda r: s.get(r.id, State.LIVE)
 
 
-def go(kind, refs, st=states(), changed=False, head=False):
-    return route(kind, refs, st, changed_nearby=changed, head=head)
+def go(kind, refs, st=states(), changed=False):
+    return route(kind, refs, st, changed_nearby=changed)
 
 
 def test_unknown_kind_is_refused_and_never_sent_anywhere():
@@ -31,7 +31,6 @@ def test_reads():
     assert go(Kind.READ, Refs((A,))).way is Way.REAL
     assert go(Kind.LIST, Refs()).way is Way.MERGED_LIST
     assert go(Kind.READ, Refs((A,)), states(a=State.COPIED)).way is Way.TRANSPLANT
-    assert go(Kind.READ, Refs((A,)), states(a=State.COPIED), head=True).way is Way.ENGINE
     for s in (State.ABSENT, State.BORN, State.DELETED):
         assert go(Kind.READ, Refs((A,)), states(a=s)).way is Way.ENGINE
     mixed = go(Kind.READ, Refs((A, B)), states(a=State.BORN))

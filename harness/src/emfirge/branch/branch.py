@@ -95,8 +95,7 @@ class Branch:
         return self._change(call, refs)
 
     def _route(self, call: Call, refs: Refs) -> Route:
-        return route(call.kind, refs, self.overlay.state, changed_nearby=self.overlay.changed_in(call.service),
-                     head=call.wire.method == 'HEAD')
+        return route(call.kind, refs, self.overlay.state, changed_nearby=self.overlay.changed_in(call.service))
 
     def _reason(self, way: Route) -> str:
         why = [f'{r}: {self.overlay.why_opaque(r)}' for r in way.refs if self.overlay.why_opaque(r)]
@@ -106,7 +105,7 @@ class Branch:
     def _transplant(self, call: Call, ref: ResourceRef) -> WireResponse:
         """The real account's live answer with the branch's change (E0 -> E1) laid over it."""
         base = self.baselines.find(ref, call)
-        if base is None:
+        if base is None or call.wire.method == 'HEAD':   # a HEAD has no body to lay a change over
             return self._unbased(call, ref)
         e1 = self._sides.engine(call)
         r = self._sides.real(call)

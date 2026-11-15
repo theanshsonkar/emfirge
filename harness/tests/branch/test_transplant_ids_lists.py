@@ -168,3 +168,10 @@ def test_a_list_of_one_given_as_its_item_is_still_laid_item_by_item():
     r = {'C': [obj('a', 13, 'r'), obj('b', 13, 'r')]}
     e0 = {'C': [obj('a', 0, 'e'), obj('b', 0, 'e')]}             # the copy lacks the bytes and has its own times
     assert transplant.lay(e0, {'C': obj('b', 0, 'e')}, r) == {'C': [obj('b', 13, 'r')]}
+
+
+def test_carried_loss_and_lay_items_are_total():
+    assert transplant.lay_items(None, None, None) == []
+    assert transplant.carried_loss({'a': None}, {'a': None}, {'a': None}) == []
+    assert transplant.carried_loss({'L': [1]}, {}, {}) == []
+    assert transplant.carried_loss({}, {'L': [{'k': 1}]}, {'L': None}) == []

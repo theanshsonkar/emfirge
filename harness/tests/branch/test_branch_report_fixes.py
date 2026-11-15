@@ -118,3 +118,18 @@ def test_the_read_only_door_keeps_the_names_of_the_calls_it_stopped():
     with pytest.raises(NotARead):
         b.real.send(request('put', name='a', set={}))
     assert b.stats()['real_blocked'] == 1 and b.stats()['real_blocked_calls'] == ['cloud.put'] and real.sent == []
+
+
+def head(op: str, **params):
+    from emfirge.core.model import WireRequest
+    return WireRequest('HEAD', '/', '', {}, request(op, **params).body)
+
+
+def test_a_head_read_of_a_copy_follows_the_no_baseline_rule():
+    b, real, _, _ = make({'a': {'size': 1}, 'lossy-b': {'size': 1}, 'c': {'size': 1}})
+    b.handle(request('put', name='a', uses='lossy-b', set={'size': 2}))    # lossy-b copied, not acted on
+    real.things['lossy-b']['size'] = 7
+    assert answer(b.handle(head('get', name='lossy-b')))['size'] == 7         # unchanged: real, live
+    assert answer(b.handle(head('peek', name='a')))['size'] == 2              # changed, read checked alike: engine
+    b.handle(request('put', name='lossy-b', set={'size': 3}))
+    assert refused(b.handle(head('get', name='lossy-b')))                     # changed, not checked: refused

@@ -172,8 +172,6 @@ def test_without_reading_data_a_bucket_is_copied_with_its_keys_only(names_only):
     assert rc('s3').get_object(Bucket='names-only-1', Key='b.txt')['Body'].read() == b'real-b.txt'      # real untouched
 
 
-@pytest.mark.xfail(strict=True, reason='needs the branch: a HEAD on a copied resource goes to the engine (router: '
-                                       'no body to lay over) without the faithful check, so a placeholder answers')
 def test_without_reading_data_a_head_of_an_object_is_real_or_refused(names_only):
     bc, _, _, _ = names_only
     got = _try(lambda: bc('s3').head_object(Bucket='names-only-1', Key='a.txt')['ContentLength'])

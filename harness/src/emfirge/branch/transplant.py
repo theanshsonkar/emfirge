@@ -80,11 +80,13 @@ def lay(e0: Any, e1: Any, real: Any) -> Any:
     return apply(ops, real, e1)
 
 
-def lay_items(e0: list, e1: list, real: list) -> list | None:
+def lay_items(e0: Any, e1: Any, real: Any) -> list | None:
     """A list changed on the branch, laid over the real list item by item. Items the branch did not change are the
     real ones (with whatever the copy lacked); an item it changed is its real twin with the change laid over; an
     item it added is the engine's; an item it removed is gone. Items are paired by the fields they share (scalars:
-    by value). None when the pairing is not clear, so the caller does not guess."""
+    by value). None when the pairing is not clear, so the caller does not guess. A side that is missing is an empty
+    list; a single item stands for a list of one."""
+    e0, e1, real = (v if isinstance(v, list) else [] if v is None else [v] for v in (e0, e1, real))
     if not all(isinstance(i, dict) for i in e0 + e1 + real):
         if any(isinstance(i, (dict, list)) for i in e0 + e1 + real):
             return None

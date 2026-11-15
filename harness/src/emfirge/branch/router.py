@@ -31,11 +31,10 @@ class Route:
     reason: str = ''
 
 
-def route(kind: Kind, refs: Refs, state_of: Callable[[ResourceRef], State], *, changed_nearby: bool,
-          head: bool = False) -> Route:
+def route(kind: Kind, refs: Refs, state_of: Callable[[ResourceRef], State], *, changed_nearby: bool) -> Route:
     """The way for one call. `changed_nearby`: the branch holds a change to a resource of the call's own service,
-    which a read naming something unidentifiable might show. `head`: the call has no answer body, so there is
-    nothing to lay a change over."""
+    which a read naming something unidentifiable might show. A read of a copied resource is a TRANSPLANT even
+    when it has no body (a HEAD): the branch then decides as for a read with no copy-time answer."""
     if kind is Kind.UNKNOWN:
         return Route(Way.REFUSE, refs.all, 'it is not known what this call changes (it may run code, or change '
                                            'something the branch cannot see), so it was sent nowhere')
@@ -43,11 +42,11 @@ def route(kind: Kind, refs: Refs, state_of: Callable[[ResourceRef], State], *, c
     if opaque:
         return Route(Way.REFUSE, opaque, 'it names a resource the branch could not copy')
     if kind.reads_only:
-        return _read(refs, state_of, changed_nearby, head)
+        return _read(refs, state_of, changed_nearby)
     return _change(refs, state_of)
 
 
-def _read(refs: Refs, state_of: Callable[[ResourceRef], State], changed_nearby: bool, head: bool) -> Route:
+def _read(refs: Refs, state_of: Callable[[ResourceRef], State], changed_nearby: bool) -> Route:
     if not refs.complete and changed_nearby:
         return Route(Way.REFUSE, refs.all, 'it is not known which resource this read names, and the branch holds '
                                            'changes it might show')
@@ -59,7 +58,7 @@ def _read(refs: Refs, state_of: Callable[[ResourceRef], State], changed_nearby: 
     live = tuple(r for r, s in zip(refs.primary, states) if s is State.LIVE)
     if live:
         return Route(Way.COPY, live)
-    if states[0] is State.COPIED and not head:
+    if states[0] is State.COPIED:
         return Route(Way.TRANSPLANT, refs.primary)
     return Route(Way.ENGINE, refs.primary)
 
