@@ -76,6 +76,15 @@ class AwsCatalog:
     def resource_type(self, type_: str) -> ResourceTypeInfo | None:
         return self._store.info(type_)
 
+    def action(self, service: str, operation: str) -> str | None:
+        """The IAM action that decides what an operation is ('lambda:InvokeFunction'), or None when AWS lists none."""
+        entry = self._entry(service, operation)
+        return entry.get('a') if entry else None
+
+    def types_of(self, prefix: str) -> tuple[str, ...]:
+        """Every resource type of one IAM service prefix ('ec2' -> 'ec2:vpc', 'ec2:subnet', ...)."""
+        return tuple(f'{prefix}:{name}' for name in self._store.type_names(prefix))
+
     def parse_arn(self, value: str) -> ResourceRef | None:
         """An ARN -> the resource it names, or None (not an ARN, owned by AWS, or no known type fits)."""
         parsed = self._parse(value)

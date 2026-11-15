@@ -82,7 +82,11 @@ class KeyTable:
         self._lengths.setdefault(words[0], set()).add(len(words))
 
     def texts(self) -> list[str]:
-        return list(self._by_text)
+        """Every identifier text, those found inside strings and those matched as whole values only."""
+        return [*self._by_text, *self._spaced]
+
+    def items(self) -> list[tuple[str, tuple[Key, ...]]]:
+        return [(t, tuple(k)) for t, k in (*self._by_text.items(), *self._spaced.items())]
 
     def keys_for(self, text: str) -> tuple[Key, ...]:
         found = self._by_text.get(text) or self._spaced.get(text) or []
@@ -90,8 +94,8 @@ class KeyTable:
             found = [k for k in found if k.kind is not KeyKind.ALIAS]
         return tuple(found)
 
-    def spans(self, text: str) -> list[Span]:
-        """Every identifier found in text as whole tokens, overlaps resolved longest first."""
+    def spans(self, text: str, resolve: bool = True) -> list[Span]:
+        """Every identifier found in text as whole tokens, overlaps resolved longest first (resolve=False: all)."""
         whole = bare(text)
         if whole in self._spaced:
             return [Span(text.find(whole), text.find(whole) + len(whole), self.keys_for(whole))]
@@ -107,7 +111,7 @@ class KeyTable:
                         cand = text[ws:words[i + n - 1][1]]
                         if cand in self._by_text:
                             found.append(Span(ws, words[i + n - 1][1], self.keys_for(cand)))
-        return _longest_first(found)
+        return _longest_first(found) if resolve else found
 
 
 def _chunks(text: str) -> list[tuple[int, int]]:

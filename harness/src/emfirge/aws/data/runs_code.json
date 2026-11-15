@@ -1,0 +1,35 @@
+{
+  "about": "IAM actions that run the customer's own code or commands. AWS's list calls them plain writes, so the generic catalog cannot tell them from a setting change. What such code does to the account cannot be told from the call, so the branch refuses them (experiment 14, gap 8). Operations whose name starts with Invoke or TestInvoke are found by name and need no line here. Data only, read by emfirge.aws.layered. Each line says why and names its test. The number of lines is a cost: keep it near zero.",
+  "actions": [
+    {
+      "action": "states:StartExecution",
+      "why": "Runs a state machine: its tasks call Lambda functions, ECS tasks and other services with the customer's own logic.",
+      "test": "tests/aws/test_layered.py::test_calls_that_run_customer_code_are_unknown"
+    },
+    {
+      "action": "states:StartSyncExecution",
+      "why": "The same as StartExecution, waiting for the answer.",
+      "test": "tests/aws/test_layered.py::test_calls_that_run_customer_code_are_unknown"
+    },
+    {
+      "action": "ecs:RunTask",
+      "why": "Starts containers that run the customer's own image and command.",
+      "test": "tests/aws/test_layered.py::test_calls_that_run_customer_code_are_unknown"
+    },
+    {
+      "action": "ecs:StartTask",
+      "why": "The same as RunTask, on chosen container instances.",
+      "test": "tests/aws/test_layered.py::test_calls_that_run_customer_code_are_unknown"
+    },
+    {
+      "action": "ssm:SendCommand",
+      "why": "Runs a shell command or document on the customer's machines.",
+      "test": "tests/aws/test_layered.py::test_calls_that_run_customer_code_are_unknown"
+    },
+    {
+      "action": "codebuild:StartBuild",
+      "why": "Runs the customer's build commands, which may call any service with the build role.",
+      "test": "tests/aws/test_layered.py::test_calls_that_run_customer_code_are_unknown"
+    }
+  ]
+}

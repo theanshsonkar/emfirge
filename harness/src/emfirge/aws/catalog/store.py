@@ -84,6 +84,11 @@ class Store:
             self._types[prefix] = json.loads(text) if text else {}
         return self._types[prefix].get(name)
 
+    def type_names(self, prefix: str) -> tuple[str, ...]:
+        """The resource type names of one IAM service prefix, in the reference's order."""
+        self.type_row(prefix + ':')
+        return tuple(self._types.get(prefix, {}))
+
     def formats(self, type_: str) -> list[ArnFormat]:
         if type_ not in self._formats:
             row = self.type_row(type_) or {}

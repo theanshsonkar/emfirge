@@ -1,0 +1,6 @@
+{
+  "about": "Which copier tries first, per resource type. Written from experiment 23's measurement (research-log/experiments/23-generic-copy). '*' is every type not listed. When the first copier refuses before writing anything to the engine, the next one tries.",
+  "order": {
+    "*": ["generic", "curated"]
+  }
+}

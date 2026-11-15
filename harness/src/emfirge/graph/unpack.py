@@ -25,28 +25,35 @@ class Leaf:
     text      the string itself (for packed strings: the opened text)
     own       True when the string sits in a plain field of the resource (only mappings on the way, no list, not
               inside a packed string): such a value can be the resource's own name or address
-    scope     the other patterns in the same mapping (siblings): they say what a catch-all '*' beside them covers"""
+    scope     the other patterns in the same mapping (siblings): they say what a catch-all '*' beside them covers
+    labels    what the settings call this value: the key that holds it and, in a name/value pair such as
+              {'Name': 'QueueName', 'Value': 'orders'}, the other string. A label can say what kind of thing a bare
+              name names."""
     path: str
     text: str
     own: bool
     scope: tuple[str, ...] = ()
+    labels: tuple[str, ...] = ()
 
 
 def leaves(state: Any, has_wildcard: Callable[[str], bool]) -> Iterator[Leaf]:
     """All string leaves of a state. has_wildcard picks the sibling patterns kept as a leaf's scope."""
-    yield from _walk(state, '', True, (), has_wildcard, 0)
+    yield from _walk(state, '', True, (), (), has_wildcard, 0)
 
 
-def _walk(node: Any, path: str, own: bool, scope: tuple[str, ...], wild: Callable[[str], bool], depth: int) -> Iterator[Leaf]:
+def _walk(node: Any, path: str, own: bool, scope: tuple[str, ...], labels: tuple[str, ...],
+          wild: Callable[[str], bool], depth: int) -> Iterator[Leaf]:
     if isinstance(node, dict):
         siblings = tuple(s for v in node.values() for s in _strings_of(v) if wild(s))
+        pair = [v for v in node.values() if isinstance(v, str)] if len(node) == 2 else []
         for key, value in node.items():
-            yield from _walk(value, f'{path}.{key}' if path else str(key), own, siblings, wild, depth)
+            named = (str(key),) + tuple(v for v in pair if v is not value) if len(pair) == 2 else (str(key),)
+            yield from _walk(value, f'{path}.{key}' if path else str(key), own, siblings, named, wild, depth)
     elif isinstance(node, (list, tuple)):
         for i, value in enumerate(node):
-            yield from _walk(value, f'{path}[{i}]', False, scope, wild, depth)
+            yield from _walk(value, f'{path}[{i}]', False, scope, labels, wild, depth)
     elif isinstance(node, str):
-        yield from _string(node, path, own, scope, wild, depth)
+        yield from _string(node, path, own, scope, labels, wild, depth)
 
 
 def _strings_of(value: Any) -> list[str]:
@@ -57,17 +64,18 @@ def _strings_of(value: Any) -> list[str]:
     return []
 
 
-def _string(text: str, path: str, own: bool, scope: tuple[str, ...], wild: Callable[[str], bool], depth: int) -> Iterator[Leaf]:
+def _string(text: str, path: str, own: bool, scope: tuple[str, ...], labels: tuple[str, ...],
+            wild: Callable[[str], bool], depth: int) -> Iterator[Leaf]:
     if depth < _MAX_DEPTH:
         opened = open_packed(text)
         if opened is not None:
             kind, inner = opened
             if isinstance(inner, str):
-                yield Leaf(f'{path}<{kind}>', inner, False, scope)
+                yield Leaf(f'{path}<{kind}>', inner, False, scope, labels)
             else:
-                yield from _walk(inner, f'{path}<{kind}>', False, (), wild, depth + 1)
+                yield from _walk(inner, f'{path}<{kind}>', False, (), labels, wild, depth + 1)
             return
-    yield Leaf(path, text, own, scope)
+    yield Leaf(path, text, own, scope, labels)
 
 
 def open_packed(text: str) -> tuple[str, Any] | None:

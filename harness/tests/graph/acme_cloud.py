@@ -44,7 +44,7 @@ def account() -> dict[ResourceRef, dict]:
         OTHER: {'name': 'scratch-2024'},
         EDGE: {'id': 'edg-0a1b2c3d4e', 'host': 'd1x2y3.edge.acme.net', 'origins': [{'host': 'media-files.store.acme.net'}]},
         DNS: {'name': 'feeds.example.org', 'values': [{'value': 'd1x2y3.edge.acme.net'}]},
-        JOB: {'grant': urn('grant', 'publisher-grant'), 'env': {'OUT_STORE': 'media-files'}},
+        JOB: {'grant': urn('grant', 'publisher-grant'), 'env': {'OUTPUT': 'media-files'}},
         JOB_GRANT: {'doc': policy({'allow': 'write', 'on': urn('store', 'media-files') + '/*'})},
         TIMER: {'target': urn('job', 'publisher-job'), 'grant': urn('grant', 'timer-grant'), 'state': 'off'},
         TIMER_GRANT: {'doc': policy({'allow': 'run', 'on': urn('job', 'publisher-job')})},

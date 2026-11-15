@@ -45,9 +45,16 @@ def test_unused_store_affects_nothing():
     assert report.changes[0].affected == () and report.unknowns() == []
 
 
-def test_modified_job_reaches_through_its_grant_and_downstream_is_only_maybe():
-    after = {JOB: {**account()[JOB], 'code': 'v2'}}
+def test_a_setting_change_that_touches_no_reference_reports_its_users_and_nothing_forward():
+    after = {JOB: {**account()[JOB], 'memory': 512}}
     report = _run([Change(JOB, MODIFIED)], after=after)
+    firm, loose = _by_ref(report), _by_ref(report, firm_only=False)
+    assert set(firm) == {TIMER, TIMER_GRANT}                              # who uses the job
+    assert loose[STORE].relation is Relation.REACHED and not loose[STORE].firm
+
+
+def test_an_action_reaches_forward_and_downstream_is_only_maybe():
+    report = _run([Change(JOB, ChangeType.ACTION)], after={JOB: account()[JOB]})
     firm, loose = _by_ref(report), _by_ref(report, firm_only=False)
     assert firm[TIMER].relation is Relation.USES
     assert firm[STORE].relation is Relation.REACHED and firm[STORE].via == (JOB_GRANT,)
@@ -55,15 +62,21 @@ def test_modified_job_reaches_through_its_grant_and_downstream_is_only_maybe():
     assert loose[BOX].relation is Relation.DOWNSTREAM and BOX not in firm
 
 
-def test_timer_change_reaches_the_store_three_links_out():
-    after = {TIMER: {**account()[TIMER], 'state': 'on'}}
-    found = _by_ref(_run([Change(TIMER, MODIFIED)], after=after))
+def test_a_changed_reference_makes_its_new_target_and_beyond_news():
+    after = {JOB: {**account()[JOB], 'grant': urn('grant', 'box-grant')}}
+    found = _by_ref(_run([Change(JOB, MODIFIED)], after=after))
+    assert found[BOX_GRANT].relation is Relation.NOW_NAMED and found[JOB_GRANT].relation is Relation.NO_LONGER_NAMED
+    assert found[STORE].relation is Relation.REACHED and found[STORE].via == (BOX_GRANT,)   # reached through the new reference
+
+
+def test_timer_run_reaches_the_store_three_links_out():
+    found = _by_ref(_run([Change(TIMER, ChangeType.ACTION)], after={TIMER: account()[TIMER]}))
     assert found[STORE].via == (JOB, JOB_GRANT) and found[STORE].relation is Relation.REACHED
 
 
 def test_repoint_to_a_new_store():
     new = ref('store', 'media-feed')
-    after = {new: {'name': 'media-feed'}, JOB: {**account()[JOB], 'env': {'OUT_STORE': 'media-feed'}}}
+    after = {new: {'name': 'media-feed'}, JOB: {**account()[JOB], 'env': {'OUTPUT': 'media-feed'}}}
     report = _run([Change(new, CREATED), Change(JOB, MODIFIED)], after=after)
     job = {i.ref: i for i in report.changes[1].affected}
     assert job[JOB_GRANT].relation is Relation.OUT_OF_STEP and 'still names' in job[JOB_GRANT].because
@@ -74,23 +87,26 @@ def test_repoint_to_a_new_store():
 
 
 def test_repoint_to_something_unknown_is_an_unknown():
-    after = {JOB: {**account()[JOB], 'env': {'OUT_STORE': 'nowhere-at-all'}}}
+    after = {JOB: {**account()[JOB], 'env': {'OUTPUT': 'nowhere-at-all'}}}
     report = _run([Change(JOB, MODIFIED)], after=after)
     assert any('names nothing known' in u.what for u in report.unknowns())
-    assert _by_ref(report)[STORE].relation is Relation.REACHED     # still reached through the grant: the firm finding wins
+    assert _by_ref(report, firm_only=False)[STORE].relation is Relation.NO_LONGER_NAMED
 
 
 def test_dropped_link_is_no_longer_named():
-    after = {JOB: {'env': {'OUT_STORE': 'media-files'}}}                 # the grant reference is gone
+    after = {JOB: {'env': {'OUTPUT': 'media-files'}}}                 # the grant reference is gone
     found = _by_ref(_run([Change(JOB, MODIFIED)], after=after))
     assert found[JOB_GRANT].relation is Relation.NO_LONGER_NAMED and found[JOB_GRANT].strength is Strength.STRONG
 
 
 def test_dropped_bare_name_stays_visible_beside_a_firm_finding():
-    after = {JOB: {'grant': urn('grant', 'publisher-grant'), 'env': {}}}       # the env setting naming the store is gone
-    c = _run([Change(JOB, MODIFIED)], after=after).changes[0]
-    assert {i.relation for i in c.affected if i.ref == STORE} == {Relation.REACHED}           # still reached through the grant
-    assert {i.relation for i in c.maybe if i.ref == STORE} == {Relation.NO_LONGER_NAMED}      # and the lost name is shown
+    a, b = ref('node', 'node-alpha'), ref('node', 'node-beta')
+    before = {a: {}, b: {'uses': urn('node', 'node-alpha'), 'env': {'OUTPUT': 'node-alpha'}}}
+    c = _run([Change(b, ChangeType.MODIFIED)], before=before, after={b: {'uses': urn('node', 'node-alpha'), 'env': {}}}).changes[0]
+    assert Relation.NO_LONGER_NAMED not in {i.relation for i in c.maybe if i.ref == a}   # still named exactly: nothing lost
+    before[b]['uses'] = 'x'
+    c = _run([Change(b, ChangeType.MODIFIED)], before=before, after={b: {'uses': 'x', 'env': {}}}).changes[0]
+    assert {i.relation for i in c.maybe if i.ref == a} == {Relation.NO_LONGER_NAMED}     # a weak lost name is shown apart
 
 
 def test_created_store_with_a_policy_now_names_the_edge_and_only_that():

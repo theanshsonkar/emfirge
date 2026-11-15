@@ -32,7 +32,7 @@ def test_id_as_a_word_in_a_script_is_text():
 
 def test_bare_name_equal_to_a_whole_value_is_weak():
     e = _edge(_index(account()), JOB, STORE)
-    assert (e.strength, e.how, e.path) == (Strength.WEAK, 'name', 'env.OUT_STORE')
+    assert (e.strength, e.how, e.path) == (Strength.WEAK, 'name', 'env.OUTPUT')
 
 
 def test_whole_token_only():
@@ -110,7 +110,7 @@ def test_ghosts_give_identifiers_and_no_edges():
 
 def test_ambient_resource_is_kept_apart():
     region = ref('region', 'north-1')
-    states = {region: {}, **{ref('box', f'box-{i:010x}'): {'where': f'urn:acme:north-1:box/{i}'} for i in range(8)}}
+    states = {region: {}, **{ref('box', f'box-{i:010x}'): {'where': [f'urn:acme:north-1:box/{i}']} for i in range(8)}}
     index = ReferenceIndex.build(states, Vocabulary(VOCAB.address_patterns, VOCAB.opaque_patterns, ambient_min=5))
     assert region in index.ambient and index.named_by(region) == []
 

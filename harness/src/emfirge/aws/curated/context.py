@@ -2,7 +2,6 @@
 door) and on the engine, and the branch's placement (copy what this needs first, translate ids, record ids)."""
 from __future__ import annotations
 
-import re
 import time
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -12,6 +11,7 @@ import botocore.exceptions
 from emfirge.core.model import ResourceRef, WireRequest
 from emfirge.core.ports import CannotTell, Placement
 
+from ..errors import absent
 from .spec import Where
 
 
@@ -87,12 +87,3 @@ class CopyContext:
             time.sleep(0.2)
         raise CannotTell(f'the copy did not settle ({field})')
 
-
-_ABSENT = re.compile(r'NotFound|NoSuch|NonExistent|DoesNotExist')
-
-
-def absent(e: botocore.exceptions.ClientError) -> bool:
-    """The service's way of saying the thing does not exist."""
-    code = e.response.get('Error', {}).get('Code', '')
-    status = e.response.get('ResponseMetadata', {}).get('HTTPStatusCode')
-    return bool(_ABSENT.search(code)) or code == '404' or (status == 404 and not code)

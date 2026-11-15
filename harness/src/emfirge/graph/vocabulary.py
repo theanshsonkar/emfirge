@@ -21,7 +21,11 @@ class Vocabulary:
     max_key_words        the longest identifier, in words, that is looked for inside a string
     wildcards            characters that make a string a pattern rather than a name
     ambient_share        a resource named by at least this share of all resources that name anything ...
-    ambient_min          ... and by at least this many, is context (a region, the account), not a dependency"""
+    ambient_min          ... and by at least this many, is context (a region, the account), not a dependency
+    identifying_key      a key that holds the resource's own identifier ('Id', 'Name', 'Uri', 'Address'); the cloud
+                         may widen it ('Arn')
+    generic_words        words of a label that say nothing about the kind of thing ('name', 'value')
+    max_suffix           a provider may add a short random suffix to an id inside its own address ('name-a1B2c3')"""
     address_patterns: tuple[re.Pattern[str], ...] = ()
     opaque_patterns: tuple[re.Pattern[str], ...] = ()
     min_name_length: int = 4
@@ -30,15 +34,25 @@ class Vocabulary:
     wildcards: str = '*?'
     ambient_share: float = 0.2
     ambient_min: int = 25
+    identifying_key: re.Pattern[str] = re.compile(r'(?i)(id|name|uri|url|address)$')
+    generic_words: frozenset[str] = frozenset({'name', 'id', 'value', 'key', 'uri', 'url', 'address', 'string', 'text',
+                                               'data', 'item', 'list', 'type', 'the', 'of', 'for', 'to', 'from', 'my'})
+    max_suffix: int = 8
     _wild: re.Pattern[str] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, '_wild', re.compile('[' + re.escape(self.wildcards) + ']'))
 
     @classmethod
-    def of(cls, addresses: Iterable[str], opaque: Iterable[str], **settings: float) -> 'Vocabulary':
-        """Build from plain regular-expression strings (how a plug-in keeps them: as data)."""
-        return cls(tuple(re.compile(p) for p in addresses), tuple(re.compile(p) for p in opaque), **settings)
+    def of(cls, addresses: Iterable[str], opaque: Iterable[str], identifying_key: str | None = None,
+           generic_words: Iterable[str] = (), **settings: float) -> 'Vocabulary':
+        """Build from plain strings (how a plug-in keeps them: as data). generic_words are added to the defaults."""
+        extra: dict = dict(settings)
+        if identifying_key:
+            extra['identifying_key'] = re.compile(identifying_key)
+        if generic_words:
+            extra['generic_words'] = cls.generic_words | frozenset(generic_words)
+        return cls(tuple(re.compile(p) for p in addresses), tuple(re.compile(p) for p in opaque), **extra)
 
     def is_address(self, text: str) -> bool:
         return any(p.fullmatch(text) for p in self.address_patterns)

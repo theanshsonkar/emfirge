@@ -20,8 +20,9 @@ from .baseline import Baseline, Baselines, noise_between
 from .guard import ReadOnly
 from .ids import IdMap, alias_of
 from .journal import Entry, Journal
-from .lifecycle import Lifecycle, Stage
+from .lifecycle import IllegalMove, Lifecycle, Stage
 from .overlay import Overlay, State
+from .proving import EngineSpent, ProofDoor
 from .router import Route, Way, route
 from .sides import Sides
 from .touch import CopyOnTouch
@@ -49,6 +50,7 @@ class Branch:
         self._counts: dict[str, int] = {}
         self._refusals: dict[str, int] = {}
         self._lock = threading.RLock()
+        self._spent = False
 
     # ------------------------------------------------------------------ calls
     def handle(self, request: WireRequest) -> WireResponse:
@@ -244,8 +246,26 @@ class Branch:
         with self._lock:
             self.life.move(to)
 
+    def begin_proof(self) -> ProofDoor:
+        """Hand the engine to an undo prover, once, after the diff was read. The prover puts the changes back on the
+        engine, so from here on every read of branch state raises EngineSpent (proving.py says why)."""
+        with self._lock:
+            if self.life.stage is not Stage.SEALED:
+                raise IllegalMove(f'a branch is proven only when sealed, not {self.life.stage.value}')
+            if self._spent:
+                raise EngineSpent('the engine was already handed to an undo prover')
+            self._spent = True
+            return ProofDoor(self._sides, self._catalog, self._outcomes, self.overlay, self.baselines, self.journal,
+                             self._lock)
+
+    def _intact(self) -> None:
+        if self._spent:
+            raise EngineSpent('the engine was used to prove undo and no longer holds the branch: read branch state '
+                              'before proving')
+
     def changes(self) -> list[Change]:
         with self._lock:
+            self._intact()
             return diff.changes(self.overlay.held(), self.overlay.from_real(), self.baselines.all(),
                                 self._now(self._sides.engine_answer), self._about, self.journal, self._born_settings)
 
@@ -254,6 +274,7 @@ class Branch:
         A copied resource is the real account's live answer with the branch's change laid over it; a born one is
         the engine's answer."""
         with self._lock:
+            self._intact()
             out = {}
             for ref, state in self.overlay.held().items():
                 if state in (State.COPIED, State.BORN):
@@ -291,6 +312,7 @@ class Branch:
     def drift(self) -> list[Change]:
         """What changed in the real account under the branch since each copy."""
         with self._lock:
+            self._intact()
             return diff.drift(self.baselines.all(), self._now(self._sides.real_answer), self._about)
 
     def _now(self, read) -> diff.Now:
@@ -313,6 +335,7 @@ class Branch:
     def copy(self, ref: ResourceRef) -> State:
         """Copy one resource without changing it (for measuring how faithful copies are)."""
         with self._lock:
+            self._intact()
             self._touch.ensure(ref)
             return self.overlay.state(ref)
 

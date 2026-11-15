@@ -1,0 +1,201 @@
+"""The session's report: short plain text for a person in a hurry or an agent, and JSON for tools.
+
+Text sections, in this order: the verdict and why; what would change (created, modified with each setting
+before -> after, deleted, actions); what it affects (the default list, then how many weaker 'maybe' ones, shown with
+show_all); flagged by lenses; could not tell; and one line on how the real account was touched.
+
+Parts are folded: a resource reached only because one reported resource names it (the disks and network cards of
+an instance, the rules of a group) is listed under that resource, not on its own line. Folding changes what is
+shown, never what is decided: the verdict counts every affected resource.
+"""
+from __future__ import annotations
+
+import json
+import re
+from typing import Any, Iterable
+
+from emfirge.core.model import Change, ChangeType, FieldChange, ResourceRef
+from emfirge.gate import as_dict
+from emfirge.graph import Impact, Relation
+
+from .judge import Judgement
+
+WIDTH = 72
+REASONS_SHOWN = 8
+FIELDS_SHOWN = 8
+GROUPS = ((ChangeType.CREATED, 'Created'), (ChangeType.MODIFIED, 'Modified'), (ChangeType.DELETED, 'Deleted'),
+          (ChangeType.ACTION, 'Actions'))
+VERDICT_WORDS = {'go': 'GO. The agent may make the real change.', 'ask': 'ASK. The owner decides.'}
+PHRASES = {
+    Relation.USES: 'uses {o}',
+    Relation.REACHED: '{o} reaches it',
+    Relation.DOWNSTREAM: 'uses something {o} reaches',
+    Relation.NO_LONGER_NAMED: '{o} no longer names it',
+    Relation.NOW_NAMED: '{o} now names it',
+    Relation.OUT_OF_STEP: 'out of step: {o} moved, this still names the old one',
+    Relation.ON_OLD_TARGET: 'still uses what {o} moved away from',
+}
+LOSES_A_USER = 'loses a user: {o} named it'
+FOLDABLE = frozenset({Relation.REACHED, Relation.DOWNSTREAM})
+
+
+def as_text(j: Judgement, show_all: bool = False, command_code: int | None = None) -> str:
+    lines = [*_verdict(j, command_code), '', *_changes(j), '', *_affects(j, show_all), '',
+             *_listed('Flagged by lenses', once(f'{f.lens}: {f.message}' for f in j.decision.facts.findings)), '',
+             *_listed('Could not tell', once(u.what for u in j.decision.facts.unknowns)), '', _account(j)]
+    return '\n'.join(_cut(line) for line in lines) + '\n'
+
+
+def as_json(j: Judgement, command_code: int | None = None) -> str:
+    out: dict[str, Any] = as_dict(j.decision)
+    out['maybe'] = [{'ref': str(a.ref), 'because': a.because, 'via': [str(v) for v in a.via], 'strength': a.strength}
+                    for a in j.maybe]
+    out['command_exit_code'] = command_code
+    out['seconds'] = dict(j.seconds)
+    out['real_account'] = {**j.real, 'changing_calls': 0}
+    out['reader'] = {'reads': j.reading.reads, **j.reading.counts}
+    return json.dumps(out, indent=2, sort_keys=True, ensure_ascii=False)
+
+
+# ---------------------------------------------------------------------- sections
+def _verdict(j: Judgement, command_code: int | None) -> list[str]:
+    d = j.decision
+    lines = [f'Verdict: {VERDICT_WORDS[d.verdict.value]} (exit {d.exit_code})']
+    if command_code not in (None, 0):
+        lines.append(f'Your command failed (exit {command_code}). What it changed before it stopped is below.')
+    lines.append('Why:')
+    reasons = once(r.words for r in d.reasons)
+    lines += [f'  - {r}' for r in reasons[:REASONS_SHOWN]]
+    if len(reasons) > REASONS_SHOWN:
+        lines.append(f'  - and {len(reasons) - REASONS_SHOWN} more reasons (see below)')
+    return lines
+
+
+def _changes(j: Judgement) -> list[str]:
+    changes = j.decision.facts.changes
+    if not changes:
+        return ['What would change: nothing. The agent changed nothing.']
+    lines = [f'What would change ({len(changes)}):']
+    for kind, title in GROUPS:
+        group = [c for c in changes if c.type is kind]
+        if group:
+            lines.append(f'  {title}:')
+            for c in group:
+                lines += _change(c)
+    return lines
+
+
+def _change(c: Change) -> list[str]:
+    lines = [f'    {c.ref}']
+    if c.type is ChangeType.MODIFIED:
+        fields = once(_field(x) for x in c.fields)
+        lines += [f'      {x}' for x in fields[:FIELDS_SHOWN]]
+        if len(fields) > FIELDS_SHOWN:
+            lines.append(f'      and {len(fields) - FIELDS_SHOWN} more settings (in the JSON report)')
+    elif c.type is ChangeType.ACTION and c.calls:
+        lines.append(f'      {", ".join(dict.fromkeys(c.calls))}')
+    return lines
+
+
+def _field(x: FieldChange) -> str:
+    """A setting by its own name: the same setting shows in several reads ('GetFunction.Configuration.Timeout',
+    'GetFunctionConfiguration.Timeout'), and the person knows it by its last part."""
+    return f'{_tail(x.path)}: {_value(x.before)} -> {_value(x.after)}'
+
+
+def _affects(j: Judgement, show_all: bool) -> list[str]:
+    shown, parts = fold(_firm(j)) if not show_all else (_firm(j), {})
+    maybe = j.maybe
+    if not shown and not maybe:
+        return ['What it affects: nothing found in the settings read.']
+    more = f'; {len(maybe)} more maybe' + ('' if show_all else ', --all shows them') if maybe else ''
+    lines = [f'What it affects ({len(shown)}{more}):']
+    deleted = {c.ref for c in j.decision.facts.changes if c.type is ChangeType.DELETED}
+    for i in shown:
+        lines.append(f'  {i.ref}: {because(i, deleted)}')
+        under = parts.get(i.ref, [])
+        if under:
+            lines.append(f'    and {len(under)} things it names: {", ".join(str(r) for r in under)}')
+    if show_all and maybe:
+        lines.append('  Maybe (weak evidence, or only next to what changed):')
+        lines += [f'    {x}' for x in once(f'{a.ref}: {a.because}' for a in maybe)]
+    return lines
+
+
+def _listed(title: str, items: list[str]) -> list[str]:
+    if not items:
+        return [f'{title}: nothing']
+    return [f'{title} ({len(items)}):', *(f'  {x}' for x in items)]
+
+
+def _account(j: Judgement) -> str:
+    blocked = j.real.get('blocked', 0)
+    stopped = f' ({blocked} more were stopped at the read-only door)' if blocked else ''
+    return f'Your account: 0 changing calls reached it{stopped}. {j.real.get("reads", 0)} reads.'
+
+
+# ---------------------------------------------------------------------- affected, folded
+def _firm(j: Judgement) -> list[Impact]:
+    """One line per affected resource: the first (most telling) impact the graph gives for it."""
+    if j.graph is None:
+        return []
+    changed = {c.ref for c in j.decision.facts.changes}
+    seen: dict[ResourceRef, Impact] = {}
+    for c in j.graph.changes:
+        for i in c.affected:
+            if i.ref not in changed:
+                seen.setdefault(i.ref, i)
+    return list(seen.values())
+
+
+def fold(impacts: Iterable[Impact]) -> tuple[list[Impact], dict[ResourceRef, list[ResourceRef]]]:
+    """(shown, parts): an impact reached forward through one link from another shown resource is listed under it."""
+    impacts = list(impacts)
+    refs = {i.ref for i in impacts}
+    parts: dict[ResourceRef, list[ResourceRef]] = {}
+    shown = []
+    for i in impacts:
+        holder = i.chain[-1].source if i.relation in FOLDABLE and len(i.chain) >= 2 else None
+        if holder is not None and holder in refs and holder != i.ref:
+            parts.setdefault(holder, []).append(i.ref)
+        else:
+            shown.append(i)
+    return shown, parts
+
+
+def because(i: Impact, deleted: frozenset[ResourceRef] | set[ResourceRef] = frozenset()) -> str:
+    """A short reason, in very simple words, with the resources in between."""
+    template = LOSES_A_USER if i.relation is Relation.REACHED and i.origin in deleted else PHRASES.get(i.relation, '{r} ({o})')
+    words = template.format(o=i.origin, r=i.relation.value.replace('-', ' '))
+    via = f' (via {", ".join(str(v) for v in i.via)})' if i.via else ''
+    weak = '' if i.strength.label == 'strong' else f' [{i.strength.label}]'
+    return words + via + weak
+
+
+# ---------------------------------------------------------------------- values
+DOTTED = re.compile(r'[\w#{}"-]+(?:\.[\w#{}"-]+)+')
+
+
+def once(lines: Iterable[str]) -> list[str]:
+    """Each fact once. A lens or the gate says one fact once per read that shows it ('...(GetFunction.Configuration.
+    Environment.Variables.DRY_RUN: true -> false)', and the same from GetFunctionConfiguration): two lines that are
+    the same when every dotted path is cut to its last part are one fact. The first is kept."""
+    seen: dict[str, str] = {}
+    for line in lines:
+        seen.setdefault(DOTTED.sub(lambda m: _tail(m.group(0)), line), line)
+    return list(seen.values())
+
+
+def _tail(path: str) -> str:
+    return path.rsplit('.', 1)[-1]
+
+
+def _value(value: Any) -> str:
+    if value is None:
+        return '(none)'
+    text = value if isinstance(value, str) else json.dumps(value, sort_keys=True, default=str)
+    return text if len(text) <= 40 else text[:37] + '...'
+
+
+def _cut(line: str) -> str:
+    return line if len(line) <= WIDTH * 2 else line[:WIDTH * 2 - 3] + '...'
