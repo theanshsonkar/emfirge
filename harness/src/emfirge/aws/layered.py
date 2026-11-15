@@ -11,6 +11,8 @@ LayeredCatalog (core.ports.Catalog)
            * a call that names a resource by a required member (a name, id or ARN, or a member named after a type of
              its service: ecs taskDefinition) that nothing places is not complete, even where AWS's list ties the
              action to no resource: the branch refuses it rather than send it to an engine that does not have it;
+           * reading data switched off (copy_data=False): a change that takes data from another resource holding
+             data (a member named as a source: CopyObject's CopySource) is not complete, so it is refused;
            * fallback: where the generic catalog cannot place a call, or places no primary resource, and the curated
              naming does, the curated primary is used; resources only the curated naming finds (a copy source
              bucket, a group id inside a rule) are added as mentioned. One vocabulary: the generic catalog's.
@@ -45,6 +47,7 @@ from .catalog.names import split
 from .resource_words import formats, names_type, noun_of, type_word, verb_of
 
 CODE_VERBS = ('Invoke', 'TestInvoke')
+SOURCE = 'source'
 CREATE_VERBS = ('Create', 'Put', 'Register', 'Run', 'Allocate', 'Import')
 
 
@@ -56,8 +59,9 @@ def runs_code_actions(path: Path | None = None) -> frozenset[str]:
 
 class LayeredCatalog:
     def __init__(self, generic: AwsCatalog, codec: AwsCodec, curated: Catalog | None = None,
-                 runs_code: frozenset[str] | None = None) -> None:
+                 runs_code: frozenset[str] | None = None, copy_data: bool = False) -> None:
         self._generic, self._codec, self._curated = generic, codec, curated
+        self._copy_data = copy_data
         self._runs_code = runs_code_actions() if runs_code is None else runs_code
         self.fallbacks: Counter[str] = Counter()
 
@@ -78,7 +82,7 @@ class LayeredCatalog:
         mine = self._generic.refs(call)
         mine = self._unplaced(call, self._arn_read(call, self._contents_on_containers(mine)))
         if self._curated is None:
-            return mine
+            return self._data_source(call, mine)
         theirs = self._curated.refs(call)
         primary, complete = mine.primary, mine.complete
         if (not mine.complete or not mine.primary) and theirs.complete and theirs.primary:
@@ -88,7 +92,7 @@ class LayeredCatalog:
         if extra:
             self.fallbacks['refs: named only by the curated naming'] += 1
         mentioned = tuple(r for r in mine.all if r not in primary) + extra
-        return Refs(primary, mentioned, complete)
+        return self._data_source(call, Refs(primary, mentioned, complete))
 
     def _arn_read(self, call: Call, refs: Refs) -> Refs:
         """A read with no primary resource that names one by an ARN member of its own (GetSubscriptionAttributes'
@@ -99,6 +103,19 @@ class LayeredCatalog:
                  if isinstance(v, str) and v.startswith('arn:') and split(k).designator == 'arn']
         primary = tuple(r for r in dict.fromkeys(named) if r is not None)
         return Refs(primary, tuple(r for r in refs.mentioned if r not in primary), refs.complete) if primary else refs
+
+    def _data_source(self, call: Call, refs: Refs) -> Refs:
+        """Reading data is switched off: a change that takes data from another resource that holds data (CopyObject's
+        CopySource) would copy a copy's placeholders, so it cannot be placed. A member is a source when its words
+        say so."""
+        if self._copy_data or self.kind(call.service, call.operation).reads_only:
+            return refs
+        sources = [k for k, v in call.params.items() if v and SOURCE in split(k).words]
+        holds = [r for r in refs.mentioned if (info := self._generic.resource_type(r.type)) and info.holds_data]
+        if sources and holds:
+            self.fallbacks['refs: a data source, while reading data is off'] += 1
+            return Refs(refs.primary, refs.mentioned, False)
+        return refs
 
     def _unplaced(self, call: Call, refs: Refs) -> Refs:
         if refs.all or not refs.complete or call.operation.startswith(CREATE_VERBS):

@@ -8,6 +8,7 @@ Lists are whole values: an item list changed on the branch replaces the real one
 from __future__ import annotations
 
 import copy
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -65,8 +66,96 @@ def _apply_one(op: Op, out: Any, source: Any) -> Any:
 
 
 def lay(e0: Any, e1: Any, real: Any) -> Any:
-    """The real answer with the engine's change e0 -> e1 laid over it."""
-    return apply(diff(e0, e1), real, e1)
+    """The real answer with the engine's change e0 -> e1 laid over it. A list the change touches is laid item by
+    item where its items can be paired with the real ones (see lay_items); otherwise it is replaced whole."""
+    ops = []
+    for op in diff(e0, e1):
+        before, now = _get(e0, op.path), _get(real, op.path)
+        if not op.remove and any(isinstance(v, list) for v in (op.value, before, now)):
+            # a list of one may arrive as its single item (an XML answer cannot tell them apart)
+            items = lay_items(*(v if isinstance(v, list) else [v] for v in (before, op.value, now)))
+            if items is not None:
+                op = Op(op.path, items)
+        ops.append(op)
+    return apply(ops, real, e1)
+
+
+def lay_items(e0: list, e1: list, real: list) -> list | None:
+    """A list changed on the branch, laid over the real list item by item. Items the branch did not change are the
+    real ones (with whatever the copy lacked); an item it changed is its real twin with the change laid over; an
+    item it added is the engine's; an item it removed is gone. Items are paired by the fields they share (scalars:
+    by value). None when the pairing is not clear, so the caller does not guess."""
+    if not all(isinstance(i, dict) for i in e0 + e1 + real):
+        if any(isinstance(i, (dict, list)) for i in e0 + e1 + real):
+            return None
+        gone = [i for i in e0 if i not in e1]
+        return [i for i in real if i not in gone] + [i for i in e1 if i not in e0 and i not in real]
+    twin = _pairs(e0, real)
+    if twin is None:
+        return None
+    out, used = [], set()
+    for item in e1:
+        if item in e0:
+            j = twin[e0.index(item)]
+            out.append(real[j])
+            used.add(j)
+            continue
+        k = _best(item, e0)
+        if k is not None and twin[k] not in used:
+            out.append(lay(e0[k], item, real[twin[k]]))
+            used.add(twin[k])
+        else:
+            out.append(item)
+    return out
+
+
+def _pairs(a: list[dict], b: list[dict]) -> dict[int, int] | None:
+    """Each item of `a` with the one item of `b` it shares the most fields with (more than half); None unless that
+    is one to one."""
+    out: dict[int, int] = {}
+    for i, item in enumerate(a):
+        j = _best(item, b)
+        if j is None or j in out.values():
+            return None
+        out[i] = j
+    return out
+
+
+def _best(item: dict, among: list[dict]) -> int | None:
+    def score(other: dict) -> int:
+        return sum(1 for k in item.keys() & other.keys() if item[k] == other[k])
+    scores = [score(o) for o in among]
+    if not scores:
+        return None
+    top = max(scores)
+    if top * 2 <= len(item) or scores.count(top) > 1:
+        return None
+    return scores.index(top)
+
+
+def carried_loss(e0: Any, e1: Any, r0: Any, noise: frozenset[str] = frozenset()) -> list[str]:
+    """Lists where the copy already differed from the real account (E0 against R0, order aside), whose items cannot
+    be paired with the real ones, and that the branch's change (E0 -> E1) touches. Such a list is laid over whole, so
+    the engine's list, with what the copy lacks (an object's bytes, an item's field), would replace the real one:
+    that lay-over cannot be trusted."""
+    dotted = lambda path: '.'.join(map(str, path))
+    lossy = [dotted(p) for p in _lossy_lists(e0, r0)
+             if not any(dotted(p) == n or dotted(p).startswith(n + '.') for n in noise)
+             and lay_items(_get(e0, p), _get(e0, p), _get(r0, p)) is None]
+    touched = [dotted(op.path) for op in diff(e0, e1)]
+    return [p for p in lossy for t in touched if t == p or p.startswith(t + '.') or t.startswith(p + '.') or not t]
+
+
+def _lossy_lists(a: Any, b: Any, path: Path = ()) -> list[Path]:
+    if isinstance(a, dict) and isinstance(b, dict):
+        return [p for k in a.keys() & b.keys() for p in _lossy_lists(a[k], b[k], path + (k,))]
+    if isinstance(a, list) and isinstance(b, list) and _bag(a) != _bag(b):
+        return [path]
+    return []
+
+
+def _bag(items: list) -> list[str]:
+    return sorted(json.dumps(i, sort_keys=True, default=str) for i in items)
 
 
 def structured(*bodies: Any) -> bool:

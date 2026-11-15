@@ -61,19 +61,26 @@ def test_the_journal_keeps_each_answer_as_plain_data():
 
 
 def test_a_read_without_a_copy_time_answer():
-    b, real, _, _ = make({'a': {'size': 1}, 'b': {'size': 1}})
-    b.handle(request('put', name='a', uses='b', set={'size': 2}))   # b is copied (named), not acted on
-    real.things['b']['size'] = 5
-    assert answer(b.handle(request('peek', name='b')))['size'] == 5          # unchanged? its state: real, live
-    b2, real2, _, _ = make({'c': {'size': 1}})
+    # unchanged on the branch: the real account, live
+    b, real, _, _ = make({'a': {'size': 1}, 'lossy-b': {'size': 1}})
+    b.handle(request('put', name='a', uses='lossy-b', set={'size': 2}))   # lossy-b is copied (named), not acted on
+    real.things['lossy-b']['size'] = 5
+    assert answer(b.handle(request('peek', name='lossy-b')))['size'] == 5
+    # changed, and the copier checked this read alike: the engine
+    b2, _, _, _ = make({'c': {'size': 1}})
     b2.handle(request('put', name='c', set={'size': 2}))
-    r = b2.handle(request('peek', name='c'))
+    assert answer(b2.handle(request('peek', name='c')))['size'] == 2
+    # changed, and not checked: refused
+    b3, _, _, _ = make({'lossy-c': {'size': 1}})
+    b3.handle(request('put', name='lossy-c', set={'size': 2}))
+    r = b3.handle(request('peek', name='lossy-c'))
     assert refused(r) and 'no answer from the time it was copied' in answer(r)['message']
-    assert answer(b2.handle(request('get', name='c')))['size'] == 2           # a read with a baseline still answers
-    b3, real3, _, _ = make({'d': {'size': 1}})
-    b3.handle(request('put', name='d', set={'size': 2}))
-    del real3.things['d']   # the real account says 'not found' (404); the engine has what the branch made
-    assert answer(b3.handle(request('peek', name='d')))['size'] == 2
+    assert answer(b3.handle(request('get', name='lossy-c')))['size'] == 2      # a read with a baseline still answers
+    # changed, not checked, but the real account says 'not found' and the engine has it: the branch made it
+    b4, real4, _, _ = make({'lossy-d': {'size': 1}})
+    b4.handle(request('put', name='lossy-d', set={'size': 2}))
+    del real4.things['lossy-d']
+    assert answer(b4.handle(request('peek', name='lossy-d')))['size'] == 2
 
 
 def test_what_a_copy_lacks_is_an_unknown_about_it():

@@ -156,3 +156,10 @@ def test_the_order_per_type_is_the_measured_data():
     assert all(v == ('curated', 'generic') for k, v in order.items() if k != '*')
     s = stack(Fake('generic'), Fake('curated'), order)
     assert s.order_of('dynamodb:table')[0] == 'curated' and s.order_of('lambda:function')[0] == 'generic'
+
+
+def test_while_reading_data_is_off_a_change_taking_data_from_another_resource_is_not_placed():
+    params = dict(Bucket='new', Key='k', CopySource='media/feed.xml')
+    assert not refs(LayeredCatalog(GENERIC, CODEC, CURATED), 's3', 'CopyObject', **params).complete
+    assert refs(LayeredCatalog(GENERIC, CODEC, CURATED, copy_data=True), 's3', 'CopyObject', **params).complete
+    assert refs(LAYERED, 's3', 'PutObject', Bucket='b', Key='k').complete

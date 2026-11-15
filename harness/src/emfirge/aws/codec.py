@@ -523,11 +523,18 @@ def _strip_ns(tag: str) -> str:
     return tag.split('}', 1)[-1]
 
 
+ATTRIBUTE, TEXT = '@', '#text'
+"""An XML attribute is kept as '@' + its name (xsi:type as '@{http://www.w3.org/2001/XMLSchema-instance}type'); the
+text of an element that also has attributes as '#text'. Why keep them: an SDK reads some fields from attributes (an
+S3 grantee's type), so an answer rendered back without them would lose a field."""
+
+
 def _x2d(el: ET.Element) -> Any:
     kids = list(el)
+    attrs = {ATTRIBUTE + k: v for k, v in el.attrib.items()}
     if not kids:
-        return el.text or ''
-    out: dict[str, Any] = {}
+        return {**attrs, TEXT: el.text or ''} if attrs else el.text or ''
+    out: dict[str, Any] = dict(attrs)
     for k in kids:
         tag, value = _strip_ns(k.tag), _x2d(k)
         if tag not in out:
@@ -546,8 +553,13 @@ class _Repeated(list):
 def _d2x(el: ET.Element, value: Any) -> None:
     if isinstance(value, dict):
         for k, v in value.items():
-            for item in _each(v):
-                _d2x(ET.SubElement(el, k), item)
+            if k.startswith(ATTRIBUTE):
+                el.set(k[len(ATTRIBUTE):], str(v))
+            elif k == TEXT:
+                el.text = '' if v is None else str(v)
+            else:
+                for item in _each(v):
+                    _d2x(ET.SubElement(el, k), item)
     else:
         el.text = '' if value is None else str(value)
 

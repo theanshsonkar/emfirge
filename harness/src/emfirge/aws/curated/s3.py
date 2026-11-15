@@ -39,6 +39,9 @@ def copy_bucket(x: CopyContext, b: str) -> bool:
     where = loc.get('LocationConstraint')
     e.create_bucket(Bucket=b, **({'CreateBucketConfiguration': {'LocationConstraint': where}} if where else {}))
     for o in objs.get('Contents', []):
+        if not x.copy_data:      # names only: an empty object under each real key (reading bodies is the owner's call)
+            e.put_object(Bucket=b, Key=o['Key'])
+            continue
         g = s3.get_object(Bucket=b, Key=o['Key'])
         e.put_object(Bucket=b, Key=o['Key'], Body=g['Body'].read(), **pick(g, 'ContentType', 'Metadata', 'CacheControl', 'ContentEncoding'))
     pol = x.find(s3.get_bucket_policy, Bucket=b)

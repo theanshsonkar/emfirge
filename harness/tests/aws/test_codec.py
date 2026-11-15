@@ -153,3 +153,15 @@ def test_a_refusal_for_a_request_that_could_not_be_decoded_is_still_in_its_proto
     wire = WireRequest('POST', '/', '', {'Authorization': 'AWS4-HMAC-SHA256 Credential=a/1/us-west-2/ec2/aws4_request',
                                          'Content-Type': 'application/x-www-form-urlencoded'}, b'Action=NoSuchThing')
     assert CODEC.refusal(None, wire, 'm').body.startswith(b'<?xml')
+
+
+def test_xml_attributes_survive_a_round_trip():
+    xml = (b'<?xml version="1.0" encoding="UTF-8"?><AccessControlPolicy xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+           b'<Owner><ID>o1</ID></Owner><AccessControlList><Grant><Grantee xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+           b'xsi:type="CanonicalUser"><ID>o1</ID></Grantee><Permission>FULL_CONTROL</Permission></Grant></AccessControlList>'
+           b'</AccessControlPolicy>')
+    shape = SESSION.get_service_model('s3').operation_model('GetBucketAcl').output_shape
+    parse = lambda body: botocore.parsers.create_parser('rest-xml').parse({'status_code': 200, 'headers': {}, 'body': body}, shape)
+    again = encode_body(decode_body(xml))
+    assert parse(again)['Grants'] == parse(xml)['Grants'] and parse(again)['Grants'][0]['Grantee']['Type'] == 'CanonicalUser'
+    assert decode_body(again) == decode_body(xml)

@@ -119,18 +119,27 @@ class Branch:
         if not (e0.ok and a1.ok and ar.ok):
             self._count('transplant_skipped')  # the branch's change made the read fail (or the real one fails)
             return e1
+        lost = transplant.carried_loss(e0.body, a1.body, base.r0.body, base.noise) if base.r0.ok else []
+        if lost:
+            self._count('transplant_lossy')
+            raise CannotTell(f'the copy of {ref} differs from the real account in {lost[0]}, and the branch changed '
+                             f'it there, so the answer would carry what the copy lacks')
         self._count('transplanted')
         return self._codec.render(call, e1, transplant.lay(e0.body, a1.body, ar.body))
 
     def _unbased(self, call: Call, ref: ResourceRef) -> WireResponse:
         """A read of a copied resource that has no copy-time answer (E0) to lay the branch's change over. The copy
         may lack what this read shows, so the engine's answer alone is not trusted. Unchanged on the branch: the
-        real account's live answer is the branch's answer. Changed: when the real account says the thing read is
-        not there (HTTP 404) and the engine has it, the branch made it (a policy it put on a copied role), so the
-        engine's answer holds nothing copied; otherwise it cannot be told."""
+        real account's live answer is the branch's answer. Changed: the engine answers when its copier checked that
+        this read answered alike on both sides right after the copy (CopyResult.faithful), or when the real account
+        says the thing read is not there (HTTP 404) and the engine has it (the branch made it: a policy it put on a
+        copied role); otherwise it cannot be told."""
         if not self.journal.changed(ref):
             self._count('unbased_real')
             return self._sides.real(call)
+        if call.operation in self._touch.faithful.get(ref, frozenset()):
+            self._count('unbased_faithful')
+            return self._sides.engine(call)
         real = self._sides.real(call)
         if real.status == 404:
             engine = self._sides.engine(call)
@@ -204,6 +213,8 @@ class Branch:
         a1 = self._sides.answer(call, answer)
         if not (base.e0.ok and r.ok and transplant.structured(base.e0.body, a1.body, r.body)):
             return answer
+        if base.r0.ok and transplant.carried_loss(base.e0.body, a1.body, base.r0.body, base.noise):
+            return answer   # the engine's own answer: laying it over would carry what the copy lacks into real values
         self._count('change_answer_transplanted')
         return self._codec.render(call, answer, transplant.lay(base.e0.body, a1.body, r.body))
 

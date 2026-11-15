@@ -114,11 +114,12 @@ class Copied:
     found: bool
     also: tuple[ResourceRef, ...] = ()
     notes: tuple[str, ...] = ()
+    faithful: frozenset[str] = frozenset()
 
 
 class FakeCopier:
     """Copies a thing as it is. A thing whose name starts with 'cursed' cannot be copied; one whose name starts with
-    'lossy' is copied without its colour, and says so in a note."""
+    'lossy' is copied without its colour, and says so in a note; any other copy says its 'peek' read answers alike."""
 
     def __init__(self) -> None:
         self.copied: list[str] = []
@@ -134,7 +135,7 @@ class FakeCopier:
         place.engine.send(request('put', name=ref.id, set={k: v for k, v in body.items()
                                                            if k != 'name' and not (lossy and k == 'colour')}))
         self.copied.append(ref.id)
-        return Copied(True, notes=('its colour',) if lossy else ())
+        return Copied(True, notes=('its colour',) if lossy else (), faithful=frozenset() if lossy else frozenset({'peek'}))
 
 
 def make(real_things: dict[str, dict[str, Any]] | None = None):

@@ -36,6 +36,7 @@ class CopyOnTouch:
         self._new: list[ResourceRef] = []
         self._touched: dict[ResourceRef, list[Answer]] = {}
         self.copies: dict[str, int] = {}
+        self.faithful: dict[ResourceRef, frozenset[str]] = {}   # per copy: the reads its copier checked alike
 
     # ---- core.ports.Placement
     def need(self, ref: ResourceRef) -> None:
@@ -85,6 +86,7 @@ class CopyOnTouch:
             return
         for what in getattr(result, 'notes', ()):
             self._note(ref, what)
+        self.faithful[ref] = frozenset(getattr(result, 'faithful', ()))
         for r in (ref, *result.also):
             if self._overlay.state(r) is State.LIVE:
                 self._overlay.move(r, State.COPIED)

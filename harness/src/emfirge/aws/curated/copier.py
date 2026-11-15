@@ -21,15 +21,15 @@ class Copied:
 
 
 class CuratedCopier:
-    def __init__(self, naming: Naming, where: Where) -> None:
-        self._naming, self._where = naming, where
+    def __init__(self, naming: Naming, where: Where, copy_data: bool = False) -> None:
+        self._naming, self._where, self._copy_data = naming, where, copy_data
         self._clients: dict[tuple[int, str], tuple[Account, Any]] = {}
 
     def copy(self, ref: ResourceRef, place: Placement) -> Copied:
         spec = self._naming.specs.get(ref.type)
         if spec is None or spec.copy is None:
             raise UnknownType(f'nothing can copy a {ref.type} yet')
-        x = CopyContext(place, self._where, self._client, self._recognize)
+        x = CopyContext(place, self._where, self._client, self._recognize, self._copy_data)
         found = spec.copy(x, ref.id)
         return Copied(found, tuple(x.also))
 

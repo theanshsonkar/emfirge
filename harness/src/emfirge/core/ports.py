@@ -96,6 +96,9 @@ class CopyResult(Protocol):
     also: Iterable[ResourceRef]          # other resources copied with it (addressed through it, or needed by it)
     notes: tuple[str, ...]               # what the copy lacks, in plain words (may be absent: read as empty). The
                                          # branch reports each note as an Unknown about the resource.
+    faithful: frozenset[str]             # read operations that answered alike on the engine and on the real account
+                                         # right after the copy, as the copier checked (may be absent: empty). For
+                                         # these the engine is trusted where the branch has no copy-time answer.
 
 
 class Outcomes(Protocol):

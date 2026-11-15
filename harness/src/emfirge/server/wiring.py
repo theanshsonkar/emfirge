@@ -8,6 +8,7 @@ Configurations (keyword options of build):
   catalog='layered' | 'generic' | 'curated'          what names calls and resources ('generic': the layered catalog
                                                      without its curated fallback)
   copier='layered' | 'curated' | 'generic'           what copies a real resource into the engine
+  copy_data=False | True                             whether copies may read the customer's data (items, bodies)
 """
 from __future__ import annotations
 
@@ -44,6 +45,7 @@ class Setup:
     region: str = 'us-west-2'
     catalog: CatalogChoice = 'layered'
     copier: CopierChoice = 'layered'
+    copy_data: bool = False
 
 
 class _ReadKinds:
@@ -62,17 +64,19 @@ def make_engine(kind: str, port: int, workdir: Path) -> Engine:
     return ENGINES[kind](port, workdir)
 
 
-def parts(codec: AwsCodec, where: Where, catalog: CatalogChoice = 'layered',
-          copier: CopierChoice = 'layered') -> tuple[Catalog, Outcomes, Copier]:
-    """The catalog, outcomes and copier of one configuration."""
-    cur_catalog, cur_outcomes, cur_copier = curated(codec, where)
+def parts(codec: AwsCodec, where: Where, catalog: CatalogChoice = 'layered', copier: CopierChoice = 'layered',
+          copy_data: bool = False) -> tuple[Catalog, Outcomes, Copier]:
+    """The catalog, outcomes and copier of one configuration. `copy_data`: copies may read the customer's data from
+    the real account (a table's items, an object's body). Off by default: the owner decides (card run-reads)."""
+    cur_catalog, cur_outcomes, cur_copier = curated(codec, where, copy_data)
     if catalog == 'curated':
         if copier != 'curated':
             raise ValueError('the curated catalog runs with the curated copier only')
         return cur_catalog, cur_outcomes, cur_copier
     fallback = cur_catalog if catalog == 'layered' else None
-    layered = LayeredCatalog(AwsCatalog(account=where.account, region=where.region), codec, fallback)
-    generic = GenericCopier(layered, codec, where.region)
+    layered = LayeredCatalog(AwsCatalog(account=where.account, region=where.region), codec, fallback,
+                             copy_data=copy_data)
+    generic = GenericCopier(layered, codec, where.region, copy_data=copy_data)
     copiers: dict[str, Copier] = {'generic': generic, 'curated': cur_copier}
     if copier != 'layered':
         copiers = {copier: copiers[copier]}
@@ -80,10 +84,10 @@ def parts(codec: AwsCodec, where: Where, catalog: CatalogChoice = 'layered',
 
 
 def build(real: Account, engine: Account, region: str = 'us-west-2', codec: AwsCodec | None = None, *,
-          catalog: CatalogChoice = 'layered', copier: CopierChoice = 'layered') -> Branch:
+          catalog: CatalogChoice = 'layered', copier: CopierChoice = 'layered', copy_data: bool = False) -> Branch:
     """A branch over `real` with `engine` (already started)."""
     codec = codec or AwsCodec(region)
-    cat, outcomes, cop = parts(codec, Where(region, account_id(real, codec, region)), catalog, copier)
+    cat, outcomes, cop = parts(codec, Where(region, account_id(real, codec, region)), catalog, copier, copy_data)
     return Branch(codec, cat, cop, real, engine, outcomes)
 
 
@@ -92,7 +96,8 @@ def build_from(setup: Setup) -> tuple[Branch, Engine]:
     engine.start()
     try:
         real = HttpAccount('real', setup.real_url, setup.real_ca)
-        return build(real, engine, setup.region, catalog=setup.catalog, copier=setup.copier), engine
+        return build(real, engine, setup.region, catalog=setup.catalog, copier=setup.copier,
+                     copy_data=setup.copy_data), engine
     except Exception:
         engine.stop()
         raise

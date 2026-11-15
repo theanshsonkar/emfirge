@@ -20,8 +20,8 @@ def test_lay_keeps_live_values_and_applies_only_the_branch_change():
     assert transplant.lay(e0, e1, real) == {'Timeout': 60, 'Env': {'A': '1'}, 'Lost': 'kept', 'Live': 'now'}
 
 
-def test_lists_are_whole_values_and_missing_room_takes_the_engine_subtree():
-    assert transplant.lay({'L': [1, 2]}, {'L': [1]}, {'L': [1, 2, 3]}) == {'L': [1]}
+def test_list_items_and_missing_room():
+    assert transplant.lay({'L': [1, 2]}, {'L': [1]}, {'L': [1, 2, 3]}) == {'L': [1, 3]}   # the branch removed 2 only
     assert transplant.lay({}, {'New': {'x': 1}}, {}) == {'New': {'x': 1}}
     assert transplant.lay({'S': {'a': 1}}, {'S': {'a': 2}}, {'S': 'scalar'}) == {'S': {'a': 2}}
     assert transplant.lay(1, 2, 3) == 2
@@ -29,6 +29,16 @@ def test_lists_are_whole_values_and_missing_room_takes_the_engine_subtree():
 
 def test_leaves():
     assert transplant.leaves({'a': {'b': 1, 'c': [1]}, 'd': {}}) == [('a.b', 1), ('a.c', [1]), ('d', {})]
+
+
+def test_a_change_to_a_list_the_copy_got_wrong_is_found():
+    r0 = {'Contents': [{'Key': 'a', 'Size': 13}, {'Key': 'b', 'Size': 13}], 'Name': 'x'}
+    e0 = {'Contents': [{'Key': 'a', 'Size': 0}, {'Key': 'b', 'Size': 0}], 'Name': 'x'}   # bytes not copied
+    e1 = {'Contents': [{'Key': 'a', 'Size': 0}], 'Name': 'x'}
+    assert transplant.carried_loss(e0, e1, r0) == ['Contents']
+    assert transplant.carried_loss(e0, {**e0, 'Name': 'y'}, r0) == []                     # the change is elsewhere
+    same = {'Rules': [{'Port': 22}, {'Port': 443}]}
+    assert transplant.carried_loss(same, {'Rules': [{'Port': 22}]}, {'Rules': [{'Port': 443}, {'Port': 22}]}) == []
 
 
 def test_diff_paths_and_noise():
@@ -139,3 +149,22 @@ def test_a_setting_filled_into_an_empty_element_is_named_leaf_by_leaf():
                             lambda ref: [])
     assert {(f.path, f.before, f.after, f.derived) for f in change.fields} == {
         ('get.Root.Status', None, 'on', False), ('get.Root.Stamp', None, 't1', True)}
+
+
+def test_lists_are_laid_item_by_item_when_the_items_pair_up():
+    r = {'Contents': [{'Key': 'a', 'Size': 13, 'Time': 'r'}, {'Key': 'b', 'Size': 13, 'Time': 'r'}]}
+    e0 = {'Contents': [{'Key': 'a', 'Size': 13, 'Time': 'e'}, {'Key': 'b', 'Size': 13, 'Time': 'e'}]}
+    e1 = {'Contents': [{'Key': 'b', 'Size': 99, 'Time': 'e'}, {'Key': 'c', 'Size': 5, 'Time': 'e'}]}   # a gone, b changed, c new
+    assert transplant.lay(e0, e1, r) == {'Contents': [{'Key': 'b', 'Size': 99, 'Time': 'r'}, {'Key': 'c', 'Size': 5, 'Time': 'e'}]}
+    assert transplant.carried_loss(e0, e1, r) == []                     # the copy's own times never reach the answer
+    assert transplant.lay({'L': ['x', 'y']}, {'L': ['y', 'z']}, {'L': ['w', 'x', 'y']}) == {'L': ['w', 'y', 'z']}
+    unclear = {'L': [{'a': 1, 'b': 2}, {'a': 1, 'b': 3}]}
+    assert transplant.lay_items(unclear['L'], [{'a': 1, 'b': 2}], [{'a': 1, 'b': 9}, {'a': 1, 'b': 8}]) is None
+
+
+def test_a_list_of_one_given_as_its_item_is_still_laid_item_by_item():
+    def obj(key, size, t):
+        return {'Key': key, 'Size': size, 'T': t, 'Class': 'STANDARD', 'Owner': 'o'}
+    r = {'C': [obj('a', 13, 'r'), obj('b', 13, 'r')]}
+    e0 = {'C': [obj('a', 0, 'e'), obj('b', 0, 'e')]}             # the copy lacks the bytes and has its own times
+    assert transplant.lay(e0, {'C': obj('b', 0, 'e')}, r) == {'C': [obj('b', 13, 'r')]}

@@ -17,8 +17,9 @@ from .spec import Where
 
 class CopyContext:
     def __init__(self, place: Placement, where: Where, clients: Callable[[Any, str], Any],
-                 recognize: Callable[[str], ResourceRef | None]) -> None:
+                 recognize: Callable[[str], ResourceRef | None], copy_data: bool = False) -> None:
         self._place, self.where, self._clients, self._recognize = place, where, clients, recognize
+        self.copy_data = copy_data     # the copy may read the customer's data (items, object bodies): the owner decides
         self.also: list[ResourceRef] = []
 
     @property

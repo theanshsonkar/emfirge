@@ -87,12 +87,13 @@ def test_a_dns_change_is_answered_and_read_back(lab):
     assert 'feeds.gap.example.' in names
 
 
-def test_a_copy_from_a_real_bucket_into_a_new_bucket_works(lab):
+def test_a_copy_from_a_real_bucket_is_refused_while_reading_data_is_off(lab):
+    """The copy of the source bucket would hold its keys only; copying from it would give an empty object."""
     bc, _, _ = lab
     s3 = bc('s3')
     s3.create_bucket(Bucket='gap-new2', **LOC)
-    s3.copy_object(Bucket='gap-new2', Key='feed.xml', CopySource={'Bucket': 'gap-media', 'Key': 'feed.xml'})
-    assert s3.get_object(Bucket='gap-new2', Key='feed.xml')['Body'].read() == b'<rss/>'
+    assert outcome(s3.copy_object, Bucket='gap-new2', Key='feed.xml',
+                   CopySource={'Bucket': 'gap-media', 'Key': 'feed.xml'}) == 'EmfirgeCannotTell'
 
 
 def test_an_invoke_is_still_refused(lab):

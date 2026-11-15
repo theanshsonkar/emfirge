@@ -68,8 +68,10 @@ class Copied:
 
 class GenericCopier:
     def __init__(self, catalog: Catalog, codec: AwsCodec, region: str,
-                 sleep: Callable[[float], None] = time.sleep) -> None:
-        self._catalog, self._codec = catalog, codec
+                 sleep: Callable[[float], None] = time.sleep, *, copy_data: bool = False) -> None:
+        """`copy_data`: the copier may read the customer's data from the real account (a table's items, an object's
+        body) to copy it. Off by default: the owner decides. Names (a bucket's keys) are read either way."""
+        self._catalog, self._codec, self._copy_data = catalog, codec, copy_data
         self._clients = Clients(region)
         self._sleep = sleep
         self.notes: dict[ResourceRef, list[str]] = {}
@@ -77,7 +79,7 @@ class GenericCopier:
     def copy(self, ref: ResourceRef, place: Placement) -> Copied:
         lost: list[str] = []
         try:
-            job = _Copy(self._catalog, self._codec, self._clients, self._sleep, ref, place, lost)
+            job = _Copy(self._catalog, self._codec, self._clients, self._sleep, ref, place, lost, self._copy_data)
             result = job.run()
             return Copied(result.found, result.also, tuple(lost), frozenset(job.faithful) if result.found else frozenset())
         finally:
@@ -87,7 +89,7 @@ class GenericCopier:
     def verify(self, ref: ResourceRef, place: Placement) -> tuple[frozenset[str], tuple[str, ...]]:
         """(faithful reads, notes) of a copy another copier made: the same reads and checks, nothing written."""
         lost: list[str] = []
-        job = _Copy(self._catalog, self._codec, self._clients, self._sleep, ref, place, lost)
+        job = _Copy(self._catalog, self._codec, self._clients, self._sleep, ref, place, lost, self._copy_data)
         try:
             job.verify()
         except CannotTell as e:
@@ -99,8 +101,11 @@ class _Copy:
     """One copy of one resource (see the module docstring for the steps)."""
 
     def __init__(self, catalog: Catalog, codec: AwsCodec, clients: Clients, sleep: Callable[[float], None], ref: ResourceRef,
-                 place: Placement, lost: list[str]) -> None:
+                 place: Placement, lost: list[str], copy_data: bool) -> None:
         self.catalog, self.codec, self.clients, self.sleep = catalog, codec, clients, sleep
+        self.copy_data = copy_data
+        self.placeholders = 0          # items rebuilt from their names only (no data read)
+        self.data_left_out = False     # a contents read returns data, and reading data is switched off
         self.ref, self.place, self.lost = ref, place, lost
         self.info = catalog.resource_type(ref.type)
         self.delegated = set()
@@ -118,12 +123,14 @@ class _Copy:
         self._listed_with_it()
         self._settle()          # settings may have started an update (a function's LastUpdateStatus)
         self._compare(strict=True)
+        self._contents_notes()
         return Copied(True)
 
     def verify(self) -> None:
         """Steps 1 and 6 only, for a copy another copier made."""
         if self._read():
             self._compare(strict=False)
+            self._contents_notes()
 
     def _read(self) -> bool:
         """Step 1: the reads (and the contents reads) on the real account. False: the resource is not there."""
@@ -178,14 +185,18 @@ class _Copy:
         return False, []
 
     def _contents(self, known: set[str]) -> list[Answer]:
-        """The data the resource holds, as its contents reads answer it (contents.py). More than one page of it is
-        not copied: the copy is refused."""
+        """What the resource holds, as its contents reads answer it (contents.py). A list of names (AWS's list kind:
+        ListObjectsV2) is read always; a read that returns the data itself (Scan) only when reading data is switched
+        on. More than one page is not copied: the copy is refused."""
         if not self.info.holds_data:
             return []
         known |= {a.operation for a in self.answers}
         out = []
         for op, params in contents.contents_reads(self.model, self.service, self.ref, self.ids, known,
                                                   self.catalog.kind, self._refs_of):
+            if self.catalog.kind(self.service, op) is not Kind.LIST and not self.copy_data:
+                self.data_left_out = True
+                continue
             a = self.clients.read(self.place.real, self.service, op, params)
             if a.body is None or not contents.lists(a.body):
                 continue
@@ -193,6 +204,25 @@ class _Copy:
                 raise CannotTell(f'it holds more data than Emfirge copies ({op} has more than one page)')
             out.append(a)
         return out
+
+    def _reads_data(self, op: str, params: dict[str, Any]) -> bool:
+        """The read returns customer data: a READ (not a list) on a resource that holds data, which the catalog leaves
+        out of that resource's reads (its compile step leaves out exactly AWS's data-plane reads: GetObject, GetItem)."""
+        if self.catalog.kind(self.service, op) is not Kind.READ:
+            return False
+        named = self._refs_of(self.service, op, params)
+        for r in named.primary if named is not None else ():
+            info = self.catalog.resource_type(r.type)
+            if info is not None and info.holds_data and op not in {o for _, o, _ in self.catalog.reads_of(r)}:
+                return True
+        return False
+
+    def _contents_notes(self) -> None:
+        if self.placeholders:
+            self.lost.append(f'the copy holds the names of its {self.placeholders} items, not their contents '
+                             '(reading data is switched off)')
+        if self.data_left_out:
+            self.lost.append('the copy does not hold its items (reading them is switched off)')
 
     def _refs_of(self, service: str, op: str, params: dict[str, Any]) -> Refs | None:
         try:
@@ -435,6 +465,9 @@ class _Copy:
             sources: list[Any] = [item, self.ids]
             for detail in plan.details(self.model, write):
                 got = fill(self.model.operation_model(detail).input_shape, [item, self.ids])
+                if not got.missing and not self.copy_data and self._reads_data(detail, got.params):
+                    self.placeholders += 1        # its name only: the write goes without the data
+                    break
                 if not got.missing:
                     d = self.clients.read(self.place.real, self.service, detail, got.params)
                     if d.body is not None:
@@ -550,9 +583,11 @@ class _Copy:
         self._data_reads_faithful()
 
     def _data_reads_faithful(self) -> None:
-        """The contents were copied and every contents read answers alike: the reads of its data that the catalog
-        leaves out (a table's GetItem, a bucket's HeadObject) answer alike too."""
-        if not self.info.holds_data or not self.contents or any(a.operation not in self.faithful for a in self.contents):
+        """The contents were copied with their data and every contents read answers alike: the reads of its data
+        that the catalog leaves out (a table's GetItem, a bucket's HeadObject) answer alike too. Never for a copy
+        holding names only, or no contents: those reads go to the real account, or are refused once changed."""
+        if not self.info.holds_data or not self.contents or self.placeholders or self.data_left_out or \
+                any(a.operation not in self.faithful for a in self.contents):
             return
         self.faithful |= set(contents.data_reads(self.model, self.service, self.ref, self.ids, self.known,
                                                  self.catalog.kind, self._refs_of))

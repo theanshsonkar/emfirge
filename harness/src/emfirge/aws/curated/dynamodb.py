@@ -49,7 +49,7 @@ def copy_table(x: CopyContext, t: str) -> bool:
     d = d['Table']
     if d['TableStatus'] != 'ACTIVE':
         raise CannotTell(f"the table is {d['TableStatus']}")
-    items = ddb.scan(TableName=t, Limit=MAX_ITEMS + 1)
+    items = ddb.scan(TableName=t, Limit=MAX_ITEMS + 1) if x.copy_data else {'Items': []}   # reading items: owner's call
     if items.get('LastEvaluatedKey') or len(items['Items']) > MAX_ITEMS:
         raise CannotTell('the table is too big to copy')
     kw = create_args(d)
