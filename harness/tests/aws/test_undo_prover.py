@@ -101,7 +101,18 @@ def prover(door: FakeDoor, *changes: Change) -> BranchUndoProver:
 def test_a_version_that_does_not_come_back_is_no_and_named():
     door, change = session(bump=True)
     fact = prover(door, change).prove(change)
-    assert fact.undo is Undo.NO and 'GetParameter.Parameter.Version: 1 -> 3' in fact.reasons[0]
+    assert fact.undo is Undo.NO
+    assert fact.reasons[0] == ('put back on the branch: everything the session set came back; these values the '
+                               'service keeps moved: Version')
+    assert 'GetParameter.Parameter.Version: 1 -> 3' in fact.reasons[1]
+
+
+def test_a_status_that_says_a_change_is_landing_is_waited_for():
+    from emfirge.aws.undo.prover import landing
+    ok = lambda body: Answer(200, body)
+    assert landing({ref('a'): (ok({'Configuration': {'LastUpdateStatus': 'InProgress'}}),)})
+    assert landing({ref('a'): (ok({'Table': {'TableStatus': 'UPDATING'}}),)})
+    assert not landing({ref('a'): (ok({'Configuration': {'LastUpdateStatus': 'Successful', 'Note': 'pending'}}),)})
 
 
 def test_every_field_equal_again_is_yes_and_a_moved_clock_is_named_not_counted():

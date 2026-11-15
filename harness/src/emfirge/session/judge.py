@@ -53,9 +53,17 @@ class Judgement:
 
     @property
     def maybe(self) -> tuple[Affected, ...]:
+        """The weaker findings, one per resource: the first change that reaches it says why (two changes reaching
+        the same role are one maybe, not two)."""
         if self.graph is None:
             return ()
-        return tuple(i.to_affected() for c in self.graph.changes for i in c.maybe)
+        firm = {a.ref for a in self.decision.facts.affected}
+        once: dict = {}
+        for c in self.graph.changes:
+            for i in c.maybe:
+                if i.ref not in firm and i.ref != c.change.ref:
+                    once.setdefault(i.ref, i.to_affected())
+        return tuple(once.values())
 
 
 class _Clock:

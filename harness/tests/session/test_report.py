@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from emfirge.core.model import FieldChange
+from emfirge.core.model import Change, ChangeType, FieldChange
 from emfirge.session import judge
 from emfirge.session.report import as_json, as_text, fold, once
 
@@ -130,3 +130,17 @@ def test_a_change_that_can_be_put_back_says_how_that_was_established():
     new = ref('store', 'fresh-one')
     text = as_text(judge(FakeHeld([created(new)], {new: {}}), parts()))
     assert '      can be put back: it can be deleted again' in text.splitlines()
+
+
+def test_a_change_seen_only_in_computed_values_names_its_calls():
+    fn = ref('job', 'publisher')
+    change = Change(fn, ChangeType.MODIFIED, (FieldChange('GetJob.CodeSha256', 'a', 'b', derived=True),
+                                              FieldChange('GetJob.CodeSize', 1, 2, derived=True)), ('job.UpdateJobCode',))
+    lines = as_text(judge(FakeHeld([change], {fn: {}}), parts())).splitlines()
+    assert '      by: UpdateJobCode' in lines
+    assert '      UpdateJobCode changed it; only values the service computed show it: CodeSha256, CodeSize' in lines
+
+
+def test_every_changed_resource_names_the_calls_that_acted_on_it():
+    text = as_text(judge(FakeHeld([deleted(STORE), modified(ref('job', 'publisher'))]), parts()))
+    assert text.count('      by: ') == 2 and 'by: Delete' in text and 'by: Update' in text

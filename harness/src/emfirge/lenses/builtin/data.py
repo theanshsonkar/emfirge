@@ -55,7 +55,7 @@ class DataLens:
         if holds is None:
             return [], [unknown(NAME, 'deleted, and whether it holds data cannot be told', change)]
         if holds:
-            return [fact(NAME, 'store_deleted', 'deleted; it holds data, and the data goes with it', change,
+            return [fact(NAME, 'store_deleted', 'deleted; it can hold data, and any data in it goes with it', change,
                          calls=list(change.calls))], []
         return [], []
 

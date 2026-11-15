@@ -111,19 +111,27 @@ def _changes(j: Judgement) -> list[str]:
 
 
 def _change(c: Change) -> list[str]:
+    """The resource, the calls that acted on it, and what they set. A call can change a resource only through values
+    the service computes (new code shows as a new hash and size): then the calls and those values say it."""
     lines = [f'    {c.ref}']
+    calls = list(dict.fromkeys(call.rsplit('.', 1)[-1] for call in c.calls))
+    computed = list(dict.fromkeys(_tail(x.path) for x in c.fields if x.derived))
+    names = ', '.join(computed[:4]) + (', ...' if len(computed) > 4 else '')
     if c.type is ChangeType.MODIFIED:
         fields = once(_field(x) for x in c.fields if not x.derived)
+        if calls:
+            lines.append(f'      by: {", ".join(calls)}')
         lines += [f'      {x}' for x in fields[:FIELDS_SHOWN]]
         if len(fields) > FIELDS_SHOWN:
             lines.append(f'      and {len(fields) - FIELDS_SHOWN} more settings (in the JSON report)')
-        computed = list(dict.fromkeys(_tail(x.path) for x in c.fields if x.derived))
-        if computed:
-            names = ', '.join(computed[:4]) + (', ...' if len(computed) > 4 else '')
+        if computed and not fields:
+            lines.append(f'      {" and ".join(calls) or "a call"} changed it; only values the service computed '
+                         f'show it: {names}')
+        elif computed:
             noun = 'value' if len(computed) == 1 else 'values'
             lines.append(f'      and {len(computed)} {noun} the service computed ({names})')
-    elif c.type is ChangeType.ACTION and c.calls:
-        lines.append(f'      {", ".join(dict.fromkeys(c.calls))}')
+    elif calls:
+        lines.append(f'      by: {", ".join(calls)}')
     return lines
 
 

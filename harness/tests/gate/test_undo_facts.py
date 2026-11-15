@@ -22,12 +22,30 @@ def fact(undo: Undo, why: str = '') -> UndoFact:
     (Undo.UNKNOWN, Undo.NO, Undo.NO),
     (Undo.UNKNOWN, Undo.UNKNOWN, Undo.UNKNOWN),
     (Undo.YES, None, Undo.YES),
-    (Undo.YES, Undo.UNKNOWN, Undo.YES),
+    (Undo.YES, Undo.UNKNOWN, Undo.UNKNOWN),  # an unproven yes is not a yes
     (Undo.YES, Undo.NO, Undo.NO),            # a proof that finds a difference lowers yes
 ])
 def test_combine(static, proof, result):
     got = combine(fact(static, 'static'), fact(proof, 'proof') if proof else None)
     assert got.undo is result and got.ref == REF
+
+
+@pytest.mark.parametrize('static, proof, reasons', [
+    (Undo.NO, Undo.YES, ('static',)),
+    (Undo.NO, Undo.UNKNOWN, ('static',)),
+    (Undo.UNKNOWN, Undo.YES, ('proof',)),
+    (Undo.UNKNOWN, Undo.NO, ('static', 'proof')),
+    (Undo.UNKNOWN, Undo.UNKNOWN, ('proof',)),       # the proof's reason, not the generic "not yet proven"
+    (Undo.YES, Undo.YES, ('proof',)),
+    (Undo.YES, Undo.UNKNOWN, ('proof',)),           # why the proof could not put it back
+    (Undo.YES, Undo.NO, ('static', 'proof')),
+])
+def test_combine_reasons(static, proof, reasons):
+    assert combine(fact(static, 'static'), fact(proof, 'proof')).reasons == reasons
+
+
+def test_an_unknown_proof_without_words_keeps_the_static_reason():
+    assert combine(fact(Undo.YES, 'static'), fact(Undo.UNKNOWN)).reasons == ('static',)
 
 
 def test_a_no_keeps_both_reasons():

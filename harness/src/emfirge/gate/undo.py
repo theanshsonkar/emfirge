@@ -3,7 +3,8 @@
   static NO      always wins. A proof on a fake cannot see what the provider says is lost (a secret never shown
                  again, a message already sent, what ran while a switch was on).
   static UNKNOWN a proof can raise it to YES (put back on the branch and found equal) or lower it to NO.
-  static YES     stays YES unless a proof finds a difference (then NO).
+  static YES     stays YES when a proof confirms it; a proof that finds a difference makes it NO, and a proof that
+                 could not tell makes it UNKNOWN (with the proof's reason).
 
 The verdict takes the combined facts only; it never calls a plug-in itself.
 """
@@ -25,7 +26,9 @@ def combine(static: UndoFact, proof: UndoFact | None) -> UndoFact:
         return UndoFact(static.ref, Undo.NO, static.reasons + proof.reasons)
     if proof.undo is Undo.YES:
         return UndoFact(static.ref, Undo.YES, proof.reasons or static.reasons)
-    return static
+    # the proof was tried and could not tell: an unproven "can be put back" is not a yes, and the proof's own reason
+    # says more than the static "not yet proven"
+    return UndoFact(static.ref, Undo.UNKNOWN, proof.reasons or static.reasons)
 
 
 def undo_facts(changes: Iterable[Change], reversibility: Reversibility,

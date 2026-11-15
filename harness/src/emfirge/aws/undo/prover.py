@@ -18,6 +18,7 @@ its state afterwards, so the diff must be read first. The facts are made on the 
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, Sequence
@@ -81,7 +82,7 @@ class BranchUndoProver:
         facts = {c.ref: UndoFact(c.ref, Undo.UNKNOWN, (NOT_TRIED[c.type],)) for c in self._changes if c.ref not in tried}
         groups = self._groups(tried, {c.ref for c in self._changes if c.type is ChangeType.DELETED})
         watched = [r for r, s in held.items() if s is State.COPIED or (r in tried and s is State.BORN)]
-        end = self._reader.settle(watched, self._moved)
+        end = self._reader.settle(watched, self._moved, pending=landing)
         self._noise = end.noise
         born = {r for r in tried if held.get(r) is State.BORN}
         start = self._clock()
@@ -89,7 +90,7 @@ class BranchUndoProver:
         window = lambda: Window(start, self._clock(), self._timing.slack)
         leaving = [r for g in groups if not g.blocked and not g.failures for r in g.refs & born]
         after = self._reader.settle(watched, self._moved, lambda s: self._clean(s, end.snapshot, tried, window()),
-                                    end.noise, lambda s: any(not self._gone(r, end.snapshot, s)[0] for r in leaving))
+                                    end.noise, lambda s: landing(s) or any(not self._gone(r, end.snapshot, s)[0] for r in leaving))
         self._noise = after.noise
         for group in groups:
             for ref in group.refs:
@@ -241,7 +242,7 @@ class BranchUndoProver:
         if group.blocked:
             return UndoFact(ref, Undo.UNKNOWN, (group.blocked,))
         names = self._set_names(group.refs)
-        reasons, differs, reads, clocks = [], [], 0, []
+        reasons, differs, reads, clocks, kept = [], [], 0, [], []
         for r in sorted(group.refs, key=str):
             if r in born:
                 gone, evidence = self._gone(r, end, now)
@@ -257,6 +258,7 @@ class BranchUndoProver:
             d, c = self._diffs(r, end, now, window, names)
             reads += len(self._door.baselines(r))
             differs += [f'{r}: {x}' for x in d]
+            kept += [x for x in d if _leaf(x.path) not in names]
             clocks += c
         differs += self._collateral(group, end, now, window)
         if group.failures:
@@ -264,6 +266,11 @@ class BranchUndoProver:
         if differs and not stable:
             return UndoFact(ref, Undo.UNKNOWN, (f'the answers were still changing after {self._timing.limit:.0f} s',
                                                 *differs[:8]))
+        if differs and len(kept) == len(differs):
+            moved = ', '.join(dict.fromkeys(_leaf(x.path) or x.read for x in kept))
+            return UndoFact(ref, Undo.NO, (f'put back on the branch: everything the session set came back; these values '
+                                           f'the service keeps moved: {moved}',
+                                           'details: ' + '; '.join(differs[:12])))
         if differs:
             return UndoFact(ref, Undo.NO, tuple(['put back on the branch, but it does not come back the same: '
                                                  + '; '.join(differs[:12])]))
@@ -283,6 +290,29 @@ class BranchUndoProver:
                 d, _ = self._diffs(r, end, now, window, frozenset())
                 out += [f'{r} (not a change of the session that was put back): {x}' for x in d]
         return out
+
+
+TRANSITIONAL = re.compile(r'(?i)^(in[ _-]?progress|pending|creating|updating|deleting|modifying|provisioning)$')
+"""Values of a status or state field that say a change is still landing (AWS-wide words, not per service)."""
+
+
+def landing(snapshot: Snapshot) -> bool:
+    """Some answer still says a change is landing (a function 'InProgress' after the inverse call): keep waiting,
+    up to the reader's limit, before comparing."""
+    return any(_landing(a.body) for answers in snapshot.values() for a in answers if a.ok)
+
+
+def _landing(body: object, key: str = '') -> bool:
+    if isinstance(body, dict):
+        return any(_landing(v, str(k)) for k, v in body.items())
+    if isinstance(body, list):
+        return any(_landing(v, key) for v in body)
+    return isinstance(body, str) and key.lower().endswith(('status', 'state')) and bool(TRANSITIONAL.match(body))
+
+
+def _leaf(path: str) -> str:
+    """The setting's own name in a dotted path ('Configuration.RevisionId' -> 'RevisionId'; list indexes skipped)."""
+    return next((p for p in reversed(path.split('.')) if p and not p.isdigit()), '')
 
 
 def _names_in(o: object) -> set[str]:

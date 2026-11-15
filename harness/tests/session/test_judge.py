@@ -115,3 +115,10 @@ def test_outside_lenses_run_before_the_seal_with_both_endpoints():
     p = type(p)(p.reader, p.graph, p.lenses, p.reversibility, outside=(Outside(),))
     judge(held, p, ('http://before', 'http://after'))
     assert seen == [('http://before', 'http://after', Stage.OPEN)]
+
+
+def test_a_maybe_resource_is_listed_once_whatever_reaches_it():
+    j = judge(FakeHeld([deleted(STORE), deleted(ref('store', 'other'))]), parts())
+    refs = [a.ref for a in j.maybe]
+    assert len(refs) == len(set(refs))
+    assert not set(refs) & {a.ref for a in j.decision.facts.affected}

@@ -34,7 +34,7 @@ class PermissionsLens:
         unknowns: list[Unknown] = []
         for change in view.changes:
             f, u = self._one(change)
-            findings += f
+            findings += _once(f)
             unknowns += u
         return LensResult(tuple(findings), tuple(unknowns))
 
@@ -132,9 +132,19 @@ def _grouped(items: Iterator[tuple[str, Grant]] | list[tuple[str, Grant]]) -> li
     return [(key[0], groups[key]) for key in sorted(groups)]
 
 
+def _once(findings: list[Finding]) -> list[Finding]:
+    """One finding per fact: the same policy shows in several reads of one resource (a role's trust policy in its
+    own read and in the list of roles), and says the same thing in each."""
+    seen: dict[tuple, Finding] = {}
+    for f in findings:
+        seen.setdefault((f.code, f.message, f.refs), f)
+    return list(seen.values())
+
+
 def _lost(change: Change, field: FieldChange, code: str, gs: list[Grant], verb: str, why: str) -> Finding:
-    acts, res = {g.action for g in gs}, {g.resource for g in gs}
-    return fact(NAME, code, f'{_who(gs[0].principal)} {verb} {short(acts)} on {short(res)} {why}', change, field.path,
+    acts, res = {g.action for g in gs}, {g.resource for g in gs if g.resource}
+    on = f' on {short(res)}' if res else ''    # a trust policy names no resource: the role itself is it
+    return fact(NAME, code, f'{_who(gs[0].principal)} {verb} {short(acts)}{on} {why}', change, field.path,
                 before={'principal': gs[0].principal, 'actions': sorted(acts), 'resources': sorted(res)})
 
 
