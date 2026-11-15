@@ -119,8 +119,8 @@ def _branch_options(p: argparse.ArgumentParser) -> None:
     p.add_argument('--budget', type=int, default=Options.budget, help='reads of the real account for the graph, at most')
     p.add_argument('--lens', action='append', default=[], metavar="'NAME=COMMAND'",
                    help='an outside tool that prints JSON lines; run on the account and on the branch')
-    p.add_argument('--prove-undo', action='store_true',
-                   help='put each modified resource back on the branch to prove it can be put back')
+    p.add_argument('--prove-undo', action=argparse.BooleanOptionalAction, default=True,
+                   help='put each change back on the branch to prove it can be put back (default: on; it runs last)')
     p.add_argument('--report', metavar='FILE.json', help='also write the report as JSON')
     p.add_argument('--all', action='store_true', help='show every affected resource, the maybe ones too')
     p.add_argument('--workdir', metavar='DIR', help='keep engine logs here (default: a temporary folder)')

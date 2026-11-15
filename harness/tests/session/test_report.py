@@ -37,7 +37,7 @@ def test_changes_are_grouped_with_settings_before_and_after():
     lines = text.splitlines()
     heads = [l.strip() for l in lines if l.strip() in ('Created:', 'Modified:', 'Deleted:', 'Actions:')]
     assert heads == ['Created:', 'Modified:', 'Deleted:']
-    assert '      DRY_RUN: true -> false' in lines
+    assert '      Environment.DRY_RUN: true -> false' in lines
 
 
 def test_the_same_setting_from_two_reads_is_shown_once():
@@ -84,3 +84,49 @@ def test_json_has_the_verdict_the_facts_and_the_measurements():
     assert {'changes', 'affected', 'maybe', 'findings', 'unknowns', 'seconds', 'real_account', 'reader'} <= set(d)
     assert d['real_account']['changing_calls'] == 0
     assert {a['ref'] for a in d['affected']} >= {str(BOX)}
+
+
+def test_resources_are_named_the_way_a_person_says_them_and_json_keeps_full_refs():
+    j = judge(FakeHeld([deleted(STORE)]), parts())
+    assert 'store media' in as_text(j) and 'store:store/media' not in as_text(j)
+    assert json.loads(as_json(j))['changes'][0]['ref'] == 'store:store/media'
+
+
+def test_reasons_are_wrapped_not_cut_and_at_most_six():
+    lenses = tuple(FlagLens(name=f'lens{i}', message=f'finding number {i} ' + 'word ' * 30) for i in range(9))
+    text = as_text(judge(FakeHeld([deleted(STORE)]), parts(lenses=lenses)))
+    why = text.split('Why:\n', 1)[1].split('\n\n', 1)[0].splitlines()
+    assert sum(1 for l in why if l.startswith('  - ')) == 7 and why[-1].startswith('  - and ') and why[-1].endswith('more below')
+    assert not any(l.endswith('...') for l in why)
+    assert all(len(l) <= 100 for l in text.splitlines())
+
+
+def test_values_the_service_computed_are_counted_not_listed():
+    job = ref('job', 'publisher')
+    change = modified(job, 'GetJob.Timeout', 3, 60)
+    change = type(change)(job, change.type, change.fields + (FieldChange('GetJob.LastModified', 'a', 'b', derived=True),
+                                                            FieldChange('GetJob.RevisionId', 'r1', 'r2', derived=True)))
+    j = judge(FakeHeld([change], {job: {}}), parts())
+    text = as_text(j)
+    assert 'Timeout: 3 -> 60' in text and 'LastModified: a' not in text
+    assert 'and 2 values the service computed (LastModified, RevisionId)' in text
+    fields = json.loads(as_json(j))['changes'][0]['fields']
+    assert [f['derived'] for f in fields] == [False, True, True]
+
+
+def test_copy_notes_are_one_line_and_never_reach_the_gate():
+    from emfirge.core.model import Unknown
+    notes = [Unknown(f'the copy of store:store/media lacks: thing {i}', 'copy', STORE) for i in range(13)]
+    new = ref('store', 'fresh-one')
+    j = judge(FakeHeld([created(new)], {new: {}}, notes=notes), parts())
+    assert j.decision.verdict.value == 'go'
+    text = as_text(j)
+    assert '13 notes on what the practice copies lack: in the JSON report' in text and 'thing 3' not in text
+    assert 'thing 3' in as_text(j, show_all=True)
+    assert len(json.loads(as_json(j))['copy_notes']) == 13
+
+
+def test_a_change_that_can_be_put_back_says_how_that_was_established():
+    new = ref('store', 'fresh-one')
+    text = as_text(judge(FakeHeld([created(new)], {new: {}}), parts()))
+    assert '      can be put back: it can be deleted again' in text.splitlines()

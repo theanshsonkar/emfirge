@@ -14,7 +14,7 @@ from emfirge.aws.engines import EmulatorEngine
 from emfirge.cli.main import main
 
 pytestmark = pytest.mark.lab
-REAL, ENGINE, BRANCH = 9861, 9862, 9863
+REAL, ENGINE, BRANCH = 9864, 9865, 9866
 LOC = {'CreateBucketConfiguration': {'LocationConstraint': 'us-west-2'}}
 TRUST = json.dumps({'Version': '2012-10-17', 'Statement': [{'Effect': 'Allow', 'Principal': {'Service': 'ec2.amazonaws.com'},
                                                             'Action': 'sts:AssumeRole'}]})
@@ -70,7 +70,7 @@ def test_deleting_a_bucket_a_role_reads_is_ask_and_names_the_role(real, tmp_path
     out = capsys.readouterr().out
     assert code == 3, out
     assert 'iam:role/run-reader' in {a['ref'] for a in report['affected']}
-    assert 's3:bucket/run-data' in out and 'Deleted:' in out
+    assert 'bucket run-data' in out and 'Deleted:' in out
     assert fingerprint(real[1]) == before
 
 
@@ -81,7 +81,7 @@ def test_a_failing_script_still_gets_its_report_and_64_plus_its_code(real, tmp_p
     code, _, report = emf(real, script, tmp_path)
     out = capsys.readouterr().out
     assert code == 67, out
-    assert 'Your command failed (exit 3)' in out and 's3:bucket/run-new' in out
+    assert 'Your command failed (exit 3)' in out and 'bucket run-new' in out
     assert report['command_exit_code'] == 3
     assert fingerprint(real[1]) == before
 
@@ -102,3 +102,24 @@ def test_the_script_cannot_see_the_owners_keys(real, tmp_path, capsys, monkeypat
     assert env['AWS_ACCESS_KEY_ID'] != 'OWNER-KEY' and 'AWS_PROFILE' not in env
     assert env['AWS_CONFIG_FILE'] != str(owner_config) and Path(env['AWS_CONFIG_FILE']).stat().st_size == 0
     assert env['AWS_ENDPOINT_URL'] == f'http://127.0.0.1:{BRANCH}'
+
+
+def test_a_setting_put_back_on_the_branch_is_go_with_the_prover(real, tmp_path, capsys):
+    """The undo prover runs by default: a tag on a role nothing names is proven undoable, so the verdict is go."""
+    _, c = real
+    c('iam').create_role(RoleName='run-lonely', AssumeRolePolicyDocument=TRUST)
+    before = fingerprint(c)
+    code, _, report = emf(real, "boto3.client('iam').tag_role(RoleName='run-lonely', Tags=[{'Key': 'team', 'Value': 'x'}])",
+                          tmp_path)
+    out = capsys.readouterr().out
+    assert [u['undo']['undo'] for u in (x for x in report['changes'])] == ['yes'], out
+    assert 'undo_and_proof' in report['seconds']
+    assert code == 0, out
+    assert fingerprint(c) == before
+
+
+def test_without_the_prover_a_modified_setting_is_ask(real, tmp_path, capsys):
+    code, _, report = emf(real, "boto3.client('iam').tag_role(RoleName='run-lonely', Tags=[{'Key': 'team', 'Value': 'y'}])",
+                          tmp_path, '--no-prove-undo')
+    assert code == 3
+    assert 'undo-unknown' in {r['code'] for r in report['reasons']}

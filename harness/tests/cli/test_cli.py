@@ -47,10 +47,10 @@ def test_the_options_reach_the_wiring(monkeypatch):
         raise RuntimeError('stop here')
     monkeypatch.setattr(cli, 'open_bench', capture)
     cli.main(['run', '--real-endpoint', 'https://127.0.0.1:1', '--real-ca', '/ca.pem', '--engine', 'moto', '--budget', '50',
-              '--lens', 'scan=scanner --json', '--prove-undo', '--', 'true'])
+              '--lens', 'scan=scanner --json', '--no-prove-undo', '--', 'true'])
     o = seen['options']
     assert (o.real_endpoint, o.real_ca, o.engine, o.budget, o.real_aws, o.prove_undo) == \
-        ('https://127.0.0.1:1', '/ca.pem', 'moto', 50, False, True)
+        ('https://127.0.0.1:1', '/ca.pem', 'moto', 50, False, False)
     assert o.outside[0].name == 'scan' and tuple(o.outside[0].command) == ('scanner', '--json')
 
 
@@ -85,3 +85,14 @@ def test_outside_records_are_findings_by_their_whole_content():
     assert whole_records('[{"a": 1}]') == {'{"a": 1}': '{"a": 1}'}
     with pytest.raises(ValueError):
         whole_records('not json')
+
+
+def test_the_undo_prover_is_on_by_default(monkeypatch):
+    seen = {}
+
+    def capture(options, admin=()):
+        seen['options'] = options
+        raise RuntimeError('stop here')
+    monkeypatch.setattr(cli, 'open_bench', capture)
+    cli.main(['run', '--real-endpoint', 'https://127.0.0.1:1', '--', 'true'])
+    assert seen['options'].prove_undo is True

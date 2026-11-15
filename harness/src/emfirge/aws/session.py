@@ -5,7 +5,7 @@
   branch         server.wiring.build over that account, on a fresh engine (AWS's emulator or moto) on a free port
   endpoint       the branch on a free 127.0.0.1 port
   parts          the reader (aws/reader.py), the graph with AWS's vocabulary, the built-in lenses with the catalog's
-                 facts, outside tools, AwsReversibility, and the undo prover (aws/undo) when asked for
+                 facts, outside tools, AwsReversibility, and the undo prover (aws/undo; on unless turned off)
 
 The client environment is a guard against accidents, not a sandbox: it makes AWS tools that read the usual
 variables and files reach only the branch, with dummy keys, so an agent cannot pick up the owner's credentials by
@@ -55,7 +55,7 @@ class Options:
     region: str = 'us-west-2'
     budget: int = ReaderSettings.budget
     outside: tuple[ExternalLens, ...] = ()
-    prove_undo: bool = False             # put modified resources back on the branch to prove they can be (aws/undo)
+    prove_undo: bool = True              # put changes back on the branch to prove they can be (aws/undo); runs last
 
 
 @dataclass

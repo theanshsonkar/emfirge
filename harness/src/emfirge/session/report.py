@@ -4,6 +4,11 @@ Text sections, in this order: the verdict and why; what would change (created, m
 before -> after, deleted, actions); what it affects (the default list, then how many weaker 'maybe' ones, shown with
 show_all); flagged by lenses; could not tell; and one line on how the real account was touched.
 
+Plain words: a resource is named the way a person says it ('function tidecast-publisher'), a setting by its own
+path without the read that showed it ('Environment.Variables.DRY_RUN'); long lines are wrapped, never cut. Values the
+service computed (a clock, a hash, a revision) are counted, not listed. Notes on what the practice copies lack are
+counted in one line (listed with show_all and in JSON): they are about the copies, not the change.
+
 Parts are folded: a resource reached only because one reported resource names it (the disks and network cards of
 an instance, the rules of a group) is listed under that resource, not on its own line. Folding changes what is
 shown, never what is decided: the verdict counts every affected resource.
@@ -12,9 +17,10 @@ from __future__ import annotations
 
 import json
 import re
+import textwrap
 from typing import Any, Callable, Iterable, TypeVar
 
-from emfirge.core.model import Change, ChangeType, FieldChange, ResourceRef
+from emfirge.core.model import Change, ChangeType, FieldChange, ResourceRef, Undo
 from emfirge.gate import Code, Reason, as_dict
 from emfirge.graph import Impact, Relation
 
@@ -22,7 +28,7 @@ from .judge import Judgement
 
 T = TypeVar('T')
 WIDTH = 100
-REASONS_SHOWN = 8
+REASONS_SHOWN = 6
 FIELDS_SHOWN = 8
 GROUPS = ((ChangeType.CREATED, 'Created'), (ChangeType.MODIFIED, 'Modified'), (ChangeType.DELETED, 'Deleted'),
           (ChangeType.ACTION, 'Actions'))
@@ -41,16 +47,22 @@ FOLDABLE = frozenset({Relation.REACHED, Relation.DOWNSTREAM})
 
 
 def as_text(j: Judgement, show_all: bool = False, command_code: int | None = None) -> str:
-    lines = [*_verdict(j, command_code), '', *_changes(j), '', *_affects(j, show_all), '',
+    plain = _plain_words(j)
+    lines = [*_verdict(j, command_code, plain), '', *_changes(j), '', *_affects(j, show_all), '',
              *_listed('Flagged by lenses', once(f'{f.lens}: {f.message}' for f in j.decision.facts.findings)), '',
-             *_listed('Could not tell', once(u.what for u in j.decision.facts.unknowns)), '', _account(j)]
-    return '\n'.join(_cut(line) for line in lines) + '\n'
+             *_listed('Could not tell', once(u.what for u in j.decision.facts.unknowns)), '',
+             *_notes(j, show_all), _account(j)]
+    return '\n'.join(w for line in lines for w in _wrap(plain(line))) + '\n'
 
 
 def as_json(j: Judgement, command_code: int | None = None) -> str:
     out: dict[str, Any] = as_dict(j.decision)
+    for entry, change in zip(out['changes'], j.decision.facts.changes):
+        for field, f in zip(entry['fields'], change.fields):
+            field['derived'] = f.derived
     out['maybe'] = [{'ref': str(a.ref), 'because': a.because, 'via': [str(v) for v in a.via], 'strength': a.strength}
                     for a in j.maybe]
+    out['copy_notes'] = [{'what': u.what, 'ref': str(u.ref) if u.ref else None} for u in j.copy_notes]
     out['command_exit_code'] = command_code
     out['seconds'] = dict(j.seconds)
     out['real_account'] = {**j.real, 'changing_calls': 0}
@@ -59,25 +71,26 @@ def as_json(j: Judgement, command_code: int | None = None) -> str:
 
 
 # ---------------------------------------------------------------------- sections
-def _verdict(j: Judgement, command_code: int | None) -> list[str]:
+def _verdict(j: Judgement, command_code: int | None, plain: Callable[[str], str]) -> list[str]:
     d = j.decision
     lines = [f'Verdict: {VERDICT_WORDS[d.verdict.value]} (exit {d.exit_code})']
     if command_code not in (None, 0):
         lines.append(f'Your command failed (exit {command_code}). What it changed before it stopped is below.')
     lines.append('Why:')
     reasons = [_reason(r) for r in once_by(d.reasons, lambda r: r.words)]
-    lines += [f'  - {r}' for r in reasons[:REASONS_SHOWN]]
+    for r in reasons[:REASONS_SHOWN]:
+        short = textwrap.shorten(plain(r), width=2 * (WIDTH - 4), placeholder=' (more below)')
+        lines += textwrap.wrap(short, WIDTH, initial_indent='  - ', subsequent_indent='    ')
     if len(reasons) > REASONS_SHOWN:
-        lines.append(f'  - and {len(reasons) - REASONS_SHOWN} more reasons (see below)')
+        lines.append(f'  - and {len(reasons) - REASONS_SHOWN} more below')
     return lines
 
 
 def _reason(r: Reason) -> str:
-    """The gate's words, shorter where the sections below say the rest: an affected resource's chain is listed
-    under 'What it affects'."""
+    """The gate's words; an affected resource's chain is left to 'What it affects'."""
     if r.code is Code.AFFECTS and r.refs:
         return f'{r.refs[0]} is outside the change, and the change reaches it'
-    return r.words if len(r.words) <= WIDTH else r.words[:WIDTH - 3] + '...'
+    return r.words
 
 
 def _changes(j: Judgement) -> list[str]:
@@ -91,25 +104,31 @@ def _changes(j: Judgement) -> list[str]:
             lines.append(f'  {title}:')
             for c in group:
                 lines += _change(c)
+                undo = j.decision.facts.undo_of(c.ref)
+                if undo is not None and undo.undo is Undo.YES and undo.reasons:
+                    lines.append(f'      can be put back: {undo.reasons[0]}')
     return lines
 
 
 def _change(c: Change) -> list[str]:
     lines = [f'    {c.ref}']
     if c.type is ChangeType.MODIFIED:
-        fields = once(_field(x) for x in c.fields)
+        fields = once(_field(x) for x in c.fields if not x.derived)
         lines += [f'      {x}' for x in fields[:FIELDS_SHOWN]]
         if len(fields) > FIELDS_SHOWN:
             lines.append(f'      and {len(fields) - FIELDS_SHOWN} more settings (in the JSON report)')
+        computed = list(dict.fromkeys(_tail(x.path) for x in c.fields if x.derived))
+        if computed:
+            names = ', '.join(computed[:4]) + (', ...' if len(computed) > 4 else '')
+            noun = 'value' if len(computed) == 1 else 'values'
+            lines.append(f'      and {len(computed)} {noun} the service computed ({names})')
     elif c.type is ChangeType.ACTION and c.calls:
         lines.append(f'      {", ".join(dict.fromkeys(c.calls))}')
     return lines
 
 
 def _field(x: FieldChange) -> str:
-    """A setting by its own name: the same setting shows in several reads ('GetFunction.Configuration.Timeout',
-    'GetFunctionConfiguration.Timeout'), and the person knows it by its last part."""
-    return f'{_tail(x.path)}: {_value(x.before)} -> {_value(x.after)}'
+    return f'{x.path}: {_value(x.before)} -> {_value(x.after)}'
 
 
 def _affects(j: Judgement, show_all: bool) -> list[str]:
@@ -135,6 +154,15 @@ def _listed(title: str, items: list[str]) -> list[str]:
     if not items:
         return [f'{title}: nothing']
     return [f'{title} ({len(items)}):', *(f'  {x}' for x in items)]
+
+
+def _notes(j: Judgement, show_all: bool) -> list[str]:
+    notes = j.copy_notes
+    if not notes:
+        return []
+    if not show_all:
+        return [f'{len(notes)} notes on what the practice copies lack: in the JSON report (--all lists them).', '']
+    return [f'Notes on what the practice copies lack ({len(notes)}):', *(f'  {u.what}' for u in notes), '']
 
 
 def _account(j: Judgement) -> str:
@@ -211,5 +239,34 @@ def _value(value: Any) -> str:
     return text if len(text) <= 40 else text[:37] + '...'
 
 
-def _cut(line: str) -> str:
-    return line if len(line) <= WIDTH + 20 else line[:WIDTH + 17] + '...'
+READ_NAME = re.compile(r'\b(?:Get|List|Describe)[A-Z][A-Za-z0-9]*(?:\{[^}]*\})?(?:\[\])?(?:#\d+)?\.(?=[A-Za-z])')
+
+
+def _plain_words(j: Judgement) -> Callable[[str], str]:
+    """Text for a person: every resource of this session by its short name, and read names dropped from paths."""
+    f = j.decision.facts
+    refs = {c.ref for c in f.changes} | {a.ref for a in f.affected} | {a.ref for a in j.maybe} | \
+        {v for a in (*f.affected, *j.maybe) for v in a.via} | {r for x in f.findings for r in x.refs} | \
+        {u.ref for u in (*f.unknowns, *j.copy_notes) if u.ref}
+    names = sorted(((str(r), short_name(r)) for r in refs), key=lambda p: -len(p[0]))
+    pattern = re.compile('|'.join(re.escape(full) for full, _ in names)) if names else None
+    table = dict(names)
+
+    def plain(line: str) -> str:
+        line = pattern.sub(lambda m: table[m.group(0)], line) if pattern else line
+        return READ_NAME.sub('', line)
+    return plain
+
+
+def short_name(ref: ResourceRef) -> str:
+    """'lambda:function/tidecast-publisher' -> 'function tidecast-publisher'."""
+    kind = ref.type.split(':', 1)[-1].strip('/')
+    return f'{kind} {ref.id}'
+
+
+def _wrap(line: str) -> list[str]:
+    """A long line on several lines, indented under its start. Never cut."""
+    if len(line) <= WIDTH:
+        return [line]
+    indent = ' ' * (len(line) - len(line.lstrip()) + 2)
+    return textwrap.wrap(line, WIDTH, subsequent_indent=indent, break_on_hyphens=False)

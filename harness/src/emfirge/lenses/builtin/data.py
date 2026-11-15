@@ -40,6 +40,8 @@ class DataLens:
                 continue
             if change.type is not ChangeType.CREATED:    # a new resource has no protection to lose
                 for field in change.fields:
+                    if field.derived:
+                        continue           # computed by the service (a clock, a count): no call of the session set it
                     if is_status(field):
                         u = status_unknown(NAME, field, change, self.words.status_words)
                         unknowns += [u] if u else []

@@ -83,11 +83,12 @@ def test_a_read_without_a_copy_time_answer():
     assert answer(b4.handle(request('peek', name='lossy-d')))['size'] == 2
 
 
-def test_what_a_copy_lacks_is_an_unknown_about_it():
+def test_what_a_copy_lacks_is_a_note_about_it_not_an_unknown():
     b, _, _, _ = make({'lossy-1': {'size': 1, 'colour': 'red'}})
     b.handle(request('put', name='lossy-1', set={'size': 2}))
-    [u] = b.unknowns()
-    assert u.ref == ResourceRef(THING, 'lossy-1') and 'its colour' in u.what and u.where == 'branch'
+    [u] = b.copy_notes()
+    assert u.ref == ResourceRef(THING, 'lossy-1') and 'its colour' in u.what and u.where == 'copy'
+    assert b.unknowns() == ()
 
 
 class Settling(FakeAccount):

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Mapping, Sequence
 
 from emfirge.branch.lifecycle import Stage
-from emfirge.core.model import Affected, Change
+from emfirge.core.model import Affected, Change, Unknown
 from emfirge.core.ports import Reversibility
 from emfirge.gate import AffectedRule, Decision, UndoProver, decide, undo_facts
 from emfirge.graph import Graph, GraphReport
@@ -41,12 +41,15 @@ class Parts:
 class Judgement:
     """The verdict and everything the report shows.
     seconds   time per step after the command ended
-    real      how the real account was touched: reads that passed the read-only door, and calls it blocked"""
+    real      how the real account was touched: reads that passed the read-only door, and calls it blocked
+    copy_notes what the practice copies lack: shown, never given to the gate (a gap that mattered made a call of the
+              session refused, and that refusal is an unknown)"""
     decision: Decision
     graph: GraphReport | None
     reading: Reading
     seconds: Mapping[str, float] = field(default_factory=dict)
     real: Mapping[str, int] = field(default_factory=dict)
+    copy_notes: tuple[Unknown, ...] = ()
 
     @property
     def maybe(self) -> tuple[Affected, ...]:
@@ -80,8 +83,9 @@ def judge(held: Held, parts: Parts, endpoints: tuple[str, str] = ('', ''),
     t = time.perf_counter()
     lensed = run_lenses(parts.lenses, LensView(changes)) + outside
     t = clock.lap('lenses', t)
-    prover = parts.prover(changes) if parts.prover and changes else None
+    prover = parts.prover(changes) if parts.prover and changes else None    # last: a proof uses the engine up
     undo = undo_facts(changes, parts.reversibility, prover)
+    t = clock.lap('undo_and_proof', t)
     unknowns = (*held.unknowns(), *reading.unknowns, *(graph.unknowns() if graph else ()), *lensed.unknowns)
     decision = decide(changes, undo, lensed.findings, unknowns, graph.affected() if graph else (),
                       affected_rule=parts.rule)
@@ -89,7 +93,8 @@ def judge(held: Held, parts: Parts, endpoints: tuple[str, str] = ('', ''),
     clock.lap('gate', t)
     stats = held.stats()
     return Judgement(decision, graph, reading, clock.seconds,
-                     {'reads': int(stats.get('real_reads', 0)), 'blocked': int(stats.get('real_blocked', 0))})
+                     {'reads': int(stats.get('real_reads', 0)), 'blocked': int(stats.get('real_blocked', 0))},
+                     tuple(held.copy_notes()))
 
 
 def _affects(parts: Parts, held: Held, changes: tuple[Change, ...], clock: _Clock) -> tuple[Reading, GraphReport | None]:

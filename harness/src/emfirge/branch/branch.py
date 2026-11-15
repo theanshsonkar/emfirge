@@ -45,6 +45,7 @@ class Branch:
         self.baselines = Baselines()
         self._sides = Sides(codec, self.real, engine, self.ids, outcomes)
         self._unknowns: list[Unknown] = []
+        self._copy_notes: list[Unknown] = []
         self._touch = CopyOnTouch(copier, catalog, self.overlay, self.baselines, self._sides, self.ids,
                                   self.real, engine, self._note)
         self._counts: dict[str, int] = {}
@@ -266,8 +267,9 @@ class Branch:
         return self._codec.refusal(call, request, f'Emfirge cannot tell: {what}. {ADVICE}')
 
     def _note(self, ref: ResourceRef, what: str) -> None:
-        """What a copy lacks, as its copier said: an unknown about that resource."""
-        self._unknowns.append(Unknown(f'the copy of {ref} lacks: {what}', 'branch', ref))
+        """What a copy lacks, as its copier said. A note, not an unknown: a practice copy is lossy by design and reads
+        are laid over the real answer. Where a gap matters, a later call is refused, and the refusal is the unknown."""
+        self._copy_notes.append(Unknown(f'the copy of {ref} lacks: {what}', 'copy', ref))
 
     def _count(self, what: str) -> None:
         self._counts[what] = self._counts.get(what, 0) + 1
@@ -363,7 +365,12 @@ class Branch:
         return self.journal.entries()
 
     def unknowns(self) -> tuple[Unknown, ...]:
+        """What the branch could not tell about what happened: refusals, changes it could not name."""
         return tuple(self._unknowns)
+
+    def copy_notes(self) -> tuple[Unknown, ...]:
+        """What the practice copies lack, as their copiers said. Facts about the copies, not about the change."""
+        return tuple(self._copy_notes)
 
     def stats(self) -> dict[str, Any]:
         return {'routes': dict(self._counts), 'copies': dict(self._touch.copies), 'refusals': dict(self._refusals),

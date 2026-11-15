@@ -36,6 +36,7 @@ class FakeHeld:
     held: Sequence[Change] = ()
     after: Mapping[ResourceRef, Any] = field(default_factory=dict)
     refused: Sequence[Unknown] = ()
+    notes: Sequence[Unknown] = ()
     life: Lifecycle = field(default_factory=Lifecycle)
 
     def seal(self) -> None:
@@ -52,6 +53,9 @@ class FakeHeld:
 
     def unknowns(self) -> tuple[Unknown, ...]:
         return tuple(self.refused)
+
+    def copy_notes(self) -> tuple[Unknown, ...]:
+        return tuple(self.notes)
 
     def stats(self) -> dict[str, Any]:
         return {'real_reads': 12, 'real_blocked': 0}

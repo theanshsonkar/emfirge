@@ -25,6 +25,9 @@ from .state import as_number, as_switch, is_status, leaves, operation, short
 from .vocabulary import MoneyWords
 
 NAME = 'money'
+SET_BY_SERVICE_IGNORED = frozenset({'class_changed', 'size_up'})
+"""A size or class the service computed (a bigger CodeSize after a code upload) is not a money fact: no call of the
+session set it. A plan, a switch or a commitment is judged whoever set it."""
 Price = Callable[[Change], float | None]
 
 
@@ -59,7 +62,7 @@ class MoneyLens:
             if b == a:
                 continue
             said = self._judge(shape, b, a)
-            if said:
+            if said and not (field.derived and said[0] in SET_BY_SERVICE_IGNORED):
                 code, message = said
                 out.append(fact(NAME, code, message, change, shape, before=b, after=a))
         return out
