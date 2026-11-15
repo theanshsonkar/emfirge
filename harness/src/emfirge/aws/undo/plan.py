@@ -89,6 +89,9 @@ def plan(entry: Entry, before: View, after: View, models: Models, names: Names) 
     """The inverse of one successful changing call. Raises NoPlan with every strategy's reason."""
     if _writes_data(models, entry.service, entry.operation):
         raise NoPlan(f'{entry.call} writes data: no read shows data itself, so whether it came back cannot be seen')
+    lost = _unread(models, entry)
+    if lost:
+        raise NoPlan(f'the journal does not hold the whole call ({", ".join(lost)} missing), so what it set is not known')
     why = []
     nothing_before = False
     try:
@@ -118,7 +121,10 @@ def g1(entry: Entry, before: View, after: View, models: Models) -> Plan:
     found, sources, gaps = 0, [], []
     for k, sent in params.items():
         member = shape.members.get(k) if shape else None
-        if k in args or member is None or member.metadata.get('idempotencyToken'):
+        if k in args or member is None:
+            continue
+        if member.metadata.get('idempotencyToken'):
+            args[k] = str(uuid.uuid4())     # a fresh token: the old one would make the service skip the call
             continue
         if k in pairs.values() or (k not in pairs and _option(models, entry, k, member)):
             args[k] = sent
@@ -172,8 +178,18 @@ def _setting_value(models: Models, entry: Entry, before: View, after: View, k: s
 
 
 def _option(models: Models, entry: Entry, name: str, member: Shape) -> bool:
-    """A request option (Overwrite, DryRun): a flag no read ever returns. Kept as the call sent it."""
+    """A request option, kept as the call sent it: a flag no read ever returns (Overwrite, DryRun), or a member sent
+    as an HTTP header (a checksum algorithm, an expected owner). A header is how a request describes itself; a
+    setting found under the same name elsewhere (an object listing) would be a false match."""
+    if member.serialization.get('location') == 'header':
+        return True
     return member.type_name == 'boolean' and not _named_in_state(models, entry, name, None)
+
+
+def _unread(models: Models, entry: Entry) -> list[str]:
+    """Required members missing from the journal's params: the call was not read whole (a body not decoded)."""
+    shape = models.input(entry.service, entry.operation)
+    return [m for m in (shape.required_members if shape else ()) if m not in entry.params]
 
 
 def _named_in_state(models: Models, entry: Entry, name: str, value: Any) -> bool:
@@ -238,7 +254,7 @@ def _inverse_args(entry: Entry, inverse: str, src: dict[str, Any], before: View,
                   from_snapshot: bool) -> tuple[dict[str, Any], list[str]]:
     shape = models.input(entry.service, inverse)
     args: dict[str, Any] = {}
-    optional, missing = [], []
+    optional: list[str] = []
     for name, member in (shape.members.items() if shape else ()):
         if member.metadata.get('idempotencyToken'):
             args[name] = str(uuid.uuid4())     # a fresh token: an old one would make the service skip the call

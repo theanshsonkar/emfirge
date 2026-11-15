@@ -10,8 +10,7 @@ import datetime
 import re
 from typing import Any, Callable, Iterator
 
-from ..catalog.names import split
-from ..resource_words import names_type
+from ..catalog.names import related, split
 
 ID_VALUE = re.compile(r'^[\w./:+=@-]{6,}$')
 STATE_KEY = re.compile(r'(State|Status)$')
@@ -30,9 +29,11 @@ def leaves(value: Any, path: tuple[str, ...] = ()) -> Iterator[tuple[tuple[str, 
         yield path, value
 
 
-def new_ids(real: Any, engine: Any, type_: str) -> list[tuple[str, str]]:
-    """(real id, engine id) where the same field holds an id of the resource itself (RoleId, KeyId, a bare Id)
-    and the two differ: the engine gave out its own."""
+def new_ids(real: Any, engine: Any, word: str) -> list[tuple[str, str]]:
+    """(real value, engine value) where the same field holds an id, ARN or address of the resource itself (RoleId,
+    KeyId, a bare Id, a secret's ARN with its random end, a queue's URL) and the two differ: the engine gave out its
+    own. `word` names the resource (its type's name, or a list item's noun: 'accesskey'). An id at the top of the
+    answer (a secret's VersionId) is the resource's own too."""
     mine = dict(leaves(engine))
     out = []
     for path, value in leaves(real):
@@ -40,10 +41,20 @@ def new_ids(real: Any, engine: Any, type_: str) -> list[tuple[str, str]]:
         if not path or not isinstance(value, str) or not isinstance(other, str) or value == other:
             continue
         words = split(path[-1])
-        own = words.designator == 'id' and (not words.words or names_type(words.joined, type_)) or path[-1] == 'UUID'
+        own = words.designator in ('id', 'arn', 'url') and (not words.words or related(words.joined, word)) \
+            or path[-1] == 'UUID' or len(path) == 1 and words.designator == 'id'
         if own and ID_VALUE.match(value) and ID_VALUE.match(other):
             out.append((value, other))
     return list(dict.fromkeys(out))
+
+
+def same_item(real: Any, engine: Any, translate: Callable[[str], str]) -> bool:
+    """The engine's list item is the real one: every name, id or ARN field of the real item has the same value
+    (in engine ids) in the engine's item."""
+    if not isinstance(real, dict) or not isinstance(engine, dict):
+        return translate(real) == engine if isinstance(real, str) else real == engine
+    keys = [k for k, v in real.items() if isinstance(v, str) and split(k).designator in ('name', 'id', 'arn')]
+    return bool(keys) and all(translate(real[k]) == engine.get(k) for k in keys)
 
 
 def states(body: Any) -> dict[tuple[str, ...], str]:

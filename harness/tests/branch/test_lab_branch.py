@@ -76,8 +76,8 @@ def lab(tmp_path_factory):
         rc = clients(real.url, real.ca)
         rc.ids, rc.account = seed(rc), HttpAccount('real', real.url, real.ca)
         before = fingerprint(rc)
-        branch = build(rc.account, engine)
-        server = BranchServer(branch, BRANCH).start()
+        branch = build(rc.account, engine, catalog='curated', copier='curated')   # the curated branch's gaps; the
+        server = BranchServer(branch, BRANCH).start()                               # default: tests/aws/test_layered_lab.py
         yield clients(server.url), rc, branch
         assert fingerprint(rc) == before, 'the real account changed under the branch'
     finally:

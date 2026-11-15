@@ -5,6 +5,8 @@
   settings   a write that sets what a read shows: the same noun after the verb (PutBucketPolicy <- GetBucketPolicy,
              PutFunctionConcurrency <- GetFunctionConcurrency, PutTargets <- ListTargetsByRule), or the read's noun is
              the write's with the write's verb as a participle in front (AttachRolePolicy <- ListAttachedRolePolicies).
+             A write that puts one thing into another (AddRoleToInstanceProfile) is replayed for each item of the
+             read of the container whose list is named after the thing (GetInstanceProfile's Roles).
   details    a read that gives one item of a list in full (GetRolePolicy for each name ListRolePolicies gives).
 """
 from __future__ import annotations
@@ -13,7 +15,7 @@ from dataclasses import dataclass
 
 from botocore.model import ServiceModel
 
-from ..resource_words import noun_of, verb_of
+from ..resource_words import into, noun_of, verb_of
 
 CREATE_VERBS = ('Create', 'Put', 'Register', 'Run')
 SETTING_VERBS = ('Put', 'Set', 'Update', 'Create', 'Attach', 'Add', 'Enable', 'Register', 'Associate')
@@ -24,6 +26,7 @@ DETAIL_VERBS = ('Get', 'Describe')
 class Setting:
     read: str        # the read whose answer holds the setting
     write: str       # the write that sets it
+    item: str = ''   # for a write that puts one thing into the resource: what the thing is called ('role')
 
 
 def creates(model: ServiceModel, words: frozenset[str]) -> list[str]:
@@ -51,6 +54,8 @@ def settings(model: ServiceModel, reads: list[str], create: str) -> list[Setting
                 continue
             if noun_of(op) == noun or (noun == participle(verb) + noun_of(op)):
                 out.append(Setting(read, op))
+            elif (parts := into(op)) and parts[1] == noun:
+                out.append(Setting(read, op, parts[0]))
     return out
 
 

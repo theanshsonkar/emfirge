@@ -95,11 +95,18 @@ def plain(body: Any) -> Any:
 
 
 def refused_value(message: str, params: dict[str, Any], required: frozenset[str]) -> tuple[str, ...] | None:
-    """The optional member, or key of a map member, that an error message names (the longest name wins)."""
+    """The optional member, or key of a map member, that an error message names, written as one word or in words
+    ('RevisionId' or 'Revision Id'). A key inside a map wins over the map; then the longest name."""
     names: list[tuple[str, ...]] = [(k,) for k in params if k not in required]
     names += [(k, sub) for k, v in params.items() if isinstance(v, dict) for sub in v]
-    hits = [n for n in names if re.search(rf'(?<![A-Za-z]){re.escape(n[-1])}(?![a-z])', message)]
-    return max(hits, key=lambda n: (len(n[-1]), len(n))) if hits else None
+    text = _squash(message)
+    hits = [n for n in names if re.search(rf'(?<![A-Za-z]){re.escape(n[-1])}(?![a-z])', message)
+            or len(n[-1]) >= 6 and _squash(n[-1]) in text]
+    return max(hits, key=lambda n: (len(n), len(n[-1]))) if hits else None
+
+
+def _squash(text: str) -> str:
+    return re.sub(r'[^a-z0-9]', '', text.lower())
 
 
 def _without(params: dict[str, Any], path: tuple[str, ...]) -> dict[str, Any]:

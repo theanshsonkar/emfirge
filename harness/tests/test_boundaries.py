@@ -81,3 +81,19 @@ def test_only_aws_imports_the_aws_sdk(path):
 
 def test_the_rule_is_checked_on_real_files():
     assert modules('core') and modules('branch')
+
+
+SESSION_MAY_IMPORT = ('core', 'branch', 'graph', 'lenses', 'gate', 'session')
+
+
+@pytest.mark.parametrize('path', modules('session'), ids=str)
+def test_the_session_is_cloud_neutral(path):
+    """The session wires core, branch, graph, lenses and gate; cloud parts come in by injection."""
+    bad = set()
+    for m in imports(path):
+        if ours(m) is not None:
+            if ours(m) not in SESSION_MAY_IMPORT:
+                bad.add(m)
+        elif top(m) != 'emfirge' and top(m) not in sys.stdlib_module_names and top(m) != '__future__':
+            bad.add(m)
+    assert not bad, f'{path} imports {bad}'

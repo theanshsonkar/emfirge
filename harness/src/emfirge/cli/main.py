@@ -63,7 +63,7 @@ def _seal(args: argparse.Namespace) -> int:
 
 def _options(args: argparse.Namespace, workdir: Path) -> Options:
     return Options(workdir=workdir, real_endpoint=args.real_endpoint, real_ca=args.real_ca, real_aws=args.real_aws,
-                   engine=args.engine, region=args.region, budget=args.budget,
+                   engine=args.engine, engine_port=args.engine_port, port=args.port, region=args.region, budget=args.budget,
                    outside=tuple(outside_lens(spec) for spec in args.lens), prove_undo=args.prove_undo)
 
 
@@ -113,6 +113,8 @@ def _branch_options(p: argparse.ArgumentParser) -> None:
                        help='read your real AWS account with your own credentials (reads only, never writes)')
     p.add_argument('--real-ca', metavar='FILE', help='CA file for --real-endpoint')
     p.add_argument('--engine', choices=('emulator', 'moto'), default='emulator', help='the fake that runs changes')
+    p.add_argument('--engine-port', type=int, help='port for the engine (default: a free one)')
+    p.add_argument('--port', type=int, help='port for the branch endpoint on 127.0.0.1 (default: a free one)')
     p.add_argument('--region', default=os.environ.get('AWS_REGION') or os.environ.get('AWS_DEFAULT_REGION') or 'us-west-2')
     p.add_argument('--budget', type=int, default=Options.budget, help='reads of the real account for the graph, at most')
     p.add_argument('--lens', action='append', default=[], metavar="'NAME=COMMAND'",

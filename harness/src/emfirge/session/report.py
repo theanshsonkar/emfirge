@@ -12,15 +12,16 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable, TypeVar
 
 from emfirge.core.model import Change, ChangeType, FieldChange, ResourceRef
-from emfirge.gate import as_dict
+from emfirge.gate import Code, Reason, as_dict
 from emfirge.graph import Impact, Relation
 
 from .judge import Judgement
 
-WIDTH = 72
+T = TypeVar('T')
+WIDTH = 100
 REASONS_SHOWN = 8
 FIELDS_SHOWN = 8
 GROUPS = ((ChangeType.CREATED, 'Created'), (ChangeType.MODIFIED, 'Modified'), (ChangeType.DELETED, 'Deleted'),
@@ -64,11 +65,19 @@ def _verdict(j: Judgement, command_code: int | None) -> list[str]:
     if command_code not in (None, 0):
         lines.append(f'Your command failed (exit {command_code}). What it changed before it stopped is below.')
     lines.append('Why:')
-    reasons = once(r.words for r in d.reasons)
+    reasons = [_reason(r) for r in once_by(d.reasons, lambda r: r.words)]
     lines += [f'  - {r}' for r in reasons[:REASONS_SHOWN]]
     if len(reasons) > REASONS_SHOWN:
         lines.append(f'  - and {len(reasons) - REASONS_SHOWN} more reasons (see below)')
     return lines
+
+
+def _reason(r: Reason) -> str:
+    """The gate's words, shorter where the sections below say the rest: an affected resource's chain is listed
+    under 'What it affects'."""
+    if r.code is Code.AFFECTS and r.refs:
+        return f'{r.refs[0]} is outside the change, and the change reaches it'
+    return r.words if len(r.words) <= WIDTH else r.words[:WIDTH - 3] + '...'
 
 
 def _changes(j: Judgement) -> list[str]:
@@ -176,14 +185,19 @@ def because(i: Impact, deleted: frozenset[ResourceRef] | set[ResourceRef] = froz
 DOTTED = re.compile(r'[\w#{}"-]+(?:\.[\w#{}"-]+)+')
 
 
+def once_by(items: Iterable[T], words: Callable[[T], str]) -> list[T]:
+    """Each fact once, by its words (see once)."""
+    seen: dict[str, T] = {}
+    for item in items:
+        seen.setdefault(DOTTED.sub(lambda m: _tail(m.group(0)), words(item)), item)
+    return list(seen.values())
+
+
 def once(lines: Iterable[str]) -> list[str]:
     """Each fact once. A lens or the gate says one fact once per read that shows it ('...(GetFunction.Configuration.
     Environment.Variables.DRY_RUN: true -> false)', and the same from GetFunctionConfiguration): two lines that are
     the same when every dotted path is cut to its last part are one fact. The first is kept."""
-    seen: dict[str, str] = {}
-    for line in lines:
-        seen.setdefault(DOTTED.sub(lambda m: _tail(m.group(0)), line), line)
-    return list(seen.values())
+    return once_by(lines, lambda line: line)
 
 
 def _tail(path: str) -> str:
@@ -198,4 +212,4 @@ def _value(value: Any) -> str:
 
 
 def _cut(line: str) -> str:
-    return line if len(line) <= WIDTH * 2 else line[:WIDTH * 2 - 3] + '...'
+    return line if len(line) <= WIDTH + 20 else line[:WIDTH + 17] + '...'

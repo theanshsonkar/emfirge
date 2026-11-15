@@ -26,7 +26,7 @@ from emfirge.branch import Branch
 from emfirge.branch.baseline import Answer
 from emfirge.branch.journal import Entry
 from emfirge.branch.overlay import State
-from emfirge.core.model import Change, ChangeType, ResourceRef, Undo, UndoFact
+from emfirge.core.model import Call, Change, ChangeType, ResourceRef, Undo, UndoFact
 
 from ..codec import AwsCodec
 from .compare import Difference, Window, compare
@@ -62,6 +62,8 @@ class BranchUndoProver:
         self._reader = Reader(door, timing, sleep, clock)
         self._runner = Runner(door, codec, timing, sleep, clock)
         self._facts: dict[ResourceRef, UndoFact] | None = None
+        self._noise: frozenset[tuple[ResourceRef, int, str]] = frozenset()   # learned while settling
+        self._side: set[ResourceRef] = set()      # changed, but named by no call: a side effect of other calls
         self.seconds = 0.0
 
     def prove(self, change: Change) -> UndoFact:
@@ -79,12 +81,16 @@ class BranchUndoProver:
         facts = {c.ref: UndoFact(c.ref, Undo.UNKNOWN, (NOT_TRIED[c.type],)) for c in self._changes if c.ref not in tried}
         groups = self._groups(tried, {c.ref for c in self._changes if c.type is ChangeType.DELETED})
         watched = [r for r, s in held.items() if s is State.COPIED or (r in tried and s is State.BORN)]
-        end = self._reader.settle(watched, self._same)
+        end = self._reader.settle(watched, self._moved)
+        self._noise = end.noise
         born = {r for r in tried if held.get(r) is State.BORN}
         start = self._clock()
         self._undo(groups, end.snapshot, born)
         window = lambda: Window(start, self._clock(), self._timing.slack)
-        after = self._reader.settle(watched, self._same, lambda s: self._clean(s, end.snapshot, tried, window()))
+        leaving = [r for g in groups if not g.blocked and not g.failures for r in g.refs & born]
+        after = self._reader.settle(watched, self._moved, lambda s: self._clean(s, end.snapshot, tried, window()),
+                                    end.noise, lambda s: any(not self._gone(r, end.snapshot, s)[0] for r in leaving))
+        self._noise = after.noise
         for group in groups:
             for ref in group.refs:
                 facts[ref] = self._fact(ref, group, end.snapshot, after.snapshot, after.stable, born, window())
@@ -107,9 +113,7 @@ class BranchUndoProver:
                 merged.blocked = (f'{e.call} also deleted {", ".join(sorted(str(r) for r in named & deleted))}, '
                                   'which is not put back on the branch')
             groups = [g for g in groups if all(g is not m for m in mine)] + [merged]
-        for g in groups:
-            if not g.entries and not g.blocked:
-                g.blocked = 'no call of the session named it, so there is no call to put back'
+        self._side = {r for g in groups if not g.entries for r in g.refs}
         return groups
 
     def _undo(self, groups: list[Group], end: Snapshot, born: set[ResourceRef]) -> None:
@@ -162,19 +166,23 @@ class BranchUndoProver:
         return View(tuple(r for r in reads if r.body is not MISSING), ids)
 
     # ------------------------------------------------------------------ comparing
-    def _same(self, a: Snapshot, b: Snapshot) -> bool:
-        """Two rounds of reads agree, apart from each read's noise (status only, for reads without a baseline)."""
+    def _moved(self, a: Snapshot, b: Snapshot) -> set[tuple[ResourceRef, int, str]]:
+        """Where two rounds of reads differ, apart from each read's noise at copy time (status only, for reads
+        without a baseline)."""
+        out = set()
         for ref, answers in b.items():
             base = self._door.baselines(ref)
             for i, (x, y) in enumerate(zip(a.get(ref, ()), answers)):
-                if x.status != y.status:
-                    return False
-                if i < len(base) and x.ok:
-                    out = compare('', x, None, y, lambda body: self._door.focus(ref, base[i].call, body),
-                                  base[i].noise, frozenset(), Window(0, 0))
-                    if out.differences:
-                        return False
-        return True
+                if x.status != y.status or i >= len(base):
+                    out |= {(ref, i, '(status)')} if x.status != y.status else set()
+                    continue
+                focus = self._focus(ref, base[i].call)
+                diffs = compare('', x, None, y, focus, base[i].noise, frozenset(), Window(0, 0)).differences
+                out |= {(ref, i, d.path) for d in diffs}
+        return out
+
+    def _focus(self, ref: ResourceRef, call: Call) -> Callable[[object], object]:
+        return lambda body: self._door.focus(ref, call, body)
 
     def _diffs(self, ref: ResourceRef, end: Snapshot, now: Snapshot, window: Window,
                set_names: frozenset[str]) -> tuple[list[Difference], list[Difference]]:
@@ -182,8 +190,9 @@ class BranchUndoProver:
         real, clocks = [], []
         e1s = end.get(ref, ())
         for i, b in enumerate(self._door.baselines(ref)):
+            learned = frozenset(p for r, j, p in self._noise if r == ref and j == i)
             out = compare(b.call.operation, b.e0, e1s[i] if i < len(e1s) else None, now[ref][i],
-                          lambda body: self._door.focus(ref, b.call, body), b.noise, set_names, window)
+                          self._focus(ref, b.call), b.noise | learned, set_names, window)
             real += out.differences
             clocks += out.clocks
         return real, clocks
@@ -198,7 +207,7 @@ class BranchUndoProver:
             evidence += then is True and after is False
         return True, evidence
 
-    def _shows(self, ref: ResourceRef, call, answer: Answer) -> bool | None:
+    def _shows(self, ref: ResourceRef, call: Call, answer: Answer) -> bool | None:
         """True: the answer shows the resource; False: it shows it is not there; None: it says neither."""
         if not answer.ok:
             return False
@@ -263,12 +272,13 @@ class BranchUndoProver:
         return UndoFact(ref, Undo.YES, (f'put back on the branch and compared: {reads} reads, no difference{note}',))
 
     def _collateral(self, group: Group, end: Snapshot, now: Snapshot, window: Window) -> list[str]:
-        """Differences on copied resources outside the tried changes (untouched by the session, or named with no
-        trace): putting back changed them."""
-        tried = {c.ref for c in self._changes if c.type in TRIED}
+        """Differences on copied resources outside the group that every put-back must leave as they were: those the
+        session did not change (or named with no trace), and those it changed only as a side effect of its calls
+        (named by none of them: putting back the calls must take the side effect back too)."""
+        tried = {c.ref for c in self._changes if c.type in TRIED} - self._side
         out = []
         for r in now:
-            if r not in tried and self._door.held().get(r) is State.COPIED:
+            if r not in tried and r not in group.refs and self._door.held().get(r) is State.COPIED:
                 d, _ = self._diffs(r, end, now, window, frozenset())
                 out += [f'{r} (not a change of the session that was put back): {x}' for x in d]
         return out

@@ -10,6 +10,7 @@ from .catalog.arns import ArnFormat, canonical_value, compile_format
 from .catalog.names import Member, score, split
 
 QUALIFIER = 'by'                                     # ListTargetsByRule: the noun ends before 'By'
+INTO = 'to'                                          # AddRoleToInstanceProfile: a role into a profile
 NOISE = frozenset({'list', 'entry', 'summary', 'detail', 'metadata', 'configuration', 'info', 'set', 'item'})
 _TRAILER = re.compile(r'^(v?\d+|v)$')              # ListObjectsV2
 
@@ -29,6 +30,15 @@ def noun_of(operation: str) -> str:
     while words and _TRAILER.match(words[-1]):
         words.pop()
     return ''.join(words)
+
+
+def into(operation: str) -> tuple[str, str] | None:
+    """'X To Y' in an operation's name, as two joined words: AddRoleToInstanceProfile -> ('role', 'instanceprofile')."""
+    words = list(split(operation).words)[1:]
+    if INTO not in words or words.index(INTO) in (0, len(words) - 1):
+        return None
+    i = words.index(INTO)
+    return ''.join(words[:i]), ''.join(words[i + 1:])
 
 
 def type_word(type_: str) -> str:

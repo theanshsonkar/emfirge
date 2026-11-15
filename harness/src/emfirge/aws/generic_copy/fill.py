@@ -79,8 +79,9 @@ def empty(value: Any) -> bool:
     return value is None or value == '' or value == [] or value == {}
 
 
-def fill(shape: StructureShape | None, sources: Iterable[Mapping[str, Any]]) -> Filled:
-    """The input for `shape`, from `sources` (the strongest first)."""
+def fill(shape: StructureShape | None, sources: Iterable[Mapping[str, Any]], wrap: bool = True) -> Filled:
+    """The input for `shape`, from `sources` (the strongest first). `wrap`: a structure member no source names may
+    be filled from the sources' top level (one level only: inside such a structure, members are looked up)."""
     sources = [s for s in sources if isinstance(s, Mapping)]
     out = Filled({})
     if shape is None:
@@ -88,7 +89,9 @@ def fill(shape: StructureShape | None, sources: Iterable[Mapping[str, Any]]) -> 
     for name, member in shape.members.items():
         if member.serialization.get('location') in ('header', 'headers') and name not in shape.required_members:
             continue      # checksums, request payers, expected owners: request plumbing, not a setting
-        value = _member(name, member, sources, out, (name,))
+        if not wrap and not split(name).words:
+            continue      # inside a wrapper filled from the top: a bare Arn or Name there is the resource's own
+        value = _member(name, member, sources, out, (name,), wrap)
         if value is MISSING:
             if name in shape.required_members:
                 out.missing.append(name)
@@ -97,14 +100,15 @@ def fill(shape: StructureShape | None, sources: Iterable[Mapping[str, Any]]) -> 
     return out
 
 
-def _member(name: str, shape: Shape, sources: list[Mapping[str, Any]], out: Filled, path: tuple[str, ...]) -> Any:
+def _member(name: str, shape: Shape, sources: list[Mapping[str, Any]], out: Filled, path: tuple[str, ...],
+            wrap: bool) -> Any:
     found = lookup(name, sources)
     if found is not MISSING:
         value = adapt(found, shape, out, path)
         if value is not MISSING:
             return value
-    if shape.type_name == 'structure':        # a wrapper the answers do not have: fill it from their top level
-        inner = fill(shape, sources)
+    if wrap and shape.type_name == 'structure':   # a wrapper the answers do not have: fill it from their top level
+        inner = fill(shape, sources, wrap=False)
         if inner.params and not inner.missing:
             out.fetches += inner.fetches
             return inner.params
@@ -131,9 +135,10 @@ def lookup(name: str, sources: list[Mapping[str, Any]]) -> Any:
 
 
 def _variant(want: Any, have: Any) -> bool:
-    """Same words under another designator (Name <- Arn), or one name is the other's tail (Document <-> PolicyDocument)."""
+    """Same words, an ARN where a name or id is wanted (FunctionName <- FunctionArn: AWS takes the ARN for the name),
+    or one name is the other's tail (Document <-> PolicyDocument)."""
     if want.words == have.words:
-        return want.designator != have.designator and 'url' not in (want.designator, have.designator)
+        return have.designator == 'arn' and want.designator in ('name', 'id', None)
     if want.designator != have.designator or not have.words:
         return False
     short, long_ = sorted((want.words, have.words), key=len)

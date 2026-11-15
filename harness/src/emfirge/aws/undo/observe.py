@@ -40,11 +40,16 @@ class Timing:
     calm: int = 3             # rounds in a row with no change that count as stopped
 
 
+Moved = Callable[[Snapshot, Snapshot], set[tuple[ResourceRef, int, str]]]
+"""(ref, read index, path) of every place two rounds of reads differ."""
+
+
 @dataclass(frozen=True)
 class Settled:
     snapshot: Snapshot
-    stable: bool              # two rounds in a row agreed (or `done` said so) before the limit
+    stable: bool              # `done` held, or the answers stopped moving, before the limit
     seconds: float
+    noise: frozenset[tuple[ResourceRef, int, str]] = frozenset()   # places that moved in every round
 
 
 class Reader:
@@ -61,17 +66,26 @@ class Reader:
     def read(self, refs: Iterable[ResourceRef]) -> Snapshot:
         return {ref: tuple(self._door.send(c) for c in self.calls(ref)) for ref in refs}
 
-    def settle(self, refs: list[ResourceRef], same: Callable[[Snapshot, Snapshot], bool],
-               done: Callable[[Snapshot], bool] = lambda s: False) -> Settled:
-        """Read until `done` holds, or the answers stay the `same` for `calm` rounds in a row (a state that holds
-        still for one round can still be on its way, like DELETING), or the limit passes."""
-        start, calm = self._clock(), 0
+    def settle(self, refs: list[ResourceRef], moved: Moved, done: Callable[[Snapshot], bool] = lambda s: False,
+               noise: frozenset[tuple[ResourceRef, int, str]] = frozenset(),
+               pending: Callable[[Snapshot], bool] = lambda s: False) -> Settled:
+        """Read until `done` holds, or nothing moves for `calm` rounds in a row while nothing is `pending` (a table
+        that holds still at DELETING is still on its way out), or the limit passes.
+
+        A place that moves in `calm` rounds of one wait, with nothing sent in between, is noise (a presigned URL,
+        a clock that ticks on every read). A change landing moves once or twice and then stops."""
+        start, streak = self._clock(), 0
+        moves: dict[tuple[ResourceRef, int, str], int] = {}
         prev = self.read(refs)
-        while not done(prev) and calm < self._timing.calm:
+        while not done(prev) and streak < self._timing.calm:
             if self._clock() - start >= self._timing.limit:
-                return Settled(prev, False, self._clock() - start)
+                return Settled(prev, False, self._clock() - start, noise)
             self._sleep(self._timing.interval)
             cur = self.read(refs)
-            calm = calm + 1 if same(prev, cur) else 0
+            now_moved = moved(prev, cur)
+            for place in now_moved:
+                moves[place] = moves.get(place, 0) + 1
+            noise = noise | frozenset(p for p, n in moves.items() if n >= self._timing.calm)
+            streak = streak + 1 if not now_moved - noise and not pending(cur) else 0
             prev = cur
-        return Settled(prev, True, self._clock() - start)
+        return Settled(prev, True, self._clock() - start, noise)

@@ -90,13 +90,21 @@ class Places:
         return {norm(name): f'{prefix}:{name}' for name in store._types.get(prefix, {})}
 
     def types_for(self, service: str, noun: str) -> tuple[str, ...]:
-        """The types a noun names: the exact type, else types whose name starts with it ('rule-on-default-event-bus')."""
-        types, n = self.types(service), norm(noun)
+        """The types a noun names: the type of that name and its kinds ('loadbalancer', 'loadbalancer/app/',
+        'rule-on-default-event-bus'). A noun with no type is tried by its last words ('PolicyRoles' are roles)."""
+        words = re.findall(r'[A-Z]?[a-z0-9]+|[A-Z]+(?![a-z])', noun)
+        for start in range(len(words)):
+            found = self._types_named(service, norm(''.join(words[start:])))
+            if found:
+                return found
+        return ()
+
+    def _types_named(self, service: str, n: str) -> tuple[str, ...]:
         if not n:
             return ()
-        if n in types:
-            return (types[n],)
-        return tuple(t for t in types.values() if t.split(':', 1)[1].lower().startswith(n + '-'))
+        types = self.types(service)
+        kinds = tuple(t for t in types.values() if re.match(re.escape(n) + '[-/]', t.split(':', 1)[1].lower()))
+        return ((types[n],) if n in types else ()) + kinds
 
     @lru_cache(maxsize=None)
     def weight(self, type_: str) -> int:
@@ -143,7 +151,8 @@ class Places:
             for t in self.types_for(service, op_noun(op)):
                 found.append((op, t))
         found.sort(key=lambda x: (-self.weight(x[1]), x[0]))
-        return list(dict.fromkeys(found))
+        seen: set[str] = set()
+        return [(op, t) for op, t in found if not (op in seen or seen.add(op))]
 
     def owners(self, service: str, operation: str, params: dict[str, Any]) -> tuple[ResourceRef, ...]:
         """The resources a read with these parameters is about, by the catalog."""
@@ -182,13 +191,21 @@ class Places:
             return Placed(ref, False) if ref else None
         if not isinstance(item, dict):
             return None
-        for k, v in item.items():
-            if isinstance(v, str) and norm(k) in ('arn', norm(stem(noun)) + 'arn'):
-                ref = self._by_arn(v, types)
-                if ref:
-                    return Placed(ref, True)
+        ref = self._own_arn(item, noun, types)
+        if ref:
+            return Placed(ref, _full(item, noun))
         ref = self._by_read(service, item_context(params, item, noun), types)
         return Placed(ref, _full(item, noun)) if ref else None
+
+    def _own_arn(self, item: dict[str, Any], noun: str, types: tuple[str, ...]) -> ResourceRef | None:
+        """The item's own ARN: a field named Arn, <noun>Arn or <type>Arn first, then any ARN of a listed type."""
+        names = {'arn', norm(stem(noun)) + 'arn', *(norm(t.split(':', 1)[1]) + 'arn' for t in types)}
+        arns = [(norm(k) not in names, v) for k, v in item.items() if isinstance(v, str) and v.startswith('arn:')]
+        for _, value in sorted(arns, key=lambda x: x[0]):
+            ref = self._by_arn(value, types)
+            if ref:
+                return ref
+        return None
 
     def _by_arn(self, value: str, types: tuple[str, ...]) -> ResourceRef | None:
         ref = self.catalog.parse_arn(value) if value.startswith('arn:') else None
@@ -277,23 +294,24 @@ def contexts(params: dict[str, Any], answer: Any, operation: str) -> list[dict[s
 
 
 def fill_value(ctx: dict[str, Any], member: str, shape: Shape) -> Any:
-    """A value for parameter `member` from a context, or None. A list of strings takes one value."""
+    """A value for parameter `member` from a context, or None. A list of strings takes one value. Names match
+    whatever the case of their first letter ('restApiId' from 'RestApiId')."""
     is_list = shape.type_name == 'list' and getattr(shape.member, 'type_name', '') == 'string'
     if shape.type_name not in ('string', 'list') or (shape.type_name == 'list' and not is_list):
         return None
+    folded = {k.lower(): v for k, v in ctx.items() if isinstance(v, str) and v}
     name = singular(member) if is_list else member
     base = stem(name)
-    for key in (name, member, *(base + s for s in ('Arn', 'Name', 'Id', 'Url', 'ARN')), base,
-                base[:1].upper() + base[1:]):
-        v = ctx.get(key)
-        if isinstance(v, str) and v:
+    for key in (name, member, *(base + s for s in ('Arn', 'Name', 'Id', 'Url', 'ARN')), base):
+        v = folded.get(key.lower())
+        if v:
             return [v] if is_list else v
     return None
 
 
 def _filled_from(member: str, own: set[str]) -> bool:
-    base = stem(singular(member))
-    return any(k == member or stem(k) == base or k == base for k in own)
+    base = stem(singular(member)).lower()
+    return any(k.lower() == member.lower() or stem(k).lower() == base for k in own)
 
 
 def _full(item: dict[str, Any], noun: str) -> bool:

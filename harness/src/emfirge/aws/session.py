@@ -50,6 +50,8 @@ class Options:
     real_ca: str | None = None
     real_aws: bool = False               # the owner's real AWS account, with their own credentials
     engine: str = 'emulator'
+    engine_port: int | None = None       # default: a free port
+    port: int | None = None              # the branch endpoint's port; default: a free port
     region: str = 'us-west-2'
     budget: int = ReaderSettings.budget
     outside: tuple[ExternalLens, ...] = ()
@@ -111,12 +113,12 @@ def open_bench(options: Options, admin: tuple[tuple[str, Any], ...] = ()) -> tup
     """Start the engine, build the branch over the real account, serve it; and the parts that judge it."""
     codec = AwsCodec(options.region)
     real = real_account(options, codec)
-    engine = make_engine(options.engine, free_port(), options.workdir)
+    engine = make_engine(options.engine, options.engine_port or free_port(), options.workdir)
     engine.start()
     stops: list[Callable[[], None]] = [engine.stop]
     try:
         branch = build(real, engine, options.region, codec)
-        server = BranchServer(branch, free_port(), admin).start()
+        server = BranchServer(branch, options.port or free_port(), admin).start()
         stops.append(server.stop)
         catalog = AwsCatalog(account=account_id(branch.real, codec, options.region), region=options.region)
         bench = AwsBench(branch, server.url, options.region, options.workdir, codec, catalog, stops)

@@ -69,9 +69,9 @@ SKIP = frozenset({
 """Reads of data (objects, items, messages, logs, secrets) or of AWS's public catalogue (images, prices, instance
 types): not the account's settings, and often large. From experiment 12's crawl, plus four history lists."""
 
-DETAIL_WORDS = ('Policy', 'Target', 'Subscription', 'Notification', 'Integration', 'Origin', 'Environment',
-                'Attribute', 'Configuration', 'Config', 'Definition', 'Mapping', 'RecordSet', 'Profile')
-"""Words in the reads that hold references: policies name principals and resources; targets, subscriptions,
+DETAIL_WORDS = ('Polic', 'Target', 'Subscription', 'Notification', 'Integration', 'Origin', 'Environment',
+                'Attribute', 'Config', 'Definition', 'Mapping', 'RecordSet', 'Profile')
+"""Word stems in the reads that hold references ('Polic': Policy and Policies): policies name principals and resources; targets, subscriptions,
 notifications and integrations name what they call; configurations, attributes and definitions hold ids."""
 
 
@@ -278,7 +278,7 @@ class _Crawl:
         if service is None:
             return
         listed = ref in self.states
-        planned = self._candidates(ref, service, self.ctx.get(ref, []))
+        planned = self._catalog_reads(ref, service) + self._filled_reads(ref, service, self.ctx.get(ref, []))
         ranked = sorted(planned, key=lambda c: _rank(c[0], ref, listed))
         if not everything:
             ranked = [c for c in ranked if _rank(c[0], ref, listed) < 2][:cap]
@@ -290,31 +290,37 @@ class _Crawl:
             if answer is None:
                 continue
             new_ctx = self._absorb_read(ref, service, op, params, answer)
-            more = [c for c in self._candidates(ref, service, new_ctx) if c not in queue and not self._was_read(service, *c)]
+            more = [c for c in self._filled_reads(ref, service, new_ctx) if c not in queue]
             take = more[:max(0, follow_ups)]
             follow_ups -= len(take)
             queue += take
 
-    def _candidates(self, ref: ResourceRef, service: str, ctxs: list[dict[str, Any]]) -> list[tuple[str, dict]]:
-        """(operation, params): the catalog's reads of the resource, and reads of its service that known values
-        fill and that the catalog says are about this resource."""
+    def _catalog_reads(self, ref: ResourceRef, service: str) -> list[tuple[str, dict]]:
+        """(operation, params) of the reads the catalog lists for the resource, not read yet."""
         out = [(op, {**params, **self.places.extras(svc, op)}) for svc, op, params in self.places.catalog.reads_of(ref)
                if svc == service and op not in SKIP]
+        return [c for c in out if not self._was_read(service, *c)]
+
+    def _filled_reads(self, ref: ResourceRef, service: str, ctxs: list[dict[str, Any]]) -> list[tuple[str, dict]]:
+        """Reads of the resource's service that known values fill (each inline policy of a role, the attributes of
+        a queue by its URL) and that the catalog says are about this resource."""
+        listed = {op for _, op, _ in self.places.catalog.reads_of(ref)}
         last = ref.id.rsplit('/', 1)[-1]
+        out = []
         for op in self.places.read_ops(service):
-            if op in SKIP or any(o == op for o, _ in out):
+            if op in SKIP or op in listed:
                 continue
             for ctx in ctxs:
                 params = self.places.fill(service, op, ctx)
-                if params and any(last in v for v in strings(params)) and ref in self.places.owners(service, op, params):
+                if params and not self._was_read(service, op, params) and any(last in v for v in strings(params)) \
+                        and ref in self.places.owners(service, op, params) and (op, params) not in out:
                     out.append((op, params))
-                    break
-        return [c for c in out if not self._was_read(service, *c)]
+        return out
 
     def _absorb_read(self, ref: ResourceRef, service: str, op: str, params: dict[str, Any], answer: Any) -> list[dict]:
         """Record a read about `ref`. Whole other resources in its lists are a reverse read: recorded on their own and
         cut from this answer. Returns the contexts the answer offers."""
-        kept = _cut(answer, lambda key, parent, item: self._other(ref, service, op, key, parent, item, params))
+        kept = _cut_top(answer, lambda key, item: self._other(ref, service, op, key, '', item, params))
         name = op if op not in self.states.get(ref, {}) else f'{op}{json.dumps(params, sort_keys=True, default=str)}'
         self._put(ref, name, kept)
         new = contexts(params, answer, op)
@@ -363,11 +369,11 @@ class _Crawl:
             return None
         try:
             answer = self._pages(client, method, params) if client.can_paginate(method) else getattr(client, method)(**params)
-        except (botocore.exceptions.ClientError, botocore.exceptions.ParamValidationError, CannotTell):
-            self.counts['failed'] += 1
-            return None
-        except botocore.exceptions.BotoCoreError:
-            self.counts['failed'] += 1
+        except Spent:
+            raise
+        except (botocore.exceptions.ClientError, botocore.exceptions.BotoCoreError, botocore.parsers.ResponseParserError,
+                CannotTell, ValueError):
+            self.counts['failed'] += 1     # refused, not there, not served, or an answer the SDK cannot parse
             return None
         answer.pop('ResponseMetadata', None)
         self._done[key] = plain(answer)
@@ -416,6 +422,14 @@ def _cut(node: Any, claims: Callable[[str, str, Any], bool], key: str = '', pare
     if isinstance(node, list):
         return [_cut(x, claims, '', key) for x in node if not claims(key, parent, x)]
     return node
+
+
+def _cut_top(answer: Any, claims: Callable[[str, Any], bool]) -> Any:
+    """The answer without the items of its top-level lists that `claims(list key, item)` takes. Only the top: a list
+    inside the resource's own settings (the roles of a profile) is part of what it names."""
+    if not isinstance(answer, dict):
+        return answer
+    return {k: [x for x in v if not claims(k, x)] if isinstance(v, list) else v for k, v in answer.items()}
 
 
 def plain(value: Any) -> Any:

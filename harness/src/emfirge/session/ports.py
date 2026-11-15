@@ -1,6 +1,6 @@
 """What a session needs from the parts it does not own: the branch it judges, the reader of the account's settings,
 and the bench a cloud plug-in sets up (a branch on a live local endpoint). Cloud-neutral: written against
-emfirge.core only, so a second cloud plugs in by implementing these.
+emfirge.core (and the branch's lifecycle stages), so a second cloud plugs in by implementing these.
 """
 from __future__ import annotations
 

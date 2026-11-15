@@ -4,7 +4,8 @@ Every field counts: ids, version numbers, revision ids, list contents. Two kinds
 from the answers themselves, never from a list of names:
   noise   a field that differed between two identical reads taken a moment apart at copy time (a request id).
   clock   a field holding a time that moved when the session's call ran, and moved again to the moment the undo ran
-          (a "last modified" time). Any write moves it, so it cannot come back; it is named in the proof's reason.
+          (a "last modified" time): a time at copy time, no earlier at the end of the session, and the moment of the
+          undo afterwards. Any write moves it, so it cannot come back; it is named in the proof's reason.
           A field the call itself set is never a clock: what the agent set must come back exactly.
 """
 from __future__ import annotations
@@ -71,9 +72,8 @@ def compare(read: str, e0: Answer, e1: Answer | None, now: Answer, focus: Focus,
         if any(path == p or path.startswith(p + '.') for p in noise):
             continue
         d = Difference(read, path, value_at(x, op.path), None if op.remove else op.value)
-        during = value_at(mid, op.path)
-        moved = time_of(during) is not None and during != d.before
-        (clocks if moved and is_clock(op.path, d.before, d.after, set_names, window) else real).append(d)
+        clock = is_clock(op.path, d.before, d.after, set_names, window) and _not_back(value_at(mid, op.path), d.before)
+        (clocks if clock else real).append(d)
     return Outcome(tuple(real), tuple(clocks))
 
 
@@ -83,6 +83,13 @@ def is_clock(path: tuple[Any, ...], before: Any, after: Any, set_names: frozense
         return False
     tb, ta = time_of(before), time_of(after)
     return tb is not None and ta is not None and ta > tb and window.holds(ta)
+
+
+def _not_back(during: Any, before: Any) -> bool:
+    """At the end of the session the field was a time no earlier than at copy time: a clock only moves forward.
+    (With one-second clocks, the session's own write may not have moved it yet.)"""
+    t, b = time_of(during), time_of(before)
+    return t is not None and b is not None and t >= b
 
 
 def time_of(v: Any) -> float | None:
