@@ -1,0 +1,27 @@
+[project]
+name = "emfirge"
+version = "0.1.0.dev0"
+description = "The harness and the branch for AI agents that work on the cloud."
+requires-python = ">=3.11"
+dependencies = ["botocore>=1.35", "boto3>=1.35", "urllib3>=2"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+moto = ["moto[server,all]>=5.2"]
+
+[project.scripts]
+emf = "emfirge.cli.main:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+emfirge = ["aws/data/*.json", "aws/data/*.json.gz"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["lab: needs local emulators (no real AWS); skipped unless EMFIRGE_LAB=1"]
