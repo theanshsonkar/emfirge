@@ -32,7 +32,7 @@ def copy_secret(x: CopyContext, n: str) -> bool:
 
 
 TYPES = [
-    TypeSpec(SECRET, 'secretsmanager', params=('SecretId', 'Name'), arn=r'secret:(.+)-[A-Za-z0-9]{6}', ops=r'Secret',
+    TypeSpec(SECRET, 'secretsmanager', params=('SecretId', 'Name'), arn=r'secret:(.+)-[A-Za-z0-9]{6}',
              lists=(('ListSecrets', 'SecretList', 'Name'),), removed_by=('DeleteSecret',),
              reads=lambda w, n: [('DescribeSecret', {'SecretId': n}), ('GetSecretValue', {'SecretId': n}),
                                  ('GetResourcePolicy', {'SecretId': n})],

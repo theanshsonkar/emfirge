@@ -79,6 +79,8 @@ class Overlay:
     def held_types(self, states: frozenset[State] = ENGINE_ANSWERS) -> frozenset[str]:
         return frozenset(r.type for r, s in self._states.items() if s in states)
 
-    def changed_anything(self) -> bool:
-        """True once the branch holds any resource whose answer differs from the live account's."""
-        return any(s in (State.COPIED, State.BORN, State.DELETED) for s in self._states.values())
+    def changed_in(self, service: str) -> bool:
+        """True when the branch holds a resource of `service` whose answers may differ from the live account's.
+        A type is '<service>:<resource type>' (core.model.ResourceRef)."""
+        return any(s in (State.COPIED, State.BORN, State.DELETED) and r.type.split(':', 1)[0] == service
+                   for r, s in self._states.items())

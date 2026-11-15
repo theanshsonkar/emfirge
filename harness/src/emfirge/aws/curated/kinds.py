@@ -13,9 +13,10 @@ _TAGGING = re.compile(r'^(Tag|Untag)[A-Z]|^(Add|Remove)Tags|^(Put|Delete)\w*Tagg
 
 
 def kind_of(operation: str) -> Kind:
-    """READ / LIST by name; an Invoke is never a read; every other operation changes something."""
+    """READ / LIST by name; every other operation changes something. An Invoke runs the customer's own code, whose
+    effects on the account cannot be told from the call: UNKNOWN (refused), never a read."""
     if 'Invoke' in operation:
-        return Kind.WRITE
+        return Kind.UNKNOWN
     if _LIST.match(operation):
         return Kind.LIST
     if _READ.match(operation):

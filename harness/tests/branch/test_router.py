@@ -13,7 +13,7 @@ def states(**s):
 
 
 def go(kind, refs, st=states(), changed=False, head=False):
-    return route(kind, refs, st, changed_anything=changed, head=head)
+    return route(kind, refs, st, changed_nearby=changed, head=head)
 
 
 def test_unknown_kind_is_refused_and_never_sent_anywhere():

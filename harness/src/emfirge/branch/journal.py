@@ -10,7 +10,7 @@ from emfirge.core.model import ResourceRef
 @dataclass(frozen=True)
 class Entry:
     n: int
-    call: str                                  # 'lambda.UpdateFunctionConfiguration'
+    call: str                                  # '<service>.<Operation>'
     params: Mapping[str, Any]
     status: int
     refs: tuple[ResourceRef, ...]

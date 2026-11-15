@@ -70,11 +70,11 @@ def test_overlay_facts():
     assert ENGINE_ANSWERS == {State.COPIED, State.ABSENT, State.BORN, State.DELETED}
     assert set(ANSWERED_BY) == set(State)
     o = Overlay()
-    assert o.state(R) is State.LIVE and not o.changed_anything()
+    assert o.state(R) is State.LIVE and not o.changed_in('cloud')
     o.move(R, State.OPAQUE, 'it is cursed')
-    assert o.why_opaque(R) == 'it is cursed' and not o.changed_anything()
+    assert o.why_opaque(R) == 'it is cursed' and not o.changed_in('cloud')
     b = ResourceRef('cloud:thing', 'b')
     o.move(b, State.COPIED)
     o.move(b, State.DELETED)
-    assert o.from_real() == {b} and o.changed_anything()
+    assert o.from_real() == {b} and o.changed_in('cloud') and not o.changed_in('other')
     assert o.held_types() == {'cloud:thing'}

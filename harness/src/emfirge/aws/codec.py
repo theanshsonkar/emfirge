@@ -125,9 +125,10 @@ class AwsCodec:
     def _decode_rest(self, service: str, request: WireRequest, headers: dict[str, str]) -> tuple[str, dict] | None:
         have = dict(urllib.parse.parse_qsl(request.query, keep_blank_values=True))
         path = urllib.parse.unquote(request.path)
-        for method, rx, name, need in self._rest_routes(service):
+        for method, rx, name, need, need_headers in self._rest_routes(service):
             m = rx.match(path) if method == request.method else None
-            if not m or not all(k in have and (v == '' or have[k] == v) for k, v in need.items()):
+            if not m or not all(k in have and (v == '' or have[k] == v) for k, v in need.items()) or \
+                    not all(h in headers for h in need_headers):
                 continue
             opm = self.model(service).operation_model(name)
             params: dict[str, Any] = {}
@@ -148,20 +149,25 @@ class AwsCodec:
         return None
 
     def _rest_routes(self, service: str) -> list[tuple]:
-        """(method, path regex, operation, required query keys), most specific first."""
+        """(method, path regex, operation, required query keys, required headers), most specific first. Two
+        operations on one path (PutObject, CopyObject) are told apart by the headers each one requires."""
         if service not in self._routes:
             out = []
             model = self.model(service)
             for name in model.operation_names:
-                http = model.operation_model(name).http
-                uri, _, q = http.get('requestUri', '/').partition('?')
+                opm = model.operation_model(name)
+                uri, _, q = opm.http.get('requestUri', '/').partition('?')
                 rx = re.escape(uri).replace(r'\{', '{').replace(r'\}', '}').replace(r'\+', '+')
                 rx = re.sub(r'\{([\w-]+)\+\}', lambda m: f'(?P<{_group(m.group(1))}>.+)', rx)
                 rx = re.sub(r'\{([\w-]+)\}', lambda m: f'(?P<{_group(m.group(1))}>[^/]+)', rx)
                 need = dict(urllib.parse.parse_qsl(q, keep_blank_values=True))
-                out.append((http.get('method', 'POST'), re.compile('^' + rx + '/?$'), name, need, uri.count('{'), len(uri)))
-            out.sort(key=lambda r: (r[4], -len(r[3]), -r[5]))
-            self._routes[service] = [r[:4] for r in out]
+                shape = opm.input_shape
+                heads = tuple(shape.members[m].serialization.get('name', m).lower() for m in shape.required_members
+                              if shape.members[m].serialization.get('location') == 'header') if shape else ()
+                out.append((opm.http.get('method', 'POST'), re.compile('^' + rx + '/?$'), name, need, heads,
+                            uri.count('{'), len(uri)))
+            out.sort(key=lambda r: (r[5], -len(r[3]), -len(r[4]), -r[6]))
+            self._routes[service] = [r[:5] for r in out]
         return self._routes[service]
 
     # ------------------------------------------------------------------ encode

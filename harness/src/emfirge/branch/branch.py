@@ -92,7 +92,7 @@ class Branch:
         return self._change(call, refs)
 
     def _route(self, call: Call, refs: Refs) -> Route:
-        return route(call.kind, refs, self.overlay.state, changed_anything=self.overlay.changed_anything(),
+        return route(call.kind, refs, self.overlay.state, changed_nearby=self.overlay.changed_in(call.service),
                      head=call.wire.method == 'HEAD')
 
     def _reason(self, way: Route) -> str:
