@@ -40,7 +40,8 @@ def creates(model: ServiceModel, words: frozenset[str]) -> list[str]:
             ranked.append((0, len(noun), CREATE_VERBS.index(verb_of(op)), op))
         elif any(w and (noun.endswith(w) or noun.startswith(w)) for w in words):
             ranked.append((1, len(noun), CREATE_VERBS.index(verb_of(op)), op))
-    return [op for *_, op in sorted(ranked)]
+    best = [r for r in ranked if r[0] == 0] or ranked     # a close name only when there is no exact one
+    return [op for *_, op in sorted(best)]
 
 
 def settings(model: ServiceModel, reads: list[str], create: str) -> list[Setting]:

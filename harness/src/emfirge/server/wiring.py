@@ -5,7 +5,8 @@ AWS's published lists), with the hand-written (curated) naming only where the ge
 with the generic and curated copiers in the order experiment 23 measured (aws/data/copier_order.json).
 
 Configurations (keyword options of build):
-  catalog='layered' | 'curated'                      what names calls and resources
+  catalog='layered' | 'generic' | 'curated'          what names calls and resources ('generic': the layered catalog
+                                                     without its curated fallback)
   copier='layered' | 'curated' | 'generic'           what copies a real resource into the engine
 """
 from __future__ import annotations
@@ -29,7 +30,7 @@ from emfirge.core.model import Kind
 from emfirge.core.ports import Account, Catalog, Copier, Engine, Outcomes
 
 ENGINES = {'emulator': EmulatorEngine, 'moto': MotoEngine}
-CatalogChoice = Literal['layered', 'curated']
+CatalogChoice = Literal['layered', 'generic', 'curated']
 CopierChoice = Literal['layered', 'curated', 'generic']
 
 
@@ -69,7 +70,8 @@ def parts(codec: AwsCodec, where: Where, catalog: CatalogChoice = 'layered',
         if copier != 'curated':
             raise ValueError('the curated catalog runs with the curated copier only')
         return cur_catalog, cur_outcomes, cur_copier
-    layered = LayeredCatalog(AwsCatalog(account=where.account, region=where.region), codec, cur_catalog)
+    fallback = cur_catalog if catalog == 'layered' else None
+    layered = LayeredCatalog(AwsCatalog(account=where.account, region=where.region), codec, fallback)
     generic = GenericCopier(layered, codec, where.region)
     copiers: dict[str, Copier] = {'generic': generic, 'curated': cur_copier}
     if copier != 'layered':

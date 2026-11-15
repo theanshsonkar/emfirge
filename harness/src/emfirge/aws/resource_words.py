@@ -47,10 +47,11 @@ def type_word(type_: str) -> str:
 
 
 def names_type(word: str, type_: str) -> bool:
-    """A joined word names the type: equal, the type's name ends with it or it ends with the type's name
-    ('attachedpolicy' -> policy), or the type's name starts with it ('rule' -> rule-on-default-event-bus)."""
+    """A joined word names the type: equal, it ends with the type's name ('attachedpolicy' -> policy), or the type's
+    name starts with it ('rule' -> rule-on-default-event-bus). Not a type whose name only ends with it: 'query' is
+    not a 'scheduled-query'."""
     t = type_word(type_)
-    return bool(word) and bool(t) and (word == t or word.endswith(t) or t.endswith(word) or t.startswith(word))
+    return bool(word) and bool(t) and (word == t or word.endswith(t) or t.startswith(word))
 
 
 def list_word(member: str, item_shape: str | None = None) -> tuple[str, ...]:

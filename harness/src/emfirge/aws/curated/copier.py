@@ -8,6 +8,7 @@ from emfirge.core.model import ResourceRef
 from emfirge.core.ports import Account, CannotTell, Placement
 
 from ..accounts import sdk_client
+from ..errors import UnknownType
 from .context import CopyContext
 from .naming import Naming, Unplaced
 from .spec import Where
@@ -27,7 +28,7 @@ class CuratedCopier:
     def copy(self, ref: ResourceRef, place: Placement) -> Copied:
         spec = self._naming.specs.get(ref.type)
         if spec is None or spec.copy is None:
-            raise CannotTell(f'nothing can copy a {ref.type} yet')
+            raise UnknownType(f'nothing can copy a {ref.type} yet')
         x = CopyContext(place, self._where, self._client, self._recognize)
         found = spec.copy(x, ref.id)
         return Copied(found, tuple(x.also))

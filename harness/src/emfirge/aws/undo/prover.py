@@ -33,7 +33,7 @@ from .compare import Difference, Window, compare
 from .inverse import Runner
 from .model import MISSING, Models
 from .observe import Door, Reader, Snapshot, Timing
-from .plan import NoPlan, Read, View, plan
+from .plan import NoPlan, Read, View, mentions, plan
 
 TRIED = (ChangeType.CREATED, ChangeType.MODIFIED)
 NOT_TRIED = {ChangeType.DELETED: 'a deleted resource is not put back on the branch: its static fact stands',
@@ -208,13 +208,14 @@ class BranchUndoProver:
         return True, evidence
 
     def _shows(self, ref: ResourceRef, call: Call, answer: Answer) -> bool | None:
-        """True: the answer shows the resource; False: it shows it is not there; None: it says neither."""
+        """True: the answer shows the resource; False: it shows it is not there; None: it says neither. An answer
+        that does not mention the resource's id says nothing (an empty list of its exports answers 'ok' either way)."""
         if not answer.ok:
             return False
         held = self._door.holds(ref, call, answer.body)
         if held is not None:
             return held
-        return True if call.params else None
+        return True if call.params and mentions(answer.body, (ref.id,)) else None
 
     def _set_names(self, refs: set[ResourceRef]) -> frozenset[str]:
         """Names of every member the session's calls on these resources set: such a field is never a clock."""

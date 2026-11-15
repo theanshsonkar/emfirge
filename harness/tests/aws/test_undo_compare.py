@@ -32,7 +32,7 @@ def test_time_of(value, expected):
 
 def test_ids_versions_and_lists_all_count():
     out = run({'Id': 'a', 'Version': 1, 'Items': [1, 2]}, {}, {'Id': 'b', 'Version': 3, 'Items': [2, 1]})
-    assert {d.path for d in out.differences} == {'Id', 'Version', 'Items'}
+    assert {d.path for d in out.differences} == {'Id', 'Version', 'Items.0', 'Items.1'}
 
 
 def test_noise_is_left_out():
@@ -64,3 +64,15 @@ def test_status_counts_and_two_errors_alike_are_equal():
                    WINDOW).differences[0].path == '(status)'
     assert not compare('Get', Answer(404, {'m': 1}), None, Answer(404, {'m': 2}), lambda b: b, frozenset(),
                        frozenset(), WINDOW).differences
+
+
+def test_a_clock_inside_a_list_item_is_seen_and_a_list_of_another_length_is_one_difference():
+    out = run({'Items': [{'Id': 'a', 'LastModified': T0}]}, {'Items': [{'Id': 'a', 'LastModified': T0 + 1}]},
+              {'Items': [{'Id': 'a', 'LastModified': T0 + 105}]})
+    assert not out.differences and [c.path for c in out.clocks] == ['Items.0.LastModified']
+    out = run({'Items': [{'Id': 'a'}]}, {}, {'Items': [{'Id': 'a'}, {'Id': 'b'}]})
+    assert [d.path for d in out.differences] == ['Items']
+
+
+def test_two_lists_with_the_same_items_in_another_order_differ():
+    assert run({'Items': ['a', 'b']}, {}, {'Items': ['b', 'a']}).differences

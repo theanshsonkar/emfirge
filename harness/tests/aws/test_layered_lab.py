@@ -58,12 +58,12 @@ def test_a_role_in_an_instance_profile_is_copied_with_its_profile(lab):
     assert bc('iam').get_instance_profile(InstanceProfileName='worker-profile')['InstanceProfile']['Roles']
 
 
-def test_a_group_in_a_vpc_with_a_gateway_takes_a_rule(lab):
+def test_a_group_in_a_vpc_with_a_gateway_stays_an_honest_refusal(lab):
+    """The curated copier goes first for groups (measured) and refuses VPCs with gateways; the generic copier does not
+    overrule a copier that knows the type."""
     bc, rc, _ = lab
     rule = {'IpProtocol': 'tcp', 'FromPort': 22, 'ToPort': 22, 'IpRanges': [{'CidrIp': '10.0.0.0/8'}]}
-    assert outcome(bc('ec2').authorize_security_group_ingress, GroupId=rc.ids['sg'], IpPermissions=[rule]) == 'ok'
-    perms = bc('ec2').describe_security_groups(GroupIds=[rc.ids['sg']])['SecurityGroups'][0]['IpPermissions']
-    assert any(p.get('FromPort') == 22 for p in perms)
+    assert outcome(bc('ec2').authorize_security_group_ingress, GroupId=rc.ids['sg'], IpPermissions=[rule]) == 'EmfirgeCannotTell'
 
 
 def test_changes_to_things_that_do_not_exist_answer_as_the_account_does_or_are_refused(lab):

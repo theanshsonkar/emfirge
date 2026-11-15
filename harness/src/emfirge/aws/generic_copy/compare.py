@@ -32,8 +32,9 @@ def leaves(value: Any, path: tuple[str, ...] = ()) -> Iterator[tuple[tuple[str, 
 def new_ids(real: Any, engine: Any, word: str) -> list[tuple[str, str]]:
     """(real value, engine value) where the same field holds an id, ARN or address of the resource itself (RoleId,
     KeyId, a bare Id, a secret's ARN with its random end, a queue's URL) and the two differ: the engine gave out its
-    own. `word` names the resource (its type's name, or a list item's noun: 'accesskey'). An id at the top of the
-    answer (a secret's VersionId) is the resource's own too."""
+    own. `word` names the resource (its type's name, or a list item's noun: 'accesskey'). Any other id outside lists
+    (a secret's VersionId, the VPC of a database's default subnet group) is the engine's counterpart of the real one;
+    ids inside lists are left alone, as list order could pair the wrong two."""
     mine = dict(leaves(engine))
     out = []
     for path, value in leaves(real):
@@ -42,10 +43,33 @@ def new_ids(real: Any, engine: Any, word: str) -> list[tuple[str, str]]:
             continue
         words = split(path[-1])
         own = words.designator in ('id', 'arn', 'url') and (not words.words or related(words.joined, word)) \
-            or path[-1] == 'UUID' or len(path) == 1 and words.designator == 'id'
+            or path[-1] == 'UUID' or words.designator == 'id' and not any(p.isdigit() for p in path)
         if own and ID_VALUE.match(value) and ID_VALUE.match(other):
             out.append((value, other))
     return list(dict.fromkeys(out))
+
+
+def generated(real: Any, engine: Any, given: frozenset[str]) -> list[tuple[str, str]]:
+    """(real value, engine value) for top-level fields the create did not set whose values differ and look like ids or
+    addresses (a digit, no spaces): the service made them up, as it made up the id."""
+    if not isinstance(real, dict) or not isinstance(engine, dict):
+        return []
+    out = []
+    for key, value in real.items():
+        other = engine.get(key)
+        if key in given or NOISE_KEY.search(key) or not isinstance(value, str) or not isinstance(other, str):
+            continue
+        if value != other and ID_VALUE.match(value) and ID_VALUE.match(other) and re.search(r'\d', value):
+            out.append((value, other))
+    return out
+
+
+def fewer_items(real: Any, engine: Any) -> list[str]:
+    """Top-level lists of which the engine has fewer items than the real account."""
+    if not isinstance(real, dict) or not isinstance(engine, dict):
+        return []
+    return [f'{k}: {len(v)} real, {len(engine.get(k) or [])} copied' for k, v in real.items()
+            if isinstance(v, list) and len(engine.get(k) or []) < len(v)]
 
 
 def same_item(real: Any, engine: Any, translate: Callable[[str], str]) -> bool:

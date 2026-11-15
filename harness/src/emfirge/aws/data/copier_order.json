@@ -1,5 +1,5 @@
 {
-  "about": "Which copier tries first, per resource type. Written by research-log/experiments/23-generic-copy/order.py from the measurement: the curated copier goes first only for the types named by a rig step that the generic copier alone answered differently ('because'). '*' is every other type. When the first copier refuses before writing anything to the engine, the next one tries.",
+  "about": "Which copier tries first, per resource type. Written by research-log/experiments/23-generic-copy/order.py from the measurement: the curated copier goes first only for the types named by a rig step that the generic copier alone answered differently ('because'). '*' is every other type. When the first copier does not know the type at all (said before it writes anything to the engine), the next one tries.",
   "order": {
     "*": [
       "generic",
@@ -27,16 +27,23 @@
       "D08"
     ],
     "sns:topic": [
+      "N01",
       "N02",
-      "N04"
+      "N03",
+      "N04",
+      "N05"
     ],
     "ec2:security-group": [
+      "C01",
       "C02",
-      "C03"
+      "C03",
+      "C04"
     ],
     "ec2:vpc": [
       "C05",
-      "C07"
+      "C06",
+      "C07",
+      "C08"
     ]
   }
 }

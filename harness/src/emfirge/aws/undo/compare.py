@@ -67,14 +67,27 @@ def compare(read: str, e0: Answer, e1: Answer | None, now: Answer, focus: Focus,
         return Outcome(() if x == y else (Difference(read, '', x, y),), ())
     mid = focus(e1.body) if e1 is not None and e1.ok else None
     real, clocks = [], []
-    for op in transplant.diff(x, y):
-        path = '.'.join(map(str, op.path))
+    for where, before, after in changes(x, y):
+        path = '.'.join(map(str, where))
         if any(path == p or path.startswith(p + '.') for p in noise):
             continue
-        d = Difference(read, path, value_at(x, op.path), None if op.remove else op.value)
-        clock = is_clock(op.path, d.before, d.after, set_names, window) and _not_back(value_at(mid, op.path), d.before)
+        d = Difference(read, path, before, after)
+        clock = is_clock(where, before, after, set_names, window) and _not_back(value_at(mid, where), before)
         (clocks if clock else real).append(d)
     return Outcome(tuple(real), tuple(clocks))
+
+
+def changes(a: Any, b: Any, path: tuple[Any, ...] = ()) -> list[tuple[tuple[Any, ...], Any, Any]]:
+    """(path, before, after) of each place two answers differ. Lists of the same length are compared item by item
+    (so a clock inside an item is seen as one); a list whose length changed is one difference, whole."""
+    if isinstance(a, dict) and isinstance(b, dict):
+        out = [(path + (k,), a[k], None) for k in a if k not in b]
+        for k in b:
+            out += [(path + (k,), None, b[k])] if k not in a else changes(a[k], b[k], path + (k,))
+        return out
+    if isinstance(a, list) and isinstance(b, list) and len(a) == len(b):
+        return [c for i, (x, y) in enumerate(zip(a, b)) for c in changes(x, y, path + (i,))]
+    return [] if a == b else [(path, a, b)]
 
 
 def is_clock(path: tuple[Any, ...], before: Any, after: Any, set_names: frozenset[str], window: Window) -> bool:
@@ -111,9 +124,12 @@ def time_of(v: Any) -> float | None:
 
 def value_at(body: Any, path: tuple[Any, ...]) -> Any:
     for k in path:
-        if not isinstance(body, dict) or k not in body:
+        if isinstance(body, dict) and k in body:
+            body = body[k]
+        elif isinstance(body, list) and isinstance(k, int) and k < len(body):
+            body = body[k]
+        else:
             return None
-        body = body[k]
     return body
 
 

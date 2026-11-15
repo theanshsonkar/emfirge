@@ -36,6 +36,7 @@ from ..codec import AwsCodec
 from ..resource_words import binds, canonical, formats, list_word, names_type, noun_of, type_word, verb_of
 from . import compare, plan
 from .fill import Fetch, Filled, empty, fill, unwrap
+from ..errors import UnknownType
 from .sdk import Answer, Clients, fetch
 
 URL_TAIL = re.compile(r'^https?://[^/]+/(?:[^?#]*/)?([^/?#]+)/?(?:[?#].*)?$')
@@ -82,12 +83,13 @@ class _Copy:
         self.catalog, self.codec, self.clients, self.sleep = catalog, codec, clients, sleep
         self.ref, self.place, self.lost = ref, place, lost
         self.info = catalog.resource_type(ref.type)
+        self.delegated = set()
 
     # ------------------------------------------------------------------ 1-2: read, plan
     def run(self) -> Copied:
         reads = [r for r in self.catalog.reads_of(self.ref) if r[2]]
         if not reads or self.info is None:
-            raise CannotTell("AWS's lists give no read that shows this kind of resource, so Emfirge cannot copy it yet")
+            raise UnknownType("AWS's lists give no read that shows this kind of resource, so Emfirge cannot copy it yet")
         self.service = reads[0][0]
         self.model = self.codec.model(self.service)
         answers = [self.clients.read(self.place.real, s, op, p) for s, op, p in reads if s == self.service]
@@ -135,7 +137,7 @@ class _Copy:
         words = frozenset({type_word(self.ref.type), *self._variable_words()}) - {''}
         candidates = plan.creates(self.model, words)
         if not candidates:
-            raise CannotTell(f'no operation of {self.service} creates a {self.ref.type}, so Emfirge cannot copy it yet')
+            raise UnknownType(f'no operation of {self.service} creates a {self.ref.type}, so Emfirge cannot copy it yet')
         tried = []
         for op in candidates:
             om = self.model.operation_model(op)
@@ -143,7 +145,8 @@ class _Copy:
             if not filled.missing:
                 return op, filled
             tried.append(f'{op} needs {", ".join(filled.missing)}')
-        raise CannotTell(f'no read answers what creating one needs ({"; ".join(tried[:2])}), so Emfirge cannot copy it yet')
+        raise UnknownType(f'no read answers what creating one needs ({"; ".join(tried[:2])}), so Emfirge cannot copy it '
+                          'yet')
 
     def _variable_words(self) -> list[str]:
         return [split(f.variables[-1]).joined for f in formats(self.ref.type, self.info.arn_formats) if f.variables]
@@ -165,6 +168,9 @@ class _Copy:
         return out
 
     # ------------------------------------------------------------------ 3-4: create, ids, settle
+    given: frozenset[str] = frozenset()     # the top-level members the create set (not made up by the service)
+    delegated: set[tuple[str, str]]         # (read, list) whose items were each copied on their own
+
     def _create(self, op: str, filled: Filled) -> None:
         """Create the copy, unless the engine already has it: what every account has (the default event bus, the
         default schedule group) is in the engine too. Only for a caller-chosen id: an id the service gave out may
@@ -173,7 +179,9 @@ class _Copy:
         if mine is not None and mine.body is not None and not _nothing(mine.body):
             self._settle()
             return
-        params = self._resolve(op, filled)
+        params = self._resolve(op, filled, strict=True)
+        self.given = frozenset(params)
+        self._write_only(op, params)
         om = self.model.operation_model(op)
         answer = self.clients.write(self.place.engine, self.service, op, params,
                                     frozenset(om.input_shape.required_members), self.lost.append)
@@ -182,8 +190,20 @@ class _Copy:
             self.place.same(self.ref.id, engine_id)
         self._settle()
 
-    def _resolve(self, op: str, filled: Filled) -> dict[str, Any]:
-        """Downloads fetched, what the call names copied first, real ids written in the engine's ids."""
+    def _write_only(self, op: str, params: dict[str, Any]) -> None:
+        """Settings AWS publishes as write-only (a password, a secret's value given at create) that the create takes
+        and no read gave: the copy has none, and says so."""
+        shape = self.model.operation_model(op).input_shape
+        members = {m.lower(): m for m in shape.members} if shape else {}
+        for setting in self.info.write_only_settings:
+            name = members.get(setting.split('/', 1)[0].lower())
+            if name and name not in params:
+                self.lost.append(f'{name} is write-only (AWS never shows it), so the copy has no value for it')
+
+    def _resolve(self, op: str, filled: Filled, strict: bool = False) -> dict[str, Any]:
+        """Downloads fetched, what the call names copied first, real ids written in the engine's ids. `strict` (the
+        create): what it names must be copied, or the copy is refused; an untranslated real id could name another
+        thing in the engine."""
         params = _replace_fetches(filled.params, lambda f: fetch(self.place.real, f.url))
         names = self.catalog.refs(self.codec.encode(self.service, op, params)).all + self._named_by_members(params)
         for other in dict.fromkeys(names):
@@ -192,6 +212,8 @@ class _Copy:
             try:
                 self.place.need(other)
             except CannotTell as e:
+                if strict:
+                    raise CannotTell(f'it names {other}, which could not be copied') from e
                 self.lost.append(f'{op} names {other}, which could not be copied ({str(e)[:160]})')
         return _translate(params, self.place.engine_value)
 
@@ -228,6 +250,9 @@ class _Copy:
                 if var:
                     value = URL_TAIL.sub(r'\1', value)      # a queue's URL: the name is its last part
                     found.append(canonical(self.info.arn_formats, self.ref.type, var, value))
+        if not found and self.info.id_given_by_service:     # a bare 'id' at the top (API Gateway's CreateRestApi)
+            found = [v for k, v in answer.items() if isinstance(v, str)
+                     and binds(k, self.ref.type, self.info.arn_formats, strong=2)]
         return found[0] if found else None
 
     def _engine_read(self, answer: Answer) -> Answer:
@@ -240,6 +265,8 @@ class _Copy:
         want = compare.states(unwrap(first.body, self.ref.type))
         for _ in range(SETTLE_TRIES):
             mine = self._engine_read(first)
+            if mine.absent:
+                raise CannotTell(f'the engine does not find the copy by its id ({mine.error[:120]})')
             if mine.body is not None:
                 self._adopt_ids(first.body, mine.body)
                 got = compare.states(unwrap(mine.body, self.ref.type))
@@ -249,9 +276,11 @@ class _Copy:
         self.lost.append(f'the copy did not reach the real state ({want})')
 
     def _adopt_ids(self, real: Any, engine: Any) -> None:
-        """Ids the engine gave the copy (or its versions) instead of the real ones."""
+        """Ids the engine gave the copy (or its versions) instead of the real ones, and values the service made up
+        for it (a distribution's domain name): what the create did not set."""
         real, engine = unwrap(real, self.ref.type), unwrap(engine, self.ref.type)
-        for real_id, engine_id in compare.new_ids(real, engine, type_word(self.ref.type)):
+        pairs = compare.new_ids(real, engine, type_word(self.ref.type)) + compare.generated(real, engine, self.given)
+        for real_id, engine_id in pairs:
             if not self.place.known(real_id):
                 self.place.same(real_id, engine_id)
 
@@ -346,19 +375,25 @@ class _Copy:
         return self.ref in refs.primary or (not refs.primary and self.ref in refs.mentioned)
 
     def _listed_with_it(self) -> None:
-        """What a read lists by its own ARN (the instance profiles a role is in, the groups a user is in) is copied
-        too: the engine can only refuse what depends on them (deleting the role) when it has them."""
+        """What a read of it lists, by the item's own ARN or by the id of the type the list is named after (the
+        instance profiles a role is in, a function's event source mappings), is copied too: the engine can only
+        refuse what depends on them (deleting the role) when it has them."""
         for a in self.answers:
             if verb_of(a.operation) != 'List':
                 continue
-            for key, values in unwrap(a.body, self.ref.type).items():
-                for v in values if isinstance(values, list) else []:
-                    other = self._own_arn(key, v)
-                    if other is not None and other.type != self.ref.type:
-                        try:
-                            self.place.need(other)
-                        except CannotTell as e:
-                            self.lost.append(f'{a.operation} lists {other}, which could not be copied ({str(e)[:160]})')
+            for key, values in {**a.body, **unwrap(a.body, self.ref.type)}.items():
+                refs = [self._own_arn(key, v) or self._listed_id(key, v) for v in values] if isinstance(values, list) else []
+                refs = [r for r in refs if r is not None and r.type != self.ref.type]
+                if refs and len(refs) == len(values) and all(self._need(a.operation, r) for r in refs):
+                    self.delegated.add((a.operation, key))   # each item is its own copy (maybe still on the way)
+
+    def _need(self, operation: str, other: ResourceRef) -> bool:
+        try:
+            self.place.need(other)
+            return True
+        except CannotTell as e:
+            self.lost.append(f'{operation} lists {other}, which could not be copied ({str(e)[:160]})')
+            return False
 
     def _own_arn(self, key: str, item: Any) -> ResourceRef | None:
         """The ARN a list item carries as its own (Arn, or <item>Arn), as a resource."""
@@ -371,8 +406,26 @@ class _Copy:
                 return self.catalog.parse_arn(v)
         return None
 
+    def _listed_id(self, key: str, item: Any) -> ResourceRef | None:
+        """The item's id, when the list is named exactly after a type of the service (EventSourceMappings -> its
+        UUID)."""
+        if not isinstance(item, dict):
+            return None
+        for t in self.catalog.types_of(self.ref.type.split(':', 1)[0]):
+            info = self.catalog.resource_type(t)
+            if info is None or t == self.ref.type or type_word(t) not in list_word(key):
+                continue
+            for k, v in item.items():
+                var = binds(k, t, info.arn_formats) if isinstance(v, str) else None
+                if var:
+                    return ResourceRef(t, canonical(info.arn_formats, t, var, v))
+        return None
+
     # ------------------------------------------------------------------ 6: what the copy lacks
     def _compare(self) -> None:
+        """What the copy lacks, in notes. A list the engine shows fewer items of (records of a zone, resources of an
+        API, subscriptions) means parts of the resource were not copied: a change to it could be answered wrong, so
+        the copy is refused."""
         for a in self.answers:
             mine = self._engine_read(a)
             if mine.body is not None:
@@ -381,10 +434,15 @@ class _Copy:
             if mine.body is None:
                 self.lost.append(f'{a.operation}: the engine has no answer ({mine.error[:100]})')
                 continue
-            diff = compare.differences(unwrap(a.body, self.ref.type), unwrap(mine.body, self.ref.type),
-                                       self.place.engine_value)
+            real, engine = unwrap(a.body, self.ref.type), unwrap(mine.body, self.ref.type)
+            diff = compare.differences(real, engine, self.place.engine_value)
             if diff:
                 self.lost.append(f'{a.operation}: differs in {", ".join(diff[:6])}')
+            short = [s for s in compare.fewer_items(real, engine) + compare.fewer_items(a.body, mine.body)
+                     if (a.operation, s.split(':', 1)[0]) not in self.delegated]
+            if short:
+                raise CannotTell(f'the copy lacks parts of it that Emfirge cannot rebuild yet ({a.operation}: '
+                                 f'{", ".join(short[:3])})')
 
 
 # ---------------------------------------------------------------------- helpers

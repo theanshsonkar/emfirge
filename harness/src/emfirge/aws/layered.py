@@ -3,19 +3,27 @@
 LayeredCatalog (core.ports.Catalog)
   kind     the generic catalog's two-key answer, except calls that run the customer's own code (an operation named
            Invoke... or TestInvoke..., or an action in data/runs_code.json): UNKNOWN, so the branch refuses them.
-  refs     the generic catalog's refs, with data held inside a container (an object in a bucket: a type whose parent
-           holds data and that holds data itself) placed on its container, as the container is what is copied. Where
-           it cannot place a changing call and the curated naming can, the curated
-           primary is used; resources only the curated naming finds (a copy source bucket, a group id inside a rule)
-           are added as mentioned. Both use one vocabulary: the generic catalog's types and ids.
+  refs     the generic catalog's refs, then four generic rules and one fallback:
+           * data held inside a container (a type that holds data, whose parent holds data: an object in a bucket)
+             is placed on its container, as the container is what is copied;
+           * a read with no primary resource that names one by an ARN member of its own reads that resource
+             (GetSubscriptionAttributes' SubscriptionArn names the topic);
+           * a call that names a resource by a required member (a name, id or ARN, or a member named after a type of
+             its service: ecs taskDefinition) that nothing places is not complete, even where AWS's list ties the
+             action to no resource: the branch refuses it rather than send it to an engine that does not have it;
+           * fallback: where the generic catalog cannot place a call, or places no primary resource, and the curated
+             naming does, the curated primary is used; resources only the curated naming finds (a copy source
+             bucket, a group id inside a rule) are added as mentioned. One vocabulary: the generic catalog's.
   reads    the curated reads first where a curated type has them (they name the resource the way agents do, and the
            first one tells whether it exists), then the generic reads, then the list reads that can show the type.
-           For other types the read named after the type comes first.
+           For other types the read named after the type (or its ARN variable) comes first.
   `fallbacks` counts each use of the curated layer, so its cost can be measured.
 
 LayeredCopier (core.ports.Copier)
-  Tries copiers in order for each type. When one refuses (CannotTell) having written nothing to the engine, the next
-  one tries. The order per type is data (data/copier_order.json), written from experiment 23's measurement.
+  Tries copiers in order for each type. When one does not know the type at all (UnknownType, raised before anything
+  is written to the engine), the next one tries. A copier that knows the type and refuses this resource (a role in an
+  instance profile, a VPC with a gateway) is not overruled: its refusal stands. The order per type is data
+  (data/copier_order.json), written from experiment 23's measurement.
 """
 from __future__ import annotations
 
@@ -30,10 +38,13 @@ from emfirge.core.ports import Account, CannotTell, Catalog, Copier, CopyResult,
 from .catalog import AwsCatalog, ResourceTypeInfo
 from .catalog.store import DATA
 from .codec import AwsCodec
+from .errors import UnknownType
 from .outcomes_generic import list_ops
-from .resource_words import noun_of, type_word, verb_of
+from .catalog.names import split
+from .resource_words import formats, names_type, noun_of, type_word, verb_of
 
 CODE_VERBS = ('Invoke', 'TestInvoke')
+CREATE_VERBS = ('Create', 'Put', 'Register', 'Run', 'Allocate', 'Import')
 
 
 def runs_code_actions(path: Path | None = None) -> frozenset[str]:
@@ -63,12 +74,13 @@ class LayeredCatalog:
 
     # ---------------------------------------------------------------- refs
     def refs(self, call: Call) -> Refs:
-        mine = self._contents_on_containers(self._generic.refs(call))
+        mine = self._generic.refs(call)
+        mine = self._unplaced(call, self._arn_read(call, self._contents_on_containers(mine)))
         if self._curated is None:
             return mine
         theirs = self._curated.refs(call)
         primary, complete = mine.primary, mine.complete
-        if not mine.complete and theirs.complete and theirs.primary and not self.kind(call.service, call.operation).reads_only:
+        if (not mine.complete or not mine.primary) and theirs.complete and theirs.primary:
             primary, complete = theirs.primary, True
             self.fallbacks['refs: placed by the curated naming'] += 1
         extra = tuple(r for r in theirs.all if r not in primary and r not in mine.mentioned)
@@ -76,6 +88,29 @@ class LayeredCatalog:
             self.fallbacks['refs: named only by the curated naming'] += 1
         mentioned = tuple(r for r in mine.all if r not in primary) + extra
         return Refs(primary, mentioned, complete)
+
+    def _arn_read(self, call: Call, refs: Refs) -> Refs:
+        """A read with no primary resource that names one by an ARN member of its own (GetSubscriptionAttributes'
+        SubscriptionArn names the topic) reads that resource: on a branch that holds it, the engine answers."""
+        if refs.primary or not self.kind(call.service, call.operation).reads_only:
+            return refs
+        named = [self._generic.parse_arn(v) for k, v in call.params.items()
+                 if isinstance(v, str) and v.startswith('arn:') and split(k).designator == 'arn']
+        primary = tuple(r for r in dict.fromkeys(named) if r is not None)
+        return Refs(primary, tuple(r for r in refs.mentioned if r not in primary), refs.complete) if primary else refs
+
+    def _unplaced(self, call: Call, refs: Refs) -> Refs:
+        if refs.all or not refs.complete or call.operation.startswith(CREATE_VERBS):
+            return refs
+        shape = self._codec.operation(call).input_shape
+        types = self._generic.types_of((self._generic.action(call.service, call.operation) or ':').split(':')[0])
+        for name in shape.required_members if shape is not None else ():
+            words = split(name)
+            if shape.members[name].type_name in ('string', 'list') and call.params.get(name) and (
+                    words.designator in ('name', 'id', 'arn', 'identifier') or
+                    any(names_type(words.joined, t) and words.joined for t in types)):
+                return Refs((), (), False)
+        return refs
 
     def _contents_on_containers(self, refs: Refs) -> Refs:
         moved = [self._container(r, refs.mentioned) for r in refs.primary]
@@ -93,7 +128,7 @@ class LayeredCatalog:
     # ---------------------------------------------------------------- reads
     def reads_of(self, ref: ResourceRef) -> list[tuple[str, str, dict[str, Any]]]:
         theirs = self._curated.reads_of(ref) if self._curated is not None else []
-        mine = _existence_first(ref.type, self._generic.reads_of(ref))
+        mine = _existence_first(ref.type, self._generic.resource_type(ref.type), self._generic.reads_of(ref))
         if theirs:
             self.fallbacks['reads: curated reads first'] += 1
         out = _unique(theirs + mine)
@@ -116,11 +151,13 @@ class LayeredCatalog:
         return self._generic.types_of(prefix)
 
 
-def _existence_first(type_: str, reads: list[tuple[str, str, dict[str, Any]]]) -> list[tuple[str, str, dict[str, Any]]]:
-    """The read named after the type (GetHostedZone, DescribeInstances) first: the branch asks the first read whether
-    the resource exists."""
-    word = type_word(type_)
-    named = [r for r in reads if verb_of(r[1]) in ('Get', 'Describe') and noun_of(r[1]) == word]
+def _existence_first(type_: str, info: ResourceTypeInfo | None,
+                     reads: list[tuple[str, str, dict[str, Any]]]) -> list[tuple[str, str, dict[str, Any]]]:
+    """The read named after the type or its ARN variable (GetHostedZone, DescribeInstances, DescribeDBInstances for
+    rds:db) first: the branch asks the first read whether the resource exists."""
+    words = {type_word(type_)} | {split(f.variables[-1]).joined
+                                  for f in formats(type_, info.arn_formats if info else ()) if f.variables}
+    named = [r for r in reads if verb_of(r[1]) in ('Get', 'Describe') and noun_of(r[1]) in words - {''}]
     return named + [r for r in reads if r not in named]
 
 
@@ -157,9 +194,9 @@ class LayeredCopier:
             watched = _Watched(place, self._codec, self._kinds)
             try:
                 result = self._copiers[name].copy(ref, watched)
-            except CannotTell as e:
+            except UnknownType as e:
                 if watched.engine.changed:
-                    raise
+                    raise CannotTell(str(e)) from e
                 refusals.append(f'{name}: {e}')
                 continue
             self.used[f'{ref.type} by {name}'] += 1
