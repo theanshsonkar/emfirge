@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Protocol, runtime_checkable
 
-from .model import Call, Change, Kind, Refs, ResourceRef, UndoFact, WireRequest, WireResponse
+from .model import Call, Change, Kind, Listed, Refs, ResourceRef, UndoFact, WireRequest, WireResponse
 
 
 class CannotTell(Exception):
@@ -64,16 +64,53 @@ class Catalog(Protocol):
         """(service, operation, params) of the reads that show this resource's state. May be empty."""
 
 
+class Placement(Protocol):
+    """What a copier gets from the branch while it copies. The branch owns ids and resource states, and hands out the
+    real account only behind its read-only door."""
+    real: Account      # the real account, read only
+    engine: Account    # the branch's engine (ids untranslated: the copier records them with `same`)
+
+    def need(self, ref: ResourceRef) -> None:
+        """Make sure `ref` is on the branch before going on (copy it, or accept it as already there).
+        Raises CannotTell when it cannot be."""
+
+    def engine_value(self, value: str) -> str:
+        """`value` with every real id the engine knows by another id replaced by the engine's id."""
+
+    def same(self, real_id: str, engine_id: str) -> None:
+        """Record that the engine calls this real id `engine_id`."""
+
+    def known(self, real_id: str) -> bool:
+        """True when an engine id was recorded for this real id."""
+
+
 class Copier(Protocol):
     """Brings one real resource into the engine, so a change to it can run there."""
 
-    def copy(self, ref: ResourceRef) -> 'CopyResult':
+    def copy(self, ref: ResourceRef, place: Placement) -> 'CopyResult':
         """Raises CannotTell when the resource cannot be copied faithfully enough to answer changes."""
 
 
 class CopyResult(Protocol):
     found: bool                          # False: the real account does not have it
     also: Iterable[ResourceRef]          # other resources copied with it (addressed through it, or needed by it)
+
+
+class Outcomes(Protocol):
+    """What a cloud's answers mean for a branch. Optional for a plug-in: without it a branch refuses list answers
+    that mix its own resources with the account's, and tracks only resources that calls name."""
+
+    def listed(self, call: Call, body: Any) -> list[Listed]:
+        """The lists in a list answer. Raises CannotTell when the answer is one page of several."""
+
+    def born(self, call: Call, body: Any) -> tuple[ResourceRef, ...]:
+        """Resources in a change's answer whose id the service gave out (the caller did not choose it)."""
+
+    def removes(self, call: Call) -> bool:
+        """The call deletes the resource it acts on, even when the service finishes the deletion later."""
+
+    def opaque(self, call: Call) -> bool:
+        """The call's request or answer payload is the customer's data (an object, a blob): never rewrite it."""
 
 
 class Reversibility(Protocol):

@@ -82,6 +82,19 @@ class Refs:
         return self.primary + tuple(r for r in self.mentioned if r not in self.primary)
 
 
+@dataclass(frozen=True)
+class Listed:
+    """One list inside a list answer, and which resource each of its items is.
+    path   where the list sits in the answer's plain nested data (keys from the top)
+    items  the items, in order
+    refs   the resource each item is, or None where the plug-in cannot tell
+    types  the resource types this list can hold (a branch holding one of them must merge, or refuse)"""
+    path: tuple[str, ...]
+    items: tuple[Any, ...]
+    refs: tuple[ResourceRef | None, ...]
+    types: frozenset[str] = frozenset()
+
+
 class ChangeType(str, Enum):
     CREATED = 'created'
     MODIFIED = 'modified'

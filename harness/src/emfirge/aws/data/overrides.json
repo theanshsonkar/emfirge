@@ -1,0 +1,37 @@
+{
+  "about": "Per-service knowledge the published lists do not carry. Data only, read by emfirge.aws.catalog. Every line says why the generic rule fails and names the test that shows it. The number of lines is the cost of AWS's services to Emfirge: keep it near zero.",
+  "absent_means": [
+    {
+      "type": "scheduler:schedule",
+      "variable": "GroupName",
+      "value": "default",
+      "why": "The ARN always holds the schedule group; a call that leaves GroupName out uses the group named 'default'. The SDK model does not say so, only the prose docs.",
+      "test": "tests/aws/test_catalog.py::test_scheduler_name_without_group_is_the_default_group"
+    },
+    {
+      "type": "ecs:service",
+      "variable": "ClusterName",
+      "value": "default",
+      "why": "The ARN always holds the cluster; a call that leaves 'cluster' out uses the cluster named 'default'. The SDK model does not say so, only the prose docs.",
+      "test": "tests/aws/test_catalog.py::test_ecs_service_without_cluster_is_the_default_cluster"
+    }
+  ],
+  "same_as_absent": [
+    {
+      "type": "events:rule-on-custom-event-bus",
+      "variable": "EventBusName",
+      "value": "default",
+      "why": "A rule on the bus named 'default' has the short ARN rule/<name> (rule-on-default-event-bus), not rule/default/<name>. Naming the default bus out loud must give the same resource.",
+      "test": "tests/aws/test_catalog.py::test_events_rule_on_named_default_bus_is_the_default_rule"
+    }
+  ],
+  "arn_suffix": [
+    {
+      "type": "secretsmanager:Secret",
+      "variable": "SecretId",
+      "pattern": "-[A-Za-z0-9]{6}$",
+      "why": "A secret's ARN ends in '-' and six random characters that its name does not have. The reference's ARN format has one variable for both.",
+      "test": "tests/aws/test_catalog.py::test_secret_by_name_and_by_arn_converge"
+    }
+  ]
+}
